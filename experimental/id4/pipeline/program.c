@@ -408,7 +408,8 @@ static iree_status_t id4_pipeline_program_validate_dispatch_binding_flags(
     id4_pipeline_program_dispatch_binding_flags_t flags,
     iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
   const id4_pipeline_program_dispatch_binding_flags_t allowed_flags =
-      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE;
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE |
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE;
   if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -420,6 +421,37 @@ static iree_status_t id4_pipeline_program_validate_dispatch_binding_range(
     const id4_pipeline_program_dispatch_binding_t* binding,
     const id4_pipeline_program_tensor_record_t* tensor_record,
     iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
+  if (iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE)) {
+    if (!iree_any_bit_set(binding->access,
+                          ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch %.*s binding %" PRIhsz
+                              " has read coverage without read access",
+                              (int)dispatch_name.size, dispatch_name.data,
+                              binding_index);
+    }
+    if (binding->read_range.length == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dispatch %.*s binding %" PRIhsz " read coverage is empty",
+          (int)dispatch_name.size, dispatch_name.data, binding_index);
+    }
+    iree_device_size_t read_end = 0;
+    if (!iree_device_size_checked_add(binding->read_range.offset,
+                                      binding->read_range.length, &read_end) ||
+        read_end > tensor_record->byte_length) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "dispatch %.*s binding %" PRIhsz " read coverage [%" PRIu64
+          ", %" PRIu64 ") exceeds tensor %.*s byte length %" PRIu64,
+          (int)dispatch_name.size, dispatch_name.data, binding_index,
+          (uint64_t)binding->read_range.offset, (uint64_t)read_end,
+          (int)tensor_record->name.size, tensor_record->name.data,
+          (uint64_t)tensor_record->byte_length);
+    }
+  }
   if (!iree_all_bits_set(
           binding->flags,
           ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {

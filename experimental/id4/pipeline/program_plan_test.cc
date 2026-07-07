@@ -400,6 +400,59 @@ static id4_pipeline_program_t* CreateMultiSpanParameterProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateReadRangeProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("hidden_states.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t output_options = {
+      /*.structure_size=*/sizeof(output_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("hidden_states.output"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
+
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read_range(input, /*offset=*/4, /*length=*/8),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+      /*.structure_size=*/sizeof(dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.copy_range"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/copy_range"),
+                                   IREE_SV("copy_range")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(bindings),
+      /*.bindings=*/bindings,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 typedef enum region_cut_program_write_mode_e {
   kRegionCutProgramWriteModeFull,
   kRegionCutProgramWriteModePartial,
@@ -1638,6 +1691,39 @@ TEST(PipelineProgramPlan, RetainsMultiSpanParameterTensorRanges) {
   ExpectFinds(json, IREE_SV("\"request_count\":2"));
   ExpectFinds(json, IREE_SV("\"name\":\"next.weight\""));
   ExpectFinds(json, IREE_SV("\"global_request_offset\":2"));
+  iree_string_builder_deinitialize(&json_builder);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, EmitsReadRangesInDispatchDiagnostics) {
+  id4_pipeline_program_t* program = CreateReadRangeProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &json_builder));
+  iree_string_view_t json = iree_string_builder_view(&json_builder);
+  ExpectFinds(
+      json,
+      IREE_SV("\"name\":\"hidden_states.input\",\"access\":\"read\","
+              "\"recorded_ref\":{\"binding_slot\":1,\"offset\":0,"
+              "\"length\":16},\"read_range\":{\"offset\":4,\"length\":8}"));
   iree_string_builder_deinitialize(&json_builder);
 
   id4_pipeline_plan_release(plan);

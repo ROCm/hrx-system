@@ -93,6 +93,8 @@ typedef uint32_t id4_pipeline_program_dispatch_binding_flags_t;
 typedef enum id4_pipeline_program_dispatch_binding_flag_bits_e {
   // write_range describes the byte interval written by this binding.
   ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE = 1u << 0,
+  // read_range describes the byte interval read by this binding.
+  ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE = 1u << 1,
 } id4_pipeline_program_dispatch_binding_flag_bits_t;
 
 // Tensor byte interval relative to the bound logical tensor.
@@ -187,6 +189,8 @@ typedef struct id4_pipeline_program_dispatch_binding_t {
   id4_pipeline_program_tensor_access_flags_t access;
   // Dispatch binding behavior flags.
   id4_pipeline_program_dispatch_binding_flags_t flags;
+  // Tensor-relative byte range covered by reads when READ_RANGE is set.
+  id4_pipeline_program_tensor_byte_range_t read_range;
   // Tensor-relative byte range covered by writes when WRITE_RANGE is set.
   id4_pipeline_program_tensor_byte_range_t write_range;
 } id4_pipeline_program_dispatch_binding_t;
@@ -543,9 +547,29 @@ id4_pipeline_program_dispatch_binding(
       /*.access=*/access,
       // No optional binding behavior flags.
       /*.flags=*/0,
+      // No explicit read coverage for whole-tensor reads.
+      /*.read_range=*/{0, 0},
       // No explicit write coverage for whole-tensor writes.
       /*.write_range=*/{0, 0},
   };
+}
+
+// Returns a dispatch binding with explicit tensor read coverage.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_dispatch_binding_read_range(
+    id4_pipeline_program_tensor_t tensor,
+    id4_pipeline_program_tensor_access_flags_t access,
+    iree_device_size_t offset, iree_device_size_t length) {
+  id4_pipeline_program_dispatch_binding_t binding =
+      id4_pipeline_program_dispatch_binding(tensor, access);
+  binding.flags = ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE;
+  binding.read_range = (id4_pipeline_program_tensor_byte_range_t){
+      // Byte offset from the start of the logical tensor.
+      /*.offset=*/offset,
+      // Byte length of the interval.
+      /*.length=*/length,
+  };
+  return binding;
 }
 
 // Returns a dispatch binding with explicit tensor write coverage.
@@ -571,6 +595,15 @@ static inline id4_pipeline_program_dispatch_binding_t id4_pipeline_program_read(
     id4_pipeline_program_tensor_t tensor) {
   return id4_pipeline_program_dispatch_binding(
       tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ);
+}
+
+// Returns a read-only dispatch binding with explicit byte coverage.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_read_range(id4_pipeline_program_tensor_t tensor,
+                                iree_device_size_t offset,
+                                iree_device_size_t length) {
+  return id4_pipeline_program_dispatch_binding_read_range(
+      tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ, offset, length);
 }
 
 // Returns a write-only dispatch binding.

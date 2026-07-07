@@ -3296,6 +3296,15 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
       (uint64_t)recorded_ref.length));
   if (iree_all_bits_set(
           binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"read_range\":{\"offset\":%" PRIu64 ",\"length\":%" PRIu64 "}",
+        (uint64_t)binding->read_range.offset,
+        (uint64_t)binding->read_range.length));
+  }
+  if (iree_all_bits_set(
+          binding->flags,
           ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,

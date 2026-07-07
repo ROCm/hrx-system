@@ -1029,6 +1029,18 @@ static iree_status_t id4_pipeline_program_region_lower_dispatch_binding(
         .length = program_binding->write_range.length,
     };
   }
+  if (iree_all_bits_set(
+          program_binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE)) {
+    region_binding->flags |=
+        ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_READ_RANGE;
+    region_binding->read_range = (id4_pipeline_region_tensor_byte_range_t){
+        // Byte offset from the start of the logical tensor.
+        .offset = program_binding->read_range.offset,
+        // Byte length of the interval.
+        .length = program_binding->read_range.length,
+    };
+  }
   return iree_ok_status();
 }
 
