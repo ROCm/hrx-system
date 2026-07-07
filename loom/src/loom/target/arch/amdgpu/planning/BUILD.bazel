@@ -277,6 +277,7 @@ loom_cc_library(
     hdrs = ["vopd_plan.h"],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
+        ":descriptor_semantics",
         ":wait_packets",
         ":wait_states",
         "//loom/src/loom/codegen/low:allocation",
@@ -290,6 +291,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

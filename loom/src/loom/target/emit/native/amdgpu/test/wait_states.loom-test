@@ -123,22 +123,20 @@ low.func.def target(@gfx11_target) @gfx11_valu_dependency_delay_alu_ignores_salu
   s_add_u32 s0, s0, s1
   s_delay_alu instid0(VALU_DEP_1)
   v_lshlrev_b32 v0, 2, v0
-  s_delay_alu instid0(VALU_DEP_1)
   global_load_b32 v0, v0, s[2:3] offset:0
   v_mov_b32_copy v1, s0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v1, v0, s[4:5] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_address_delay_alu_preserves_other_addresses strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_address_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_address_delay_alu_preserves_other_addresses(%index: reg<amdgpu.vgpr>, %lane0: reg<amdgpu.vgpr>, %lane1: reg<amdgpu.vgpr>, %lane2: reg<amdgpu.vgpr>, %lane3: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_address_uses_implicit_valu_wait(%index: reg<amdgpu.vgpr>, %lane0: reg<amdgpu.vgpr>, %lane1: reg<amdgpu.vgpr>, %lane2: reg<amdgpu.vgpr>, %lane3: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
   %scaled = v_lshlrev_b32_src0_inline %index, 13
   %addr0 = v_add_u32 %scaled, %lane0
   %addr1 = v_add_u32 %scaled, %lane1
@@ -162,13 +160,9 @@ low.func.def target(@gfx11_target) @gfx11_vmem_address_delay_alu_preserves_other
   v_add_u32 v2, v0, v2
   v_add_u32 v3, v0, v3
   v_add_u32 v0, v0, v4
-  s_delay_alu instid0(VALU_DEP_4)
   global_load_b32 v4, v1, s[0:1] offset:0
-  s_delay_alu instid0(VALU_DEP_3)
   global_load_b32 v5, v2, s[0:1] offset:0
-  s_delay_alu instid0(VALU_DEP_2)
   global_load_b32 v6, v3, s[0:1] offset:0
-  s_delay_alu instid0(VALU_DEP_1)
   global_load_b32 v7, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v4, s[2:3] offset:0
@@ -180,11 +174,11 @@ low.func.def target(@gfx11_target) @gfx11_vmem_address_delay_alu_preserves_other
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_byte_payload_delay_alu strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_byte_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_store_byte_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_store_byte_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %value = v_add_u32 %lhs, %rhs
   global_store_b8_saddr %addr, %value, %output
   return
@@ -192,18 +186,17 @@ low.func.def target(@gfx11_target) @gfx11_vmem_store_byte_payload_delay_alu(%add
 
 // ----
   v_add_u32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b8 v2, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_short_payload_delay_alu strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_short_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_store_short_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_store_short_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %value = v_cvt_pk_u16_u32 %low, %high
   global_store_short_saddr %addr, %value, %output
   return
@@ -211,18 +204,17 @@ low.func.def target(@gfx11_target) @gfx11_vmem_store_short_payload_delay_alu(%ad
 
 // ----
   v_cvt_pk_u16_u32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_short v2, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b32_payload_delay_alu strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b32_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_store_b32_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b32_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %value = v_add_u32 %lhs, %rhs
   global_store_b32_saddr %addr, %value, %output
   return
@@ -230,18 +222,17 @@ low.func.def target(@gfx11_target) @gfx11_vmem_store_b32_payload_delay_alu(%addr
 
 // ----
   v_add_u32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v2, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b64_payload_dual_delay_alu strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b64_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_store_b64_payload_dual_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b64_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %packed0 = v_cvt_pk_u16_u32 %a0, %a1
   %packed1 = v_cvt_pk_u16_u32 %a2, %a3
   %payload = concat(%packed0, %packed1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -252,18 +243,17 @@ low.func.def target(@gfx11_target) @gfx11_vmem_store_b64_payload_dual_delay_alu(
 // ----
   v_cvt_pk_u16_u32 v0, v0, v1
   v_cvt_pk_u16_u32 v1, v2, v3
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   global_store_b64 v4, v[0:1], s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b128_payload_delay_fallback strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b128_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_vmem_store_b128_payload_delay_fallback(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b128_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %packed0 = v_cvt_pk_u16_u32 %a0, %a1
   %packed1 = v_cvt_pk_u16_u32 %a2, %a3
   %packed2 = v_cvt_pk_u16_u32 %a4, %a5
@@ -278,18 +268,17 @@ low.func.def target(@gfx11_target) @gfx11_vmem_store_b128_payload_delay_fallback
   v_cvt_pk_u16_u32 v1, v2, v3
   v_cvt_pk_u16_u32 v2, v4, v5
   v_cvt_pk_u16_u32 v3, v6, v7
-  s_nop 2
   global_store_b128 v8, v[0:3], s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_vmem_store_b128_payload_delay_fallback strategy=source
+// RUN: emit amdgpu-assembly @gfx12_vmem_store_b128_payload_uses_implicit_valu_wait strategy=source
 
 amdgpu.target<gfx1200> @gfx12_target
 
-low.func.def target(@gfx12_target) @gfx12_vmem_store_b128_payload_delay_fallback(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target(@gfx12_target) @gfx12_vmem_store_b128_payload_uses_implicit_valu_wait(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
   %packed0 = v_cvt_pk_u16_u32 %a0, %a1
   %packed1 = v_cvt_pk_u16_u32 %a2, %a3
   %packed2 = v_cvt_pk_u16_u32 %a4, %a5
@@ -304,18 +293,17 @@ low.func.def target(@gfx12_target) @gfx12_vmem_store_b128_payload_delay_fallback
   v_cvt_pk_u16_u32 v1, v2, v3
   v_cvt_pk_u16_u32 v2, v4, v5
   v_cvt_pk_u16_u32 v3, v6, v7
-  s_nop 2
   global_store_b128 v8, v[0:3], s[0:1] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_vmem_store_b128_payload_delay_fallback strategy=source
+// RUN: emit amdgpu-assembly @gfx942_vmem_store_b128_packed_payload strategy=source
 
 amdgpu.target<gfx942> @gfx942_target
 
-low.func.def target(@gfx942_target) @gfx942_vmem_store_b128_payload_delay_fallback(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target(@gfx942_target) @gfx942_vmem_store_b128_packed_payload(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
   %packed0 = v_cvt_pk_u16_u32 %a0, %a1
   %packed1 = v_cvt_pk_u16_u32 %a2, %a3
   %packed2 = v_cvt_pk_u16_u32 %a4, %a5

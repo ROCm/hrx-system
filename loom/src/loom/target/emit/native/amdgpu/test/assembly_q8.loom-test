@@ -37,14 +37,10 @@ low.func.def target(@target) @gfx11_q8_native(%lane: reg<amdgpu.vgpr>, %weights_
 // ----
   v_lshrrev_b32 v1, 3, v0
   v_lshlrev_b32 v2, 2, v0
-  s_delay_alu instid0(VALU_DEP_1)
   global_load_b32 v3, v2, s[0:1] offset:0
-  s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v1, 1, v1
-  s_delay_alu instid0(VALU_DEP_1)
   global_load_d16_b16 v1, v1, s[0:1] offset:0
   v_lshlrev_b32 v0, 4, v0
-  s_delay_alu instid0(VALU_DEP_1)
   global_load_b128 v[4:7], v0, s[2:3] offset:0
   s_waitcnt vmcnt(2) lgkmcnt(63)
   v_bfe_i32 v0, v3, 0, 8
@@ -78,7 +74,6 @@ low.func.def target(@target) @gfx11_q8_native(%lane: reg<amdgpu.vgpr>, %weights_
   v_fmac_f32 v3, v9, v6
   s_delay_alu instid0(VALU_DEP_1)
   v_fmac_f32 v3, v1, v7
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v2, v3, s[4:5] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

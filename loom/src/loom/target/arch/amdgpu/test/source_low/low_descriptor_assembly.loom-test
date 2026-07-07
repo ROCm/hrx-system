@@ -9,7 +9,6 @@ low.func.def target(@target) @vop3_lshl_add_shift_src2_literal(%addr: reg<amdgpu
 
 // ----
   v_lshl_add_u32 v0, v0, 4, 0x3c003c00
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v1, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

@@ -2110,14 +2110,9 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
       builder, packet, &match, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
 
   if (descriptor_uses_vector_memory) {
-    loom_amdgpu_wait_state_match_t delay_alu_match = {0};
-    const loom_amdgpu_wait_state_action_t delay_alu_action =
-        loom_amdgpu_wait_state_delay_alu_match_operands(builder, packet,
-                                                        &delay_alu_match);
-    if (delay_alu_action != LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
-          builder, packet, &delay_alu_match, delay_alu_action));
-    }
+    // VMEM packets are not VALU consumers for fixed ALU dependency windows and
+    // naturally separate later VALU consumers from currently tracked producers.
+    loom_amdgpu_wait_state_delay_alu_clear_all(builder);
   } else if (delay_alu_type != LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER) {
     loom_amdgpu_wait_state_match_t delay_alu_match = {0};
     const loom_amdgpu_wait_state_action_t delay_alu_action =

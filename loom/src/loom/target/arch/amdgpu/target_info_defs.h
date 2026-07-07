@@ -145,6 +145,14 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
 // Bitset of loom_amdgpu_processor_scheduling_bit_t values.
 typedef uint32_t loom_amdgpu_processor_scheduling_bits_t;
 
+// Maximum nearby vector ALU packet interval covered by the
+// LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR hazard window.
+#define LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_VALU_INTERVAL 5u
+
+// Maximum nearby TRANS packet interval covered by the
+// LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR hazard window.
+#define LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_TRANS_INTERVAL 1u
+
 typedef enum loom_amdgpu_wavefront_size_flag_bits_e {
   // Processor supports wavefront-size-32 kernels.
   LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32 = 1u << 0,

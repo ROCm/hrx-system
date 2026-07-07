@@ -329,6 +329,7 @@ loom_cc_library(
   SRCS
     "vopd_plan.c"
   DEPS
+    ::descriptor_semantics
     ::wait_packets
     ::wait_states
     iree::base
@@ -343,6 +344,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream

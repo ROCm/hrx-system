@@ -21,9 +21,6 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 
-#define LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_VALU_INTERVAL 5u
-#define LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_TRANS_INTERVAL 1u
-
 typedef struct loom_amdgpu_wait_node_state_t {
   // Counters observed on WAIT_COUNTER hazard rows for this node.
   uint32_t hazard_counter_mask;
@@ -869,9 +866,9 @@ static bool loom_amdgpu_wait_plan_trans_result_vgpr_is_active(
     return false;
   }
   return vgpr->valu_interval <=
-             LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_VALU_INTERVAL &&
+             LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_VALU_INTERVAL &&
          vgpr->trans_interval <=
-             LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_TRANS_INTERVAL;
+             LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_TRANS_INTERVAL;
 }
 
 static bool loom_amdgpu_wait_plan_assignment_reuses_trans_result(
@@ -1067,12 +1064,13 @@ static void loom_amdgpu_wait_plan_increment_trans_result_intervals(
     }
     if (is_vector_alu) {
       vgpr->valu_interval = loom_amdgpu_wait_plan_saturated_increment(
-          vgpr->valu_interval, LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_VALU_INTERVAL);
+          vgpr->valu_interval,
+          LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_VALU_INTERVAL);
     }
     if (is_transcendental) {
       vgpr->trans_interval = loom_amdgpu_wait_plan_saturated_increment(
           vgpr->trans_interval,
-          LOOM_AMDGPU_WAIT_TRANS_RESULT_MAX_TRANS_INTERVAL);
+          LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_TRANS_INTERVAL);
     }
     if (!loom_amdgpu_wait_plan_trans_result_vgpr_is_active(builder, vgpr)) {
       *vgpr = (loom_amdgpu_wait_trans_result_vgpr_t){0};
@@ -1266,11 +1264,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_wait_plan_compute_node_forwards_dependencies(
             builder, (uint32_t)i, &node_state->forwards_dependencies));
-    if (has_valu_trans_use_depctr &&
-        loom_amdgpu_descriptor_is_transcendental(descriptor_set,
-                                                 node->descriptor) &&
-        iree_any_bit_set(node_state->hazard_counter_mask,
-                         LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU)) {
+    if (has_valu_trans_use_depctr && loom_amdgpu_descriptor_is_transcendental(
+                                         descriptor_set, node->descriptor)) {
       node_state->trans_result_counter_mask |=
           LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU;
     }
