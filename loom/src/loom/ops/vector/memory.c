@@ -98,6 +98,38 @@ static bool loom_vector_memory_value_type(const loom_module_t* module,
   return true;
 }
 
+static bool loom_vector_memory_fragment_footprint_type(
+    const loom_module_t* module, loom_type_t view_type, const loom_op_t* op,
+    loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  if (loom_type_rank(view_type) < 2) return false;
+
+  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      rows = loom_vector_fragment_load_rows(op);
+      columns = loom_vector_fragment_load_columns(op);
+      break;
+    case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      rows = loom_vector_fragment_store_rows(op);
+      columns = loom_vector_fragment_store_columns(op);
+      break;
+    default:
+      return false;
+  }
+
+  if (rows == LOOM_VALUE_ID_INVALID || rows >= module->values.count ||
+      columns == LOOM_VALUE_ID_INVALID || columns >= module->values.count) {
+    return false;
+  }
+  *out_type = loom_type_shaped_2d(
+      LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+      loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
+      /*encoding_id=*/0);
+  return true;
+}
+
 static bool loom_vector_memory_access_has_atomic_attrs(
     loom_memory_access_t access) {
   return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
@@ -185,16 +217,19 @@ bool loom_vector_memory_footprint_describe(
     footprint.flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_WRITES;
   }
 
-  if (footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
-    if (!loom_vector_memory_value_type(module, op, access,
-                                       &footprint.vector_type)) {
+  if (footprint.kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
+    if (!loom_vector_memory_fragment_footprint_type(module, view_type, op,
+                                                    &footprint.vector_type)) {
       return false;
     }
-    if (!loom_vector_memory_access_describe(context, module, view_type,
-                                            footprint.vector_type,
-                                            &footprint.vector_access)) {
-      return false;
-    }
+  } else if (!loom_vector_memory_value_type(module, op, access,
+                                            &footprint.vector_type)) {
+    return false;
+  }
+  if (!loom_vector_memory_access_describe(context, module, view_type,
+                                          footprint.vector_type,
+                                          &footprint.vector_access)) {
+    return false;
   }
 
   *out_footprint = footprint;

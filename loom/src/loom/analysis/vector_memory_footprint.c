@@ -1358,24 +1358,6 @@ static bool loom_vector_memory_footprint_describe_view_op(
   return true;
 }
 
-static bool loom_vector_memory_footprint_describe_fragment_type(
-    const loom_module_t* module, loom_value_id_t view, loom_value_id_t rows,
-    loom_value_id_t columns, loom_type_t* out_type) {
-  if (view == LOOM_VALUE_ID_INVALID || view >= module->values.count) {
-    return false;
-  }
-  const loom_type_t view_type = loom_module_value_type(module, view);
-  if (!loom_type_is_view(view_type) || loom_type_rank(view_type) < 2 ||
-      rows == LOOM_VALUE_ID_INVALID || columns == LOOM_VALUE_ID_INVALID) {
-    return false;
-  }
-  *out_type = loom_type_shaped_2d(
-      LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
-      loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
-      /*encoding_id=*/0);
-  return true;
-}
-
 static bool loom_vector_memory_footprint_describe_op(
     loom_vector_memory_footprint_state_t* state, const loom_op_t* op,
     loom_vector_memory_footprint_access_t* out_access) {
@@ -1385,171 +1367,36 @@ static bool loom_vector_memory_footprint_describe_op(
       .mask = LOOM_VALUE_ID_INVALID,
       .offsets = LOOM_VALUE_ID_INVALID,
   };
-  switch (op->kind) {
-    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
-      out_access->view = loom_vector_fragment_load_view(op);
-      if (!loom_vector_memory_footprint_describe_fragment_type(
-              state->module, out_access->view,
-              loom_vector_fragment_load_rows(op),
-              loom_vector_fragment_load_columns(op),
-              &out_access->vector_type)) {
+  const loom_fact_context_t* fact_context =
+      state->fact_table ? &state->fact_table->context : NULL;
+  loom_vector_memory_footprint_t footprint = {0};
+  if (loom_vector_memory_footprint_describe(fact_context, state->module, op,
+                                            &footprint)) {
+    out_access->view = footprint.view;
+    out_access->vector_type = footprint.vector_type;
+    out_access->static_indices = footprint.static_indices;
+    out_access->dynamic_indices = footprint.dynamic_indices;
+    out_access->mask = footprint.mask;
+    out_access->offsets = footprint.offsets;
+    switch (footprint.kind) {
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_NONE:
         return false;
-      }
-      out_access->static_indices = loom_vector_fragment_load_static_indices(op);
-      out_access->dynamic_indices = loom_vector_fragment_load_indices(op);
-      return true;
-    case LOOM_OP_VECTOR_FRAGMENT_STORE:
-      out_access->view = loom_vector_fragment_store_view(op);
-      if (!loom_vector_memory_footprint_describe_fragment_type(
-              state->module, out_access->view,
-              loom_vector_fragment_store_rows(op),
-              loom_vector_fragment_store_columns(op),
-              &out_access->vector_type)) {
-        return false;
-      }
-      out_access->static_indices =
-          loom_vector_fragment_store_static_indices(op);
-      out_access->dynamic_indices = loom_vector_fragment_store_indices(op);
-      return true;
-    case LOOM_OP_VECTOR_LOAD:
-      out_access->view = loom_vector_load_view(op);
-      out_access->vector_type =
-          loom_module_value_type(state->module, loom_vector_load_result(op));
-      out_access->static_indices = loom_vector_load_static_indices(op);
-      out_access->dynamic_indices = loom_vector_load_indices(op);
-      return true;
-    case LOOM_OP_VECTOR_STORE:
-      out_access->view = loom_vector_store_view(op);
-      out_access->vector_type =
-          loom_module_value_type(state->module, loom_vector_store_value(op));
-      out_access->static_indices = loom_vector_store_static_indices(op);
-      out_access->dynamic_indices = loom_vector_store_indices(op);
-      return true;
-    case LOOM_OP_VECTOR_LOAD_MASK:
-      out_access->view = loom_vector_load_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_load_mask_result(op));
-      out_access->static_indices = loom_vector_load_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_load_mask_indices(op);
-      out_access->mask = loom_vector_load_mask_mask(op);
-      return true;
-    case LOOM_OP_VECTOR_STORE_MASK:
-      out_access->view = loom_vector_store_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_store_mask_value(op));
-      out_access->static_indices = loom_vector_store_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_store_mask_indices(op);
-      out_access->mask = loom_vector_store_mask_mask(op);
-      return true;
-    case LOOM_OP_VECTOR_LOAD_EXPAND:
-      out_access->view = loom_vector_load_expand_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_load_expand_result(op));
-      out_access->static_indices = loom_vector_load_expand_static_indices(op);
-      out_access->dynamic_indices = loom_vector_load_expand_indices(op);
-      out_access->mask = loom_vector_load_expand_mask(op);
-      return true;
-    case LOOM_OP_VECTOR_STORE_COMPRESS:
-      out_access->view = loom_vector_store_compress_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_store_compress_value(op));
-      out_access->static_indices =
-          loom_vector_store_compress_static_indices(op);
-      out_access->dynamic_indices = loom_vector_store_compress_indices(op);
-      out_access->mask = loom_vector_store_compress_mask(op);
-      return true;
-    case LOOM_OP_VECTOR_GATHER:
-      out_access->view = loom_vector_gather_view(op);
-      out_access->vector_type =
-          loom_module_value_type(state->module, loom_vector_gather_result(op));
-      out_access->static_indices = loom_vector_gather_static_indices(op);
-      out_access->dynamic_indices = loom_vector_gather_indices(op);
-      out_access->offsets = loom_vector_gather_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_SCATTER:
-      out_access->view = loom_vector_scatter_view(op);
-      out_access->vector_type =
-          loom_module_value_type(state->module, loom_vector_scatter_value(op));
-      out_access->static_indices = loom_vector_scatter_static_indices(op);
-      out_access->dynamic_indices = loom_vector_scatter_indices(op);
-      out_access->offsets = loom_vector_scatter_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_GATHER_MASK:
-      out_access->view = loom_vector_gather_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_gather_mask_result(op));
-      out_access->static_indices = loom_vector_gather_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_gather_mask_indices(op);
-      out_access->mask = loom_vector_gather_mask_mask(op);
-      out_access->offsets = loom_vector_gather_mask_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_SCATTER_MASK:
-      out_access->view = loom_vector_scatter_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_scatter_mask_value(op));
-      out_access->static_indices = loom_vector_scatter_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_scatter_mask_indices(op);
-      out_access->mask = loom_vector_scatter_mask_mask(op);
-      out_access->offsets = loom_vector_scatter_mask_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-      out_access->view = loom_vector_atomic_reduce_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_atomic_reduce_value(op));
-      out_access->static_indices = loom_vector_atomic_reduce_static_indices(op);
-      out_access->dynamic_indices = loom_vector_atomic_reduce_indices(op);
-      out_access->offsets = loom_vector_atomic_reduce_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
-      out_access->view = loom_vector_atomic_reduce_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_atomic_reduce_mask_value(op));
-      out_access->static_indices =
-          loom_vector_atomic_reduce_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_atomic_reduce_mask_indices(op);
-      out_access->mask = loom_vector_atomic_reduce_mask_mask(op);
-      out_access->offsets = loom_vector_atomic_reduce_mask_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_RMW:
-      out_access->view = loom_vector_atomic_rmw_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_atomic_rmw_value(op));
-      out_access->static_indices = loom_vector_atomic_rmw_static_indices(op);
-      out_access->dynamic_indices = loom_vector_atomic_rmw_indices(op);
-      out_access->offsets = loom_vector_atomic_rmw_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
-      out_access->view = loom_vector_atomic_rmw_mask_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_atomic_rmw_mask_value(op));
-      out_access->static_indices =
-          loom_vector_atomic_rmw_mask_static_indices(op);
-      out_access->dynamic_indices = loom_vector_atomic_rmw_mask_indices(op);
-      out_access->mask = loom_vector_atomic_rmw_mask_mask(op);
-      out_access->offsets = loom_vector_atomic_rmw_mask_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_CMPXCHG:
-      out_access->view = loom_vector_atomic_cmpxchg_view(op);
-      out_access->vector_type = loom_module_value_type(
-          state->module, loom_vector_atomic_cmpxchg_old(op));
-      out_access->static_indices =
-          loom_vector_atomic_cmpxchg_static_indices(op);
-      out_access->dynamic_indices = loom_vector_atomic_cmpxchg_indices(op);
-      out_access->offsets = loom_vector_atomic_cmpxchg_offsets(op);
-      out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
-      return true;
-    default:
-      return loom_vector_memory_footprint_describe_view_op(state, op,
-                                                           out_access);
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_PER_LANE_OFFSET:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_PER_LANE_OFFSET:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_ATOMIC_PER_LANE:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_ATOMIC_PER_LANE:
+        out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_OFFSET_VECTOR;
+        break;
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_DENSE:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_COMPRESS_EXPAND:
+      case LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT:
+        out_access->kind = LOOM_VECTOR_MEMORY_FOOTPRINT_ACCESS_DIRECT_VECTOR;
+        break;
+    }
+    return true;
   }
+  return loom_vector_memory_footprint_describe_view_op(state, op, out_access);
 }
 
 static iree_status_t loom_vector_memory_footprint_ensure_dominance(

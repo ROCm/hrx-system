@@ -139,11 +139,11 @@ typedef struct loom_vector_memory_footprint_t {
   // Typed view operand.
   loom_type_t view_type;
 
-  // Vector payload type that describes the logical footprint for non-fragment
-  // families.
+  // Vector payload type that describes the logical footprint. Fragment memory
+  // ops use the logical matrix shape, not the physical fragment payload shape.
   loom_type_t vector_type;
 
-  // Decomposed view/vector relationship for non-fragment families.
+  // Decomposed view/vector relationship for the logical footprint.
   loom_vector_memory_access_t vector_access;
 } loom_vector_memory_footprint_t;
 
