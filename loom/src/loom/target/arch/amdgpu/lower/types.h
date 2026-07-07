@@ -274,11 +274,23 @@ iree_status_t loom_amdgpu_context_value_prefers_vgpr(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     bool* out_prefers_vgpr);
 
+// Computes whether the source value should prefer a VGPR mapping in the active
+// target-low legality context.
+iree_status_t loom_amdgpu_target_low_legality_value_prefers_vgpr(
+    loom_target_low_legality_context_t* context,
+    loom_value_id_t source_value_id, bool* out_prefers_vgpr);
+
 // Computes whether the source value is represented as an EXEC-width native lane
 // mask in the active lowering context.
 iree_status_t loom_amdgpu_context_value_is_native_i1_mask(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     bool* out_is_native_mask);
+
+// Computes whether the source value is represented as an EXEC-width native lane
+// mask in the active target-low legality context.
+iree_status_t loom_amdgpu_target_low_legality_value_is_native_i1_mask(
+    loom_target_low_legality_context_t* context,
+    loom_value_id_t source_value_id, bool* out_is_native_mask);
 
 // Returns true when the source value is a subgroup lane-mask integer and every
 // active lane observes the same mask payload.
