@@ -91,6 +91,24 @@ TEST(Qwen3VLProgramTest, CalculatesBf16TokenCapacity) {
   EXPECT_EQ(token_capacity, 64u);
 }
 
+TEST(Qwen3VLProgramTest, CalculatesFormatTokenCapacity) {
+  uint32_t token_capacity = 0;
+  IREE_ASSERT_OK(id4_qwen3_vl_program_calculate_token_capacity(
+      ID4_QWEN3_VL_PARAMETER_FORMAT_BF16, 17, &token_capacity));
+  EXPECT_EQ(token_capacity, 32u);
+  IREE_ASSERT_OK(id4_qwen3_vl_program_calculate_token_capacity(
+      ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED, 1, &token_capacity));
+  EXPECT_EQ(token_capacity, 64u);
+  IREE_ASSERT_OK(id4_qwen3_vl_program_calculate_token_capacity(
+      ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED, 19,
+      &token_capacity));
+  EXPECT_EQ(token_capacity, 64u);
+  IREE_ASSERT_OK(id4_qwen3_vl_program_calculate_token_capacity(
+      ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED, 65,
+      &token_capacity));
+  EXPECT_EQ(token_capacity, 128u);
+}
+
 TEST(Qwen3VLProgramTest, ParsesParameterFormatNames) {
   struct FormatCase {
     iree_string_view_t value;

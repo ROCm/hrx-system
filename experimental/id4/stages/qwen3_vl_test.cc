@@ -292,6 +292,53 @@ TEST(Qwen3VlStage, PlansFp8SourceWithLowerParameterPressure) {
   iree_hal_device_group_release(device_group);
 }
 
+TEST(Qwen3VlStage, PlansFp8SourceTinyPrompt) {
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  const id4_qwen3_vl_model_config_t* model =
+      id4_qwen3_vl_program_ideogram4_model_config();
+  id4_pipeline_stage_t* stage = CreateStage(
+      device_group, model, ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED);
+
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  std::vector<int32_t> token_ids(19, 0);
+  id4_qwen3_vl_stage_plan_options_t qwen_options;
+  memset(&qwen_options, 0, sizeof(qwen_options));
+  qwen_options.structure_size = sizeof(qwen_options);
+  qwen_options.request.token_count = static_cast<uint32_t>(token_ids.size());
+  qwen_options.request.token_ids = token_ids.data();
+  qwen_options.weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+  qwen_options.attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = &qwen_options;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+  EXPECT_GT(id4_pipeline_plan_parameter_slab_count(plan), 0u);
+  EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
+
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+  iree_hal_device_group_release(device_group);
+}
+
 TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
   iree_hal_device_group_t* device_group =
       id4::test::CreateLocalSyncDeviceGroup();

@@ -150,6 +150,9 @@ struct id4_ideogram4_session_t {
   iree_allocator_t host_allocator;
   // Qwen3-VL model dimensions used by the text conditioning stage.
   id4_qwen3_vl_model_config_t qwen_model;
+  // Qwen3-VL provider parameter format used by input lowering and stage
+  // planning.
+  id4_qwen3_vl_parameter_format_t qwen_parameter_format;
   // Ideogram 4 DiT model dimensions used by conditioned/unconditioned stages.
   id4_ideogram4_dit_model_config_t dit_model;
   // Ideogram 4 latent-to-image decode model contract.

@@ -115,7 +115,13 @@ iree_status_t id4_qwen3_vl_attention_implementation_parse(
 iree_string_view_t id4_qwen3_vl_attention_implementation_name(
     id4_qwen3_vl_attention_implementation_t implementation);
 
-// Calculates the BF16 packed token capacity used by Qwen3-VL linear kernels.
+// Calculates the packed token capacity used by Qwen3-VL kernels for a provider
+// parameter format.
+iree_status_t id4_qwen3_vl_program_calculate_token_capacity(
+    id4_qwen3_vl_parameter_format_t parameter_format, uint32_t token_count,
+    uint32_t* out_token_capacity);
+
+// Calculates the BF16 packed token capacity used by Qwen3-VL kernels.
 iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
     uint32_t token_count, uint32_t* out_token_capacity);
 

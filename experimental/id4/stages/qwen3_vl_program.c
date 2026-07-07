@@ -306,8 +306,9 @@ static uint32_t id4_qwen3_vl_program_selected_hidden_row_count(
   return config->selected_layer_count * config->hidden_size;
 }
 
-iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
-    uint32_t token_count, uint32_t* out_token_capacity) {
+iree_status_t id4_qwen3_vl_program_calculate_token_capacity(
+    id4_qwen3_vl_parameter_format_t parameter_format, uint32_t token_count,
+    uint32_t* out_token_capacity) {
   if (!out_token_capacity) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL token capacity output is required");
@@ -317,18 +318,44 @@ iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL token count must be non-zero");
   }
-  const iree_host_size_t alignment =
-      token_count > ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16
-          ? ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32
-          : ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16;
+  iree_host_size_t alignment = 0;
+  switch (parameter_format) {
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_BF16:
+      alignment = token_count > ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16
+                      ? ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32
+                      : ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16;
+      break;
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED:
+      alignment = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M64;
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL parameter format %" PRIu32
+                              " is invalid",
+                              (uint32_t)parameter_format);
+  }
   iree_host_size_t token_capacity = 0;
   if (!iree_host_size_checked_align(token_count, alignment, &token_capacity) ||
       token_capacity > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Qwen3-VL BF16 token capacity overflow");
+                            "Qwen3-VL token capacity overflow");
   }
   *out_token_capacity = (uint32_t)token_capacity;
   return iree_ok_status();
+}
+
+iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
+    uint32_t token_count, uint32_t* out_token_capacity) {
+  return id4_qwen3_vl_program_calculate_token_capacity(
+      ID4_QWEN3_VL_PARAMETER_FORMAT_BF16, token_count, out_token_capacity);
+}
+
+static iree_status_t id4_qwen3_vl_program_calculate_options_token_capacity(
+    const id4_qwen3_vl_program_options_t* options,
+    uint32_t* out_token_capacity) {
+  return id4_qwen3_vl_program_calculate_token_capacity(
+      options->parameter_format, options->request.token_count,
+      out_token_capacity);
 }
 
 static iree_status_t id4_qwen3_vl_program_validate_model_config(
@@ -2863,8 +2890,8 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
       builder, ID4_QWEN3_VL_TENSOR_ATTENTION_MASK,
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
@@ -2921,8 +2948,8 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rows(
     uint32_t row_count, uint32_t channel_count, uint32_t output_width,
     id4_pipeline_program_tensor_t* out_output) {
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
       builder, options->parameter_scope, parameter_kind, layer_ordinal,
@@ -2988,8 +3015,8 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if ((input_size % ID4_QWEN3_VL_LINEAR_SCALAR_INPUT_BLOCK) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL scalar linear input size %" PRIu32
@@ -3243,8 +3270,8 @@ static iree_status_t id4_qwen3_vl_program_author_value_projection_packed(
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if (options->parameter_format != ID4_QWEN3_VL_PARAMETER_FORMAT_BF16) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -3319,8 +3346,8 @@ static iree_status_t id4_qwen3_vl_program_author_rotary(
     uint32_t channel_count, id4_qwen3_vl_tensor_kind_t output_kind,
     id4_pipeline_program_tensor_t* out_output) {
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if ((channel_count % 2) != 0 || (options->model.head_size % 2) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL rotary dimensions must be even");
@@ -3359,8 +3386,8 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rotary(
     id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t input,
     uint32_t head_count, id4_pipeline_program_tensor_t* out_output) {
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if ((options->model.head_size % 2) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL fused RMSNorm rotary head size must be "
@@ -3439,8 +3466,8 @@ static iree_status_t id4_qwen3_vl_program_author_attention_materialized(
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t attention_head_count = options->model.attention_head_count;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   id4_pipeline_program_tensor_t scores = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES, layer_ordinal,
@@ -3541,8 +3568,8 @@ static iree_status_t id4_qwen3_vl_program_dispatch_value_pack(
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   uint32_t element_count = 0;
   if (!id4_qwen3_vl_program_checked_mul_u32(token_count, key_value_width,
                                             &element_count)) {
@@ -3597,8 +3624,8 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma_packed_value(
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t attention_head_count = options->model.attention_head_count;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   id4_pipeline_program_tensor_t scores = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES, layer_ordinal,
@@ -3683,8 +3710,8 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   id4_pipeline_program_tensor_t packed_value =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
@@ -3777,8 +3804,8 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t intermediate_size = options->model.intermediate_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if (options->parameter_format != ID4_QWEN3_VL_PARAMETER_FORMAT_BF16) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -3862,8 +3889,8 @@ static iree_status_t id4_qwen3_vl_program_author_silu_gate(
     id4_pipeline_program_tensor_t* out_activation) {
   const uint32_t intermediate_size = options->model.intermediate_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -3928,8 +3955,8 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t intermediate_size = options->model.intermediate_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   if (options->parameter_format != ID4_QWEN3_VL_PARAMETER_FORMAT_BF16) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -3995,8 +4022,8 @@ static iree_status_t id4_qwen3_vl_program_author_residual_add(
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t hidden_size = options->model.hidden_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
@@ -4035,8 +4062,8 @@ static iree_status_t id4_qwen3_vl_program_author_residual_add_rmsnorm(
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t hidden_size = options->model.hidden_size;
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
       builder, options->parameter_scope, parameter_kind, layer_ordinal,
@@ -4235,8 +4262,8 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
   uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
   uint32_t query_row_count = 0;
   if (!id4_qwen3_vl_program_checked_mul_u32(options->request.token_count,
                                             options->model.attention_head_count,
@@ -4457,8 +4484,8 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       id4_qwen3_vl_program_mlp_requires_materialized_projection_taps(
           options, layer_ordinal, &requires_materialized_mlp_projections));
   uint32_t mlp_token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      options->request.token_count, &mlp_token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &mlp_token_capacity));
   const bool uses_fused_mlp =
       !requires_materialized_mlp_projections &&
       options->parameter_format == ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;

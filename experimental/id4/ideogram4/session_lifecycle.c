@@ -191,6 +191,7 @@ static iree_status_t id4_ideogram4_create_stages(
     const id4_ideogram4_session_create_options_t* options,
     id4_ideogram4_session_t* session) {
   session->qwen_model = *id4_qwen3_vl_program_ideogram4_model_config();
+  session->qwen_parameter_format = options->qwen_parameter_format;
   session->dit_model = *id4_ideogram4_dit_program_ideogram4_model_config();
   session->decode_model =
       *id4_ideogram4_decode_program_ideogram4_model_config();

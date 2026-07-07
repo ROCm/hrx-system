@@ -391,8 +391,9 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   iree_status_t status = id4_ideogram4_request_count_qwen_tokens(
       &qwen_lowering_options, session->host_allocator, &qwen_token_count);
   if (iree_status_is_ok(status)) {
-    status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
-        qwen_token_count, &qwen_lowering_options.token_capacity);
+    status = id4_qwen3_vl_program_calculate_token_capacity(
+        session->qwen_parameter_format, qwen_token_count,
+        &qwen_lowering_options.token_capacity);
   }
   id4_ideogram4_qwen_inputs_t qwen_inputs;
   memset(&qwen_inputs, 0, sizeof(qwen_inputs));

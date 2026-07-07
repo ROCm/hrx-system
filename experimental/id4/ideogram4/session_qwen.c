@@ -284,8 +284,9 @@ iree_status_t id4_ideogram4_session_issue_qwen(
     status = id4_ideogram4_request_count_qwen_tokens(
         &lowering_options, session->host_allocator, &token_count);
     if (iree_status_is_ok(status)) {
-      status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
-          token_count, &lowering_options.token_capacity);
+      status = id4_qwen3_vl_program_calculate_token_capacity(
+          session->qwen_parameter_format, token_count,
+          &lowering_options.token_capacity);
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_request_lower_qwen_inputs(
