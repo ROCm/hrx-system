@@ -2990,15 +2990,10 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
                                               channel_count, batch_count),
         &output));
 
-    const uint64_t output_spatial_element_count =
-        (uint64_t)output_width * output_height * batch_count;
-    // OC32 has lower register pressure and wins on the smallest active VAE
-    // upsample tile. Larger OC64 shapes use a parity-packed upsample kernel
-    // that collapses the 3x3 nearest-upsample taps into four source taps.
-    const bool use_small_spatial_wmma =
-        output_spatial_element_count <= 32ull * 32ull;
-    const bool use_parity_wmma = !use_small_spatial_wmma &&
-                                 channel_count >= 64 && channel_count % 64 == 0;
+    // The general packed implementation is the production route. The
+    // parity-packed family remains an independently covered optimization
+    // candidate.
+    const bool use_parity_wmma = false;
 
     id4_vae_program_config_list_t config_list;
     if (use_parity_wmma) {
