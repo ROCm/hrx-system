@@ -26,6 +26,8 @@ extern "C" {
 #define LOOM_LOW_SCHEDULE_EFFECT_MEMORY_SPACE_COUNT \
   ((uint32_t)LOOM_LOW_MEMORY_SPACE_WASM_MEMORY + 1u)
 
+#define LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE UINT32_MAX
+
 typedef struct loom_low_schedule_hazard_state_t {
   // Hazard kind tracked by this state.
   loom_low_hazard_kind_t kind;
@@ -71,6 +73,15 @@ typedef struct loom_low_schedule_state_chain_read_record_t {
   // Next state-chain read record for the same producer node.
   uint32_t next_record;
 } loom_low_schedule_state_chain_read_record_t;
+
+typedef struct loom_low_schedule_pair_affinity_record_t {
+  // Descriptor that can be the second visible packet in a pair.
+  const loom_low_descriptor_t* second_descriptor;
+  // Next pair-affinity record for the same first descriptor.
+  uint32_t next_record;
+  // Relative benefit for forming this pair.
+  uint16_t priority;
+} loom_low_schedule_pair_affinity_record_t;
 
 typedef struct loom_low_schedule_storage_read_record_t {
   // Node that reads a value whose storage may later be consumed by a tied op.
@@ -192,6 +203,10 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* state_chain_read_heads;
   // State-chain read records used by state_chain_read_heads.
   loom_low_schedule_state_chain_read_record_t* state_chain_read_records;
+  // Pair-affinity record heads, dense by first descriptor ordinal.
+  uint32_t* pair_affinity_heads;
+  // Pair-affinity records linked from pair_affinity_heads.
+  loom_low_schedule_pair_affinity_record_t* pair_affinity_records;
   // Per-block readers of values whose storage may be consumed by tied ops.
   struct {
     // Outstanding read lists, dense by local value ordinal.
@@ -260,6 +275,8 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_read_record_capacity;
   // Number of populated state-chain read records.
   iree_host_size_t state_chain_read_record_count;
+  // Number of populated pair-affinity records.
+  iree_host_size_t pair_affinity_record_count;
   // Allocated state-chain read record capacity.
   iree_host_size_t state_chain_read_record_capacity;
   // Allocated effect-frontier read scratch capacity.
