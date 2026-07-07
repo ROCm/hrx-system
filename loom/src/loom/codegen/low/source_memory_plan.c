@@ -1063,17 +1063,6 @@ static loom_low_memory_space_t loom_low_source_memory_access_space(
   }
 }
 
-static bool loom_low_source_memory_access_has_atomic_attrs(
-    loom_memory_access_t access) {
-  return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_success_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_failure_ordering(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_scope(access));
-}
-
 bool loom_low_source_memory_access_plan_lane_byte_envelope(
     const loom_low_source_memory_access_plan_t* plan, int64_t* out_begin_offset,
     int64_t* out_end_offset) {
@@ -1167,8 +1156,7 @@ static bool loom_low_source_memory_operation_kind_from_access(
       loom_memory_access_expected(access) != LOOM_VALUE_ID_INVALID;
   const bool has_replacement =
       loom_memory_access_replacement(access) != LOOM_VALUE_ID_INVALID;
-  const bool has_atomic =
-      loom_low_source_memory_access_has_atomic_attrs(access);
+  const bool has_atomic = loom_memory_access_has_atomic_attrs(access);
 
   if (has_expected || has_replacement) {
     if (!has_expected || !has_replacement) return false;

@@ -130,17 +130,6 @@ static bool loom_vector_memory_fragment_footprint_type(
   return true;
 }
 
-static bool loom_vector_memory_access_has_atomic_attrs(
-    loom_memory_access_t access) {
-  return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_success_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_failure_ordering(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_scope(access));
-}
-
 static loom_vector_memory_footprint_kind_t
 loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
                                            loom_memory_access_t access) {
@@ -159,7 +148,7 @@ loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
       loom_memory_access_mask(access) != LOOM_VALUE_ID_INVALID;
   const bool has_offsets =
       loom_memory_access_offsets(access) != LOOM_VALUE_ID_INVALID;
-  const bool has_atomic = loom_vector_memory_access_has_atomic_attrs(access);
+  const bool has_atomic = loom_memory_access_has_atomic_attrs(access);
   if (has_atomic) {
     return has_mask ? LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_ATOMIC_PER_LANE
                     : LOOM_VECTOR_MEMORY_FOOTPRINT_ATOMIC_PER_LANE;
