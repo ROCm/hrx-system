@@ -246,6 +246,8 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   const loom_low_schedule_table_t* schedule;
   // Allocation table being analyzed.
   const loom_low_allocation_table_t* allocation;
+  // Descriptor set selected by the scheduled target.
+  const loom_low_descriptor_set_t* descriptor_set;
   // Arena that owns all output and scratch arrays.
   iree_arena_allocator_t* arena;
   // Processor facts selected by the low target, or NULL if unavailable.
@@ -610,20 +612,6 @@ loom_amdgpu_wait_state_matrix_operand_result_use(
       .operand_uses[packet_operand_index];
 }
 
-static bool loom_amdgpu_wait_state_descriptor_uses_vector_alu(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_uses_vector_alu(
-      builder->schedule->target.descriptor_set, descriptor);
-}
-
-static bool loom_amdgpu_wait_state_descriptor_uses_vector_memory(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_uses_vector_memory(
-      builder->schedule->target.descriptor_set, descriptor);
-}
-
 static bool loom_amdgpu_wait_state_has_scheduling(
     const loom_amdgpu_wait_state_builder_t* builder,
     loom_amdgpu_processor_scheduling_bits_t bits) {
@@ -632,53 +620,16 @@ static bool loom_amdgpu_wait_state_has_scheduling(
 
 static bool loom_amdgpu_wait_state_target_has_delay_alu(
     const loom_amdgpu_wait_state_builder_t* builder) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      builder->schedule->target.descriptor_set;
-  if (builder->processor == NULL || descriptor_set == NULL ||
+  if (builder->processor == NULL || builder->descriptor_set == NULL ||
       !loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU)) {
     return false;
   }
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
       loom_amdgpu_target_info_descriptor_set_at(
-          descriptor_set->descriptor_set_ordinal);
+          builder->descriptor_set->descriptor_set_ordinal);
   return descriptor_set_info != NULL &&
          descriptor_set_info->sopp.delay_alu != 0;
-}
-
-static bool loom_amdgpu_wait_state_descriptor_is_transcendental(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_is_transcendental(
-      builder->schedule->target.descriptor_set, descriptor);
-}
-
-static bool loom_amdgpu_wait_state_descriptor_uses_scalar_alu(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_uses_scalar_alu(
-      builder->schedule->target.descriptor_set, descriptor);
-}
-
-static bool loom_amdgpu_wait_state_descriptor_is_dpp(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_is_dpp(builder->schedule->target.descriptor_set,
-                                       descriptor);
-}
-
-static bool loom_amdgpu_wait_state_descriptor_is_readfirstlane(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_is_readfirstlane(
-      builder->schedule->target.descriptor_set, descriptor);
-}
-
-static bool loom_amdgpu_wait_state_descriptor_is_sdwa(
-    const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_descriptor_is_sdwa(
-      builder->schedule->target.descriptor_set, descriptor);
 }
 
 static bool loom_amdgpu_wait_state_descriptor_is_trans_forwarding_consumer(
@@ -687,10 +638,10 @@ static bool loom_amdgpu_wait_state_descriptor_is_trans_forwarding_consumer(
   return loom_amdgpu_wait_state_has_scheduling(
              builder,
              LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES) &&
-         loom_amdgpu_wait_state_descriptor_uses_vector_alu(builder,
-                                                           descriptor) &&
-         !loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
-                                                              descriptor);
+         loom_amdgpu_descriptor_uses_vector_alu(builder->descriptor_set,
+                                                descriptor) &&
+         !loom_amdgpu_descriptor_is_transcendental(builder->descriptor_set,
+                                                   descriptor);
 }
 
 static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
@@ -699,18 +650,20 @@ static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
   if (!builder->has_delay_alu || descriptor == NULL) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
   }
-  if (loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
-                                                          descriptor)) {
+  if (loom_amdgpu_descriptor_is_transcendental(builder->descriptor_set,
+                                               descriptor)) {
     if (loom_amdgpu_wait_state_has_scheduling(
             builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR)) {
       return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
     }
     return LOOM_AMDGPU_DELAY_ALU_TYPE_TRANS;
   }
-  if (loom_amdgpu_wait_state_descriptor_uses_vector_alu(builder, descriptor)) {
+  if (loom_amdgpu_descriptor_uses_vector_alu(builder->descriptor_set,
+                                             descriptor)) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_VALU;
   }
-  if (loom_amdgpu_wait_state_descriptor_uses_scalar_alu(builder, descriptor)) {
+  if (loom_amdgpu_descriptor_uses_scalar_alu(builder->descriptor_set,
+                                             descriptor)) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_SALU;
   }
   return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
@@ -729,8 +682,7 @@ loom_amdgpu_wait_state_structural_delay_alu_type(
 static uint16_t loom_amdgpu_wait_state_descriptor_latency_cycles(
     const loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_descriptor_t* descriptor) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      builder->schedule->target.descriptor_set;
+  const loom_low_descriptor_set_t* descriptor_set = builder->descriptor_set;
   if (descriptor_set == NULL || descriptor == NULL ||
       descriptor->schedule_class_id >= descriptor_set->schedule_class_count) {
     return 0;
@@ -788,8 +740,7 @@ static iree_status_t loom_amdgpu_wait_state_read_dst_sel_immediate(
     int64_t* out_value) {
   *out_has_value = false;
   *out_value = 0;
-  const loom_low_descriptor_set_t* descriptor_set =
-      builder->schedule->target.descriptor_set;
+  const loom_low_descriptor_set_t* descriptor_set = builder->descriptor_set;
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   if (descriptor == NULL) {
     return iree_ok_status();
@@ -847,7 +798,8 @@ loom_amdgpu_wait_state_packet_has_dst_sel_forwarding_hazard(
     const loom_low_packet_view_t* packet, bool* out_has_hazard) {
   *out_has_hazard = false;
   if (packet->descriptor == NULL ||
-      !loom_amdgpu_wait_state_descriptor_is_sdwa(builder, packet->descriptor)) {
+      !loom_amdgpu_descriptor_is_sdwa(builder->descriptor_set,
+                                      packet->descriptor)) {
     return iree_ok_status();
   }
   bool has_dst_sel = false;
@@ -1872,8 +1824,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   const bool has_matrix_contract =
       packet->descriptor != NULL &&
       loom_amdgpu_wait_state_contract_for_descriptor(
-          builder->schedule->target.descriptor_set, packet->descriptor,
-          &matrix_contract);
+          builder->descriptor_set, packet->descriptor, &matrix_contract);
   uint16_t matrix_pass_count = 0;
   uint16_t matrix_wait_cycles = 0;
   bool is_matrix = false;
@@ -1899,20 +1850,20 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
       loom_amdgpu_wait_state_has_scheduling(
           builder,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES) &&
-      loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
-                                                          packet->descriptor);
+      loom_amdgpu_descriptor_is_transcendental(builder->descriptor_set,
+                                               packet->descriptor);
   const bool trans_forwarding_consumer =
       packet->descriptor != NULL &&
       loom_amdgpu_wait_state_descriptor_is_trans_forwarding_consumer(
           builder, packet->descriptor);
   const bool descriptor_uses_vector_alu =
       packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_descriptor_uses_vector_alu(builder,
-                                                        packet->descriptor);
+      loom_amdgpu_descriptor_uses_vector_alu(builder->descriptor_set,
+                                             packet->descriptor);
   const bool descriptor_uses_vector_memory =
       packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_descriptor_uses_vector_memory(builder,
-                                                           packet->descriptor);
+      loom_amdgpu_descriptor_uses_vector_memory(builder->descriptor_set,
+                                                packet->descriptor);
   const loom_amdgpu_delay_alu_type_t delay_alu_type =
       packet->descriptor != NULL
           ? loom_amdgpu_wait_state_delay_alu_type(builder, packet->descriptor)
@@ -1926,13 +1877,13 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
                 delay_alu_type,
                 loom_amdgpu_wait_state_descriptor_latency_cycles(
                     builder, packet->descriptor));
-  const bool dpp_consumer =
-      packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_descriptor_is_dpp(builder, packet->descriptor);
+  const bool dpp_consumer = packet->descriptor != NULL &&
+                            loom_amdgpu_descriptor_is_dpp(
+                                builder->descriptor_set, packet->descriptor);
   const bool readfirstlane_consumer =
       packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_descriptor_is_readfirstlane(builder,
-                                                         packet->descriptor);
+      loom_amdgpu_descriptor_is_readfirstlane(builder->descriptor_set,
+                                              packet->descriptor);
   const bool processor_has_valu_sgpr_read_hazard =
       loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
@@ -2259,6 +2210,7 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
   loom_amdgpu_wait_state_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
+      .descriptor_set = schedule->target.descriptor_set,
       .arena = arena,
   };
   if (iree_status_is_ok(status)) {
