@@ -9,7 +9,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/module.h"
@@ -18,6 +17,7 @@
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -360,12 +360,6 @@ static bool loom_amdgpu_wait_state_assignment_is_physical_scc(
   }
   return loom_low_allocation_assignment_is_physical_register_class(
       assignment, LOOM_AMDGPU_REG_CLASS_ID_SCC);
-}
-
-static bool loom_amdgpu_wait_state_assignments_match(
-    const loom_low_allocation_assignment_t* lhs,
-    const loom_low_allocation_assignment_t* rhs) {
-  return loom_low_allocation_assignment_location_range_equal(lhs, rhs);
 }
 
 static const loom_low_allocation_assignment_t*
@@ -1826,112 +1820,15 @@ static void loom_amdgpu_wait_state_record_sgpr_results(
   }
 }
 
-static iree_status_t loom_amdgpu_wait_state_copy_materializes(
-    const loom_amdgpu_wait_state_builder_t* builder, const loom_op_t* op,
-    bool* out_materializes) {
-  *out_materializes = false;
-  const loom_low_allocation_assignment_t* source_assignment =
-      loom_amdgpu_wait_state_assignment(builder->allocation,
-                                        loom_low_copy_source(op));
-  const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_wait_state_assignment(builder->allocation,
-                                        loom_low_copy_result(op));
-  if (source_assignment == NULL || result_assignment == NULL) {
-    return iree_ok_status();
-  }
-  if (source_assignment->location_count != result_assignment->location_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU low.copy allocation is malformed");
-  }
-  *out_materializes = !loom_amdgpu_wait_state_assignments_match(
-      source_assignment, result_assignment);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_wait_state_structural_materializes(
-    const loom_amdgpu_wait_state_builder_t* builder, const loom_op_t* op,
-    bool* out_materializes) {
-  *out_materializes = false;
-  if (loom_low_copy_isa(op)) {
-    return loom_amdgpu_wait_state_copy_materializes(builder, op,
-                                                    out_materializes);
-  }
-  if (loom_low_slice_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-        builder->allocation, op, &move_count));
-    *out_materializes = move_count != 0;
-    return iree_ok_status();
-  }
-  if (loom_low_concat_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-        builder->allocation, op, &move_count));
-    *out_materializes = move_count != 0;
-    return iree_ok_status();
-  }
-  if (loom_low_live_in_isa(op) || loom_low_storage_reserve_isa(op)) {
-    return iree_ok_status();
-  }
-  *out_materializes = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_wait_state_structural_instruction_count(
-    const loom_amdgpu_wait_state_builder_t* builder, const loom_op_t* op,
-    uint64_t* out_instruction_count) {
-  *out_instruction_count = 0;
-  if (loom_low_copy_isa(op)) {
-    bool materializes = false;
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_wait_state_copy_materializes(builder, op, &materializes));
-    if (materializes) {
-      const loom_low_allocation_assignment_t* assignment =
-          loom_amdgpu_wait_state_assignment(builder->allocation,
-                                            loom_low_copy_result(op));
-      *out_instruction_count = assignment->location_count;
-    }
-    return iree_ok_status();
-  }
-  if (loom_low_slice_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-        builder->allocation, op, &move_count));
-    *out_instruction_count = move_count;
-    return iree_ok_status();
-  }
-  if (loom_low_concat_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-        builder->allocation, op, &move_count));
-    *out_instruction_count = move_count;
-    return iree_ok_status();
-  }
-  bool materializes = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_structural_materializes(
-      builder, op, &materializes));
-  *out_instruction_count = materializes ? 1 : 0;
-  return iree_ok_status();
-}
-
-static bool loom_amdgpu_wait_state_structural_writes_valu(
-    const loom_op_t* op, uint64_t instruction_count) {
-  if (instruction_count == 0) {
-    return false;
-  }
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op);
-}
-
 static iree_status_t loom_amdgpu_wait_state_match_structural_operands(
     const loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* packet,
     loom_amdgpu_wait_state_reason_flags_t allowed_reasons,
     loom_amdgpu_wait_state_match_t* match) {
   const loom_op_t* op = packet->node->op;
-  bool materializes = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_structural_materializes(
-      builder, op, &materializes));
+  loom_amdgpu_structural_packet_info_t info = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_structural_packet_analyze(builder->allocation, op, 0, &info));
   if (loom_low_br_isa(op)) {
     loom_value_slice_t args = loom_low_br_args(op);
     for (uint16_t i = 0; i < args.count; ++i) {
@@ -1940,7 +1837,8 @@ static iree_status_t loom_amdgpu_wait_state_match_structural_operands(
     }
     return iree_ok_status();
   }
-  if (!materializes) {
+  if (!iree_any_bit_set(info.flags,
+                        LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES)) {
     return iree_ok_status();
   }
   for (uint16_t i = 0; i < op->operand_count; ++i) {
@@ -1957,8 +1855,11 @@ static iree_status_t loom_amdgpu_wait_state_packet_instruction_count(
     *out_instruction_count = 1;
     return iree_ok_status();
   }
-  return loom_amdgpu_wait_state_structural_instruction_count(
-      builder, packet->node->op, out_instruction_count);
+  loom_amdgpu_structural_packet_info_t info = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
+      builder->allocation, packet->node->op, 0, &info));
+  *out_instruction_count = info.instruction_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_wait_state_apply_packet(
@@ -2051,12 +1952,16 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   const bool valu_sgpr_read_producer =
       processor_has_valu_sgpr_read_hazard && descriptor_uses_vector_alu;
   uint64_t instruction_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_packet_instruction_count(
-      builder, packet, &instruction_count));
-  const bool structural_writes_valu =
-      packet->descriptor == NULL &&
-      loom_amdgpu_wait_state_structural_writes_valu(packet->node->op,
-                                                    instruction_count);
+  loom_amdgpu_structural_packet_info_t structural_info = {0};
+  if (packet->descriptor == NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
+        builder->allocation, packet->node->op, 0, &structural_info));
+    instruction_count = structural_info.instruction_count;
+  } else {
+    instruction_count = 1;
+  }
+  const bool structural_writes_valu = iree_any_bit_set(
+      structural_info.flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU);
 
   loom_amdgpu_wait_state_match_t match = {0};
   if (matrix_reads_valu) {

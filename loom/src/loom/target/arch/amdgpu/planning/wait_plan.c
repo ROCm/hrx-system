@@ -9,14 +9,15 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/bitfield.h"
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
@@ -469,62 +470,6 @@ static const loom_low_allocation_assignment_t* loom_amdgpu_wait_plan_assignment(
                                                              value_id, NULL);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_copy_materializes(
-    const loom_amdgpu_wait_plan_builder_t* builder, const loom_op_t* op,
-    bool* out_materializes) {
-  *out_materializes = false;
-  const loom_low_allocation_assignment_t* source_assignment =
-      loom_amdgpu_wait_plan_assignment(builder->allocation,
-                                       loom_low_copy_source(op));
-  const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_wait_plan_assignment(builder->allocation,
-                                       loom_low_copy_result(op));
-  if (source_assignment == NULL || result_assignment == NULL) {
-    return iree_ok_status();
-  }
-  if (source_assignment->location_count != result_assignment->location_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU low.copy allocation is malformed");
-  }
-  *out_materializes = !loom_low_allocation_assignment_location_range_equal(
-      source_assignment, result_assignment);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_wait_plan_structural_materializes(
-    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
-    bool* out_materializes) {
-  *out_materializes = true;
-  if (builder->allocation == NULL ||
-      node_index >= builder->schedule->node_count) {
-    return iree_ok_status();
-  }
-  const loom_op_t* op = builder->schedule->nodes[node_index].op;
-  if (op == NULL) {
-    return iree_ok_status();
-  }
-  if (loom_low_copy_isa(op)) {
-    return loom_amdgpu_wait_plan_copy_materializes(builder, op,
-                                                   out_materializes);
-  }
-  if (loom_low_slice_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-        builder->allocation, op, &move_count));
-    *out_materializes = move_count != 0;
-    return iree_ok_status();
-  }
-  if (loom_low_concat_isa(op)) {
-    iree_host_size_t move_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-        builder->allocation, op, &move_count));
-    *out_materializes = move_count != 0;
-    return iree_ok_status();
-  }
-  *out_materializes = false;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_wait_plan_compute_node_forwards_dependencies(
     const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
     bool* out_forwards_dependencies) {
@@ -536,14 +481,12 @@ static iree_status_t loom_amdgpu_wait_plan_compute_node_forwards_dependencies(
   if (node->kind != LOOM_LOW_SCHEDULE_NODE_STRUCTURAL || node->op == NULL) {
     return iree_ok_status();
   }
-  if (!loom_low_copy_isa(node->op) && !loom_low_slice_isa(node->op) &&
-      !loom_low_concat_isa(node->op)) {
-    return iree_ok_status();
-  }
-  bool materializes = true;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_structural_materializes(
-      builder, node_index, &materializes));
-  *out_forwards_dependencies = !materializes;
+  loom_amdgpu_structural_packet_info_t info = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
+      builder->allocation, node->op,
+      LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION, &info));
+  *out_forwards_dependencies = iree_any_bit_set(
+      info.flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES);
   return iree_ok_status();
 }
 
