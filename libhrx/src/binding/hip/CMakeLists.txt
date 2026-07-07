@@ -18,6 +18,7 @@ iree_cc_library(
     "-Wno-unused-variable"
   HDRS
     "api.h"
+    "binding_internal.h"
   SRCS
     "abi_stubs.c"
     "api.c"

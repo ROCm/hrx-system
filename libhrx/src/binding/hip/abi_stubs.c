@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "libhrx/src/binding/hip/api.h"
+#include "libhrx/src/binding/hip/binding_internal.h"
 
 // Local compatibility declarations for unsupported ABI entries. These symbols
 // only need type-correct call boundaries here; their implementations below
@@ -167,8 +168,17 @@ static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
                                      void* symbol_status) {
   if (!symbol || !function) return hipErrorInvalidValue;
 
-  void* process = dlopen(NULL, RTLD_LAZY);
-  if (!process) {
+  // Resolve against this library, not the process-global scope; see
+  // iree_hip_self_dl_handle(). Like hipGetProcAddress(), a consumer may dlopen
+  // us with RTLD_LOCAL, so a dlsym(dlopen(NULL), ...) lookup would spuriously
+  // fail. Fall back to the global scope only if the self-handle is unavailable.
+  void* handle = iree_hip_self_dl_handle();
+  bool close_handle = false;
+  if (!handle) {
+    handle = dlopen(NULL, RTLD_LAZY);
+    close_handle = handle != NULL;
+  }
+  if (!handle) {
     *function = NULL;
     if (symbol_status) *(int*)symbol_status = 1;
     return hipErrorSharedObjectInitFailed;
@@ -181,9 +191,10 @@ static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
       (symbol_length < 4 || strcmp(symbol + symbol_length - 4, "_spt") != 0)) {
     snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
              "%s_spt", symbol);
-    found = dlsym(process, stream_per_thread_symbol);
+    found = dlsym(handle, stream_per_thread_symbol);
   }
-  if (!found) found = dlsym(process, symbol);
+  if (!found) found = dlsym(handle, symbol);
+  if (close_handle) dlclose(handle);
 
   *function = found;
   if (symbol_status) *(int*)symbol_status = found ? 0 : 1;

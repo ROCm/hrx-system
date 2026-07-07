@@ -26,6 +26,7 @@
 #include <unistd.h>
 #endif
 
+#include "binding/hip/binding_internal.h"
 #include "common/graph.h"
 #include "common/internal.h"
 #include "common/tls.h"
@@ -21456,8 +21457,9 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
 }
 
 // Handle scoped to THIS shared object (the HIP shim), resolved once. See the
-// note on hipGetProcAddress() for why the process-global scope is insufficient.
-static void* iree_hip_self_dl_handle = NULL;
+// declaration in binding_internal.h and the note on hipGetProcAddress() for why
+// the process-global scope is insufficient.
+static void* iree_hip_self_dl_handle_cached = NULL;
 static iree_once_flag iree_hip_self_dl_handle_once = IREE_ONCE_FLAG_INIT;
 static void iree_hip_init_self_dl_handle(void) {
   Dl_info info;
@@ -21465,8 +21467,14 @@ static void iree_hip_init_self_dl_handle(void) {
   // it with RTLD_NOLOAD returns a handle to the already-resident module (the
   // extra reference intentionally pins the always-loaded HIP runtime).
   if (dladdr((void*)&hipGetProcAddress, &info) != 0 && info.dli_fname) {
-    iree_hip_self_dl_handle = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    iree_hip_self_dl_handle_cached =
+        dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
   }
+}
+
+void* iree_hip_self_dl_handle(void) {
+  iree_call_once(&iree_hip_self_dl_handle_once, iree_hip_init_self_dl_handle);
+  return iree_hip_self_dl_handle_cached;
 }
 
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
@@ -21484,8 +21492,7 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
   // dlsym(dlopen(NULL), ...) lookup would spuriously fail with
   // hipErrorNotFound. Fall back to the global scope only if the self-handle
   // could not be established.
-  iree_call_once(&iree_hip_self_dl_handle_once, iree_hip_init_self_dl_handle);
-  void* handle = iree_hip_self_dl_handle;
+  void* handle = iree_hip_self_dl_handle();
   bool close_handle = false;
   if (!handle) {
     handle = dlopen(NULL, RTLD_LAZY);

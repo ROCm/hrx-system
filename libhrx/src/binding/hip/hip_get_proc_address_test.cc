@@ -1,17 +1,21 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Regression test for hipGetProcAddress() symbol resolution scope.
+// Regression test for hipGetProcAddress()-family symbol resolution scope.
 //
 // hipGetProcAddress() must resolve symbols against the HIP runtime library
 // that defines them, NOT the process-global symbol scope. Consumers such as
 // Triton's AMD backend dlopen() libamdhip64 with RTLD_LOCAL and then resolve
-// the whole HIP API through hipGetProcAddress(). When hipGetProcAddress() was
-// implemented as dlsym(dlopen(NULL), symbol) it searched only the global
+// the whole HIP API through hipGetProcAddress(). When these entry points were
+// implemented as dlsym(dlopen(NULL), symbol) they searched only the global
 // scope, so an RTLD_LOCAL load left our symbols invisible and every lookup
 // (starting with the very first, hipGetLastError) failed with
 // hipErrorNotFound -- taking down Triton at driver-init time. See issue for
 // details.
+//
+// The same lookup backs the stream-per-thread variants
+// (hipGetProcAddress_spt / hipGetDriverEntryPoint_spt via hrx_hip_spt_lookup),
+// so those had the identical bug and are exercised here too.
 //
 // The library under test is located via, in order: the HRX_TEST_LIBAMDHIP64
 // environment variable (an explicit override), then the
@@ -49,32 +53,44 @@ const char* CandidateLibPath() {
 #endif
 }
 
+// Resolves `entry_point` from the RTLD_LOCAL-loaded library and asserts it can
+// look up a core HIP symbol (hipGetLastError, the first thing Triton needs).
 // Opening RTLD_LOCAL is the whole point: it mirrors how Triton loads the HIP
 // runtime and is the condition that exposed the bug.
-TEST(HipGetProcAddressTest, ResolvesOwnSymbolWhenLoadedRtldLocal) {
+void ExpectResolvesUnderRtldLocal(const char* entry_point) {
   const char* path = CandidateLibPath();
   void* lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
   if (lib == nullptr) {
     GTEST_SKIP() << "cannot dlopen " << path << ": " << dlerror();
   }
 
-  auto hip_get_proc_address =
-      reinterpret_cast<hipGetProcAddressFn>(dlsym(lib, "hipGetProcAddress"));
-  ASSERT_NE(hip_get_proc_address, nullptr)
-      << "hipGetProcAddress not exported by " << path;
+  auto get_proc_address =
+      reinterpret_cast<hipGetProcAddressFn>(dlsym(lib, entry_point));
+  ASSERT_NE(get_proc_address, nullptr)
+      << entry_point << " not exported by " << path;
 
   void* pfn = nullptr;
   int symbol_status = -1;
   // hipVersion 60000000 == major 6; matches the minimum Triton requires.
-  int rc = hip_get_proc_address("hipGetLastError", &pfn, 60000000,
-                                /*flags=*/0, &symbol_status);
+  int rc = get_proc_address("hipGetLastError", &pfn, 60000000,
+                            /*flags=*/0, &symbol_status);
 
   EXPECT_EQ(rc, kHipSuccess)
-      << "hipGetProcAddress must resolve own symbols under RTLD_LOCAL";
+      << entry_point << " must resolve own symbols under RTLD_LOCAL";
   EXPECT_NE(pfn, nullptr) << "resolved function pointer must be non-null";
   EXPECT_EQ(symbol_status, 0) << "symbolStatus must report success";
 
   dlclose(lib);
+}
+
+TEST(HipGetProcAddressTest, ResolvesOwnSymbolWhenLoadedRtldLocal) {
+  ExpectResolvesUnderRtldLocal("hipGetProcAddress");
+}
+
+// The stream-per-thread entry point shares the same underlying lookup
+// (hrx_hip_spt_lookup) and had the identical process-global-scope bug.
+TEST(HipGetProcAddressTest, SptEntryPointResolvesOwnSymbolWhenLoadedRtldLocal) {
+  ExpectResolvesUnderRtldLocal("hipGetProcAddress_spt");
 }
 
 }  // namespace
