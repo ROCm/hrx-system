@@ -345,6 +345,65 @@ def _max_parameter_window_blockers(
     return row
 
 
+def _derive_serving_memory_metrics(row: dict[str, Any]) -> dict[str, Any]:
+    fp8_to_bf16_source_byte_length = (
+        row["parameter_load_fp8_bf16_source_byte_length"]
+        + row["parameter_load_fp8_bf16_rhs_source_byte_length"]
+    )
+    fp8_to_bf16_target_byte_length = (
+        row["parameter_load_fp8_bf16_target_byte_length"]
+        + row["parameter_load_fp8_bf16_rhs_target_byte_length"]
+    )
+    fp8_to_bf16_expansion_byte_length = max(
+        0,
+        fp8_to_bf16_target_byte_length - fp8_to_bf16_source_byte_length,
+    )
+    bf16_rhs_execution_byte_length = row["parameter_load_bf16_rhs_target_byte_length"]
+    bf16_execution_byte_length = (
+        fp8_to_bf16_target_byte_length + bf16_rhs_execution_byte_length
+    )
+    fp8_execution_byte_length = row["parameter_load_fp8_rhs_target_byte_length"]
+    static_parameter_byte_length = row["parameter_byte_length"]
+    return {
+        "serving_static_parameter_byte_length": static_parameter_byte_length,
+        "serving_static_parameter_mib": _ceil_mib(static_parameter_byte_length),
+        "serving_source_parameter_byte_length": row["parameter_source_byte_length"],
+        "serving_source_parameter_mib": _ceil_mib(row["parameter_source_byte_length"]),
+        "serving_phase_parameter_high_water_byte_length": row[
+            "phase_parameter_high_water_mark"
+        ],
+        "serving_phase_parameter_high_water_mib": _ceil_mib(
+            row["phase_parameter_high_water_mark"]
+        ),
+        "serving_local_high_water_byte_length": row["local_high_water_mark"],
+        "serving_local_high_water_mib": _ceil_mib(row["local_high_water_mark"]),
+        "serving_bf16_execution_byte_length": bf16_execution_byte_length,
+        "serving_bf16_execution_mib": _ceil_mib(bf16_execution_byte_length),
+        "serving_bf16_rhs_execution_byte_length": bf16_rhs_execution_byte_length,
+        "serving_bf16_rhs_execution_mib": _ceil_mib(bf16_rhs_execution_byte_length),
+        "serving_fp8_to_bf16_execution_source_byte_length": (
+            fp8_to_bf16_source_byte_length
+        ),
+        "serving_fp8_to_bf16_execution_source_mib": _ceil_mib(
+            fp8_to_bf16_source_byte_length
+        ),
+        "serving_fp8_to_bf16_execution_target_byte_length": (
+            fp8_to_bf16_target_byte_length
+        ),
+        "serving_fp8_to_bf16_execution_target_mib": _ceil_mib(
+            fp8_to_bf16_target_byte_length
+        ),
+        "serving_fp8_to_bf16_expansion_byte_length": (
+            fp8_to_bf16_expansion_byte_length
+        ),
+        "serving_fp8_to_bf16_expansion_mib": _ceil_mib(
+            fp8_to_bf16_expansion_byte_length
+        ),
+        "serving_fp8_execution_byte_length": fp8_execution_byte_length,
+        "serving_fp8_execution_mib": _ceil_mib(fp8_execution_byte_length),
+    }
+
+
 def _require_equal(actual: Any, expected: Any, context: str) -> None:
     if actual != expected:
         raise GenerationBenchmarkSummaryError(
@@ -1042,6 +1101,7 @@ def summarize_generation_benchmark(
         }
         row.update(load_kind_statistics)
         row.update(parameter_window_blockers)
+        row.update(_derive_serving_memory_metrics(row))
         if label_metrics is not None:
             _validate_label_plan_join(row, label_metrics, context)
             row.update(label_metrics)
@@ -1061,6 +1121,13 @@ _MARKDOWN_COLUMNS = (
     ("resident mask", "generation_resident_stage_mask"),
     ("phase masks", "generation_phase_stage_masks"),
     ("selected peak MiB", "logical_live_selected_peak_mib"),
+    ("static MiB", "serving_static_parameter_mib"),
+    ("phase HW MiB", "serving_phase_parameter_high_water_mib"),
+    ("local HW MiB", "serving_local_high_water_mib"),
+    ("bf16 exec MiB", "serving_bf16_execution_mib"),
+    ("fp8->bf16 MiB", "serving_fp8_to_bf16_execution_target_mib"),
+    ("fp8 expand MiB", "serving_fp8_to_bf16_expansion_mib"),
+    ("fp8 exec MiB", "serving_fp8_execution_mib"),
     ("qwen tokens", "qwen_token_count"),
     ("qwen cap", "qwen_token_capacity"),
     ("cond tokens", "conditioned_dit_token_count"),

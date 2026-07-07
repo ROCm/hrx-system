@@ -515,6 +515,59 @@ def live_label_generation_plan() -> dict:
     return plan
 
 
+def direct_fp8_generation_plan() -> dict:
+    plan = live_label_generation_plan()
+    plan["summary"]["dit_weight_execution_format"] = 2
+    plan["residency"]["total_stage_parameter_byte_length"] = 32017 * MIB
+    plan["residency"]["phase_parameter_high_water_mark"] = 18335 * MIB
+    plan["residency"]["largest_stage_parameter_byte_length"] = 14436 * MIB
+    plan["stages"]["dit_conditioned"] = stage_statistics(
+        parameter_mib=8860,
+        source_mib=8860,
+        source_direct_mib=598,
+        source_encoded_mib=8262,
+        gather_loads=36,
+        encode_loads=170,
+        local_high_water_mib=9,
+        boundary_mib=5,
+        kernels=35,
+        dispatches=637,
+        largest_window_load_group_mib=122,
+        largest_window_request_mib=122,
+        load_kinds=load_kind_statistics(
+            gather_steps=36,
+            gather_source_mib=598,
+            gather_target_mib=598,
+            fp8_rhs_steps=170,
+            fp8_rhs_source_mib=8262,
+            fp8_rhs_target_mib=8262,
+        ),
+    )
+    plan["stages"]["dit_unconditioned"] = stage_statistics(
+        parameter_mib=8626,
+        source_mib=8626,
+        source_direct_mib=364,
+        source_encoded_mib=8262,
+        gather_loads=36,
+        encode_loads=170,
+        local_high_water_mib=9,
+        boundary_mib=1,
+        kernels=31,
+        dispatches=600,
+        largest_window_load_group_mib=122,
+        largest_window_request_mib=122,
+        load_kinds=load_kind_statistics(
+            gather_steps=36,
+            gather_source_mib=364,
+            gather_target_mib=364,
+            fp8_rhs_steps=170,
+            fp8_rhs_source_mib=8262,
+            fp8_rhs_target_mib=8262,
+        ),
+    )
+    return plan
+
+
 class GenerationBenchmarkSummaryTest(unittest.TestCase):
     def test_summarize_generation_benchmark_joins_rows_to_plans(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -561,6 +614,9 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["rows"][0]["dit_feed_forward_implementation"], 2)
             self.assertEqual(summary["rows"][0]["dispatch_count"], 1168)
             self.assertEqual(summary["rows"][0]["local_high_water_mark"], 512)
+            self.assertEqual(summary["rows"][0]["serving_static_parameter_mib"], 1)
+            self.assertEqual(summary["rows"][0]["serving_bf16_execution_mib"], 0)
+            self.assertEqual(summary["rows"][0]["serving_fp8_execution_mib"], 0)
 
     def test_summarize_generation_benchmark_parses_live_label_telemetry(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -635,6 +691,15 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_parameter_load_fp8_bf16_target_mib"], 34924)
             self.assertEqual(row["runtime_parameter_load_bf16_rhs_steps"], 108)
             self.assertEqual(row["runtime_parameter_load_bf16_rhs_source_mib"], 10368)
+            self.assertEqual(row["serving_static_parameter_mib"], 49460)
+            self.assertEqual(row["serving_phase_parameter_high_water_mib"], 34951)
+            self.assertEqual(row["serving_local_high_water_mib"], 43)
+            self.assertEqual(row["serving_bf16_execution_mib"], 45292)
+            self.assertEqual(row["serving_bf16_rhs_execution_mib"], 10368)
+            self.assertEqual(row["serving_fp8_to_bf16_execution_source_mib"], 17480)
+            self.assertEqual(row["serving_fp8_to_bf16_execution_target_mib"], 34924)
+            self.assertEqual(row["serving_fp8_to_bf16_expansion_mib"], 17444)
+            self.assertEqual(row["serving_fp8_execution_mib"], 0)
             self.assertEqual(row["runtime_dispatch_count"], 1507)
             self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
             self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
@@ -682,6 +747,47 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
             self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
+
+    def test_summarize_generation_benchmark_classifies_direct_fp8_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(direct_fp8_generation_plan()), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 3900.0,
+                                "cpu_time": 10.0,
+                                "iterations": 1,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = generation_benchmark_summary.summarize_generation_benchmark(
+                benchmark_path, plan_dir
+            )
+
+            row = summary["rows"][0]
+            self.assertEqual(row["serving_static_parameter_mib"], 32017)
+            self.assertEqual(row["serving_phase_parameter_high_water_mib"], 18335)
+            self.assertEqual(row["serving_bf16_execution_mib"], 10368)
+            self.assertEqual(row["serving_bf16_rhs_execution_mib"], 10368)
+            self.assertEqual(row["serving_fp8_to_bf16_execution_target_mib"], 0)
+            self.assertEqual(row["serving_fp8_to_bf16_expansion_mib"], 0)
+            self.assertEqual(row["serving_fp8_execution_mib"], 16524)
 
     def test_summarize_generation_benchmark_joins_custom_row_by_prompt_label(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -819,11 +925,12 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("| bucket | residency | resident mask | phase masks |", table)
             self.assertIn(
                 "| short128 | selected_stage_bundles | 3 | "
-                "[0x00000001,0x0000000c,0x00000020] | 17712 | 19 | 32 | "
-                "83 | 128 | 3627.693 | 3477.614 | 150.049 | - | - | - | "
-                "- | 912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | "
-                "384 | 950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 2 | 318 | "
-                "1081 | 576 | 1187 | qwen | 1187 | qwen | 1507 |",
+                "[0x00000001,0x0000000c,0x00000020] | 17712 | 49460 | "
+                "34951 | 43 | 45292 | 34924 | 17444 | 0 | 19 | 32 | 83 | "
+                "128 | 3627.693 | 3477.614 | 150.049 | - | - | - | - | "
+                "912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | 384 | "
+                "950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 2 | 318 | 1081 | "
+                "576 | 1187 | qwen | 1187 | qwen | 1507 |",
                 table,
             )
 
