@@ -1031,59 +1031,46 @@ static iree_status_t loom_sanitizer_insert_fragment_scalar_assertion(
 }
 
 static bool loom_sanitizer_fragment_axis_is_contiguous(
-    loom_rewriter_t* rewriter, loom_module_t* module,
-    const loom_vector_memory_footprint_t* footprint, int64_t row_count,
-    int64_t column_count, uint8_t fragment_axis) {
-  const uint8_t view_rank = loom_type_rank(footprint->view_type);
+    const loom_vector_memory_footprint_t* footprint, uint8_t fragment_axis) {
+  const uint8_t view_rank = footprint->vector_access.view_rank;
   if (view_rank < 2 || fragment_axis > 1) return false;
-  loom_type_t vector_type = loom_type_shaped_2d(
-      LOOM_TYPE_VECTOR, loom_type_element_type(footprint->view_type),
-      loom_dim_pack_static(row_count), loom_dim_pack_static(column_count),
-      /*encoding_id=*/0);
-  loom_vector_memory_access_t access = {0};
-  const loom_fact_context_t* fact_context =
-      rewriter->fact_table ? &rewriter->fact_table->context : NULL;
-  if (!loom_vector_memory_access_describe(
-          fact_context, module, footprint->view_type, vector_type, &access)) {
-    return false;
-  }
   const uint8_t view_axis = (uint8_t)(view_rank - 2 + fragment_axis);
   int64_t axis_stride = 0;
-  return loom_vector_memory_access_static_axis_stride(&access, view_axis,
-                                                      &axis_stride) &&
+  return loom_vector_memory_access_static_axis_stride(
+             &footprint->vector_access, view_axis, &axis_stride) &&
          axis_stride == 1;
+}
+
+static bool loom_sanitizer_fragment_axis_count(loom_rewriter_t* rewriter,
+                                               loom_type_t vector_type,
+                                               uint8_t axis,
+                                               int64_t* out_count) {
+  *out_count = 0;
+  if (axis >= loom_type_rank(vector_type)) return false;
+  if (!loom_type_dim_is_dynamic_at(vector_type, axis)) {
+    *out_count = loom_type_dim_static_size_at(vector_type, axis);
+    return *out_count > 0;
+  }
+  return loom_sanitizer_value_exact_positive_i64(
+      rewriter, loom_type_dim_value_id_at(vector_type, axis), out_count);
 }
 
 static iree_status_t loom_sanitizer_try_instrument_fragment_access_op(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_vector_memory_footprint_t* footprint,
     loom_sanitizer_assert_access_kind_t kind) {
-  if (loom_type_rank(footprint->view_type) < 2) {
+  if (loom_type_rank(footprint->view_type) < 2 ||
+      loom_type_rank(footprint->vector_type) != 2) {
     return loom_sanitizer_emit_vector_access_unsupported(pass, module,
                                                          footprint->access.op);
   }
 
-  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
-  switch (footprint->access.op->kind) {
-    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
-      rows = loom_vector_fragment_load_rows(footprint->access.op);
-      columns = loom_vector_fragment_load_columns(footprint->access.op);
-      break;
-    case LOOM_OP_VECTOR_FRAGMENT_STORE:
-      rows = loom_vector_fragment_store_rows(footprint->access.op);
-      columns = loom_vector_fragment_store_columns(footprint->access.op);
-      break;
-    default:
-      return loom_sanitizer_emit_vector_access_unsupported(
-          pass, module, footprint->access.op);
-  }
-
   int64_t row_count = 0;
   int64_t column_count = 0;
-  if (!loom_sanitizer_value_exact_positive_i64(rewriter, rows, &row_count) ||
-      !loom_sanitizer_value_exact_positive_i64(rewriter, columns,
-                                               &column_count)) {
+  if (!loom_sanitizer_fragment_axis_count(rewriter, footprint->vector_type,
+                                          /*axis=*/0, &row_count) ||
+      !loom_sanitizer_fragment_axis_count(rewriter, footprint->vector_type,
+                                          /*axis=*/1, &column_count)) {
     return loom_sanitizer_emit_vector_access_dynamic(pass, module,
                                                      footprint->access.op);
   }
@@ -1099,15 +1086,13 @@ static iree_status_t loom_sanitizer_try_instrument_fragment_access_op(
   }
 
   loom_builder_set_before(&rewriter->builder, footprint->access.op);
-  if (loom_sanitizer_fragment_axis_is_contiguous(rewriter, module, footprint,
-                                                 row_count, column_count,
+  if (loom_sanitizer_fragment_axis_is_contiguous(footprint,
                                                  /*fragment_axis=*/1)) {
     IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_axis_assertions(
         pass, module, rewriter, footprint, kind,
         /*contiguous_fragment_axis=*/1, column_count, row_count));
-  } else if (loom_sanitizer_fragment_axis_is_contiguous(
-                 rewriter, module, footprint, row_count, column_count,
-                 /*fragment_axis=*/0)) {
+  } else if (loom_sanitizer_fragment_axis_is_contiguous(footprint,
+                                                        /*fragment_axis=*/0)) {
     IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_axis_assertions(
         pass, module, rewriter, footprint, kind,
         /*contiguous_fragment_axis=*/0, row_count, column_count));
