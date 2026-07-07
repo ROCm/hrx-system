@@ -3110,28 +3110,18 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
 // Block arguments
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
-                                 loom_value_id_t value_id) {
-  if (block->arg_count >= UINT16_MAX) {
+static iree_status_t loom_block_arg_ids_ensure_capacity(
+    loom_module_t* module, loom_block_t* block, uint32_t required_count) {
+  if (required_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "block arg count exceeds UINT16_MAX");
   }
-  if (value_id >= module->values.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "value %%%u out of range (module has %" PRIhsz
-                            " values)",
-                            (unsigned)value_id, module->values.count);
-  }
-  if (block->arg_count >= block->arg_capacity) {
-    if (block->arg_count == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "block argument count exceeds storage limit");
-    }
+  if (required_count > block->arg_capacity) {
     iree_host_size_t doubled_capacity =
         (iree_host_size_t)block->arg_capacity * 2;
     iree_host_size_t new_capacity =
         doubled_capacity > 4 ? doubled_capacity : (iree_host_size_t)4;
-    iree_host_size_t required_capacity = (iree_host_size_t)block->arg_count + 1;
+    iree_host_size_t required_capacity = required_count;
     if (new_capacity < required_capacity) {
       new_capacity = required_capacity;
     }
@@ -3149,7 +3139,49 @@ iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
     block->arg_ids = new_arg_ids;
     block->arg_capacity = (uint16_t)new_capacity;
   }
-  uint16_t arg_index = block->arg_count++;
+  return iree_ok_status();
+}
+
+iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
+                                 loom_value_id_t value_id) {
+  return loom_block_insert_arg(module, block, block->arg_count, value_id);
+}
+
+iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
+                                    uint16_t arg_index,
+                                    loom_value_id_t value_id) {
+  if (arg_index > block->arg_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "block argument insertion index %u out of range for %u argument(s)",
+        (unsigned)arg_index, (unsigned)block->arg_count);
+  }
+  if (value_id >= module->values.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "value %%%u out of range (module has %" PRIhsz
+                            " values)",
+                            (unsigned)value_id, module->values.count);
+  }
+
+  const uint32_t required_count = (uint32_t)block->arg_count + 1;
+  IREE_RETURN_IF_ERROR(
+      loom_block_arg_ids_ensure_capacity(module, block, required_count));
+
+  for (uint16_t i = block->arg_count; i > arg_index; --i) {
+    const loom_value_id_t shifted_id = block->arg_ids[i - 1];
+    block->arg_ids[i] = shifted_id;
+    if (shifted_id == LOOM_VALUE_ID_INVALID ||
+        shifted_id >= module->values.count) {
+      continue;
+    }
+    loom_value_t* shifted = loom_module_value(module, shifted_id);
+    if (loom_value_is_block_arg(shifted) &&
+        loom_value_def_block(shifted) == block) {
+      shifted->def = loom_value_def_make_block(block, i);
+    }
+  }
+
+  ++block->arg_count;
   block->arg_ids[arg_index] = value_id;
 
   loom_value_t* value = &module->values.entries[value_id];

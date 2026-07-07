@@ -36,6 +36,27 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    cfg_tuple_decomposition
+  HDRS
+    "cfg_tuple_decomposition.h"
+  SRCS
+    "cfg_tuple_decomposition.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::rewriter
+    loom::target::registers
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     dce
   HDRS
     "dce.h"

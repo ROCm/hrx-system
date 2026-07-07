@@ -500,6 +500,14 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
 iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
                                  loom_value_id_t value_id);
 
+// Inserts a block argument at |arg_index|. The value_id must already be
+// defined in the module's value table (via loom_module_define_value). Following
+// block arguments keep their value IDs and receive updated definition indices.
+// Passing block->arg_count appends.
+iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
+                                    uint16_t arg_index,
+                                    loom_value_id_t value_id);
+
 // Removes an unused block argument and compacts following argument slots.
 //
 // |arg_index| must identify a live argument of |block|. The removed value must
