@@ -1,0 +1,12 @@
+// RUN: emit amdgpu-vopd-plan-json @vopd_pairs_across_coalesced_copy strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%product_copy:physical_register:4:1 fixed=%sum:physical_register:5:1
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @vopd_pairs_across_coalesced_copy(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %product = v_mul_f32 %a0, %b0
+  %product_copy = copy %product : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %a1, %b1
+  return
+}
+
+// ----
+{"format":"loom.amdgpu.vopd_plan.v0","function":"vopd_pairs_across_coalesced_copy","target":"target","descriptor_set":"amdgpu.rdna3.core","pair_count":1,"rejection_count":0,"packet_count":4,"pairs":[{"index":0,"reason":"mixed_components","block":0,"flags":0,"literal_u32":null,"x":{"packet":0,"node":0,"descriptor":"amdgpu.v_mul_f32","op_id":3,"op":"mul_f32","vdst":4,"src0":0,"vsrc1":1},"y":{"packet":2,"node":2,"descriptor":"amdgpu.v_add_f32","op_id":4,"op":"add_f32","vdst":5,"src0":2,"vsrc1":3}}],"rejections":[],"packets":[{"index":0,"role":"first","pair":0},{"index":1,"role":"none","pair":null},{"index":2,"role":"second","pair":0},{"index":3,"role":"none","pair":null}]}
