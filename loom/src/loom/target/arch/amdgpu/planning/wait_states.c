@@ -207,6 +207,8 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   iree_arena_allocator_t* arena;
   // Processor facts selected by the low target, or NULL if unavailable.
   const loom_amdgpu_processor_info_t* processor;
+  // Cached processor scheduling and fixed-wait hazard feature bits.
+  loom_amdgpu_processor_scheduling_bits_t processor_scheduling;
   // True when the selected processor and descriptor set can emit S_DELAY_ALU.
   bool has_delay_alu;
   // Per-physical-VGPR outstanding fixed-wait hazard state.
@@ -597,36 +599,10 @@ static bool loom_amdgpu_wait_state_descriptor_uses_vector_memory(
       builder->schedule->target.descriptor_set, descriptor);
 }
 
-static bool loom_amdgpu_wait_state_processor_has_trans_forwarding_hazard(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES);
-}
-
-static bool loom_amdgpu_wait_state_processor_has_trans_depctr(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
-}
-
-static bool loom_amdgpu_wait_state_processor_has_valu_sgpr_read_hazard(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
-}
-
-static bool loom_amdgpu_wait_state_processor_has_dst_sel_forwarding_hazard(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+static bool loom_amdgpu_wait_state_has_scheduling(
+    const loom_amdgpu_wait_state_builder_t* builder,
+    loom_amdgpu_processor_scheduling_bits_t bits) {
+  return iree_any_bit_set(builder->processor_scheduling, bits);
 }
 
 static bool loom_amdgpu_wait_state_target_has_delay_alu(
@@ -634,8 +610,8 @@ static bool loom_amdgpu_wait_state_target_has_delay_alu(
   const loom_low_descriptor_set_t* descriptor_set =
       builder->schedule->target.descriptor_set;
   if (builder->processor == NULL || descriptor_set == NULL ||
-      !iree_any_bit_set(builder->processor->features.scheduling,
-                        LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU)) {
+      !loom_amdgpu_wait_state_has_scheduling(
+          builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU)) {
     return false;
   }
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
@@ -683,8 +659,9 @@ static bool loom_amdgpu_wait_state_descriptor_is_sdwa(
 static bool loom_amdgpu_wait_state_descriptor_is_trans_forwarding_consumer(
     const loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_descriptor_t* descriptor) {
-  return loom_amdgpu_wait_state_processor_has_trans_forwarding_hazard(
-             builder->processor) &&
+  return loom_amdgpu_wait_state_has_scheduling(
+             builder,
+             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES) &&
          loom_amdgpu_wait_state_descriptor_uses_vector_alu(builder,
                                                            descriptor) &&
          !loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
@@ -699,7 +676,8 @@ static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
   }
   if (loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
                                                           descriptor)) {
-    if (loom_amdgpu_wait_state_processor_has_trans_depctr(builder->processor)) {
+    if (loom_amdgpu_wait_state_has_scheduling(
+            builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR)) {
       return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
     }
     return LOOM_AMDGPU_DELAY_ALU_TYPE_TRANS;
@@ -1894,8 +1872,9 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
       loom_amdgpu_wait_state_matrix_reads_valu_results(matrix_contract);
   const bool trans_producer =
       packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_processor_has_trans_forwarding_hazard(
-          builder->processor) &&
+      loom_amdgpu_wait_state_has_scheduling(
+          builder,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES) &&
       loom_amdgpu_wait_state_descriptor_is_transcendental(builder,
                                                           packet->descriptor);
   const bool trans_forwarding_consumer =
@@ -1931,11 +1910,11 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
       loom_amdgpu_wait_state_descriptor_is_readfirstlane(builder,
                                                          packet->descriptor);
   const bool processor_has_valu_sgpr_read_hazard =
-      loom_amdgpu_wait_state_processor_has_valu_sgpr_read_hazard(
-          builder->processor);
+      loom_amdgpu_wait_state_has_scheduling(
+          builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
   const bool processor_has_dst_sel_forwarding_hazard =
-      loom_amdgpu_wait_state_processor_has_dst_sel_forwarding_hazard(
-          builder->processor);
+      loom_amdgpu_wait_state_has_scheduling(
+          builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
   const bool processor_has_delay_alu = builder->has_delay_alu;
   bool dst_sel_forwarding_producer = false;
   if (processor_has_dst_sel_forwarding_hazard) {
@@ -2207,6 +2186,8 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_allocate(builder));
   builder->processor = loom_amdgpu_target_processor_from_resolved_target(
       builder->schedule->module, &builder->schedule->target);
+  builder->processor_scheduling =
+      builder->processor != NULL ? builder->processor->features.scheduling : 0;
   builder->has_delay_alu = loom_amdgpu_wait_state_target_has_delay_alu(builder);
   builder->delay_alu_epoch = 1;
   for (iree_host_size_t block_index = 0;
