@@ -54,6 +54,7 @@ def test_vopd_component_fragment_is_data_only() -> None:
     fragment = amdgpu_vopd_component_tables._emit_component_rules(amdgpu_vopd_component_tables._VopdComponentTables(rules=(rule,)))
 
     assert "LOOM_AMDGPU_VOPD_COMPONENT_RULE(" in fragment
+    assert "LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(" in fragment
     assert "typedef " not in fragment
     assert "struct " not in fragment
     assert "static " not in fragment

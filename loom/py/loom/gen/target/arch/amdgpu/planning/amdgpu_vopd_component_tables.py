@@ -513,12 +513,13 @@ def _generated_header() -> list[str]:
     ]
 
 
-def _component_rule_initializer(rule: _VopdComponentRule) -> str:
+def _component_rule_initializer(index: int, rule: _VopdComponentRule) -> str:
     component = rule.component
     accumulator_index, src0_index, vsrc1_index = component.operand_layout
     return "\n".join(
         [
             "LOOM_AMDGPU_VOPD_COMPONENT_RULE(",
+            f"    {index},",
             f"    {rule.descriptor_ref},",
             f"    {rule.descriptor_set_mask},",
             f"    {component.op}, {component.same_op_reason},",
@@ -534,12 +535,30 @@ def _component_rule_initializer(rule: _VopdComponentRule) -> str:
     )
 
 
+def _component_reason_initializer(
+    index: int,
+    rule: _VopdComponentRule,
+) -> str | None:
+    component = rule.component
+    if component.same_op_reason == "LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN":
+        return None
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(",
+            f"    {component.same_op_reason},",
+            f"    {index})",
+        ]
+    )
+
+
 def _emit_component_rules(tables: _VopdComponentTables) -> str:
+    reason_initializers = [initializer for index, rule in enumerate(tables.rules) if (initializer := _component_reason_initializer(index, rule)) is not None]
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *(_component_rule_initializer(rule) for rule in tables.rules),
+                *(_component_rule_initializer(index, rule) for index, rule in enumerate(tables.rules)),
+                *reason_initializers,
             ]
         )
         + "\n"
