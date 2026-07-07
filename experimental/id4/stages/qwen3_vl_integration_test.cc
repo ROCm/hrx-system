@@ -25,10 +25,45 @@ IREE_FLAG_LIST(string, id4_diagnostic_tap,
 IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing an ID4 reference fixture manifest and tensor "
           "payloads used to initialize stage inputs.");
+IREE_FLAG(string, qwen_parameter_format, "bf16",
+          "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
+IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
+          "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
+          "hybrid_compact_rhs.");
+IREE_FLAG(string, qwen_attention_implementation, "auto",
+          "Qwen3-VL attention implementation: auto, materialized, or wmma.");
 
 namespace {
 
 constexpr uint8_t kExportedBoundarySentinel = 0xA5;
+
+static iree_status_t ParseQwenParameterFormat(
+    id4_qwen3_vl_parameter_format_t* out_format) {
+  iree_status_t status = id4_qwen3_vl_parameter_format_parse(
+      iree_make_cstring_view(FLAG_qwen_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--qwen_parameter_format"));
+}
+
+static iree_status_t ParseQwenWeightExecutionStrategy(
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
+  iree_status_t status = id4_qwen3_vl_weight_execution_strategy_parse(
+      iree_make_cstring_view(FLAG_qwen_weight_execution_strategy),
+      out_strategy);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_weight_execution_strategy"));
+}
+
+static iree_status_t ParseQwenAttentionImplementation(
+    id4_qwen3_vl_attention_implementation_t* out_implementation) {
+  iree_status_t status = id4_qwen3_vl_attention_implementation_parse(
+      iree_make_cstring_view(FLAG_qwen_attention_implementation),
+      out_implementation);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_attention_implementation"));
+}
 
 static iree_status_t CreateQwen3VlStage(
     const id4::test::LiveStageContext& context,
@@ -47,7 +82,8 @@ static iree_status_t CreateQwen3VlStage(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
-  create_options.parameter_format = ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
+  IREE_RETURN_IF_ERROR(
+      ParseQwenParameterFormat(&create_options.parameter_format));
   create_options.model = *id4_qwen3_vl_program_ideogram4_model_config();
   return id4_qwen3_vl_stage_create(&create_options, iree_allocator_system(),
                                    out_stage);
@@ -72,7 +108,7 @@ static iree_status_t FindDiagnosticTapPlan(
                           static_cast<int>(name.size), name.data);
 }
 
-TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
+TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithParameters) {
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
 
@@ -133,10 +169,10 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
   qwen_options.request.token_ids = token_ids.data();
-  qwen_options.weight_execution_strategy =
-      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
-  qwen_options.attention_implementation =
-      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
+  IREE_ASSERT_OK(ParseQwenWeightExecutionStrategy(
+      &qwen_options.weight_execution_strategy));
+  IREE_ASSERT_OK(
+      ParseQwenAttentionImplementation(&qwen_options.attention_implementation));
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
