@@ -135,45 +135,61 @@ typedef struct loom_amdgpu_fp8_encoded_operand_schema_requirement_t {
 
 static const loom_amdgpu_fp8_encoded_operand_schema_requirement_t
     kLoomAmdgpuFp8EncodedOperandSchemaRequirements[] = {
-        [LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED] =
-            {
-                .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE,
-                .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE,
-                .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_NONE,
-                .scale_operand_count = 0,
-                .scale_group_mode = LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_NONE,
-            },
-        [LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32] =
-            {
-                .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F32,
-                .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
-                .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
-                .scale_operand_count = 1,
-                .scale_group_mode = LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_ALL_LANES,
-            },
-        [LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0] =
-            {
-                .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
-                .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
-                .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
-                .scale_operand_count = 1,
-                .scale_group_mode =
-                    LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_OCTETS_MAX4,
-            },
+#define LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW(    \
+    kind, row_scale_format, row_scale_topology, row_affine_policy, \
+    row_scale_operand_count, row_scale_group_mode)                 \
+  [kind] = {                                                       \
+      .scale_format = row_scale_format,                            \
+      .scale_topology = row_scale_topology,                        \
+      .affine_policy = row_affine_policy,                          \
+      .scale_operand_count = row_scale_operand_count,              \
+      .scale_group_mode = row_scale_group_mode,                    \
+  }
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+#undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW
 };
+
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8EncodedOperandSchemaRequirements) ==
+                  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0 + 1,
+              "FP8 encoded operand schema requirements cover dense kinds");
+
+typedef struct loom_amdgpu_fp8_encoded_operand_format_row_t {
+  // Scalar type owning this accepted format row.
+  loom_scalar_type_t element_type;
+  // Numeric formats accepted for encoded operand facts with this scalar type.
+  loom_value_fact_numeric_format_flags_t encoded_operand_formats;
+} loom_amdgpu_fp8_encoded_operand_format_row_t;
+
+static const loom_amdgpu_fp8_encoded_operand_format_row_t
+    kLoomAmdgpuFp8EncodedOperandFormatRows[] = {
+#define LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(           \
+    row_element_type, row_encoded_operand_formats)            \
+  [row_element_type - LOOM_SCALAR_TYPE_F8E4M3] = {            \
+      .element_type = row_element_type,                       \
+      .encoded_operand_formats = row_encoded_operand_formats, \
+  }
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_encoded_operand_format_rows.inl"
+#undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW
+};
+
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8EncodedOperandFormatRows) ==
+                  LOOM_SCALAR_TYPE_F8E5M2 - LOOM_SCALAR_TYPE_F8E4M3 + 1,
+              "FP8 encoded operand format rows cover dense FP8/BF8 types");
 
 static bool loom_amdgpu_fp8_element_format_matches(
     loom_value_fact_numeric_format_flags_t element_format,
     loom_scalar_type_t element_type) {
-  switch (element_type) {
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      return element_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3 ||
-             element_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN;
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      return element_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2;
-    default:
-      return false;
+  if (element_type < LOOM_SCALAR_TYPE_F8E4M3 ||
+      element_type > LOOM_SCALAR_TYPE_F8E5M2) {
+    return false;
   }
+  const loom_amdgpu_fp8_encoded_operand_format_row_t* row =
+      &kLoomAmdgpuFp8EncodedOperandFormatRows[element_type -
+                                              LOOM_SCALAR_TYPE_F8E4M3];
+  IREE_ASSERT_EQ(row->element_type, element_type);
+  return element_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE &&
+         (element_format & (element_format - 1)) == 0 &&
+         iree_all_bits_set(row->encoded_operand_formats, element_format);
 }
 
 static bool loom_amdgpu_fp8_scale_group_matches(

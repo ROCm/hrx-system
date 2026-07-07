@@ -11,6 +11,7 @@ import pytest
 from loom.gen.target.arch.amdgpu.lower import amdgpu_narrow_float_tables
 from loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables import (
     _Fp8DecodePlanDescriptorRow,
+    _Fp8EncodedOperandSchemaRequirementRow,
     _Fp8FormatRow,
     _Fp8NativeDescriptorRefRow,
     _Fp8ScaledDescriptorRefRow,
@@ -51,6 +52,40 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F16_FP8" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8" in source
+    assert "switch " not in source
+    assert "\ncase " not in source
+    assert "\nreturn " not in source
+
+
+def test_fp8_encoded_operand_schema_requirement_rows_emit_data_only() -> None:
+    source = amdgpu_narrow_float_tables._emit_fp8_encoded_operand_schema_requirement_rows()
+
+    assert "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW(" in source
+    assert "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED" in source
+    assert "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32" in source
+    assert "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0" in source
+    assert "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_OCTETS_MAX4" in source
+    assert "typedef " not in source
+    assert "struct " not in source
+    assert "#include" not in source
+    assert "switch " not in source
+    assert "\ncase " not in source
+    assert "\nreturn " not in source
+
+
+def test_fp8_encoded_operand_format_rows_emit_data_only() -> None:
+    source = amdgpu_narrow_float_tables._emit_fp8_encoded_operand_format_rows()
+
+    assert "LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(" in source
+    assert "LOOM_SCALAR_TYPE_F8E4M3" in source
+    assert "LOOM_SCALAR_TYPE_F8E5M2" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2" in source
+    assert "typedef " not in source
+    assert "struct " not in source
+    assert "#include" not in source
     assert "switch " not in source
     assert "\ncase " not in source
     assert "\nreturn " not in source
@@ -192,6 +227,37 @@ def test_fp8_subnormal_table_rows_reject_missing_dense_format_row() -> None:
                     mantissa_bits=3,
                     exponent_bias=7,
                     special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+                    encoded_operand_formats=("LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",),
+                ),
+            ),
+        )
+
+
+def test_fp8_encoded_operand_schema_requirement_rows_reject_kind_gap() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 encoded operand schema requirement table must cover "
+            r"dense schema kinds in order"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_encoded_operand_schema_requirement_rows(
+            rows=(
+                _Fp8EncodedOperandSchemaRequirementRow(
+                    "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED",
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE",
+                    "LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE",
+                    "LOOM_VALUE_FACT_AFFINE_POLICY_NONE",
+                    0,
+                    "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_NONE",
+                ),
+                _Fp8EncodedOperandSchemaRequirementRow(
+                    "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0",
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0",
+                    "LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D",
+                    "LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY",
+                    1,
+                    "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_OCTETS_MAX4",
                 ),
             ),
         )

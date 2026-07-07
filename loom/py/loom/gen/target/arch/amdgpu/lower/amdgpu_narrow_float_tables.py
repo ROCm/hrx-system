@@ -64,6 +64,17 @@ class _Fp8FormatRow:
     mantissa_bits: int
     exponent_bias: int
     special_policy: str
+    encoded_operand_formats: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _Fp8EncodedOperandSchemaRequirementRow:
+    kind: str
+    scale_format: str
+    scale_topology: str
+    affine_policy: str
+    scale_operand_count: int
+    scale_group_mode: str
 
 
 @dataclass(frozen=True)
@@ -104,6 +115,10 @@ _FP8_FORMAT_ROWS = (
         mantissa_bits=3,
         exponent_bias=7,
         special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+        encoded_operand_formats=(
+            "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+            "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
+        ),
     ),
     _Fp8FormatRow(
         ScalarTypeKind.F8E5M2,
@@ -111,6 +126,35 @@ _FP8_FORMAT_ROWS = (
         mantissa_bits=2,
         exponent_bias=15,
         special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
+        encoded_operand_formats=("LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",),
+    ),
+)
+
+
+_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROWS = (
+    _Fp8EncodedOperandSchemaRequirementRow(
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE",
+        "LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE",
+        "LOOM_VALUE_FACT_AFFINE_POLICY_NONE",
+        0,
+        "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_NONE",
+    ),
+    _Fp8EncodedOperandSchemaRequirementRow(
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F32",
+        "LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D",
+        "LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY",
+        1,
+        "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_ALL_LANES",
+    ),
+    _Fp8EncodedOperandSchemaRequirementRow(
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0",
+        "LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D",
+        "LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY",
+        1,
+        "LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_OCTETS_MAX4",
     ),
 )
 
@@ -395,6 +439,30 @@ def _validate_fp8_format_rows(rows: Sequence[_Fp8FormatRow]) -> None:
             raise ValueError(f"{table_name} row {row.source_type.name} must describe a signless 7-bit FP8 payload")
         if row.mantissa_bits not in (2, 3):
             raise ValueError(f"{table_name} row {row.source_type.name} has unsupported mantissa bits: {row.mantissa_bits}")
+        if not row.encoded_operand_formats:
+            raise ValueError(f"{table_name} row {row.source_type.name} must list accepted encoded operand formats")
+        _validate_unique_strings(
+            table_name,
+            f"{row.source_type.name} encoded operand formats",
+            list(row.encoded_operand_formats),
+        )
+
+
+def _validate_fp8_encoded_operand_schema_requirement_rows(
+    rows: Sequence[_Fp8EncodedOperandSchemaRequirementRow],
+) -> None:
+    table_name = "AMDGPU FP8 encoded operand schema requirement table"
+    expected_kinds = (
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED",
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32",
+        "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0",
+    )
+    actual_kinds = tuple(row.kind for row in rows)
+    if actual_kinds != expected_kinds:
+        raise ValueError(f"{table_name} must cover dense schema kinds in order: expected " + ", ".join(expected_kinds) + "; got " + ", ".join(actual_kinds))
+    for row in rows:
+        if row.scale_operand_count < 0:
+            raise ValueError(f"{table_name} row {row.kind} has negative scale operand count")
 
 
 def _fp8_decode_plan_descriptor_initializer(
@@ -411,6 +479,26 @@ def _fp8_decode_plan_descriptor_initializer(
             "LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(",
             f"    {descriptor_ref}, {row.plan_field},",
             f"    {row.present_flag}),",
+        ]
+    )
+
+
+def _fp8_numeric_format_flags_expr(formats: Sequence[str]) -> str:
+    if not formats:
+        return "LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE"
+    return " | ".join(formats)
+
+
+def _fp8_encoded_operand_schema_requirement_initializer(
+    row: _Fp8EncodedOperandSchemaRequirementRow,
+) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROW(",
+            f"    {row.kind},",
+            f"    {row.scale_format}, {row.scale_topology},",
+            f"    {row.affine_policy}, {row.scale_operand_count},",
+            f"    {row.scale_group_mode}),",
         ]
     )
 
@@ -550,6 +638,16 @@ def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
     )
 
 
+def _fp8_encoded_operand_format_initializer(row: _Fp8FormatRow) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(",
+            f"    {_scalar_type_constant_name(row.source_type)},",
+            f"    {_fp8_numeric_format_flags_expr(row.encoded_operand_formats)}),",
+        ]
+    )
+
+
 def _fp8_packed_repair_expression(repair_mask: int) -> str:
     flag_names = [repair_bit.flag_name for repair_bit in _FP8_PACKED_REPAIR_BITS if repair_mask & repair_bit.bit_value]
     if not flag_names:
@@ -633,6 +731,36 @@ def _emit_fp8_decode_plan_descriptor_rows(
     )
 
 
+def _emit_fp8_encoded_operand_format_rows(
+    rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
+) -> str:
+    _validate_fp8_format_rows(rows)
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_fp8_encoded_operand_format_initializer(row) for row in rows),
+            ]
+        )
+        + "\n"
+    )
+
+
+def _emit_fp8_encoded_operand_schema_requirement_rows(
+    rows: Sequence[_Fp8EncodedOperandSchemaRequirementRow] = _FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROWS,
+) -> str:
+    _validate_fp8_encoded_operand_schema_requirement_rows(rows)
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_fp8_encoded_operand_schema_requirement_initializer(row) for row in rows),
+            ]
+        )
+        + "\n"
+    )
+
+
 def _emit_fp8_native_descriptor_ref_rows(
     rows: Sequence[_Fp8NativeDescriptorRefRow] = _FP8_NATIVE_DESCRIPTOR_REF_ROWS,
     descriptor_ref_key_set: set[str] | None = None,
@@ -680,6 +808,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated FP8 decode-plan descriptor row fragment path.",
     )
     parser.add_argument(
+        "--fp8-encoded-operand-format-rows",
+        type=Path,
+        help="Generated FP8/BF8 encoded operand format row fragment path.",
+    )
+    parser.add_argument(
+        "--fp8-encoded-operand-schema-requirement-rows",
+        type=Path,
+        help="Generated FP8/BF8 encoded operand schema requirement row fragment path.",
+    )
+    parser.add_argument(
         "--fp8-native-descriptor-ref-rows",
         type=Path,
         help="Generated native unscaled FP8/BF8 descriptor row fragment path.",
@@ -703,6 +841,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if (
         args.fp8_decode_plan_descriptor_rows is None
+        and args.fp8_encoded_operand_format_rows is None
+        and args.fp8_encoded_operand_schema_requirement_rows is None
         and args.fp8_native_descriptor_ref_rows is None
         and args.fp8_scaled_descriptor_ref_rows is None
         and args.fp8_subnormal_table_rows is None
@@ -713,6 +853,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_output(
             args.fp8_decode_plan_descriptor_rows,
             _emit_fp8_decode_plan_descriptor_rows(),
+        )
+    if args.fp8_encoded_operand_format_rows is not None:
+        _write_output(
+            args.fp8_encoded_operand_format_rows,
+            _emit_fp8_encoded_operand_format_rows(),
+        )
+    if args.fp8_encoded_operand_schema_requirement_rows is not None:
+        _write_output(
+            args.fp8_encoded_operand_schema_requirement_rows,
+            _emit_fp8_encoded_operand_schema_requirement_rows(),
         )
     if args.fp8_native_descriptor_ref_rows is not None:
         _write_output(
