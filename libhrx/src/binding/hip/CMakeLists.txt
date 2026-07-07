@@ -18,6 +18,7 @@ iree_cc_library(
     "-Wno-unused-variable"
   HDRS
     "api.h"
+    "binding_internal.h"
   SRCS
     "abi_stubs.c"
     "api.c"
@@ -41,7 +42,35 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    hip_get_proc_address_test
+  SRCS
+    "hip_get_proc_address_test.cc"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# Point hip_get_proc_address_test at the shared object built in this tree so it
+# can dlopen() the exact artifact under test, and make sure that artifact is
+# built first. Guarded because the test target only exists when tests are
+# enabled. (The library is passed by absolute path rather than as a test DATA
+# edge because DATA installs into the relocatable test tree, and the shim's
+# build-tree path is only valid for the in-tree ctest run.)
+if(TARGET libhrx_src_binding_hip_hip_get_proc_address_test)
+  target_compile_definitions(libhrx_src_binding_hip_hip_get_proc_address_test
+    PRIVATE
+      "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
+  )
+  add_dependencies(libhrx_src_binding_hip_hip_get_proc_address_test
+    libhrx_src_binding_hip_amdhip64
+  )
+endif()
 
 # The symbol version script and --undefined-version are applied through the
 # generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
