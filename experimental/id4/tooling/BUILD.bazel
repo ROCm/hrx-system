@@ -187,6 +187,28 @@ py_test(
 )
 
 py_library(
+    name = "dispatch_profile_compare_lib",
+    srcs = ["dispatch_profile_compare.py"],
+    imports = ["."],
+    deps = [":dispatch_profile_join_lib"],
+)
+
+py_binary(
+    name = "dispatch_profile_compare",
+    srcs = ["dispatch_profile_compare.py"],
+    deps = [":dispatch_profile_compare_lib"],
+)
+
+py_test(
+    name = "dispatch_profile_compare_test",
+    srcs = ["dispatch_profile_compare_test.py"],
+    deps = [
+        ":dispatch_profile_compare_lib",
+        ":dispatch_profile_join_lib",
+    ],
+)
+
+py_library(
     name = "fixture_compare_lib",
     srcs = ["fixture_compare.py"],
     imports = ["."],
