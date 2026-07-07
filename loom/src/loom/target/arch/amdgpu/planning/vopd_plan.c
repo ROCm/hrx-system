@@ -604,15 +604,13 @@ static bool loom_amdgpu_vopd_component_rule_applies_to_descriptor_set(
                               descriptor_set->descriptor_set_ordinal));
 }
 
-static bool loom_amdgpu_vopd_descriptor_set_has_component_rule(
+static bool loom_amdgpu_vopd_descriptor_set_supports_packetization(
     const loom_low_descriptor_set_t* descriptor_set) {
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVopdComponentRules); ++i) {
-    if (loom_amdgpu_vopd_component_rule_applies_to_descriptor_set(
-            &kVopdComponentRules[i], descriptor_set)) {
-      return true;
-    }
-  }
-  return false;
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      descriptor_set != NULL ? loom_amdgpu_target_info_descriptor_set_at(
+                                   descriptor_set->descriptor_set_ordinal)
+                             : NULL;
+  return loom_amdgpu_descriptor_set_info_supports_vopd(descriptor_set_info);
 }
 
 static bool loom_amdgpu_vopd_target_supports_base_vopd(
@@ -626,7 +624,7 @@ static bool loom_amdgpu_vopd_target_supports_base_vopd(
   if (target->bundle_storage.snapshot.subgroup_size != 32) {
     return false;
   }
-  return loom_amdgpu_vopd_descriptor_set_has_component_rule(descriptor_set);
+  return loom_amdgpu_vopd_descriptor_set_supports_packetization(descriptor_set);
 }
 
 static bool loom_amdgpu_vopd_processor_has_valu_trans_use_depctr(

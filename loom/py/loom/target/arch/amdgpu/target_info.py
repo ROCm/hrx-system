@@ -89,8 +89,14 @@ AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS = (
 )
 
 AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING = 1 << 0
+AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION = 1 << 1
 AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS = (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
+    | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION
+)
+AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD = (
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
+    | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION
 )
 
 AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH = 1 << 0
@@ -501,7 +507,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_xml_key="rdna4",
         isa_architecture_name="AMD RDNA 4",
         isa_architecture_id=10,
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -512,7 +518,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_xml_key="rdna3",
         isa_architecture_name="AMD RDNA 3",
         isa_architecture_id=8,
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -534,7 +540,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_xml_key="rdna4",
         isa_architecture_name="AMD RDNA 4",
         isa_architecture_id=10,
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
