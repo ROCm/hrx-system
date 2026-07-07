@@ -92,6 +92,8 @@ typedef struct loom_amdgpu_vopd_trans_result_vgpr_t {
   uint8_t valu_interval;
   // Number of TRANS packets since the TRANS result was produced.
   uint8_t trans_interval;
+  // Dense active-list position for this physical VGPR while valid.
+  uint32_t active_list_index;
 } loom_amdgpu_vopd_trans_result_vgpr_t;
 
 typedef struct loom_amdgpu_vopd_component_rule_t {
@@ -123,6 +125,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   loom_amdgpu_vopd_packet_flags_t* packet_flags;
   // Per-physical-VGPR state for GFX11 TRANS-result packetization windows.
   loom_amdgpu_vopd_trans_result_vgpr_t* trans_result_vgprs;
+  // Active physical VGPR indices with valid TRANS-result state.
+  uint32_t* active_trans_result_vgpr_indices;
   // Number of entries in |trans_result_vgprs|.
   iree_host_size_t trans_result_vgpr_count;
   // Number of currently active TRANS-result VGPR records.
@@ -968,11 +972,20 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate_trans_result_guard(
   if (vgpr_count == 0) {
     return iree_ok_status();
   }
+  if (vgpr_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU VOPD physical VGPR count exceeds 32-bit "
+                            "index range");
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       builder->arena, vgpr_count, sizeof(*builder->trans_result_vgprs),
       (void**)&builder->trans_result_vgprs));
   memset(builder->trans_result_vgprs, 0,
          vgpr_count * sizeof(*builder->trans_result_vgprs));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, vgpr_count,
+      sizeof(*builder->active_trans_result_vgpr_indices),
+      (void**)&builder->active_trans_result_vgpr_indices));
   builder->trans_result_vgpr_count = vgpr_count;
   return iree_ok_status();
 }
@@ -1062,13 +1075,19 @@ static bool loom_amdgpu_vopd_assignment_is_physical_vgpr(
 static bool loom_amdgpu_vopd_has_trans_result_guard(
     const loom_amdgpu_vopd_plan_builder_t* builder) {
   return builder->trans_result_vgprs != NULL &&
+         builder->active_trans_result_vgpr_indices != NULL &&
          builder->trans_result_vgpr_count != 0;
+}
+
+static bool loom_amdgpu_vopd_trans_result_vgpr_is_tracked(
+    const loom_amdgpu_vopd_trans_result_vgpr_t* vgpr) {
+  return iree_any_bit_set(vgpr->flags,
+                          LOOM_AMDGPU_VOPD_TRANS_RESULT_VGPR_FLAG_VALID);
 }
 
 static bool loom_amdgpu_vopd_trans_result_vgpr_is_active(
     const loom_amdgpu_vopd_trans_result_vgpr_t* vgpr) {
-  return iree_any_bit_set(vgpr->flags,
-                          LOOM_AMDGPU_VOPD_TRANS_RESULT_VGPR_FLAG_VALID) &&
+  return loom_amdgpu_vopd_trans_result_vgpr_is_tracked(vgpr) &&
          vgpr->valu_interval <=
              LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_VALU_INTERVAL &&
          vgpr->trans_interval <=
@@ -1086,15 +1105,62 @@ static void loom_amdgpu_vopd_clear_trans_result_windows(
   if (!loom_amdgpu_vopd_has_active_trans_result_window(builder)) {
     return;
   }
-  memset(
-      builder->trans_result_vgprs, 0,
-      builder->trans_result_vgpr_count * sizeof(*builder->trans_result_vgprs));
-  builder->active_trans_result_vgpr_count = 0;
+  while (builder->active_trans_result_vgpr_count != 0) {
+    const uint32_t active_list_index =
+        (uint32_t)(builder->active_trans_result_vgpr_count - 1);
+    const uint32_t vgpr_index =
+        builder->active_trans_result_vgpr_indices[active_list_index];
+    builder->trans_result_vgprs[vgpr_index] =
+        (loom_amdgpu_vopd_trans_result_vgpr_t){0};
+    --builder->active_trans_result_vgpr_count;
+  }
 }
 
 static uint8_t loom_amdgpu_vopd_saturated_increment(uint8_t value,
                                                     uint8_t limit) {
   return value <= limit ? (uint8_t)(value + 1u) : value;
+}
+
+static void loom_amdgpu_vopd_remove_active_trans_result_vgpr(
+    loom_amdgpu_vopd_plan_builder_t* builder, uint32_t vgpr_index) {
+  IREE_ASSERT_LT(vgpr_index, builder->trans_result_vgpr_count);
+  loom_amdgpu_vopd_trans_result_vgpr_t* vgpr =
+      &builder->trans_result_vgprs[vgpr_index];
+  if (!loom_amdgpu_vopd_trans_result_vgpr_is_tracked(vgpr)) {
+    *vgpr = (loom_amdgpu_vopd_trans_result_vgpr_t){0};
+    return;
+  }
+  IREE_ASSERT_NE(builder->active_trans_result_vgpr_count, 0);
+  const uint32_t removed_list_index = vgpr->active_list_index;
+  const uint32_t last_list_index =
+      (uint32_t)(builder->active_trans_result_vgpr_count - 1);
+  IREE_ASSERT_LT(removed_list_index, builder->active_trans_result_vgpr_count);
+  if (removed_list_index != last_list_index) {
+    const uint32_t moved_vgpr_index =
+        builder->active_trans_result_vgpr_indices[last_list_index];
+    builder->active_trans_result_vgpr_indices[removed_list_index] =
+        moved_vgpr_index;
+    builder->trans_result_vgprs[moved_vgpr_index].active_list_index =
+        removed_list_index;
+  }
+  --builder->active_trans_result_vgpr_count;
+  *vgpr = (loom_amdgpu_vopd_trans_result_vgpr_t){0};
+}
+
+static void loom_amdgpu_vopd_activate_trans_result_vgpr(
+    loom_amdgpu_vopd_plan_builder_t* builder, uint32_t vgpr_index) {
+  IREE_ASSERT_LT(vgpr_index, builder->trans_result_vgpr_count);
+  loom_amdgpu_vopd_trans_result_vgpr_t* vgpr =
+      &builder->trans_result_vgprs[vgpr_index];
+  if (loom_amdgpu_vopd_trans_result_vgpr_is_tracked(vgpr)) {
+    return;
+  }
+  IREE_ASSERT_LT(builder->active_trans_result_vgpr_count,
+                 builder->trans_result_vgpr_count);
+  const uint32_t active_list_index =
+      (uint32_t)builder->active_trans_result_vgpr_count++;
+  builder->active_trans_result_vgpr_indices[active_list_index] = vgpr_index;
+  vgpr->active_list_index = active_list_index;
 }
 
 static void loom_amdgpu_vopd_increment_trans_result_windows(
@@ -1104,12 +1170,11 @@ static void loom_amdgpu_vopd_increment_trans_result_windows(
       (!is_vector_alu && !is_transcendental)) {
     return;
   }
-  for (iree_host_size_t i = 0; i < builder->trans_result_vgpr_count; ++i) {
+  for (iree_host_size_t i = 0; i < builder->active_trans_result_vgpr_count;) {
+    const uint32_t vgpr_index = builder->active_trans_result_vgpr_indices[i];
     loom_amdgpu_vopd_trans_result_vgpr_t* vgpr =
-        &builder->trans_result_vgprs[i];
-    if (!loom_amdgpu_vopd_trans_result_vgpr_is_active(vgpr)) {
-      continue;
-    }
+        &builder->trans_result_vgprs[vgpr_index];
+    IREE_ASSERT(loom_amdgpu_vopd_trans_result_vgpr_is_tracked(vgpr));
     if (is_vector_alu) {
       vgpr->valu_interval = loom_amdgpu_vopd_saturated_increment(
           vgpr->valu_interval,
@@ -1121,9 +1186,10 @@ static void loom_amdgpu_vopd_increment_trans_result_windows(
           LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_TRANS_INTERVAL);
     }
     if (!loom_amdgpu_vopd_trans_result_vgpr_is_active(vgpr)) {
-      *vgpr = (loom_amdgpu_vopd_trans_result_vgpr_t){0};
-      --builder->active_trans_result_vgpr_count;
+      loom_amdgpu_vopd_remove_active_trans_result_vgpr(builder, vgpr_index);
+      continue;
     }
+    ++i;
   }
 }
 
@@ -1140,13 +1206,8 @@ static void loom_amdgpu_vopd_clear_trans_result_assignment(
     return;
   }
   for (uint32_t i = 0; i < assignment->location_count; ++i) {
-    loom_amdgpu_vopd_trans_result_vgpr_t* vgpr =
-        &builder->trans_result_vgprs[assignment->location_base + i];
-    if (loom_amdgpu_vopd_trans_result_vgpr_is_active(vgpr) &&
-        builder->active_trans_result_vgpr_count != 0) {
-      --builder->active_trans_result_vgpr_count;
-    }
-    *vgpr = (loom_amdgpu_vopd_trans_result_vgpr_t){0};
+    loom_amdgpu_vopd_remove_active_trans_result_vgpr(
+        builder, assignment->location_base + i);
   }
 }
 
@@ -1163,13 +1224,14 @@ static void loom_amdgpu_vopd_record_trans_result_assignment(
     return;
   }
   for (uint32_t i = 0; i < assignment->location_count; ++i) {
+    const uint32_t vgpr_index = assignment->location_base + i;
+    loom_amdgpu_vopd_activate_trans_result_vgpr(builder, vgpr_index);
     loom_amdgpu_vopd_trans_result_vgpr_t* vgpr =
-        &builder->trans_result_vgprs[assignment->location_base + i];
-    if (!loom_amdgpu_vopd_trans_result_vgpr_is_active(vgpr)) {
-      ++builder->active_trans_result_vgpr_count;
-    }
+        &builder->trans_result_vgprs[vgpr_index];
+    const uint32_t active_list_index = vgpr->active_list_index;
     *vgpr = (loom_amdgpu_vopd_trans_result_vgpr_t){
         .flags = LOOM_AMDGPU_VOPD_TRANS_RESULT_VGPR_FLAG_VALID,
+        .active_list_index = active_list_index,
     };
   }
 }
