@@ -47,9 +47,8 @@ iree_cc_test(
     hip_get_proc_address_test
   SRCS
     "hip_get_proc_address_test.cc"
-  DATA
-    ::amdhip64
   DEPS
+    ${CMAKE_DL_LIBS}
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
@@ -58,12 +57,18 @@ iree_cc_test(
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 # Point hip_get_proc_address_test at the shared object built in this tree so it
-# can dlopen() the exact artifact under test. Guarded because the test target
-# only exists when tests are enabled.
+# can dlopen() the exact artifact under test, and make sure that artifact is
+# built first. Guarded because the test target only exists when tests are
+# enabled. (The library is passed by absolute path rather than as a test DATA
+# edge because DATA installs into the relocatable test tree, and the shim's
+# build-tree path is only valid for the in-tree ctest run.)
 if(TARGET libhrx_src_binding_hip_hip_get_proc_address_test)
   target_compile_definitions(libhrx_src_binding_hip_hip_get_proc_address_test
     PRIVATE
       "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
+  )
+  add_dependencies(libhrx_src_binding_hip_hip_get_proc_address_test
+    libhrx_src_binding_hip_amdhip64
   )
 endif()
 
