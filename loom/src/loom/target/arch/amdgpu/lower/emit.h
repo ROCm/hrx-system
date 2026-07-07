@@ -124,6 +124,13 @@ bool loom_amdgpu_descriptor_set_has_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
 
+// Returns true when |descriptor_set| contains every non-NONE descriptor ref in
+// |descriptor_refs|.
+bool loom_amdgpu_descriptor_set_has_all_refs(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
+    iree_host_size_t descriptor_ref_count);
+
 // Returns true when |descriptor_set| can emit |descriptor_ref| with |immediate|
 // through the normal VGPR immediate helper, including target inline forms.
 bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(

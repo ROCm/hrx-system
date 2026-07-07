@@ -974,10 +974,9 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
       LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_CO_CI_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_XOR_B32,
   };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(required_refs); ++i) {
-    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set, required_refs[i])) {
-      return false;
-    }
+  if (!loom_amdgpu_descriptor_set_has_all_refs(descriptor_set, required_refs,
+                                               IREE_ARRAYSIZE(required_refs))) {
+    return false;
   }
   return loom_amdgpu_descriptor_set_has_ref(
              descriptor_set,

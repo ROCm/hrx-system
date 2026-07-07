@@ -1586,17 +1586,6 @@ static uint16_t loom_amdgpu_fragment_repack_log2_u32(uint32_t value) {
   return log2_value;
 }
 
-static bool loom_amdgpu_fragment_repack_has_required_descriptors(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_descriptor_ref_t* refs, iree_host_size_t ref_count) {
-  for (iree_host_size_t i = 0; i < ref_count; ++i) {
-    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set, refs[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static loom_amdgpu_descriptor_ref_t
 loom_amdgpu_fragment_memory_compare_i32_src1_inline_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref) {
@@ -1663,7 +1652,7 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
       LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
   };
-  if (!loom_amdgpu_fragment_repack_has_required_descriptors(
+  if (!loom_amdgpu_descriptor_set_has_all_refs(
           descriptor_set, kRequiredDescriptorRefs,
           IREE_ARRAYSIZE(kRequiredDescriptorRefs)) ||
       !loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
