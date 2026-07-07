@@ -11,6 +11,7 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pass_requirements.h"
 #include "loom/codegen/low/transforms/allocation.h"
+#include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/codegen/low/transforms/operand_forms.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
@@ -365,6 +366,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_low_dce_run,
         .requirement_defs = kLowDceRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowDceRequirements),
+    },
+    {
+        .key = IREE_SVL("low-decompose-cfg-tuples"),
+        .info = loom_low_decompose_cfg_tuples_pass_info,
+        .function_run = loom_low_decompose_cfg_tuples_run,
     },
     {
         .key = IREE_SVL("low-materialize-allocation"),

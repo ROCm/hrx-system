@@ -246,6 +246,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/codegen/low/pipeline:pass_requirements",
         "//loom/src/loom/codegen/low/transforms:allocation",
+        "//loom/src/loom/codegen/low/transforms:cfg_tuple_decomposition",
         "//loom/src/loom/codegen/low/transforms:dce",
         "//loom/src/loom/codegen/low/transforms:operand_forms",
         "//loom/src/loom/codegen/low/transforms/pipeline:source_to_low",

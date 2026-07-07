@@ -281,6 +281,7 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::pipeline::pass_requirements
     loom::codegen::low::transforms::allocation
+    loom::codegen::low::transforms::cfg_tuple_decomposition
     loom::codegen::low::transforms::dce
     loom::codegen::low::transforms::operand_forms
     loom::codegen::low::transforms::pipeline::source_to_low
