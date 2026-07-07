@@ -137,6 +137,8 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   uint32_t* first_block_arg_source_by_value;
   // Incoming low.br source records for non-entry block arguments.
   loom_amdgpu_wait_block_arg_source_t* block_arg_sources;
+  // Storage-release actions grouped by insertion node.
+  loom_low_storage_release_action_index_t storage_release_action_index;
   // DFS visit epoch per value while forwarding SSA wait dependencies.
   uint32_t* dependency_visit_epochs;
   // Number of populated dependency links.
@@ -352,6 +354,35 @@ static bool loom_amdgpu_wait_plan_reason_is_storage_release(
   }
 }
 
+static iree_status_t loom_amdgpu_wait_plan_build_storage_release_action_index(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  const loom_low_allocation_table_t* allocation = builder->allocation;
+  if (allocation == NULL || allocation->storage_release_action_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_low_schedule_table_t* schedule = builder->schedule;
+  IREE_RETURN_IF_ERROR(loom_low_storage_release_action_index_build(
+      allocation->storage_release_actions,
+      allocation->storage_release_action_count,
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE,
+      schedule->node_count, builder->arena,
+      &builder->storage_release_action_index));
+  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
+       ++i) {
+    const loom_low_storage_release_action_t* action =
+        &allocation->storage_release_actions[i];
+    const loom_low_schedule_node_t* node =
+        &schedule->nodes[action->insertion_node_index];
+    if (action->block_index != node->block_index ||
+        action->scheduled_ordinal != node->scheduled_ordinal) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU storage release action does not match its insertion node");
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_wait_plan_allocate(
     loom_amdgpu_wait_plan_builder_t* builder) {
   const loom_low_schedule_table_t* schedule = builder->schedule;
@@ -387,7 +418,7 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
           LOOM_LOW_SCHEDULE_NODE_NONE;
     }
   }
-  return iree_ok_status();
+  return loom_amdgpu_wait_plan_build_storage_release_action_index(builder);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_allocate_actions(
@@ -1981,23 +2012,17 @@ static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_action(
 static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_actions(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
-  if (allocation == NULL || allocation->storage_release_action_count == 0) {
+  if (allocation == NULL ||
+      builder->storage_release_action_index.first_action_indices == NULL) {
     return iree_ok_status();
   }
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
-  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
-       ++i) {
+  const loom_low_storage_release_action_index_t* index =
+      &builder->storage_release_action_index;
+  for (uint32_t action_index = index->first_action_indices[node_index];
+       action_index != LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+       action_index = index->next_action_indices[action_index]) {
     const loom_low_storage_release_action_t* action =
-        &allocation->storage_release_actions[i];
-    if (action->insertion_node_index != node_index) {
-      continue;
-    }
-    if (action->block_index != node->block_index ||
-        action->scheduled_ordinal != node->scheduled_ordinal) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU storage release action does not match its insertion node");
-    }
+        &allocation->storage_release_actions[action_index];
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_wait_plan_handle_storage_release_action(builder, action));
   }

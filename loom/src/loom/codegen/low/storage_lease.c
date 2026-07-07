@@ -226,6 +226,89 @@ iree_status_t loom_low_storage_lease_query_descriptor_rows(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_storage_release_action_index_build(
+    const loom_low_storage_release_action_t* actions,
+    iree_host_size_t action_count,
+    loom_low_storage_release_action_index_key_t key, iree_host_size_t key_count,
+    iree_arena_allocator_t* arena,
+    loom_low_storage_release_action_index_t* out_index) {
+  if (out_index == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "storage release action index output is required");
+  }
+  *out_index = (loom_low_storage_release_action_index_t){0};
+  if (action_count == 0) {
+    return iree_ok_status();
+  }
+  if (actions == NULL || arena == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "storage release actions and arena are required for non-empty index");
+  }
+  if (action_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "storage release action count exceeds uint32_t");
+  }
+  if (key_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "storage release actions require at least one index key");
+  }
+  bool use_packet_index = false;
+  switch (key) {
+    case LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET:
+      use_packet_index = true;
+      break;
+    case LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE:
+      use_packet_index = false;
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "storage release action index key %u is unsupported", (unsigned)key);
+  }
+
+  uint32_t* first_action_indices = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, key_count, sizeof(*first_action_indices),
+                                (void**)&first_action_indices));
+  for (iree_host_size_t i = 0; i < key_count; ++i) {
+    first_action_indices[i] = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  }
+
+  uint32_t* next_action_indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, action_count,
+                                                 sizeof(*next_action_indices),
+                                                 (void**)&next_action_indices));
+  for (iree_host_size_t i = 0; i < action_count; ++i) {
+    next_action_indices[i] = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  }
+
+  for (iree_host_size_t i = action_count; i > 0; --i) {
+    const uint32_t action_index = (uint32_t)(i - 1);
+    const loom_low_storage_release_action_t* action = &actions[action_index];
+    const iree_host_size_t key_index = use_packet_index
+                                           ? action->insertion_packet_index
+                                           : action->insertion_node_index;
+    if (key_index >= key_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "storage release action references index key %" PRIhsz
+          " but index has %" PRIhsz " key(s)",
+          key_index, key_count);
+    }
+    next_action_indices[action_index] = first_action_indices[key_index];
+    first_action_indices[key_index] = action_index;
+  }
+
+  *out_index = (loom_low_storage_release_action_index_t){
+      .first_action_indices = first_action_indices,
+      .next_action_indices = next_action_indices,
+      .key_count = key_count,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_storage_lease_run_pass(
     loom_low_storage_lease_build_state_t* state,
     loom_low_storage_lease_emit_fn_t emit) {
