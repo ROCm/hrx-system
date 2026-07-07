@@ -2856,41 +2856,35 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
   %step = s_mov_b32 64
   %value = v_mov_b32_copy %pattern
   %25 = v_mov_b32 0
-  %26 = concat(%lane, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   low.br ^_bb3
-^loop(%byte_offset: reg<amdgpu.vgpr x2>):
-  %27 = slice %byte_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %28 = slice %byte_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+^loop(%63: reg<amdgpu.vgpr>, %64: reg<amdgpu.vgpr>):
   %29 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %30 = v_mov_b32_copy %29
   %31 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %32 = v_mov_b32_copy %31
-  %33 = v_cmp_lt_u32 %28, %32
-  %34 = v_cmp_lt_u32 %27, %30
-  %35 = v_cmp_eq_i32 %28, %32
+  %33 = v_cmp_lt_u32 %64, %32
+  %34 = v_cmp_lt_u32 %63, %30
+  %35 = v_cmp_eq_i32 %64, %32
   %36 = s_and_b64 %35, %34
   %inside = s_or_b64 %33, %36
   %39, %40 = s_and_saveexec_b64 %inside
   low.cond_br %40, ^body, ^_bb4 : reg<amdgpu.scc>
 ^body:
-  %41 = slice %byte_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %42 = slice %byte_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %43 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %44 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45, %46 = v_add_co_u32 %43, %41
+  %45, %46 = v_add_co_u32 %43, %63
   %47 = v_mov_b32_copy %44
-  %48, %49 = v_add_co_ci_u32 %47, %42, %46
+  %48, %49 = v_add_co_ci_u32 %47, %64, %46
   %50 = concat(%45, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   global_store_b32_vaddr %50, %value
   %51 = v_mov_b32_copy %step
   %52 = v_mov_b32 0
-  %58, %59 = v_add_co_u32 %41, %51
-  %60, %61 = v_add_co_ci_u32 %42, %52, %59
-  %next = concat(%58, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.br ^loop(%next: reg<amdgpu.vgpr x2>)
+  %58, %59 = v_add_co_u32 %63, %51
+  %60, %61 = v_add_co_ci_u32 %64, %52, %59
+  low.br ^loop(%58: reg<amdgpu.vgpr>, %60: reg<amdgpu.vgpr>)
 ^_bb3:
   %38 = s_mov_b64_exec_read
-  low.br ^loop(%26: reg<amdgpu.vgpr x2>)
+  low.br ^loop(%lane: reg<amdgpu.vgpr>, %25: reg<amdgpu.vgpr>)
 ^_bb4:
   s_mov_b64_exec %38
   return

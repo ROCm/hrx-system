@@ -3464,8 +3464,8 @@ low.func.def target(@gfx_target) @wait_branch_arg_after_prior_wait(%resource: re
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb1:
-  s_waitcnt vmcnt(0) lgkmcnt(63)
 .Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_b128 v[4:7], v0, s[4:7], s2 offen offset:32
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
