@@ -2763,6 +2763,7 @@ static bool loom_amdgpu_source_vector_value_register_shape(
                                               vector_storage.register_count);
       return true;
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_NONE:
+    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_:
       return false;
   }
   return false;
