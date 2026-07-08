@@ -366,17 +366,6 @@ void loom_amdgpu_canonicalize_mulf_mix_sources(
   source_kinds[1] = source_kind;
 }
 
-static iree_string_view_t loom_amdgpu_descriptor_set_key(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (descriptor_set == NULL) {
-    return IREE_SV("<missing>");
-  }
-  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
-  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
-                                                       : descriptor_set_key;
-}
-
 static bool loom_amdgpu_source_value_has_exact_f32_immediate(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t value_id) {

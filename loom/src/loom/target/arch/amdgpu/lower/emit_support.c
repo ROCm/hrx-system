@@ -824,6 +824,17 @@ bool loom_amdgpu_descriptor_set_has_ref(
          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
 }
 
+iree_string_view_t loom_amdgpu_descriptor_set_key(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (descriptor_set == NULL) {
+    return IREE_SV("<missing>");
+  }
+  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
+  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
+                                                       : descriptor_set_key;
+}
+
 bool loom_amdgpu_descriptor_set_has_all_refs(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_descriptor_ref_t* descriptor_refs,

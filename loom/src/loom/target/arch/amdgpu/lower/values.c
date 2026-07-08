@@ -1818,17 +1818,6 @@ static const loom_op_t* loom_amdgpu_value_defining_op(
   return loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
 }
 
-static iree_string_view_t loom_amdgpu_descriptor_set_key(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (descriptor_set == NULL) {
-    return IREE_SV("<missing>");
-  }
-  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
-  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
-                                                       : descriptor_set_key;
-}
-
 static iree_string_view_t loom_amdgpu_fma_mix_source_kind_key(
     loom_amdgpu_fma_mix_source_kind_t source_kind) {
   switch (source_kind) {
