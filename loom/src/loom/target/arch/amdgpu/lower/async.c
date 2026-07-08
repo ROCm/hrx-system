@@ -502,6 +502,19 @@ static bool loom_amdgpu_async_wait_stream_counts(
   return true;
 }
 
+static iree_status_t loom_amdgpu_async_wait_select_packet(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t target_count,
+    loom_amdgpu_wait_packet_selection_t* out_selection,
+    loom_amdgpu_async_wait_diagnostic_t* diagnostic, bool* out_selected) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_try_select_counter_mask(
+      descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count,
+      out_selection, out_selected));
+  if (!*out_selected) {
+    diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_async_wait_plan_t* out_plan, bool* out_selected) {
@@ -521,9 +534,13 @@ iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
   }
 
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_select_counter_mask(
-      loom_low_lower_context_descriptor_set(context),
-      LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count, &selection));
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_async_wait_select_packet(
+      loom_low_lower_context_descriptor_set(context), target_count, &selection,
+      &diagnostic, &selected));
+  if (!selected) {
+    return iree_ok_status();
+  }
 
   loom_amdgpu_async_wait_immediate_t
       immediates[LOOM_AMDGPU_ASYNC_WAIT_IMMEDIATE_CAPACITY] = {0};
@@ -765,14 +782,13 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_wait(
     return iree_ok_status();
   }
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  iree_status_t status = loom_amdgpu_wait_packet_select_counter_mask(
-      loom_target_low_legality_descriptor_set(context),
-      LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count, &selection);
-  if (iree_status_is_ok(status)) {
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_async_wait_select_packet(
+      loom_target_low_legality_descriptor_set(context), target_count,
+      &selection, &diagnostic, &selected));
+  if (selected) {
     return iree_ok_status();
   }
-  iree_status_free(status);
-  diagnostic.rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
   return loom_amdgpu_low_legality_reject(
       context, op, loom_amdgpu_async_wait_rejection_key(&diagnostic));
 }
