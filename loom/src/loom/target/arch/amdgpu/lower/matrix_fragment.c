@@ -91,10 +91,8 @@ typedef struct loom_amdgpu_fragment_memory_descriptor_table_t {
   loom_amdgpu_descriptor_ref_t
       packet_refs[LOOM_AMDGPU_MEMORY_OPERATION_COUNT_]
                  [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS + 1u];
-  // Descriptor ref for a scalar 16-bit load packet.
-  loom_amdgpu_descriptor_ref_t load_b16_ref;
-  // Descriptor ref for a scalar 16-bit store packet.
-  loom_amdgpu_descriptor_ref_t store_b16_ref;
+  // Descriptor refs for scalar 16-bit packets, indexed by operation kind.
+  loom_amdgpu_descriptor_ref_t b16_refs[LOOM_AMDGPU_MEMORY_OPERATION_COUNT_];
 } loom_amdgpu_fragment_memory_descriptor_table_t;
 
 static_assert(LOOM_AMDGPU_MEMORY_OPERATION_COUNT_ == 2,
@@ -123,10 +121,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR,
                             },
                     },
-                .load_b16_ref =
-                    LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B16_D16_SADDR,
-                .store_b16_ref =
-                    LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B16_SADDR,
+                .b16_refs =
+                    {
+                        [LOOM_AMDGPU_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B16_D16_SADDR,
+                        [LOOM_AMDGPU_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B16_SADDR,
+                    },
             },
         [LOOM_AMDGPU_FRAGMENT_MEMORY_DOMAIN_DESCRIPTOR] =
             {
@@ -149,8 +150,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_B128,
                             },
                     },
-                .load_b16_ref = LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_LOAD_B16_D16,
-                .store_b16_ref = LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_B16,
+                .b16_refs =
+                    {
+                        [LOOM_AMDGPU_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_LOAD_B16_D16,
+                        [LOOM_AMDGPU_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_B16,
+                    },
             },
         [LOOM_AMDGPU_FRAGMENT_MEMORY_DOMAIN_WORKGROUP] =
             {
@@ -173,8 +179,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B128,
                             },
                     },
-                .load_b16_ref = LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
-                .store_b16_ref = LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16,
+                .b16_refs =
+                    {
+                        [LOOM_AMDGPU_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
+                        [LOOM_AMDGPU_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16,
+                    },
             },
 };
 
@@ -2230,22 +2241,16 @@ static bool loom_amdgpu_fragment_memory_16bit_descriptor_ref(
     loom_value_fact_memory_space_t memory_space,
     loom_amdgpu_descriptor_ref_t* out_descriptor_ref) {
   *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (operation_kind >= LOOM_AMDGPU_MEMORY_OPERATION_COUNT_) {
+    return false;
+  }
   loom_amdgpu_fragment_memory_domain_t domain =
       LOOM_AMDGPU_FRAGMENT_MEMORY_DOMAIN_COUNT_;
   if (!loom_amdgpu_fragment_memory_domain_from_space(memory_space, &domain)) {
     return false;
   }
-  loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  switch (operation_kind) {
-    case LOOM_AMDGPU_MEMORY_OPERATION_LOAD:
-      descriptor_ref = kFragmentMemoryDescriptorTables[domain].load_b16_ref;
-      break;
-    case LOOM_AMDGPU_MEMORY_OPERATION_STORE:
-      descriptor_ref = kFragmentMemoryDescriptorTables[domain].store_b16_ref;
-      break;
-    case LOOM_AMDGPU_MEMORY_OPERATION_COUNT_:
-      return false;
-  }
+  const loom_amdgpu_descriptor_ref_t descriptor_ref =
+      kFragmentMemoryDescriptorTables[domain].b16_refs[operation_kind];
   if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
     return false;
   }
