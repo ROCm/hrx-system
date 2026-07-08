@@ -304,7 +304,13 @@ typedef struct loom_amdgpu_i64_alu_descriptor_requirement_row_t {
   loom_amdgpu_descriptor_requirement_span_t first;
   // Optional second descriptor requirement span for fused operation kinds.
   loom_amdgpu_descriptor_requirement_span_t second;
+  // Table-specific operation properties interpreted by the owning row set.
+  uint8_t flags;
 } loom_amdgpu_i64_alu_descriptor_requirement_row_t;
+
+enum {
+  LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR = 1u << 0,
+};
 
 #define LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(requirements_) \
   {                                                            \
@@ -516,21 +522,25 @@ static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuOffsetAddVgprDescriptorRequirements),
+                    .flags = LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR,
                 },
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SUB] =
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuScalarI64SubVgprDescriptorRequirements),
+                    .flags = LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR,
                 },
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO] =
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuScalarI64MulVgprDescriptorRequirements),
+                    .flags = LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR,
                 },
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL] =
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuScalarI64ShlVgprDescriptorRequirements),
+                    .flags = LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR,
                 },
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO] =
                 {
@@ -538,6 +548,7 @@ static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
                         kAmdgpuScalarI64MulVgprDescriptorRequirements),
                     .second = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuOffsetAddVgprDescriptorRequirements),
+                    .flags = LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR,
                 },
 };
 
@@ -3021,18 +3032,13 @@ static bool loom_amdgpu_scalar_i64_alu_descriptors_supported(
 
 static bool loom_amdgpu_address_i64_alu_kind_uses_vgpr(
     loom_amdgpu_address_i64_alu_kind_t kind) {
-  switch (kind) {
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_ADD:
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SUB:
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO:
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL:
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO:
-      return true;
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_ADD:
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_NONE:
-      return false;
+  if ((iree_host_size_t)kind >=
+      IREE_ARRAYSIZE(kAmdgpuAddressI64AluDescriptorRequirementRows)) {
+    return false;
   }
-  return false;
+  return iree_any_bit_set(
+      kAmdgpuAddressI64AluDescriptorRequirementRows[kind].flags,
+      LOOM_AMDGPU_ADDRESS_I64_ALU_ROW_FLAG_USES_VGPR);
 }
 
 static bool loom_amdgpu_address_i64_alu_descriptors_supported(
