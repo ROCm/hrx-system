@@ -2313,23 +2313,6 @@ static iree_status_t loom_value_fact_table_seed_block_args(
 // CFG block argument summaries
 //===----------------------------------------------------------------------===//
 
-static bool loom_value_fact_table_branch_payload_for_successor(
-    const loom_op_t* terminator, const loom_block_t* successor,
-    const loom_value_id_t** out_args, uint16_t* out_arg_count) {
-  *out_args = NULL;
-  *out_arg_count = 0;
-  if (!terminator || terminator->successor_count != 1 ||
-      loom_op_const_successors(terminator)[0] != successor) {
-    return false;
-  }
-  if (terminator->operand_count != successor->arg_count) {
-    return false;
-  }
-  *out_args = loom_op_const_operands(terminator);
-  *out_arg_count = terminator->operand_count;
-  return true;
-}
-
 static bool loom_value_fact_table_block_has_backedge(
     const loom_cfg_graph_t* graph, uint16_t block_index) {
   loom_cfg_block_index_span_t predecessors =
@@ -2412,7 +2395,7 @@ static bool loom_value_fact_table_block_has_payload_edge_to_target(
     if (edge == NULL) continue;
     const loom_value_id_t* edge_args = NULL;
     uint16_t edge_arg_count = 0;
-    if (loom_value_fact_table_branch_payload_for_successor(
+    if (loom_cfg_terminator_payload_for_successor(
             edge->terminator, target_block, &edge_args, &edge_arg_count) &&
         arg_index < edge_arg_count) {
       return true;
@@ -2493,7 +2476,7 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
     const loom_value_id_t* edge_args = NULL;
     uint16_t edge_arg_count = 0;
     if (!predecessor_block ||
-        !loom_value_fact_table_branch_payload_for_successor(
+        !loom_cfg_terminator_payload_for_successor(
             predecessor_block->last_op, block, &edge_args, &edge_arg_count) ||
         arg_index >= edge_arg_count) {
       continue;
