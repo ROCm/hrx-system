@@ -99,6 +99,8 @@ enum loom_scalar_type_set_bits_e {
       LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2 |
       LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_BF16 |
       LOOM_SCALAR_TYPE_SET_F32 | LOOM_SCALAR_TYPE_SET_F64,
+  LOOM_SCALAR_TYPE_SET_16BIT_FLOAT =
+      LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_BF16,
 };
 
 static inline bool loom_scalar_type_set_contains(loom_scalar_type_set_t set,

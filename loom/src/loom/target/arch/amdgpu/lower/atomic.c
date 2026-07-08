@@ -563,8 +563,8 @@ static bool loom_amdgpu_atomic_packed_half_value_type(loom_type_t value_type) {
   return loom_type_is_vector(value_type) && loom_type_rank(value_type) == 1 &&
          !loom_type_dim_is_dynamic_at(value_type, 0) &&
          loom_type_dim_static_size_at(value_type, 0) == 2 &&
-         (loom_type_element_type(value_type) == LOOM_SCALAR_TYPE_F16 ||
-          loom_type_element_type(value_type) == LOOM_SCALAR_TYPE_BF16);
+         loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
+                                       loom_type_element_type(value_type));
 }
 
 static bool loom_amdgpu_atomic_packed_half_source_shape(

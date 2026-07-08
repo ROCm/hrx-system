@@ -2395,8 +2395,8 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
   if (operand_role == LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE) {
     const loom_type_t value_type = loom_module_value_type(module, value_id);
     const loom_scalar_type_t element_type = loom_type_element_type(value_type);
-    return element_type == LOOM_SCALAR_TYPE_F16 ||
-           element_type == LOOM_SCALAR_TYPE_BF16;
+    return loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
+                                         element_type);
   }
   const loom_memory_access_t store_access =
       loom_memory_access_cast(module, user_op);
