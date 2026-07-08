@@ -21,19 +21,47 @@
 extern "C" {
 #endif
 
-// Resolves the source-order storage base for a source buffer.alloca root in
-// the requested memory space. The layout must match the low.storage.reserve
-// order emitted by buffer lowering.
+typedef struct loom_target_low_legality_context_t
+    loom_target_low_legality_context_t;
+typedef struct loom_amdgpu_source_alloca_layout_t
+    loom_amdgpu_source_alloca_layout_t;
+
+// Returns an initialized analysis with no source allocation entries. This is
+// used by cold helper paths that intentionally lack a source-to-low or
+// low-legality context; it is still a real analysis object, not a nullable
+// cache sentinel.
+const loom_amdgpu_source_alloca_layout_t*
+loom_amdgpu_source_alloca_layout_empty(void);
+
+// Returns the function-local source allocation layout analysis for |context|.
+// The returned object is allocated from the lowering arena and remains valid
+// until the current source function lowering finishes.
+iree_status_t loom_amdgpu_source_alloca_layout_for_lower_context(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_source_alloca_layout_t** out_layout);
+
+// Records one selected source buffer allocation in the lowering analysis.
+// Source-to-low planning calls this while visiting buffer.alloca ops, so later
+// selectors can resolve allocation roots without scanning source IR.
+iree_status_t loom_amdgpu_source_alloca_layout_record_lower_alloca(
+    loom_low_lower_context_t* context,
+    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
+    uint64_t byte_length, uint64_t byte_alignment);
+
+// Returns the function-local source allocation layout analysis for low-legality
+// verification. The returned object is allocated from the legality context's
+// scratch arena and is built once from the function body.
+iree_status_t loom_amdgpu_source_alloca_layout_for_low_legality(
+    loom_target_low_legality_context_t* context,
+    const loom_amdgpu_source_alloca_layout_t** out_layout);
+
+// Resolves the analyzed storage base for a source buffer.alloca root in the
+// requested memory space. Returns false when the analysis cannot prove the root
+// has a statically encodable storage base in that memory space.
 bool loom_amdgpu_source_alloca_layout_lookup_root(
-    const loom_value_fact_table_t* fact_table, loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* layout,
     loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
     uint64_t* out_byte_offset);
-
-// Resolves the source-order workgroup-storage base for a workgroup
-// buffer.alloca root.
-bool loom_amdgpu_source_lds_layout_lookup_root(
-    const loom_value_fact_table_t* fact_table, loom_func_like_t source_function,
-    loom_value_id_t root_value_id, uint64_t* out_byte_offset);
 
 // Returns the exact wavefront size selected by the active target bundle.
 uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle);

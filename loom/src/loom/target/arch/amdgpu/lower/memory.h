@@ -25,6 +25,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_amdgpu_source_alloca_layout_t
+    loom_amdgpu_source_alloca_layout_t;
+
 typedef uint32_t loom_amdgpu_memory_access_rejection_flags_t;
 
 #define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE ((uint32_t)1u << 0)
@@ -149,6 +152,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,
     loom_amdgpu_memory_access_plan_t* out_plan,
@@ -174,7 +178,7 @@ bool loom_amdgpu_memory_access_select_flat_global_address(
 bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
-    loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_low_source_memory_access_plan_t* source,
     loom_amdgpu_memory_access_t* out_access,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
@@ -183,7 +187,7 @@ bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
 // access so later offset materialization uses the same address domain as real
 // AMDGPU memory packets.
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-    const loom_value_fact_table_t* fact_table, loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
 

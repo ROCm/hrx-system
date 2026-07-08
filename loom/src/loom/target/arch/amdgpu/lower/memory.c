@@ -58,7 +58,7 @@ loom_amdgpu_memory_access_alloca_root_rejection_bit(
 }
 
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-    const loom_value_fact_table_t* fact_table, loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
   switch (access->source.memory_space) {
@@ -71,7 +71,7 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
 
   uint64_t root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_root(
-          fact_table, source_function, access->source.memory_space,
+          alloca_layout, access->source.memory_space,
           access->source.root_value_id, &root_byte_offset) ||
       root_byte_offset > INT64_MAX) {
     diagnostic->rejection_bits |=
@@ -2048,7 +2048,7 @@ void loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(
 bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
-    loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_low_source_memory_access_plan_t* source,
     loom_amdgpu_memory_access_t* out_access,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic) {
@@ -2064,7 +2064,7 @@ bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
     return false;
   }
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          fact_table, source_function, out_access, out_diagnostic)) {
+          alloca_layout, out_access, out_diagnostic)) {
     return false;
   }
   loom_amdgpu_memory_dynamic_term_materialization_plan_t materialization_plan;
@@ -2671,6 +2671,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,
     loom_amdgpu_memory_access_plan_t* out_plan,
@@ -2724,7 +2725,7 @@ bool loom_amdgpu_memory_access_plan_select(
   // chunk inherits this adjusted source offset instead of rediscovering the
   // same source allocation layout per packet.
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          fact_table, source_function, &access, out_diagnostic)) {
+          alloca_layout, &access, out_diagnostic)) {
     return false;
   }
   if (access.source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
@@ -2834,12 +2835,15 @@ static iree_status_t loom_amdgpu_memory_access_plan_select_from_context(
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t diagnostic = {0};
   loom_low_source_memory_access_plan_t source = {0};
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
+      context, &alloca_layout));
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_low_lower_context_fact_table(context),
           loom_low_lower_context_descriptor_set(context), view_regions,
           loom_low_lower_context_source_function(context),
-          loom_low_lower_context_bundle(context), source_op, &source, out_plan,
-          &source_diagnostic, &diagnostic)) {
+          loom_low_lower_context_bundle(context), alloca_layout, source_op,
+          &source, out_plan, &source_diagnostic, &diagnostic)) {
     return iree_ok_status();
   }
   *out_selected = true;

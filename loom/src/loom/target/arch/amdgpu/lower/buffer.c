@@ -10,6 +10,7 @@
 
 #include "loom/ops/buffer/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
 
@@ -60,6 +61,11 @@ iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
                                                  &local_plan)) {
         return iree_ok_status();
       }
+      IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_record_lower_alloca(
+          context, loom_buffer_alloca_memory_space(source_op),
+          loom_buffer_alloca_result(source_op),
+          (uint64_t)local_plan.byte_length,
+          (uint64_t)local_plan.base_alignment));
       loom_amdgpu_buffer_alloca_plan_t* plan_data = NULL;
       IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
           context, sizeof(*plan_data), (void**)&plan_data));
