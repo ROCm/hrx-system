@@ -215,17 +215,6 @@ static iree_status_t loom_amdgpu_dotf_materialize_init(
   return loom_low_lower_lookup_value(context, plan->init, out_low_init);
 }
 
-static iree_string_view_t loom_amdgpu_dotf_descriptor_set_key(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (descriptor_set == NULL) {
-    return IREE_SV("<missing>");
-  }
-  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
-  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
-                                                       : descriptor_set_key;
-}
-
 static iree_status_t loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t lane,
@@ -244,7 +233,7 @@ static iree_status_t loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
       descriptor_set, descriptor.descriptor->key_string_offset);
   const iree_string_view_t descriptor_set_name =
-      loom_amdgpu_dotf_descriptor_set_key(descriptor_set);
+      loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t accumulator_kind =
       accumulator_is_dot_local ? IREE_SV("dot_local") : IREE_SV("incoming");
   const iree_string_view_t decision_key =

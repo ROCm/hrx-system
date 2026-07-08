@@ -124,6 +124,10 @@ bool loom_amdgpu_descriptor_set_has_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
 
+// Returns a stable display key for |descriptor_set| diagnostics.
+iree_string_view_t loom_amdgpu_descriptor_set_key(
+    const loom_low_descriptor_set_t* descriptor_set);
+
 // Returns true when |descriptor_set| contains every non-NONE descriptor ref in
 // |descriptor_refs|.
 bool loom_amdgpu_descriptor_set_has_all_refs(
