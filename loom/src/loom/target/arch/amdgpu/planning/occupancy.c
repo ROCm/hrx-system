@@ -66,32 +66,35 @@ static iree_status_t loom_amdgpu_occupancy_wave_limit(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_occupancy_next_cliff_units(
+static uint32_t loom_amdgpu_occupancy_next_cliff_units(
     uint32_t pool_units, uint32_t allocation_granularity,
-    uint32_t max_waves_per_simd, uint32_t allocated_units,
-    uint32_t current_wave_limit, uint32_t* out_next_cliff_units) {
-  *out_next_cliff_units = 0;
+    uint32_t allocated_units, uint32_t current_wave_limit) {
   if (current_wave_limit == 0) {
-    return iree_ok_status();
+    return 0;
   }
-  const uint64_t start_candidate = (uint64_t)allocated_units + 1;
-  uint64_t stop_candidate = (uint64_t)pool_units + allocation_granularity;
-  if (stop_candidate > UINT32_MAX) {
-    stop_candidate = UINT32_MAX;
+  const uint64_t first_lower_wave_limit_unit =
+      ((uint64_t)pool_units / current_wave_limit) + 1u;
+  if (first_lower_wave_limit_unit > UINT32_MAX) {
+    return 0;
   }
-  for (uint64_t candidate = start_candidate; candidate <= stop_candidate;
-       ++candidate) {
-    uint32_t ignored_rounded_units = 0;
-    uint32_t candidate_wave_limit = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_wave_limit(
-        pool_units, allocation_granularity, max_waves_per_simd,
-        (uint32_t)candidate, &ignored_rounded_units, &candidate_wave_limit));
-    if (candidate_wave_limit < current_wave_limit) {
-      *out_next_cliff_units = (uint32_t)candidate;
-      return iree_ok_status();
+  uint64_t next_rounded_units = first_lower_wave_limit_unit;
+  if (allocation_granularity > 1) {
+    const uint64_t remainder = next_rounded_units % allocation_granularity;
+    if (remainder != 0) {
+      next_rounded_units += allocation_granularity - remainder;
     }
   }
-  return iree_ok_status();
+  if (next_rounded_units > (uint64_t)UINT32_MAX + allocation_granularity) {
+    return 0;
+  }
+  uint64_t next_cliff_units = next_rounded_units;
+  if (allocation_granularity > 1) {
+    next_cliff_units -= allocation_granularity - 1u;
+  }
+  if (next_cliff_units <= allocated_units) {
+    next_cliff_units = (uint64_t)allocated_units + 1u;
+  }
+  return next_cliff_units > UINT32_MAX ? 0 : (uint32_t)next_cliff_units;
 }
 
 static uint32_t loom_amdgpu_occupancy_next_model_cliff_units(
@@ -358,9 +361,8 @@ static iree_status_t loom_amdgpu_occupancy_finalize_resource_limit(
         pressure_cliffs, pressure_cliff_count, allocated_units,
         *out_wave_limit);
   } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_next_cliff_units(
-        pool_units, allocation_granularity, max_waves_per_simd, allocated_units,
-        *out_wave_limit, out_next_cliff_units));
+    *out_next_cliff_units = loom_amdgpu_occupancy_next_cliff_units(
+        pool_units, allocation_granularity, allocated_units, *out_wave_limit);
   }
   *out_units_until_next_cliff = *out_next_cliff_units == 0
                                     ? UINT32_MAX
