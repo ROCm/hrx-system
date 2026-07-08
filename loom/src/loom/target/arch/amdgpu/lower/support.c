@@ -18,7 +18,6 @@
 #include "loom/ops/vector/storage.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
-#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -353,11 +352,6 @@ bool loom_amdgpu_type_is_32bit_memory_payload(loom_type_t type) {
              0;
 }
 
-static bool loom_amdgpu_type_is_offset(loom_type_t type) {
-  return loom_type_is_scalar(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_OFFSET;
-}
-
 uint32_t loom_amdgpu_vector_32bit_lane_count(loom_type_t type) {
   const uint32_t i32_lane_count =
       loom_amdgpu_vector_lane_count(type, LOOM_SCALAR_TYPE_I32);
@@ -502,84 +496,6 @@ bool loom_amdgpu_value_is_byte_addressable_view(
     loom_low_lower_context_t* context, loom_value_id_t value_id) {
   return loom_amdgpu_type_is_byte_addressable_view(
       loom_module_value_type(loom_low_lower_context_module(context), value_id));
-}
-
-static iree_status_t loom_amdgpu_make_register_type(
-    loom_low_lower_context_t* context, uint16_t reg_class_id,
-    uint32_t unit_count, loom_type_t* out_type) {
-  return loom_low_lower_make_register_type(context, reg_class_id, unit_count,
-                                           out_type);
-}
-
-iree_status_t loom_amdgpu_make_sgpr_type(loom_low_lower_context_t* context,
-                                         loom_type_t* out_type) {
-  return loom_amdgpu_make_register_type(context, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-                                        1, out_type);
-}
-
-iree_status_t loom_amdgpu_make_sgpr_range_type(
-    loom_low_lower_context_t* context, uint32_t unit_count,
-    loom_type_t* out_type) {
-  return loom_amdgpu_make_register_type(context, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-                                        unit_count, out_type);
-}
-
-iree_status_t loom_amdgpu_make_vgpr_type(loom_low_lower_context_t* context,
-                                         loom_type_t* out_type) {
-  return loom_amdgpu_make_register_type(context, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-                                        1, out_type);
-}
-
-iree_status_t loom_amdgpu_make_scc_type(loom_low_lower_context_t* context,
-                                        loom_type_t* out_type) {
-  return loom_amdgpu_make_register_type(context, LOOM_AMDGPU_REG_CLASS_ID_SCC,
-                                        1, out_type);
-}
-
-iree_status_t loom_amdgpu_make_vgpr_range_type(
-    loom_low_lower_context_t* context, uint32_t unit_count,
-    loom_type_t* out_type) {
-  return loom_amdgpu_make_register_type(context, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-                                        unit_count, out_type);
-}
-
-iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_type_t* out_type) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_low_lower_context_descriptor_set(context);
-  return loom_amdgpu_make_descriptor_implicit_resource_type(
-      descriptor_set, descriptor, out_type);
-}
-
-bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,
-                                            loom_type_t type,
-                                            uint16_t reg_class_id) {
-  if (!loom_low_type_is_register(type)) {
-    return false;
-  }
-  return loom_low_register_type_descriptor_set_stable_id(type) ==
-             loom_low_lower_context_descriptor_set(context)->stable_id &&
-         loom_low_register_type_class_id(type) == reg_class_id;
-}
-
-bool loom_amdgpu_low_type_is_register_class_count(
-    loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    uint32_t register_unit_count) {
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_unit_count(type) != register_unit_count) {
-    return false;
-  }
-  return loom_amdgpu_low_type_is_register_class(context, type, reg_class_id);
-}
-
-bool loom_amdgpu_low_value_is_register_class_count(
-    loom_low_lower_context_t* context, loom_value_id_t low_value,
-    uint16_t reg_class_id, uint32_t register_unit_count) {
-  const loom_module_t* module = loom_low_lower_context_module(context);
-  return loom_amdgpu_low_type_is_register_class_count(
-      context, loom_module_value_type(module, low_value), reg_class_id,
-      register_unit_count);
 }
 
 typedef struct loom_amdgpu_register_shape_t {
@@ -3100,7 +3016,7 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
   (void)user_data;
   loom_amdgpu_register_shape_t scalar_shape = {0};
   if (loom_amdgpu_scalar_type_register_shape(source_type, &scalar_shape)) {
-    return loom_amdgpu_make_register_type(
+    return loom_low_lower_make_register_type(
         context, scalar_shape.class_id, scalar_shape.unit_count, out_low_type);
   }
   loom_amdgpu_vector_storage_t vector_storage = {0};
@@ -3116,7 +3032,7 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
             storage_flags,
             LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK |
                 LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD)) {
-      return loom_amdgpu_make_register_type(
+      return loom_low_lower_make_register_type(
           context, LOOM_AMDGPU_REG_CLASS_ID_VGPR, vector_storage.register_count,
           out_low_type);
     }
@@ -3145,8 +3061,8 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
           loom_low_lower_context_module(context),
           loom_low_lower_context_fact_table(context), view_regions, analysis,
           source_value_id, source_type, &shape)) {
-    return loom_amdgpu_make_register_type(context, shape.class_id,
-                                          shape.unit_count, out_low_type);
+    return loom_low_lower_make_register_type(context, shape.class_id,
+                                             shape.unit_count, out_low_type);
   }
   return loom_amdgpu_map_type(user_data, context, source_op, source_type,
                               out_low_type);

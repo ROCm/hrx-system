@@ -289,6 +289,7 @@ loom_cc_library(
     "sync.c"
     "system_memory.c"
     "table.c"
+    "types.c"
     "values.c"
   DEPS
     ::kinds
