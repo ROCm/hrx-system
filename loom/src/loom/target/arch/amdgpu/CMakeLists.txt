@@ -202,6 +202,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::lower::kinds
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info_defs
     loom::target::legalization
     loom::transforms::vector::to_scalar

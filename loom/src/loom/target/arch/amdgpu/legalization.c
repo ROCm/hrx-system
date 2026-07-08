@@ -22,6 +22,7 @@
 #include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
 #include "loom/target/arch/amdgpu/lower/values.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/transforms/vector/to_scalar.h"
 
@@ -424,22 +425,22 @@ typedef struct loom_amdgpu_packed_bf16_arithmetic_rule_t {
   // Source op kind with lanewise BF16 arithmetic semantics.
   loom_op_kind_t op_kind;
   // Single-register packed BF16 descriptor required for each rewritten chunk.
-  iree_string_view_t descriptor_key;
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_packed_bf16_arithmetic_rule_t;
 
 static const loom_amdgpu_packed_bf16_arithmetic_rule_t
     kLoomAmdgpuPackedBf16ArithmeticRules[] = {
         {
             .op_kind = LOOM_OP_VECTOR_ADDF,
-            .descriptor_key = IREE_SVL("amdgpu.v_pk_add_bf16"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ADD_BF16,
         },
         {
             .op_kind = LOOM_OP_VECTOR_MULF,
-            .descriptor_key = IREE_SVL("amdgpu.v_pk_mul_bf16"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MUL_BF16,
         },
         {
             .op_kind = LOOM_OP_VECTOR_FMAF,
-            .descriptor_key = IREE_SVL("amdgpu.v_pk_fma_bf16"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_FMA_BF16,
         },
 };
 
@@ -452,13 +453,6 @@ loom_amdgpu_packed_bf16_arithmetic_rule(loom_op_kind_t op_kind) {
     if (rule->op_kind == op_kind) return rule;
   }
   return NULL;
-}
-
-static bool loom_amdgpu_descriptor_set_has_descriptor(
-    const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key) {
-  return descriptor_set != NULL &&
-         loom_low_descriptor_set_lookup_descriptor(descriptor_set, key) !=
-             LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
 }
 
 static bool loom_amdgpu_static_packed_bf16_vector_type(
@@ -518,8 +512,9 @@ static iree_status_t loom_amdgpu_legalize_packed_bf16_vector_arithmetic(
   const loom_amdgpu_packed_bf16_arithmetic_rule_t* rule =
       loom_amdgpu_packed_bf16_arithmetic_rule(op->kind);
   if (rule == NULL ||
-      !loom_amdgpu_descriptor_set_has_descriptor(context->descriptor_set,
-                                                 rule->descriptor_key) ||
+      loom_amdgpu_descriptor_ref_ordinal(context->descriptor_set,
+                                         rule->descriptor_ref) ==
+          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
       op->result_count != 1 || op->operand_count == 0) {
     return iree_ok_status();
   }
