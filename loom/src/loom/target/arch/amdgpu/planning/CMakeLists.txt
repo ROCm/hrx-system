@@ -534,6 +534,7 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::error::error_defs
     loom::ir
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info_defs
     loom::target::launch

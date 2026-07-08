@@ -24,6 +24,9 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+    _amdgpu_core_descriptor_set_bases,
+)
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
     AmdgpuOccupancyModelInfo,
@@ -77,6 +80,14 @@ def _u16_expr(value: int) -> str:
 
 def _u32_expr(value: int) -> str:
     return f"UINT32_C({value})"
+
+
+def _descriptor_reg_class_ids(descriptor_set_key: str) -> dict[str, int]:
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        if descriptor_set.key != descriptor_set_key:
+            continue
+        return {reg_class.name: index for index, reg_class in enumerate(descriptor_set.reg_classes)}
+    raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
 
 
 def _round_up(value: int, multiple: int) -> int:
@@ -144,7 +155,10 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
             raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many register classes")
         if len(register_classes) != len(set(register_classes)):
             raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has duplicate register classes")
+        descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
         for row in model.register_classes:
+            if row.register_class not in descriptor_reg_classes:
+                raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} references unknown register class {row.register_class}")
             if row.pool_units <= 0:
                 raise ValueError(f"AMDGPU occupancy pool for {row.register_class} must be positive")
             if row.allocation_granularity <= 0:
@@ -185,6 +199,7 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
     ]
     for model in models:
         suffix = _model_c_suffix(model.descriptor_set_key)
+        descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
         register_class_indices = {row.register_class: index for index, row in enumerate(model.register_classes)}
         pressure_cliffs_by_register_class = {row.register_class: _pressure_cliffs(row, model.max_waves_per_simd) for row in model.register_classes}
         pressure_cliff_count = sum(len(cliffs) for cliffs in pressure_cliffs_by_register_class.values())
@@ -229,6 +244,7 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                 [
                     "  {",
                     f'    .register_class = IREE_SVL("{_c_string_literal(row.register_class)}"),',
+                    f"    .descriptor_reg_class_id = {_u16_expr(descriptor_reg_classes[row.register_class])},",
                     f"    .pool_units = {_u32_expr(row.pool_units)},",
                     f"    .allocation_granularity = {_u32_expr(row.allocation_granularity)},",
                     f"    .pressure_cliffs = {pressure_cliffs_initializer},",

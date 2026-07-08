@@ -419,6 +419,7 @@ loom_cc_library(
         "//loom/src/loom/target:launch",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

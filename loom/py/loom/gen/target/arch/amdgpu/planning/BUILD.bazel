@@ -27,6 +27,7 @@ iree_py_binary(
     visibility = GENERATOR_VISIBILITY,
     deps = [
         "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
 )

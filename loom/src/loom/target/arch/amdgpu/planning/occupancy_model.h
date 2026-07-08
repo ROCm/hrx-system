@@ -30,6 +30,8 @@ typedef struct loom_amdgpu_occupancy_pressure_cliff_model_t {
 typedef struct loom_amdgpu_occupancy_register_class_model_t {
   // Stable target-low register-class name.
   iree_string_view_t register_class;
+  // Descriptor-set-local register class ID for |register_class|.
+  uint16_t descriptor_reg_class_id;
   // Occupancy register-file pool shared by resident waves.
   uint32_t pool_units;
   // Allocation granularity used by occupancy calculations.
