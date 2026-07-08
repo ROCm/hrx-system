@@ -357,6 +357,7 @@ loom_cc_library(
     deps = [
         ":live_range",
         "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

@@ -31,6 +31,14 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "adaptive_sort",
+    hdrs = ["adaptive_sort.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "diff",
     srcs = ["diff.c"],
     hdrs = ["diff.h"],
