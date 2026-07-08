@@ -1870,9 +1870,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_failure_mask(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64, failure_mask,
         conflict_kind, &raw_failure_mask));
   }
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(
-      loom_low_lower_context_bundle(context), &wavefront_size));
+  const uint32_t wavefront_size =
+      loom_amdgpu_target_wavefront_size(loom_low_lower_context_bundle(context));
   return loom_amdgpu_build_feedback_canonical_exec_mask(
       loom_low_lower_context_builder(context),
       loom_low_lower_context_descriptor_set(context), raw_failure_mask,
