@@ -166,38 +166,23 @@ static iree_status_t loom_vector_to_scalar_erase_lowered_op(
   return iree_ok_status();
 }
 
-static loom_value_id_t loom_vector_to_scalar_memory_store_value(loom_op_t* op) {
-  switch (op->kind) {
-    case LOOM_OP_VECTOR_STORE:
-      return loom_vector_store_value(op);
-    case LOOM_OP_VECTOR_STORE_MASK:
-      return loom_vector_store_mask_value(op);
-    case LOOM_OP_VECTOR_SCATTER:
-      return loom_vector_scatter_value(op);
-    case LOOM_OP_VECTOR_SCATTER_MASK:
-      return loom_vector_scatter_mask_value(op);
-    default:
-      return LOOM_VALUE_ID_INVALID;
+static loom_value_id_t loom_vector_to_scalar_memory_payload_value(
+    const loom_module_t* module, loom_op_t* op,
+    loom_memory_access_operation_kind_t required_kind) {
+  loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access) ||
+      loom_memory_access_operation_kind(access) != required_kind) {
+    return LOOM_VALUE_ID_INVALID;
   }
-}
-
-static loom_value_id_t loom_vector_to_scalar_atomic_reduce_value(
-    loom_op_t* op) {
-  switch (op->kind) {
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-      return loom_vector_atomic_reduce_value(op);
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
-      return loom_vector_atomic_reduce_mask_value(op);
-    default:
-      return LOOM_VALUE_ID_INVALID;
-  }
+  return loom_memory_access_value(access);
 }
 
 static iree_status_t loom_vector_to_scalar_lower_memory_store_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
   *out_handled = true;
-  loom_value_id_t value = loom_vector_to_scalar_memory_store_value(op);
+  loom_value_id_t value = loom_vector_to_scalar_memory_payload_value(
+      rewriter->module, op, LOOM_MEMORY_ACCESS_OPERATION_STORE);
   loom_type_t vector_type = loom_module_value_type(rewriter->module, value);
   loom_vector_to_scalar_state_t state = {
       .pass = pass,
@@ -264,7 +249,8 @@ static iree_status_t loom_vector_to_scalar_lower_atomic_reduce_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
   *out_handled = true;
-  loom_value_id_t value = loom_vector_to_scalar_atomic_reduce_value(op);
+  loom_value_id_t value = loom_vector_to_scalar_memory_payload_value(
+      rewriter->module, op, LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE);
   loom_type_t vector_type = loom_module_value_type(rewriter->module, value);
   loom_vector_to_scalar_state_t state = {
       .pass = pass,
