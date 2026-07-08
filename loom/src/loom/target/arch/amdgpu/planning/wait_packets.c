@@ -57,22 +57,6 @@ typedef struct loom_amdgpu_wait_packet_builder_t {
   iree_host_size_t immediate_capacity;
 } loom_amdgpu_wait_packet_builder_t;
 
-static uint16_t loom_amdgpu_wait_packet_counter_id_from_slot(uint32_t slot) {
-  return (uint16_t)(slot + 1);
-}
-
-static iree_status_t loom_amdgpu_wait_packet_counter_slot(uint16_t counter_id,
-                                                          uint32_t* out_slot) {
-  if (counter_id < LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD ||
-      counter_id > LOOM_AMDGPU_WAIT_COUNTER_ALU) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown AMDGPU wait counter id %" PRIu16,
-                            counter_id);
-  }
-  *out_slot = (uint32_t)(counter_id - 1);
-  return iree_ok_status();
-}
-
 static uint16_t loom_amdgpu_wait_packet_target_count(
     const loom_amdgpu_wait_packet_group_t* group, uint32_t counter_mask) {
   uint16_t target_count = LOOM_AMDGPU_WAIT_PACKET_TARGET_COUNT_NONE;
@@ -331,9 +315,9 @@ static iree_status_t loom_amdgpu_wait_packet_group_accumulate(
   uint32_t counter_mask = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_counter_mask(action->counter_id, &counter_mask));
-  uint32_t slot = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_packet_counter_slot(action->counter_id, &slot));
+  const uint32_t slot =
+      loom_amdgpu_wait_counter_slot_from_id(action->counter_id);
+  IREE_ASSERT_LT(slot, IREE_ARRAYSIZE(group->target_counts));
   group->counter_mask |= counter_mask;
   if (action->target_count < group->target_counts[slot]) {
     group->target_counts[slot] = action->target_count;
@@ -437,8 +421,7 @@ static iree_status_t loom_amdgpu_wait_packet_json_write_counters(
     if (needs_comma) {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
     }
-    const uint16_t counter_id =
-        loom_amdgpu_wait_packet_counter_id_from_slot(slot);
+    const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
     IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
         stream, loom_amdgpu_wait_counter_name(counter_id)));
     needs_comma = true;
