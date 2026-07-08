@@ -16,12 +16,9 @@
 #include <string.h>
 
 #include "loom/ir/local_value_domain.h"
-#include "loom/ops/buffer/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/low_legality.h"
-#include "loom/util/fact_table.h"
-#include "loom/util/walk.h"
 
 enum {
   LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_MEMORY_SPACE_COUNT =
@@ -71,8 +68,6 @@ struct loom_amdgpu_source_alloca_layout_t {
 };
 
 #define LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_INITIALIZED ((uint8_t)1u << 0)
-#define LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_BUILT_FROM_BODY ((uint8_t)1u << 1)
-
 static int loom_amdgpu_source_alloca_layout_state_key;
 
 static const loom_amdgpu_source_alloca_layout_t
@@ -91,34 +86,6 @@ static bool loom_amdgpu_source_alloca_layout_checked_align(
     return false;
   }
   *out_aligned_value = (value + alignment_mask) & ~alignment_mask;
-  return true;
-}
-
-static bool loom_amdgpu_source_alloca_layout_alloca_size(
-    const loom_value_fact_table_t* fact_table, const loom_op_t* alloca_op,
-    uint64_t* out_byte_length) {
-  *out_byte_length = 0;
-  int64_t byte_length = 0;
-  if (!loom_amdgpu_value_facts_as_exact_non_negative_i64(
-          loom_value_fact_table_lookup(
-              fact_table, loom_buffer_alloca_byte_length(alloca_op)),
-          &byte_length) ||
-      byte_length <= 0) {
-    return false;
-  }
-  *out_byte_length = (uint64_t)byte_length;
-  return true;
-}
-
-static bool loom_amdgpu_source_alloca_layout_alloca_alignment(
-    const loom_op_t* alloca_op, uint64_t* out_byte_alignment) {
-  *out_byte_alignment = 0;
-  const int64_t base_alignment = loom_buffer_alloca_base_alignment(alloca_op);
-  if (base_alignment <= 0 || base_alignment > UINT32_MAX ||
-      !loom_amdgpu_u32_is_power_of_two((uint32_t)base_alignment)) {
-    return false;
-  }
-  *out_byte_alignment = (uint64_t)base_alignment;
   return true;
 }
 
@@ -196,41 +163,6 @@ static void loom_amdgpu_source_alloca_layout_record_allocation(
   segment->byte_size = slot_byte_offset + byte_length;
 }
 
-typedef struct loom_amdgpu_source_alloca_layout_build_state_t {
-  // Fact table used to derive allocation sizes.
-  const loom_value_fact_table_t* fact_table;
-  // Layout populated by the walk.
-  loom_amdgpu_source_alloca_layout_t* layout;
-} loom_amdgpu_source_alloca_layout_build_state_t;
-
-static iree_status_t loom_amdgpu_source_alloca_layout_visit_op(
-    void* user_data, loom_op_t* op, const loom_walk_context_t* walk_context,
-    loom_walk_result_t* out_result) {
-  (void)walk_context;
-  *out_result = LOOM_WALK_CONTINUE;
-  loom_amdgpu_source_alloca_layout_build_state_t* state =
-      (loom_amdgpu_source_alloca_layout_build_state_t*)user_data;
-  if (!loom_buffer_alloca_isa(op)) {
-    return iree_ok_status();
-  }
-
-  const loom_value_fact_memory_space_t memory_space =
-      loom_buffer_alloca_memory_space(op);
-  uint64_t byte_alignment = 0;
-  if (!loom_amdgpu_source_alloca_layout_alloca_alignment(op, &byte_alignment)) {
-    return iree_ok_status();
-  }
-  uint64_t byte_length = 0;
-  if (!loom_amdgpu_source_alloca_layout_alloca_size(state->fact_table, op,
-                                                    &byte_length)) {
-    return iree_ok_status();
-  }
-  loom_amdgpu_source_alloca_layout_record_allocation(
-      state->layout, memory_space, loom_buffer_alloca_result(op), byte_length,
-      byte_alignment);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_source_alloca_layout_initialize(
     const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
@@ -255,36 +187,6 @@ static iree_status_t loom_amdgpu_source_alloca_layout_initialize(
     };
   }
   layout->flags = LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_INITIALIZED;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_source_alloca_layout_build_from_body(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_func_like_t source_function, iree_arena_allocator_t* arena,
-    loom_amdgpu_source_alloca_layout_t* layout) {
-  if (!loom_func_like_isa(source_function) || layout->value_domain == NULL ||
-      !loom_local_value_domain_is_acquired(layout->value_domain)) {
-    layout->flags |= LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_BUILT_FROM_BODY;
-    return iree_ok_status();
-  }
-  loom_region_t* body = loom_func_like_body(source_function);
-  if (body == NULL) {
-    layout->flags |= LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_BUILT_FROM_BODY;
-    return iree_ok_status();
-  }
-
-  loom_amdgpu_source_alloca_layout_build_state_t build_state = {
-      .fact_table = fact_table,
-      .layout = layout,
-  };
-
-  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  IREE_RETURN_IF_ERROR(loom_walk_region(
-      module, body, LOOM_WALK_PRE_ORDER,
-      (loom_walk_callback_t){loom_amdgpu_source_alloca_layout_visit_op,
-                             &build_state},
-      arena, &walk_result));
-  layout->flags |= LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_BUILT_FROM_BODY;
   return iree_ok_status();
 }
 
@@ -357,13 +259,21 @@ iree_status_t loom_amdgpu_source_alloca_layout_for_low_legality(
       fact_table, loom_target_low_legality_value_domain(context),
       loom_target_low_legality_scratch_arena(context), source_function,
       layout));
-  if (!iree_all_bits_set(layout->flags,
-                         LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_BUILT_FROM_BODY)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_build_from_body(
-        loom_target_low_legality_module(context), fact_table, source_function,
-        loom_target_low_legality_scratch_arena(context), layout));
-  }
   *out_layout = layout;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
+    loom_target_low_legality_context_t* context,
+    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
+    uint64_t byte_length, uint64_t byte_alignment) {
+  const loom_amdgpu_source_alloca_layout_t* const_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &const_layout));
+  loom_amdgpu_source_alloca_layout_t* layout =
+      (loom_amdgpu_source_alloca_layout_t*)const_layout;
+  loom_amdgpu_source_alloca_layout_record_allocation(
+      layout, memory_space, root_value_id, byte_length, byte_alignment);
   return iree_ok_status();
 }
 

@@ -50,10 +50,18 @@ iree_status_t loom_amdgpu_source_alloca_layout_record_lower_alloca(
 
 // Returns the function-local source allocation layout analysis for low-legality
 // verification. The returned object is allocated from the legality context's
-// scratch arena and is built once from the function body.
+// scratch arena and populated by the existing target-low verification walk.
 iree_status_t loom_amdgpu_source_alloca_layout_for_low_legality(
     loom_target_low_legality_context_t* context,
     const loom_amdgpu_source_alloca_layout_t** out_layout);
+
+// Records one source buffer allocation in the low-legality analysis. Target-low
+// verification calls this while visiting buffer.alloca ops, so later provider
+// checks can resolve allocation roots without scanning source IR.
+iree_status_t loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
+    loom_target_low_legality_context_t* context,
+    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
+    uint64_t byte_length, uint64_t byte_alignment);
 
 // Resolves the analyzed storage base for a source buffer.alloca root in the
 // requested memory space. Returns false when the analysis cannot prove the root

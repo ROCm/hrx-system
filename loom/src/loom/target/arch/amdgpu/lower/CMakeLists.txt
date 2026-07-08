@@ -349,7 +349,6 @@ loom_cc_library(
     loom::util::fact_table
     loom::util::math
     loom::util::numeric_format
-    loom::util::walk
   PUBLIC
 )
 endif()
