@@ -440,6 +440,27 @@ low.func.def target(@target) abi(hal_kernel) @scf_select_i1_false_condition(%val
 // ====
 
 amdgpu.target<gfx1100> @target
+func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scf_select_i1_assume_second_condition(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %21 = v_mov_b32_copy %limit
+  %22 = v_mov_b32_copy %upper
+  %checked_scalar_condition = v_cmp_lt_i32 %21, %22
+  %result = v_cndmask_b32 %false_value, %true_value, %checked_scalar_condition
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32

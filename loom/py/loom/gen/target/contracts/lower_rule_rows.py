@@ -17,6 +17,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_SOURCE_MEMORY_NONE,
     CompiledLowerRuleSet,
     ContractFragment,
@@ -327,6 +328,10 @@ def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descri
 def _rule_flags_c_expression(flags: int) -> str:
     if flags == LOWER_RULE_FLAG_CONTRACT_ONLY:
         return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY"
+    if flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS:
+        return "LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
+    if flags == (LOWER_RULE_FLAG_CONTRACT_ONLY | LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS):
+        return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY | LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
     return f"0x{flags:X}"
 
 

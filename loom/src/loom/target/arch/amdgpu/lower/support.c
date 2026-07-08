@@ -1041,6 +1041,22 @@ static bool loom_amdgpu_source_value_fact_identity_operand(
   return true;
 }
 
+static bool loom_amdgpu_fact_identity_use_result(
+    const loom_module_t* module, const loom_op_t* user_op,
+    uint16_t operand_index, loom_value_id_t source_value_id,
+    loom_value_id_t* out_result) {
+  *out_result = LOOM_VALUE_ID_INVALID;
+  if (user_op == NULL || operand_index >= user_op->operand_count ||
+      loom_op_const_operands(user_op)[operand_index] != source_value_id ||
+      operand_index >= user_op->result_count ||
+      !loom_traits_are_fact_identity(
+          loom_op_effective_traits(module, user_op))) {
+    return false;
+  }
+  *out_result = loom_op_const_results(user_op)[operand_index];
+  return *out_result != source_value_id;
+}
+
 static bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, loom_value_id_t source_value_id,
     loom_value_id_t excluded_value_id) {
@@ -1874,6 +1890,15 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
             module, user_op, operand_index, source_value_id)) {
       return true;
     }
+    loom_value_id_t identity_result = LOOM_VALUE_ID_INVALID;
+    if (loom_amdgpu_fact_identity_use_result(module, user_op, operand_index,
+                                             source_value_id,
+                                             &identity_result) &&
+        loom_amdgpu_source_value_is_native_i1_mask_excluding(
+            module, fact_table, view_regions, analysis, identity_result,
+            next_excluded_value_id)) {
+      return true;
+    }
     if (source_can_lower_as_scc) {
       continue;
     }
@@ -1991,6 +2016,13 @@ static bool loom_amdgpu_i1_use_needs_native_mask(
       loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
           module, user_op, operand_index, source_value_id)) {
     return true;
+  }
+
+  loom_value_id_t identity_result = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_fact_identity_use_result(module, user_op, operand_index,
+                                           source_value_id, &identity_result)) {
+    return loom_amdgpu_analyzed_source_value_is_native_i1_mask(
+        module, fact_table, view_regions, analysis, identity_result);
   }
 
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;

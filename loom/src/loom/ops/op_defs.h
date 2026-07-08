@@ -1053,6 +1053,12 @@ loom_value_slice_t loom_op_operand_field_span(const loom_op_vtable_t* vtable,
 bool loom_op_operand_field_present(const loom_op_vtable_t* vtable,
                                    const loom_op_t* op, uint8_t field_index);
 
+// Resolves an author-facing result field to its flat result span. For
+// variadic result fields the returned span covers the trailing variadic tail.
+loom_value_slice_t loom_op_result_field_span(const loom_op_vtable_t* vtable,
+                                             const loom_op_t* op,
+                                             uint8_t field_index);
+
 // Maps a flat operand index back to the operand descriptor that owns it.
 // Returns false if the index is out of range or the op kind has no descriptor
 // metadata.
