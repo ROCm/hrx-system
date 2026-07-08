@@ -96,6 +96,12 @@ typedef struct loom_low_source_memory_access_diagnostic_t {
   loom_low_source_memory_access_rejection_flags_t rejection_bits;
 } loom_low_source_memory_access_diagnostic_t;
 
+// Classifies the operation family represented by a MemoryAccess op.
+bool loom_low_source_memory_operation_kind_from_access(
+    const loom_module_t* module, const loom_op_t* source_op,
+    loom_memory_access_t access,
+    loom_low_source_memory_operation_kind_t* out_operation_kind);
+
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE UINT8_MAX
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY (LOOM_TYPE_MAX_RANK + 1)
 

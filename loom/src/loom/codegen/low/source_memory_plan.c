@@ -1146,7 +1146,7 @@ void loom_low_source_memory_access_plan_make_summary(
   };
 }
 
-static bool loom_low_source_memory_operation_kind_from_access(
+bool loom_low_source_memory_operation_kind_from_access(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_memory_access_t access,
     loom_low_source_memory_operation_kind_t* out_operation_kind) {
