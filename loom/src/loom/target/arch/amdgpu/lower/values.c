@@ -2552,6 +2552,34 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
   return iree_ok_status();
 }
 
+#define LOOM_AMDGPU_VECTOR_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
+#define LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(op, kind_) \
+  [LOOM_AMDGPU_VECTOR_OP_INDEX(LOOM_OP_VECTOR_##op)] =                \
+      LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_##kind_
+
+static const loom_amdgpu_vector_16bit_float_conversion_kind_t
+    kAmdgpuVector16BitFloatConversionKindByVectorOp[LOOM_OP_VECTOR_COUNT_] = {
+        LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(EXTF, EXTF),
+        LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(FPTRUNC, FPTRUNC),
+        LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW(DECODE, DECODE),
+};
+
+#undef LOOM_AMDGPU_VECTOR_OP_INDEX
+#undef LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_ROW
+
+static loom_amdgpu_vector_16bit_float_conversion_kind_t
+loom_amdgpu_vector_16bit_float_conversion_kind(loom_op_kind_t op_kind) {
+  if (loom_op_dialect_id(op_kind) != LOOM_DIALECT_VECTOR) {
+    return LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE;
+  }
+  const uint8_t op_index = loom_op_dialect_index(op_kind);
+  if (op_index >=
+      IREE_ARRAYSIZE(kAmdgpuVector16BitFloatConversionKindByVectorOp)) {
+    return LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE;
+  }
+  return kAmdgpuVector16BitFloatConversionKindByVectorOp[op_index];
+}
+
 static iree_status_t
 loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -2561,31 +2589,11 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       loom_low_lower_context_fact_table(context);
   *out_plan = (loom_amdgpu_vector_16bit_float_conversion_plan_t){0};
 
-  loom_value_id_t source = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
-  loom_amdgpu_vector_16bit_float_conversion_kind_t kind =
-      LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE;
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_EXTF:
-      source = loom_vector_extf_input(source_op);
-      result = loom_vector_extf_result(source_op);
-      kind = LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF;
-      break;
-    case LOOM_OP_VECTOR_FPTRUNC:
-      source = loom_vector_fptrunc_input(source_op);
-      result = loom_vector_fptrunc_result(source_op);
-      kind = LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_FPTRUNC;
-      break;
-    case LOOM_OP_VECTOR_DECODE:
-      source = loom_vector_decode_payload(source_op);
-      result = loom_vector_decode_result(source_op);
-      kind = LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE;
-      break;
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "accepted AMDGPU 16-bit float conversion has wrong op");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_value_id_t source = loom_op_const_operands(source_op)[0];
+  const loom_value_id_t result = loom_op_const_results(source_op)[0];
+  const loom_amdgpu_vector_16bit_float_conversion_kind_t kind =
+      loom_amdgpu_vector_16bit_float_conversion_kind(source_op->kind);
+  IREE_ASSERT_NE(kind, LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE);
 
   const loom_type_t source_type = loom_module_value_type(module, source);
   const loom_type_t result_type = loom_module_value_type(module, result);
@@ -2794,7 +2802,9 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
     loom_amdgpu_vector_16bit_float_conversion_plan_t* out_plan,
     bool* out_selected) {
   *out_plan = (loom_amdgpu_vector_16bit_float_conversion_plan_t){0};
-  if (source_op->kind == LOOM_OP_VECTOR_DECODE) {
+  const loom_amdgpu_vector_16bit_float_conversion_kind_t kind =
+      loom_amdgpu_vector_16bit_float_conversion_kind(source_op->kind);
+  if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE) {
     *out_selected = loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
         loom_low_lower_context_module(context),
         loom_low_lower_context_fact_table(context),
