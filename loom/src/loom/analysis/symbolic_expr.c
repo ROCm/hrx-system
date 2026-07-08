@@ -1573,6 +1573,27 @@ static iree_status_t loom_symbolic_expr_term_interval(
   return iree_ok_status();
 }
 
+typedef struct loom_symbolic_expr_term_interval_t {
+  // Minimum value the scaled term can contribute.
+  int64_t minimum;
+  // Maximum value the scaled term can contribute.
+  int64_t maximum;
+  // True when minimum/maximum are known for this term.
+  bool known;
+} loom_symbolic_expr_term_interval_t;
+
+static iree_status_t loom_symbolic_expr_build_term_intervals(
+    loom_symbolic_expr_context_t* context, const loom_symbolic_term_t* terms,
+    iree_host_size_t term_count,
+    loom_symbolic_expr_term_interval_t* out_intervals) {
+  for (iree_host_size_t i = 0; i < term_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_interval(
+        context, terms[i], &out_intervals[i].minimum, &out_intervals[i].maximum,
+        &out_intervals[i].known));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
@@ -2973,8 +2994,8 @@ static bool loom_symbolic_expr_scaled_pair_from_indices(
       out_negative_relation_value);
 }
 
-static iree_status_t loom_symbolic_expr_residual_interval_excluding_pair(
-    loom_symbolic_expr_context_t* context, const loom_symbolic_term_t* terms,
+static void loom_symbolic_expr_residual_interval_excluding_pair(
+    const loom_symbolic_expr_term_interval_t* intervals,
     iree_host_size_t term_count, iree_host_size_t first_index,
     iree_host_size_t second_index, int64_t constant, int64_t* out_maximum,
     bool* out_known) {
@@ -2983,20 +3004,15 @@ static iree_status_t loom_symbolic_expr_residual_interval_excluding_pair(
   int64_t maximum = constant;
   for (iree_host_size_t i = 0; i < term_count; ++i) {
     if (i == first_index || i == second_index) continue;
-    int64_t term_minimum = 0;
-    int64_t term_maximum = 0;
-    bool term_interval_known = false;
-    IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_interval(
-        context, terms[i], &term_minimum, &term_maximum, &term_interval_known));
-    if (!term_interval_known ||
-        !loom_symbolic_expr_accumulate_checked(term_minimum, term_maximum,
-                                               &minimum, &maximum)) {
-      return iree_ok_status();
+    const loom_symbolic_expr_term_interval_t* interval = &intervals[i];
+    if (!interval->known ||
+        !loom_symbolic_expr_accumulate_checked(
+            interval->minimum, interval->maximum, &minimum, &maximum)) {
+      return;
     }
   }
   *out_maximum = maximum;
   *out_known = true;
-  return iree_ok_status();
 }
 
 static iree_status_t
@@ -3009,8 +3025,9 @@ loom_symbolic_expr_prove_le_by_scaled_relation_with_residual(
     return iree_ok_status();
   }
 
-  loom_symbolic_term_t terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
-  memcpy(terms, normalized_terms, term_count * sizeof(*terms));
+  loom_symbolic_expr_term_interval_t
+      intervals[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
+  bool intervals_built = false;
 
   for (iree_host_size_t i = 0; i < term_count; ++i) {
     for (iree_host_size_t j = i + 1; j < term_count; ++j) {
@@ -3018,16 +3035,21 @@ loom_symbolic_expr_prove_le_by_scaled_relation_with_residual(
       loom_value_id_t positive_relation_value = LOOM_VALUE_ID_INVALID;
       loom_value_id_t negative_relation_value = LOOM_VALUE_ID_INVALID;
       if (!loom_symbolic_expr_scaled_pair_from_indices(
-              terms, i, j, &scale, &positive_relation_value,
+              normalized_terms, i, j, &scale, &positive_relation_value,
               &negative_relation_value)) {
         continue;
+      }
+      if (!intervals_built) {
+        IREE_RETURN_IF_ERROR(loom_symbolic_expr_build_term_intervals(
+            context, normalized_terms, term_count, intervals));
+        intervals_built = true;
       }
 
       int64_t residual_maximum = 0;
       bool residual_interval_known = false;
-      IREE_RETURN_IF_ERROR(loom_symbolic_expr_residual_interval_excluding_pair(
-          context, terms, term_count, i, j, constant, &residual_maximum,
-          &residual_interval_known));
+      loom_symbolic_expr_residual_interval_excluding_pair(
+          intervals, term_count, i, j, constant, &residual_maximum,
+          &residual_interval_known);
       if (!residual_interval_known) {
         continue;
       }
