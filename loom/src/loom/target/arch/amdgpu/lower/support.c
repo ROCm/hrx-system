@@ -700,63 +700,6 @@ static loom_amdgpu_register_shape_t loom_amdgpu_register_shape(
   };
 }
 
-#define LOOM_AMDGPU_TYPE_REGISTER_SHAPE(reg_class_id, register_unit_count) \
-  {                                                                        \
-      .class_id = reg_class_id,                                            \
-      .unit_count = register_unit_count,                                   \
-  }
-
-static const loom_amdgpu_register_shape_t
-    loom_amdgpu_scalar_type_register_shapes[LOOM_SCALAR_TYPE_COUNT_] = {
-        [LOOM_SCALAR_TYPE_INDEX] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
-        [LOOM_SCALAR_TYPE_OFFSET] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
-        [LOOM_SCALAR_TYPE_I1] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SCC, 1),
-        [LOOM_SCALAR_TYPE_I8] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_I16] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_I32] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
-        [LOOM_SCALAR_TYPE_I64] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2),
-        [LOOM_SCALAR_TYPE_F8E4M3] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_F8E5M2] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_F16] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_BF16] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_F32] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_F64] =
-            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2),
-};
-
-#undef LOOM_AMDGPU_TYPE_REGISTER_SHAPE
-
-static bool loom_amdgpu_scalar_type_register_shape(
-    loom_type_t source_type, loom_amdgpu_register_shape_t* out_shape) {
-  *out_shape = (loom_amdgpu_register_shape_t){0};
-  if (!loom_type_is_scalar(source_type)) {
-    return false;
-  }
-  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
-  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
-    return false;
-  }
-  const loom_amdgpu_register_shape_t shape =
-      loom_amdgpu_scalar_type_register_shapes[element_type];
-  if (shape.unit_count == 0) {
-    return false;
-  }
-  *out_shape = shape;
-  return true;
-}
-
 typedef enum loom_amdgpu_scalar_value_register_policy_e {
   LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE = 0,
   LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED = 1,
@@ -774,24 +717,40 @@ enum loom_amdgpu_scalar_value_register_flag_bits_e {
 };
 
 typedef struct loom_amdgpu_scalar_value_register_mapping_t {
-  // Default register class before value-specific facts adjust placement.
-  uint16_t default_class_id;
-  // Default number of 32-bit register units before value-specific facts apply.
-  uint32_t default_unit_count;
+  // Type-only fallback shape used when no source value is available.
+  loom_amdgpu_register_shape_t type_shape;
+  // Default value shape before value-specific facts adjust placement.
+  loom_amdgpu_register_shape_t default_shape;
   // Value-sensitive placement policy for this scalar type.
   loom_amdgpu_scalar_value_register_policy_t policy;
   // Placement flags that do not require inspecting the defining operation.
   loom_amdgpu_scalar_value_register_flags_t flags;
 } loom_amdgpu_scalar_value_register_mapping_t;
 
-#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER(reg_class_id, register_unit_count, \
-                                          selected_policy, selected_flags)   \
-  {                                                                          \
-      .default_class_id = reg_class_id,                                      \
-      .default_unit_count = register_unit_count,                             \
-      .policy = selected_policy,                                             \
-      .flags = selected_flags,                                               \
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_SHAPES(                      \
+    type_reg_class_id, type_register_unit_count, default_reg_class_id, \
+    default_register_unit_count, selected_policy, selected_flags)      \
+  {                                                                    \
+      .type_shape = {.class_id = type_reg_class_id,                    \
+                     .unit_count = type_register_unit_count},          \
+      .default_shape = {.class_id = default_reg_class_id,              \
+                        .unit_count = default_register_unit_count},    \
+      .policy = selected_policy,                                       \
+      .flags = selected_flags,                                         \
   }
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER(reg_class_id, register_unit_count,  \
+                                          selected_policy, selected_flags)    \
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_SHAPES(reg_class_id, register_unit_count, \
+                                           reg_class_id, register_unit_count, \
+                                           selected_policy, selected_flags)
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_TYPE_DEFAULT(                  \
+    type_reg_class_id, type_register_unit_count, default_reg_class_id,   \
+    default_register_unit_count, selected_policy, selected_flags)        \
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_SHAPES(                              \
+      type_reg_class_id, type_register_unit_count, default_reg_class_id, \
+      default_register_unit_count, selected_policy, selected_flags)
 
 #define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR \
   LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_NATURALLY_PREFERS_VGPR
@@ -847,8 +806,8 @@ static const loom_amdgpu_scalar_value_register_mapping_t
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
                 LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
-        [LOOM_SCALAR_TYPE_F32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+        [LOOM_SCALAR_TYPE_F32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_TYPE_DEFAULT(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
                 LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR),
@@ -858,11 +817,17 @@ static const loom_amdgpu_scalar_value_register_mapping_t
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
                 LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
 };
+static_assert(IREE_ARRAYSIZE(loom_amdgpu_scalar_value_register_mappings) ==
+                  LOOM_SCALAR_TYPE_COUNT_,
+              "AMDGPU scalar value register mappings out of sync with scalar "
+              "types");
 
 #undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR
 #undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR
 #undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_TYPE_DEFAULT
 #undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_SHAPES
 
 static const loom_amdgpu_scalar_value_register_mapping_t*
 loom_amdgpu_scalar_value_register_mapping_for_type(loom_type_t source_type) {
@@ -878,6 +843,18 @@ loom_amdgpu_scalar_value_register_mapping_for_type(loom_type_t source_type) {
   return mapping->policy == LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE
              ? NULL
              : mapping;
+}
+
+static bool loom_amdgpu_scalar_type_register_shape(
+    loom_type_t source_type, loom_amdgpu_register_shape_t* out_shape) {
+  *out_shape = (loom_amdgpu_register_shape_t){0};
+  const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+      loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+  if (mapping == NULL || mapping->type_shape.unit_count == 0) {
+    return false;
+  }
+  *out_shape = mapping->type_shape;
+  return true;
 }
 
 static bool loom_amdgpu_scalar_type_has_register_flag(
@@ -2787,8 +2764,7 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
   if (mapping == NULL) {
     return false;
   }
-  *out_shape = loom_amdgpu_register_shape(mapping->default_class_id,
-                                          mapping->default_unit_count);
+  *out_shape = mapping->default_shape;
   switch (mapping->policy) {
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED:
       return true;
