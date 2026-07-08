@@ -3831,7 +3831,7 @@ static void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
   plan->packet_flags |= packet_flags;
 }
 
-static iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
@@ -3841,9 +3841,8 @@ static iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     loom_symbol_ref_t target_ref, loom_func_like_t source_function,
     const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t operation_kind,
-    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
+    loom_amdgpu_fragment_memory_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
-  *out_selected = false;
   const loom_amdgpu_fragment_memory_environment_t environment = {
       .module = module,
       .fact_table = fact_table,
@@ -3864,19 +3863,18 @@ static iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
   if (!loom_amdgpu_fragment_memory_analyze(&environment, &source,
                                            operation_kind, out_plan,
                                            /*diagnostic=*/NULL)) {
-    return iree_ok_status();
+    return false;
   }
   const loom_amdgpu_matrix_fragment_layout_t* layout =
       loom_amdgpu_matrix_fragment_layout_for_kind(out_plan->layout_kind);
   if (layout == NULL ||
       !loom_amdgpu_fragment_memory_plan_packets(
           environment.descriptor_set, layout, out_plan, /*diagnostic=*/NULL)) {
-    return iree_ok_status();
+    return false;
   }
   loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
       fact_table, descriptor_set, source_op, out_plan);
-  *out_selected = true;
-  return iree_ok_status();
+  return true;
 }
 
 iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
@@ -3888,10 +3886,11 @@ iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
     const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
-  return loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+  *out_selected = loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
       module, fact_table, view_regions, bundle, descriptor_set,
       /*contract_candidates=*/NULL, target_ref, source_function, source_op,
-      operation_kind, out_plan, out_selected);
+      operation_kind, out_plan);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_fragment_memory_select(
@@ -3906,13 +3905,14 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
       contract_candidates = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_get_fragment_memory_contract_candidates(
       context, &contract_candidates));
-  return loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+  *out_selected = loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
       module, loom_low_lower_context_fact_table(context), view_regions,
       loom_low_lower_context_bundle(context),
       loom_low_lower_context_descriptor_set(context), contract_candidates,
       loom_low_lower_context_target_ref(context),
       loom_low_lower_context_source_function(context), source_op,
-      operation_kind, out_plan, out_selected);
+      operation_kind, out_plan);
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_select_vector_fragment_load_plan(

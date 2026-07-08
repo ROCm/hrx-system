@@ -1650,8 +1650,7 @@ static iree_status_t loom_amdgpu_emit_atomic_cache_controls(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_append_atomic_packet_attrs(
-    loom_low_lower_context_t* context,
+static void loom_amdgpu_append_atomic_packet_attrs(
     const loom_amdgpu_atomic_packet_attrs_t* packet_attrs,
     loom_named_attr_t* attrs, iree_host_size_t attr_capacity,
     iree_host_size_t* inout_attr_count) {
@@ -1665,7 +1664,6 @@ static iree_status_t loom_amdgpu_append_atomic_packet_attrs(
     };
     *inout_attr_count += 1;
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_emit_atomic_post_ordering(
@@ -1726,8 +1724,8 @@ iree_status_t loom_amdgpu_lower_atomic(loom_low_lower_context_t* context,
   iree_host_size_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_memory_attrs(
       context, &access, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_atomic_packet_attrs(
-      context, &plan->packet_attrs, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+  loom_amdgpu_append_atomic_packet_attrs(&plan->packet_attrs, attrs,
+                                         IREE_ARRAYSIZE(attrs), &attr_count);
   const loom_named_attr_slice_t packet_attrs =
       loom_make_named_attr_slice(attrs, attr_count);
 
