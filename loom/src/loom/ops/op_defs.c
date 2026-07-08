@@ -420,6 +420,20 @@ bool loom_op_operand_descriptor_at(
   return false;
 }
 
+loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
+                                            const loom_op_t* op,
+                                            uint16_t operand_index) {
+  if (!vtable || vtable->operand_role_mask == 0) {
+    return LOOM_OPERAND_ROLE_NONE;
+  }
+  const loom_operand_descriptor_t* descriptor = NULL;
+  if (!loom_op_operand_descriptor_at(vtable, op, operand_index, &descriptor,
+                                     NULL, NULL)) {
+    return LOOM_OPERAND_ROLE_NONE;
+  }
+  return descriptor->role;
+}
+
 //===----------------------------------------------------------------------===//
 // Effect query helpers
 //===----------------------------------------------------------------------===//

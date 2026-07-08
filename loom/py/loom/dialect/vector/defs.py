@@ -98,6 +98,7 @@ from loom.dsl import (
     Op,
     OpCategory,
     Operand,
+    OperandRole,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
@@ -513,7 +514,7 @@ vector_splat = Op(
         "must already have the same element type, so conversions must be "
         "spelled with scalar/vector cast ops before or after the splat."
     ),
-    operands=[Operand("scalar", SCALAR)],
+    operands=[Operand("scalar", SCALAR, role=OperandRole.BROADCAST_SOURCE)],
     results=[Result("result", VECTOR)],
     constraints=[SameElementType("scalar", "result")],
     facts="loom_vector_splat_facts",
@@ -640,7 +641,9 @@ vector_from_elements = Op(
         "element type: the number of operands must equal the static element "
         "count, and every operand must have the vector element type."
     ),
-    operands=[Operand("elements", SCALAR, variadic=True)],
+    operands=[
+        Operand("elements", SCALAR, variadic=True, role=OperandRole.COMPOSITE_ELEMENT),
+    ],
     results=[Result("result", VECTOR)],
     constraints=[
         HasAllStaticVector("result"),
@@ -2329,9 +2332,9 @@ vector_select = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Lanewise select from two same-typed vector values using an i1 mask vector. True condition lanes choose true_value; false lanes choose false_value."),
     operands=[
-        Operand("condition", VECTOR),
-        Operand("true_value", VECTOR),
-        Operand("false_value", VECTOR),
+        Operand("condition", VECTOR, role=OperandRole.SELECT_CONDITION),
+        Operand("true_value", VECTOR, role=OperandRole.SELECT_PAYLOAD),
+        Operand("false_value", VECTOR, role=OperandRole.SELECT_PAYLOAD),
     ],
     results=[Result("result", VECTOR)],
     constraints=[
