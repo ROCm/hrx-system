@@ -285,6 +285,83 @@ TEST_F(VectorMemoryTest, FragmentFootprintUsesLogicalMatrixShape) {
   EXPECT_EQ(footprint.vector_access.first_vector_axis, 0);
 }
 
+TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
+  loom_value_id_t view = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_shaped_2d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_static(64), loom_dim_pack_static(128),
+                          /*encoding_id=*/0),
+      &view));
+  loom_value_id_t row = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &row));
+  loom_value_id_t column = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &column));
+  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &rows));
+  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &columns));
+  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_static(8), /*encoding_id=*/0),
+      &value));
+
+  loom_value_id_t indices[] = {row, column};
+  int64_t static_indices[] = {INT64_MIN, INT64_MIN};
+  loom_op_t* fragment_load = nullptr;
+  IREE_ASSERT_OK(loom_vector_fragment_load_build(
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RHS, view, indices,
+      IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
+      rows, columns, /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0,
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(8), /*encoding_id=*/0),
+      LOOM_LOCATION_UNKNOWN, &fragment_load));
+  EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, fragment_load),
+            LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT);
+
+  loom_op_t* fragment_store = nullptr;
+  IREE_ASSERT_OK(loom_vector_fragment_store_build(
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RESULT, value, view,
+      indices, IREE_ARRAYSIZE(indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), rows, columns, /*cache_scope=*/0,
+      /*cache_temporal=*/0, LOOM_LOCATION_UNKNOWN, &fragment_store));
+  EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, fragment_store),
+            LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT);
+
+  loom_op_t* vector_load = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, /*build_flags=*/0, view, indices, IREE_ARRAYSIZE(indices),
+      static_indices, IREE_ARRAYSIZE(static_indices), /*cache_scope=*/0,
+      /*cache_temporal=*/0,
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_static(8), /*encoding_id=*/0),
+      LOOM_LOCATION_UNKNOWN, &vector_load));
+  EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, vector_load),
+            LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE);
+
+  loom_op_t* vector_store = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, /*build_flags=*/0, value, view, indices,
+      IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
+      /*cache_scope=*/0, /*cache_temporal=*/0, LOOM_LOCATION_UNKNOWN,
+      &vector_store));
+  EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, vector_store),
+            LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE);
+  EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, nullptr),
+            LOOM_VECTOR_MEMORY_FOOTPRINT_NONE);
+}
+
 TEST_F(VectorMemoryTest, DenseLayoutComputesLaneOffsets) {
   loom_value_id_t layout = LOOM_VALUE_ID_INVALID;
   BuildDenseLayout(&layout);
