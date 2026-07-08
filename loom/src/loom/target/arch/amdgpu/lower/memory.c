@@ -466,19 +466,11 @@ void loom_amdgpu_mark_source_memory_plan_root_storage_demands(
 }
 
 static loom_value_id_t loom_amdgpu_memory_access_payload_value(
-    const loom_op_t* source_op) {
-  switch (source_op->kind) {
-    case LOOM_OP_VIEW_LOAD:
-    case LOOM_OP_VECTOR_LOAD:
-      return LOOM_VALUE_ID_INVALID;
-    case LOOM_OP_VIEW_STORE:
-      return loom_view_store_value(source_op);
-    case LOOM_OP_VECTOR_STORE:
-      return loom_vector_store_value(source_op);
-    default:
-      IREE_ASSERT(false);
-      return LOOM_VALUE_ID_INVALID;
-  }
+    const loom_module_t* module, const loom_op_t* source_op) {
+  const loom_memory_access_t access =
+      loom_memory_access_cast(module, source_op);
+  IREE_ASSERT(loom_memory_access_isa(access));
+  return loom_memory_access_value(access);
 }
 
 void loom_amdgpu_mark_memory_access_plan_storage_demands(
@@ -490,8 +482,8 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
   loom_amdgpu_mark_source_memory_plan_storage_demands(
       context, &plan->packets[0].access.source);
 
-  const loom_value_id_t value =
-      loom_amdgpu_memory_access_payload_value(source_op);
+  const loom_value_id_t value = loom_amdgpu_memory_access_payload_value(
+      loom_low_lower_context_module(context), source_op);
   if (value != LOOM_VALUE_ID_INVALID) {
     loom_low_lower_require_source_value_storage(context, value);
   }
@@ -2363,28 +2355,33 @@ loom_amdgpu_memory_operation_kind_from_source(
   IREE_BUILTIN_UNREACHABLE();
 }
 
+static loom_type_t loom_amdgpu_memory_access_value_vector_type(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (value_id == LOOM_VALUE_ID_INVALID || value_id >= module->values.count) {
+    return loom_type_none();
+  }
+  const loom_type_t value_type = loom_module_value_type(module, value_id);
+  if (loom_type_is_vector(value_type)) return value_type;
+  return loom_type_shaped_1d(LOOM_TYPE_VECTOR,
+                             loom_type_element_type(value_type),
+                             loom_dim_pack_static(1), /*encoding_id=*/0);
+}
+
 static loom_type_t loom_amdgpu_memory_access_source_vector_type(
     const loom_module_t* module, const loom_op_t* source_op) {
-  loom_type_t scalar_type = loom_type_none();
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_LOAD:
-      return loom_module_value_type(module, loom_vector_load_result(source_op));
-    case LOOM_OP_VECTOR_STORE:
-      return loom_module_value_type(module, loom_vector_store_value(source_op));
-    case LOOM_OP_VIEW_LOAD:
-      scalar_type =
-          loom_module_value_type(module, loom_view_load_result(source_op));
-      break;
-    case LOOM_OP_VIEW_STORE:
-      scalar_type =
-          loom_module_value_type(module, loom_view_store_value(source_op));
-      break;
-    default:
-      return loom_type_none();
+  const loom_memory_access_t access =
+      loom_memory_access_cast(module, source_op);
+  IREE_ASSERT(loom_memory_access_isa(access));
+  const loom_value_id_t value = loom_memory_access_value(access);
+  if (value != LOOM_VALUE_ID_INVALID) {
+    return loom_amdgpu_memory_access_value_vector_type(module, value);
   }
-  return loom_type_shaped_1d(LOOM_TYPE_VECTOR,
-                             loom_type_element_type(scalar_type),
-                             loom_dim_pack_static(1), /*encoding_id=*/0);
+  if (source_op->result_count != 1) {
+    IREE_ASSERT_UNREACHABLE("expected load-like memory access result");
+    return loom_type_none();
+  }
+  return loom_amdgpu_memory_access_value_vector_type(
+      module, loom_op_const_results(source_op)[0]);
 }
 
 static bool loom_amdgpu_memory_low16_float_use_is_supported(
@@ -2398,8 +2395,13 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
            (element_type == LOOM_SCALAR_TYPE_F16 ||
             element_type == LOOM_SCALAR_TYPE_BF16);
   }
-  if (loom_view_store_isa(user_op) &&
-      loom_view_store_value(user_op) == value_id) {
+  const loom_memory_access_t store_access =
+      loom_memory_access_cast(module, user_op);
+  if (loom_memory_access_isa(store_access) &&
+      loom_traits_may_write(user_op->traits) &&
+      !loom_traits_may_read(user_op->traits) &&
+      !loom_memory_access_has_atomic_attrs(store_access) &&
+      loom_memory_access_value(store_access) == value_id) {
     return true;
   }
   if (loom_vector_from_elements_isa(user_op)) {
@@ -2427,7 +2429,7 @@ static bool loom_amdgpu_memory_access_selects_low16_float_descriptor(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t kind, loom_type_t vector_type) {
   if (kind != LOOM_AMDGPU_MEMORY_OPERATION_LOAD ||
-      !loom_view_load_isa(source_op)) {
+      source_op->result_count != 1) {
     return false;
   }
 
@@ -2439,7 +2441,7 @@ static bool loom_amdgpu_memory_access_selects_low16_float_descriptor(
     return false;
   }
 
-  const loom_value_id_t result_id = loom_view_load_result(source_op);
+  const loom_value_id_t result_id = loom_op_const_results(source_op)[0];
   const loom_value_t* result_value = loom_module_value(module, result_id);
   const loom_use_t* use = NULL;
   loom_value_for_each_use(result_value, use) {
@@ -2455,7 +2457,7 @@ static bool loom_amdgpu_memory_access_selects_signed_i16_descriptor(
     const loom_op_t* source_op, loom_amdgpu_memory_operation_kind_t kind,
     loom_type_t vector_type) {
   return kind == LOOM_AMDGPU_MEMORY_OPERATION_LOAD &&
-         loom_view_load_isa(source_op) &&
+         source_op->result_count == 1 &&
          loom_amdgpu_static_vector_lane_count(vector_type, LOOM_SCALAR_TYPE_I16,
                                               1) == 1;
 }

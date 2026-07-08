@@ -1603,29 +1603,17 @@ iree_status_t loom_amdgpu_make_memory_attrs(
 }
 
 static loom_value_id_t loom_amdgpu_memory_load_view(
-    const loom_op_t* source_op) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_LOAD:
-      return loom_vector_load_view(source_op);
-    case LOOM_OP_VIEW_LOAD:
-      return loom_view_load_view(source_op);
-    default:
-      IREE_ASSERT_UNREACHABLE("expected AMDGPU memory load op");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+    const loom_module_t* module, const loom_op_t* source_op) {
+  const loom_memory_access_t access =
+      loom_memory_access_cast(module, source_op);
+  IREE_ASSERT(loom_memory_access_isa(access));
+  return loom_memory_access_view(access);
 }
 
 static loom_value_id_t loom_amdgpu_memory_load_result(
     const loom_op_t* source_op) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_LOAD:
-      return loom_vector_load_result(source_op);
-    case LOOM_OP_VIEW_LOAD:
-      return loom_view_load_result(source_op);
-    default:
-      IREE_ASSERT_UNREACHABLE("expected AMDGPU memory load op");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  IREE_ASSERT_EQ(source_op->result_count, 1u);
+  return loom_op_const_results(source_op)[0];
 }
 
 static iree_status_t loom_amdgpu_memory_load_result_is_vgpr(
@@ -1702,29 +1690,21 @@ static iree_status_t loom_amdgpu_repair_memory_load_packet_result(
 }
 
 static loom_value_id_t loom_amdgpu_memory_store_value(
-    const loom_op_t* source_op) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_STORE:
-      return loom_vector_store_value(source_op);
-    case LOOM_OP_VIEW_STORE:
-      return loom_view_store_value(source_op);
-    default:
-      IREE_ASSERT_UNREACHABLE("expected AMDGPU memory store op");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+    const loom_module_t* module, const loom_op_t* source_op) {
+  const loom_memory_access_t access =
+      loom_memory_access_cast(module, source_op);
+  IREE_ASSERT(loom_memory_access_isa(access));
+  const loom_value_id_t value = loom_memory_access_value(access);
+  IREE_ASSERT_NE(value, LOOM_VALUE_ID_INVALID);
+  return value;
 }
 
 static loom_value_id_t loom_amdgpu_memory_store_view(
-    const loom_op_t* source_op) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_STORE:
-      return loom_vector_store_view(source_op);
-    case LOOM_OP_VIEW_STORE:
-      return loom_view_store_view(source_op);
-    default:
-      IREE_ASSERT_UNREACHABLE("expected AMDGPU memory store op");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+    const loom_module_t* module, const loom_op_t* source_op) {
+  const loom_memory_access_t access =
+      loom_memory_access_cast(module, source_op);
+  IREE_ASSERT(loom_memory_access_isa(access));
+  return loom_memory_access_view(access);
 }
 
 static iree_status_t loom_amdgpu_bind_memory_load_result(
@@ -1756,7 +1736,10 @@ static iree_status_t loom_amdgpu_lower_memory_packet_load(
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   if (loom_amdgpu_memory_access_needs_hal_resource(access)) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-        context, loom_amdgpu_memory_load_view(source_op), &low_resource));
+        context,
+        loom_amdgpu_memory_load_view(loom_low_lower_context_module(context),
+                                     source_op),
+        &low_resource));
   }
 
   loom_value_id_t low_vaddr = LOOM_VALUE_ID_INVALID;
@@ -1958,7 +1941,10 @@ static iree_status_t loom_amdgpu_lower_memory_packet_store(
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   if (loom_amdgpu_memory_access_needs_hal_resource(access)) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-        context, loom_amdgpu_memory_store_view(source_op), &low_resource));
+        context,
+        loom_amdgpu_memory_store_view(loom_low_lower_context_module(context),
+                                      source_op),
+        &low_resource));
   }
 
   loom_value_id_t low_vaddr = LOOM_VALUE_ID_INVALID;
@@ -2161,8 +2147,8 @@ iree_status_t loom_amdgpu_lower_memory_store(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan) {
   IREE_ASSERT_GT(plan->packet_count, 0);
-  const loom_value_id_t source_value =
-      loom_amdgpu_memory_store_value(source_op);
+  const loom_value_id_t source_value = loom_amdgpu_memory_store_value(
+      loom_low_lower_context_module(context), source_op);
   loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, source_value, &low_value));
