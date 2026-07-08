@@ -33,6 +33,8 @@ from loom.gen.ops.c_enums import (
     FIELD_CATEGORY_MAP,
     LOOM_FIELD_REF_MAX_INDEX,
     OPERAND_OWNERSHIP_EFFECT_MAP,
+    OPERAND_ROLE_MAP,
+    OPERAND_ROLE_MASK_MAP,
     OWNERSHIP_CARRIER_MAP,
     RESULT_OWNERSHIP_EFFECT_MAP,
     TYPE_CONSTRAINT_MAP,
@@ -295,10 +297,11 @@ def generate_tables_c(
                 else:
                     ownership_effect_name = OPERAND_OWNERSHIP_EFFECT_MAP[ownership_effect.kind]
                     ownership_carrier_name = OWNERSHIP_CARRIER_MAP[ownership_effect.carrier]
-                if ownership_effect is None:
+                role_name = OPERAND_ROLE_MAP[operand.role]
+                if ownership_effect is None and role_name == "LOOM_OPERAND_ROLE_NONE":
                     lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}}},")
                 else:
-                    lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}, {ownership_effect_name}, {ownership_carrier_name}}},")
+                    lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}, {ownership_effect_name}, {ownership_carrier_name}, {role_name}}},")
             if synthesize_func_args_operand:
                 lines.append(f"    {{{_bstring_expr(func_args_name)}, LOOM_TYPE_CONSTRAINT_ANY, LOOM_OPERAND_VARIADIC}},")
             lines.append("};")
@@ -570,6 +573,9 @@ def generate_tables_c(
             lines.append(f"    .operand_descriptor_count = IREE_ARRAYSIZE({operand_desc_ptr}),")
         append_nonzero("fixed_result_count", layout.fixed_result_count)
         append_nonzero("vtable_flags", vtable_flags_str)
+        operand_role_mask_parts = [OPERAND_ROLE_MASK_MAP[operand.role] for operand in op.operands if operand.role in OPERAND_ROLE_MASK_MAP]
+        if operand_role_mask_parts:
+            lines.append(f"    .operand_role_mask = {' | '.join(sorted(set(operand_role_mask_parts)))},")
         if successor_selector_operand_index is not None:
             lines.append("    .control_flow_flags = LOOM_OP_CONTROL_FLOW_HAS_SUCCESSOR_SELECTOR,")
             lines.append(f"    .successor_selector_operand_index = {successor_selector_operand_index},")

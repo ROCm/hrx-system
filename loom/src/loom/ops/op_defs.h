@@ -727,6 +727,44 @@ enum loom_operand_flag_bits_e {
 };
 typedef uint8_t loom_operand_flags_t;
 
+// Semantic role of an operand field independent of its author-facing name.
+enum loom_operand_role_e {
+  // Operand has no special cross-op semantic role.
+  LOOM_OPERAND_ROLE_NONE = 0,
+  // Operand controls a branch or region transfer.
+  LOOM_OPERAND_ROLE_CONTROL_CONDITION = 1,
+  // Operand selects between value payloads.
+  LOOM_OPERAND_ROLE_SELECT_CONDITION = 2,
+  // Operand is one arm of a value-selecting operation.
+  LOOM_OPERAND_ROLE_SELECT_PAYLOAD = 3,
+  // Operand is broadcast into every element of a composite result.
+  LOOM_OPERAND_ROLE_BROADCAST_SOURCE = 4,
+  // Operand contributes one logical element to a composite result.
+  LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT = 5,
+};
+typedef uint8_t loom_operand_role_t;
+
+enum loom_operand_role_mask_bits_e {
+  LOOM_OPERAND_ROLE_MASK_CONTROL_CONDITION =
+      1u << LOOM_OPERAND_ROLE_CONTROL_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION =
+      1u << LOOM_OPERAND_ROLE_SELECT_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD = 1u
+                                          << LOOM_OPERAND_ROLE_SELECT_PAYLOAD,
+  LOOM_OPERAND_ROLE_MASK_BROADCAST_SOURCE =
+      1u << LOOM_OPERAND_ROLE_BROADCAST_SOURCE,
+  LOOM_OPERAND_ROLE_MASK_COMPOSITE_ELEMENT =
+      1u << LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT,
+};
+typedef uint8_t loom_operand_role_mask_t;
+
+static inline loom_operand_role_mask_t loom_operand_role_mask_bit(
+    loom_operand_role_t role) {
+  return role == LOOM_OPERAND_ROLE_NONE || role >= 8
+             ? 0
+             : (loom_operand_role_mask_t)(1u << role);
+}
+
 enum loom_result_flag_bits_e {
   LOOM_RESULT_VARIADIC = 1u << 0,
   LOOM_RESULT_ALLOCATES = 1u << 1,
@@ -773,6 +811,8 @@ typedef struct loom_operand_descriptor_t {
   loom_operand_ownership_effect_t ownership_effect;
   // Carrier mode for the operand ownership action.
   loom_ownership_carrier_t ownership_carrier;
+  // Semantic role of this operand field.
+  loom_operand_role_t role;
 } loom_operand_descriptor_t;
 
 static_assert(sizeof(loom_operand_descriptor_t) == 16,
@@ -1016,6 +1056,13 @@ bool loom_op_operand_descriptor_at(
     const loom_op_vtable_t* vtable, const loom_op_t* op, uint16_t operand_index,
     const loom_operand_descriptor_t** out_descriptor, uint8_t* out_field_index,
     uint16_t* out_element_index);
+
+// Returns the semantic role for a flat operand index, or
+// LOOM_OPERAND_ROLE_NONE when the op has no descriptor metadata or the operand
+// has no declared role.
+loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
+                                            const loom_op_t* op,
+                                            uint16_t operand_index);
 
 // Binding kind for BindingList format elements.
 typedef enum loom_binding_kind_e {

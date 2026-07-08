@@ -1276,8 +1276,8 @@ struct loom_op_vtable_t {
   uint8_t operand_descriptor_count;
   // Structural control-flow semantics declared by the op kind.
   loom_op_control_flow_flags_t control_flow_flags;
-  // Reserved for future compact control-flow metadata. Always zero.
-  uint8_t control_flow_reserved;
+  // Bitmask of semantic operand roles present on this op kind.
+  uint8_t operand_role_mask;
   // Selector operand index for multi-successor terminators. Valid only when
   // control_flow_flags has LOOM_OP_CONTROL_FLOW_HAS_SUCCESSOR_SELECTOR.
   uint16_t successor_selector_operand_index;

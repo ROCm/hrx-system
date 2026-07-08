@@ -61,6 +61,7 @@ from loom.dsl import (
     Op,
     OpCategory,
     Operand,
+    OperandRole,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
@@ -890,6 +891,32 @@ def test_generate_tables_preserves_operand_and_result_descriptor_names() -> None
     assert ('{_BSTRING(7, "results"), LOOM_TYPE_CONSTRAINT_INTEGER, LOOM_RESULT_VARIADIC}') in tables_c
 
 
+def test_generate_tables_emits_operand_roles_when_declared() -> None:
+    op = Op(
+        "test.select",
+        group=Dialect("test"),
+        operands=[
+            Operand("condition", INTEGER, role=OperandRole.SELECT_CONDITION),
+            Operand("true_value", INTEGER, role=OperandRole.SELECT_PAYLOAD),
+            Operand("false_value", INTEGER, role=OperandRole.SELECT_PAYLOAD),
+        ],
+        results=[Result("result", INTEGER)],
+        format=[
+            Ref("condition"),
+            Ref("true_value"),
+            Ref("false_value"),
+            COLON,
+            ResultType("result"),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ('{_BSTRING(9, "condition"), LOOM_TYPE_CONSTRAINT_INTEGER, 0, LOOM_OPERAND_OWNERSHIP_NONE, LOOM_OWNERSHIP_CARRIER_NONE, LOOM_OPERAND_ROLE_SELECT_CONDITION}') in tables_c
+    assert ('{_BSTRING(10, "true_value"), LOOM_TYPE_CONSTRAINT_INTEGER, 0, LOOM_OPERAND_OWNERSHIP_NONE, LOOM_OWNERSHIP_CARRIER_NONE, LOOM_OPERAND_ROLE_SELECT_PAYLOAD}') in tables_c
+    assert (".operand_role_mask = LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION | LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD,") in tables_c
+
+
 def test_generate_tables_emits_ownership_descriptors_only_when_needed() -> None:
     op = Op(
         "test.resource.retain",
@@ -914,7 +941,7 @@ def test_generate_tables_emits_ownership_descriptors_only_when_needed() -> None:
 
     tables_c = generate_tables_c("test", 0, [op, alias])
 
-    assert ('{_BSTRING(8, "resource"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_OPERAND_OWNERSHIP_RETAIN, LOOM_OWNERSHIP_CARRIER_BY_VALUE}') in tables_c
+    assert ('{_BSTRING(8, "resource"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_OPERAND_OWNERSHIP_RETAIN, LOOM_OWNERSHIP_CARRIER_BY_VALUE, LOOM_OPERAND_ROLE_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_RETAINED, LOOM_RESULT_OWNERSHIP_SOURCE_FIELD_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_ALIAS, 0}') in tables_c
 

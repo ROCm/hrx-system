@@ -86,6 +86,7 @@ __all__ = [
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
+    "OperandRole",
     "Operand",
     "Result",
     "TiedResult",
@@ -387,6 +388,18 @@ def type_constraint_name(constraint: TypeConstraint) -> str:
 # ============================================================================
 
 
+@unique
+class OperandRole(Enum):
+    """Semantic role of an operand field independent of its display name."""
+
+    NONE = "none"
+    CONTROL_CONDITION = "control_condition"
+    SELECT_CONDITION = "select_condition"
+    SELECT_PAYLOAD = "select_payload"
+    BROADCAST_SOURCE = "broadcast_source"
+    COMPOSITE_ELEMENT = "composite_element"
+
+
 @dataclass(frozen=True, slots=True)
 class Operand:
     """An SSA value operand (input to the op at runtime).
@@ -396,6 +409,7 @@ class Operand:
     doc: Human-readable description.
     variadic: If True, this is zero-or-more values (list[Value]).
     optional: If True, this operand may be absent.
+    role: Semantic role consumed by generic analyses.
     """
 
     name: str
@@ -403,6 +417,7 @@ class Operand:
     doc: str = ""
     variadic: bool = False
     optional: bool = False
+    role: OperandRole = OperandRole.NONE
 
 
 @dataclass(frozen=True, slots=True)
