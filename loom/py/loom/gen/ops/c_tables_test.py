@@ -31,12 +31,14 @@ from loom.assembly import (
 from loom.dsl import (
     ANY,
     ATTR_TYPE_BYTES,
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_SYMBOL,
     DECOMPOSABLE,
     ELEMENTWISE,
+    HINT,
     INTEGER,
     POOL,
     SYMBOL_DEFINE,
@@ -62,6 +64,8 @@ from loom.dsl import (
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
+    Reads,
+    ReadWrites,
     RegionDef,
     Result,
     Retain,
@@ -74,6 +78,7 @@ from loom.dsl import (
     TypeDef,
     TypeSemantic,
     UnpackedPayloadBitCountMatchesStorage,
+    Writes,
 )
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
@@ -992,17 +997,138 @@ def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
         ],
         results=[Result("result", ANY)],
         attrs=[AttrDef("static_indices", ATTR_TYPE_I64_ARRAY)],
+        effects=[Reads("view")],
         interfaces=[MemoryAccessInterface()],
     )
 
     tables_c = generate_tables_c("test", 0, [op])
 
     assert "static const loom_memory_access_vtable_t loom_test_load_memory_access" in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_LOAD," in tables_c
     assert ".view_operand_index = 0," in tables_c
     assert ".value_operand_index = 255," in tables_c
     assert ".indices_operand_field_index = 1," in tables_c
     assert ".static_indices_attr_index = 0," in tables_c
     assert ".cache_scope_attr_index = 255," in tables_c
+
+
+def test_generate_tables_memory_access_operation_kind_rows() -> None:
+    dialect = Dialect("test")
+    atomic_kind = EnumDef("AtomicKind", [EnumCase("addi", 0)])
+    atomic_ordering = EnumDef("AtomicOrdering", [EnumCase("relaxed", 0)])
+    atomic_scope = EnumDef("AtomicScope", [EnumCase("workgroup", 0)])
+
+    def atomic_attrs() -> list[AttrDef]:
+        return [
+            AttrDef("kind", ATTR_TYPE_ENUM, enum_def=atomic_kind),
+            AttrDef("ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+            AttrDef("scope", ATTR_TYPE_ENUM, enum_def=atomic_scope),
+        ]
+
+    ops = [
+        Op(
+            "test.store",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            effects=[Writes("view")],
+            interfaces=[MemoryAccessInterface(value="value")],
+        ),
+        Op(
+            "test.prefetch",
+            group=dialect,
+            operands=[
+                Operand("view", ANY),
+            ],
+            traits=[HINT],
+            interfaces=[MemoryAccessInterface()],
+        ),
+        Op(
+            "test.atomic.reduce",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            attrs=atomic_attrs(),
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    value="value",
+                    atomic_kind="kind",
+                    atomic_ordering="ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+        Op(
+            "test.atomic.rmw",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            results=[Result("old", ANY)],
+            attrs=atomic_attrs(),
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    value="value",
+                    atomic_kind="kind",
+                    atomic_ordering="ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+        Op(
+            "test.atomic.cmpxchg",
+            group=dialect,
+            operands=[
+                Operand("expected", ANY),
+                Operand("replacement", ANY),
+                Operand("view", ANY),
+            ],
+            results=[Result("old", ANY)],
+            attrs=[
+                AttrDef("success_ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+                AttrDef("failure_ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+                AttrDef("scope", ATTR_TYPE_ENUM, enum_def=atomic_scope),
+            ],
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    expected="expected",
+                    replacement="replacement",
+                    atomic_success_ordering="success_ordering",
+                    atomic_failure_ordering="failure_ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+    ]
+
+    tables_c = generate_tables_c("test", 0, ops)
+
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_PREFETCH," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG," in tables_c
+
+
+def test_generate_tables_memory_access_rejects_missing_effects() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[Operand("view", ANY)],
+        results=[Result("result", ANY)],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    with _raises_value_error(r"MemoryAccessInterface on 'test\.load': unable to infer memory access operation kind"):
+        generate_tables_c("test", 0, [op])
 
 
 def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None:
@@ -1015,6 +1141,7 @@ def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None
             Operand("auxiliary", ANY, variadic=True),
         ],
         results=[Result("result", ANY)],
+        effects=[Reads("view")],
         interfaces=[MemoryAccessInterface()],
     )
 

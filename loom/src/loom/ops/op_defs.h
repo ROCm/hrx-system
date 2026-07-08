@@ -1434,6 +1434,10 @@ static inline bool loom_memory_access_isa(loom_memory_access_t access) {
 loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
                                              const loom_op_t* op);
 
+// Returns the memory operation family represented by the op shape.
+loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
+    loom_memory_access_t access);
+
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);
 

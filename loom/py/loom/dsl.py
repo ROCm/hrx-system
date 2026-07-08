@@ -229,6 +229,7 @@ __all__ = [
     "FuncLikeInterface",
     "LoopLikeInterface",
     "MemoryAccessInterface",
+    "MemoryAccessOperationKind",
     "RegionBranchInterface",
     "TargetLikeInterface",
     # Op declaration.
@@ -3454,6 +3455,18 @@ class RegionBranchInterface(NamedTuple):
 _DEFAULT_INTERFACE_FIELD = object()
 
 
+@unique
+class MemoryAccessOperationKind(Enum):
+    """Operation family represented by a MemoryAccess op shape."""
+
+    LOAD = "load"
+    STORE = "store"
+    PREFETCH = "prefetch"
+    ATOMIC_REDUCE = "atomic_reduce"
+    ATOMIC_RMW = "atomic_rmw"
+    ATOMIC_CMPXCHG = "atomic_cmpxchg"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class MemoryAccessInterface:
     """Interface for ops that access memory through a view-like operand.
@@ -3499,6 +3512,8 @@ class MemoryAccessInterface:
     atomic_failure_ordering: str | None = None
     # Atomic synchronization scope attr.
     atomic_scope: str | None = None
+    # Operation family represented by this op shape.
+    operation_kind: MemoryAccessOperationKind | None = None
     # Fields explicitly supplied by the op declaration author.
     _explicit_fields: frozenset[str] = frozenset()
 
@@ -3521,6 +3536,7 @@ class MemoryAccessInterface:
         atomic_success_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_failure_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_scope: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        operation_kind: MemoryAccessOperationKind | None = None,
     ) -> None:
         explicit_fields: set[str] = set()
 
@@ -3603,6 +3619,14 @@ class MemoryAccessInterface:
             "atomic_scope",
             _resolve("atomic_scope", atomic_scope, "scope"),
         )
+        if operation_kind is not None and not isinstance(
+            operation_kind, MemoryAccessOperationKind
+        ):
+            raise TypeError(
+                "MemoryAccessInterface field 'operation_kind': expected "
+                f"MemoryAccessOperationKind or None, got {operation_kind!r}"
+            )
+        object.__setattr__(self, "operation_kind", operation_kind)
         object.__setattr__(self, "_explicit_fields", frozenset(explicit_fields))
 
 

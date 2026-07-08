@@ -33,14 +33,22 @@ typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 #define LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE UINT32_MAX
 
-typedef enum loom_low_source_memory_operation_kind_e {
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD = 0,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE = 1,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH = 2,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE = 3,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW = 4,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG = 5,
-} loom_low_source_memory_operation_kind_t;
+typedef loom_memory_access_operation_kind_t
+    loom_low_source_memory_operation_kind_t;
+
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD LOOM_MEMORY_ACCESS_OPERATION_LOAD
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE \
+  LOOM_MEMORY_ACCESS_OPERATION_STORE
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH \
+  LOOM_MEMORY_ACCESS_OPERATION_PREFETCH
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_ \
+  LOOM_MEMORY_ACCESS_OPERATION_COUNT_
 
 typedef enum loom_low_source_memory_dynamic_index_source_e {
   // The access has no dynamic index.
@@ -98,7 +106,6 @@ typedef struct loom_low_source_memory_access_diagnostic_t {
 
 // Classifies the operation family represented by a MemoryAccess op.
 bool loom_low_source_memory_operation_kind_from_access(
-    const loom_module_t* module, const loom_op_t* source_op,
     loom_memory_access_t access,
     loom_low_source_memory_operation_kind_t* out_operation_kind);
 
