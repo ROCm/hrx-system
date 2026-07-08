@@ -1147,6 +1147,7 @@ enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL = 1u << 14,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI = 1u << 15,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY = 1u << 16,
+  LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK = 1u << 17,
 };
 
 #define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
@@ -1170,7 +1171,8 @@ static const loom_amdgpu_source_producer_flags_t
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_SCAN)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_SHUFFLE)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR |
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK,
 };
 static_assert(IREE_ARRAYSIZE(kAmdgpuKernelSourceProducerFlags) ==
                   LOOM_OP_KERNEL_COUNT_,
@@ -1735,7 +1737,8 @@ static bool loom_amdgpu_source_value_is_direct_native_i1_mask_except(
                                                           excluded_value_id);
   }
 
-  return loom_kernel_subgroup_shuffle_isa(defining_op) &&
+  return iree_any_bit_set(loom_amdgpu_source_producer_flags(defining_op->kind),
+                          LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK) &&
          loom_value_def_index(value) == 1;
 }
 
@@ -2321,7 +2324,8 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
                                next_excluded_value_id));
   }
 
-  return loom_kernel_subgroup_shuffle_isa(defining_op) &&
+  return iree_any_bit_set(loom_amdgpu_source_producer_flags(defining_op->kind),
+                          LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK) &&
          loom_value_def_index(value) == 1;
 }
 
