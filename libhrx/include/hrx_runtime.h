@@ -225,10 +225,16 @@ typedef uint32_t hrx_buffer_usage_t;
 #define HRX_BUFFER_USAGE_DEFAULT 0x00000C03u
 
 // Map flags for hrx_buffer_map. Values match iree_hal_memory_access_t.
+// HRX_MAP_DISCARD must be combined with HRX_MAP_WRITE.
 typedef uint16_t hrx_map_flags_t;
 #define HRX_MAP_READ HRX_MEMORY_ACCESS_READ
 #define HRX_MAP_WRITE HRX_MEMORY_ACCESS_WRITE
 #define HRX_MAP_DISCARD HRX_MEMORY_ACCESS_DISCARD
+
+// Buffer mapping mode. Values match iree_hal_mapping_mode_t.
+typedef uint32_t hrx_mapping_mode_t;
+#define HRX_MAPPING_MODE_SCOPED 0x00000001u
+#define HRX_MAPPING_MODE_PERSISTENT 0x00000002u
 
 // Dispatch flags (hrx-specific, no IREE equivalent).
 typedef enum hrx_dispatch_flags_t {
@@ -589,17 +595,17 @@ HRX_API hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
                                     size_t offset, size_t size,
                                     void** mapped_ptr);
 
-HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
+// Maps a buffer range with an explicit mapping mode. Only one mapping may be
+// active on an hrx_buffer_t at a time; callers must unmap before mapping again.
+// Persistent mappings remain valid until hrx_buffer_unmap or buffer release and
+// require HRX_BUFFER_USAGE_MAPPING_PERSISTENT.
+HRX_API hrx_status_t hrx_buffer_map_with_mode(hrx_buffer_t buffer,
+                                              hrx_mapping_mode_t mapping_mode,
+                                              hrx_map_flags_t flags,
+                                              size_t offset, size_t size,
+                                              void** mapped_ptr);
 
-// Maps the whole buffer persistently (map once, keep the pointer for the
-// buffer's lifetime). The returned pointer stays valid until the buffer is
-// released; callers must use hrx_buffer_flush_range /
-// hrx_buffer_invalidate_range to maintain host<->device cache coherence around
-// device work instead of re-mapping. The buffer must be allocated with
-// HRX_BUFFER_USAGE_MAPPING_PERSISTENT.
-HRX_API hrx_status_t hrx_buffer_map_persistent(hrx_buffer_t buffer,
-                                               hrx_map_flags_t flags,
-                                               void** mapped_ptr);
+HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
 
 // Flushes host writes in [offset, offset+size) out to the device (host->device
 // cache management). Cheap (no copy); the buffer must be currently mapped.

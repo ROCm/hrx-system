@@ -42,6 +42,89 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer map and unmap", "[memory][map]") {
   hrx().stream_release(stream);
 }
 
+TEST_CASE_METHOD(HrxTestFixture, "Buffer map with explicit scoped mode",
+                 "[memory][map]") {
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(
+      stream, 1024, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+
+  void* ptr = nullptr;
+  hrx_status_t invalid_mode_status = hrx().buffer_map_with_mode(
+      buf, /*mapping_mode=*/0, HRX_MAP_WRITE, 0, 1024, &ptr);
+  REQUIRE(!hrx_status_is_ok(invalid_mode_status));
+  hrx().status_ignore(invalid_mode_status);
+
+  hrx_status_t unknown_flags_status = hrx().buffer_map_with_mode(
+      buf, HRX_MAPPING_MODE_SCOPED, (hrx_map_flags_t)0x8000u, 0, 1024, &ptr);
+  REQUIRE(!hrx_status_is_ok(unknown_flags_status));
+  hrx().status_ignore(unknown_flags_status);
+
+  hrx_status_t discard_without_write_status = hrx().buffer_map_with_mode(
+      buf, HRX_MAPPING_MODE_SCOPED, HRX_MAP_DISCARD, 0, 1024, &ptr);
+  REQUIRE(!hrx_status_is_ok(discard_without_write_status));
+  hrx().status_ignore(discard_without_write_status);
+
+  REQUIRE_OK(hrx().buffer_map_with_mode(buf, HRX_MAPPING_MODE_SCOPED,
+                                        HRX_MAP_WRITE | HRX_MAP_DISCARD, 0,
+                                        1024, &ptr));
+  REQUIRE(ptr != nullptr);
+  memset(ptr, 0xCD, 1024);
+
+  void* second_ptr = nullptr;
+  hrx_status_t second_map_status = hrx().buffer_map_with_mode(
+      buf, HRX_MAPPING_MODE_SCOPED, HRX_MAP_READ, 0, 1024, &second_ptr);
+  REQUIRE(!hrx_status_is_ok(second_map_status));
+  hrx().status_ignore(second_map_status);
+
+  REQUIRE_OK(hrx().buffer_unmap(buf));
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
+}
+
+TEST_CASE_METHOD(HrxTestFixture, "Buffer map with persistent mode",
+                 "[memory][map][persistent]") {
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+
+  hrx_buffer_t buf = nullptr;
+  hrx_status_t status = hrx().buffer_allocate(
+      stream, 256, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT, &buf);
+  if (!hrx_status_is_ok(status)) {
+    hrx().status_ignore(status);
+    hrx().stream_release(stream);
+    SKIP("persistent mapping allocation is unsupported on this device");
+  }
+
+  void* ptr = nullptr;
+  status =
+      hrx().buffer_map_with_mode(buf, HRX_MAPPING_MODE_PERSISTENT,
+                                 HRX_MAP_READ | HRX_MAP_WRITE, 0, 256, &ptr);
+  if (!hrx_status_is_ok(status)) {
+    hrx().status_ignore(status);
+    hrx().buffer_release(buf);
+    hrx().stream_release(stream);
+    SKIP("persistent mapping is unsupported on this device");
+  }
+  REQUIRE(ptr != nullptr);
+
+  memset(ptr, 0xEF, 256);
+
+  void* second_ptr = nullptr;
+  hrx_status_t second_map_status = hrx().buffer_map_with_mode(
+      buf, HRX_MAPPING_MODE_PERSISTENT, HRX_MAP_READ, 0, 256, &second_ptr);
+  REQUIRE(!hrx_status_is_ok(second_map_status));
+  hrx().status_ignore(second_map_status);
+
+  REQUIRE_OK(hrx().buffer_unmap(buf));
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
+}
+
 TEST_CASE_METHOD(HrxTestFixture, "Buffer map read back written data",
                  "[memory][map]") {
   hrx_stream_t stream = nullptr;

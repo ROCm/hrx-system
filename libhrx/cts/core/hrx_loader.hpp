@@ -116,6 +116,7 @@ class HrxLoader {
   decltype(&hrx_buffer_retain) buffer_retain;
   decltype(&hrx_buffer_release) buffer_release;
   decltype(&hrx_buffer_map) buffer_map;
+  decltype(&hrx_buffer_map_with_mode) buffer_map_with_mode;
   decltype(&hrx_buffer_unmap) buffer_unmap;
   decltype(&hrx_buffer_get_device_ptr) buffer_get_device_ptr;
   decltype(&hrx_buffer_get_size) buffer_get_size;
