@@ -412,8 +412,8 @@ typedef struct loom_amdgpu_fmaf_literal_operand_form_t {
   uint32_t source_operand_index;
   // Diagnostic role for the literal operand.
   iree_string_view_t literal_role;
-  // Descriptor key implementing the literal operand form.
-  iree_string_view_t descriptor_key;
+  // Descriptor ref implementing the literal operand form.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_fmaf_literal_operand_form_t;
 
 static const loom_amdgpu_fmaf_literal_operand_form_t
@@ -422,19 +422,19 @@ static const loom_amdgpu_fmaf_literal_operand_form_t
             .operand_form = IREE_SVL("fmaak"),
             .source_operand_index = 2,
             .literal_role = IREE_SVL("addend"),
-            .descriptor_key = IREE_SVL("amdgpu.v_fmaak_f32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAAK_F32,
         },
         {
             .operand_form = IREE_SVL("fmamk"),
             .source_operand_index = 0,
             .literal_role = IREE_SVL("multiply_lhs"),
-            .descriptor_key = IREE_SVL("amdgpu.v_fmamk_f32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAMK_F32,
         },
         {
             .operand_form = IREE_SVL("fmamk"),
             .source_operand_index = 1,
             .literal_role = IREE_SVL("multiply_rhs"),
-            .descriptor_key = IREE_SVL("amdgpu.v_fmamk_f32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAMK_F32,
         },
 };
 
@@ -526,8 +526,8 @@ iree_status_t loom_amdgpu_emit_fmaf_literal_operand_form_diagnostic(
       selected_literal ? IREE_SV("selected") : IREE_SV("rejected");
   const iree_string_view_t reason_key =
       selected_literal ? IREE_SV("literal_descriptor_selected")
-                       : (loom_amdgpu_descriptor_set_has_key(
-                              descriptor_set, literal_form.descriptor_key)
+                       : (loom_amdgpu_descriptor_set_has_ref(
+                              descriptor_set, literal_form.descriptor_ref)
                               ? IREE_SV("literal_operand_contract_unmatched")
                               : IREE_SV("literal_descriptor_unavailable"));
 

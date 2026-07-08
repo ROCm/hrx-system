@@ -137,10 +137,6 @@ bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate);
 
-// Returns true when |descriptor_set| contains a descriptor with |key|.
-bool loom_amdgpu_descriptor_set_has_key(
-    const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key);
-
 // Returns true when a descriptor row has an implicit resource operand.
 bool loom_amdgpu_descriptor_has_implicit_resource_operand(
     const loom_low_descriptor_set_t* descriptor_set,
