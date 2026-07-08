@@ -474,19 +474,11 @@ static iree_status_t loom_amdgpu_read_packet_immediate_by_index_i64(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor_immediate_index >= descriptor->immediate_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly descriptor immediate index is out of range");
-  }
+  IREE_ASSERT_LT(descriptor_immediate_index, descriptor->immediate_count);
   const uint32_t immediate_row =
       descriptor->immediate_start + descriptor_immediate_index;
-  if (immediate_row >= descriptor_set->immediate_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly descriptor immediate row is outside the descriptor "
-        "set");
-  }
+  IREE_ASSERT_LT(immediate_row, descriptor_set->immediate_count);
+  IREE_ASSERT(descriptor_set->immediates != NULL);
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_row];
   return loom_amdgpu_read_packet_immediate_i64(context, immediate, out_value);
@@ -621,18 +613,11 @@ static iree_status_t loom_amdgpu_find_packet_immediate(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->immediate_start > descriptor_set->immediate_count ||
-      descriptor->immediate_count >
-          descriptor_set->immediate_count - descriptor->immediate_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly descriptor immediate range is out of range");
-  }
-  if (descriptor->immediate_count != 0 && descriptor_set->immediates == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly descriptor immediates table is "
-                            "missing");
-  }
+  IREE_ASSERT_LE(descriptor->immediate_start, descriptor_set->immediate_count);
+  IREE_ASSERT_LE(descriptor->immediate_count,
+                 descriptor_set->immediate_count - descriptor->immediate_start);
+  IREE_ASSERT(descriptor->immediate_count == 0 ||
+              descriptor_set->immediates != NULL);
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
@@ -933,11 +918,7 @@ static iree_status_t loom_amdgpu_append_assembly_packet_form(
     const loom_amdgpu_assembly_packet_form_t* form) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
   bool in_list = false;
-  if (form->value_count > IREE_ARRAYSIZE(form->values)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly packet form value count is out of range");
-  }
+  IREE_ASSERT_LE(form->value_count, IREE_ARRAYSIZE(form->values));
   for (iree_host_size_t i = 0; i < form->value_count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_asm_form_separator(context, &in_list));
@@ -992,18 +973,11 @@ static iree_status_t loom_amdgpu_append_asm_form_values(
       context->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < count; ++i) {
     const uint32_t asm_operand_index = start + i;
-    if (asm_operand_index >= descriptor_set->asm_operand_index_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU asm-form operand row is outside the descriptor set");
-    }
+    IREE_ASSERT_LT(asm_operand_index, descriptor_set->asm_operand_index_count);
+    IREE_ASSERT(descriptor_set->asm_operand_indices != NULL);
     const uint16_t descriptor_operand_index =
         descriptor_set->asm_operand_indices[asm_operand_index];
-    if (descriptor_operand_index >= descriptor->operand_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU asm-form operand index is outside the descriptor");
-    }
+    IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
     const loom_low_operand_t* descriptor_operand =
         &descriptor_set
              ->operands[descriptor->operand_start + descriptor_operand_index];
@@ -1072,11 +1046,8 @@ static iree_status_t loom_amdgpu_append_native_asm_form_values(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   for (uint16_t i = 0; i < form->native_assembly_value_count; ++i) {
     const uint32_t native_value_index = form->native_assembly_value_start + i;
-    if (native_value_index >= descriptor_set->native_asm_value_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU native asm-form value row is outside the descriptor set");
-    }
+    IREE_ASSERT_LT(native_value_index, descriptor_set->native_asm_value_count);
+    IREE_ASSERT(descriptor_set->native_asm_values != NULL);
     const loom_low_native_asm_value_t* value =
         &descriptor_set->native_asm_values[native_value_index];
     IREE_RETURN_IF_ERROR(
@@ -1095,18 +1066,12 @@ static iree_status_t loom_amdgpu_append_asm_form_immediates(
       context->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < form->immediate_count; ++i) {
     const uint32_t asm_immediate_index = form->immediate_start + i;
-    if (asm_immediate_index >= descriptor_set->asm_immediate_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU asm-form immediate row is outside the descriptor set");
-    }
+    IREE_ASSERT_LT(asm_immediate_index, descriptor_set->asm_immediate_count);
+    IREE_ASSERT(descriptor_set->asm_immediates != NULL);
     const loom_low_asm_immediate_t* asm_immediate =
         &descriptor_set->asm_immediates[asm_immediate_index];
-    if (asm_immediate->immediate_index >= descriptor->immediate_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU asm-form immediate references an invalid descriptor field");
-    }
+    IREE_ASSERT_LT(asm_immediate->immediate_index, descriptor->immediate_count);
+    IREE_ASSERT(descriptor_set->immediates != NULL);
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start +
                                     asm_immediate->immediate_index];
@@ -1175,18 +1140,10 @@ static iree_status_t loom_amdgpu_append_memory_immediate_suffixes(
   if (descriptor->immediate_count == 0) {
     return iree_ok_status();
   }
-  if (descriptor->immediate_start > descriptor_set->immediate_count ||
-      descriptor->immediate_count >
-          descriptor_set->immediate_count - descriptor->immediate_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly descriptor immediate range is out of range");
-  }
-  if (descriptor_set->immediates == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly descriptor immediates table is "
-                            "missing");
-  }
+  IREE_ASSERT_LE(descriptor->immediate_start, descriptor_set->immediate_count);
+  IREE_ASSERT_LE(descriptor->immediate_count,
+                 descriptor_set->immediate_count - descriptor->immediate_start);
+  IREE_ASSERT(descriptor_set->immediates != NULL);
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
