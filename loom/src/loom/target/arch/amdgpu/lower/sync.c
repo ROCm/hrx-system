@@ -41,11 +41,9 @@ static iree_status_t loom_amdgpu_select_kernel_barrier_lds_wait(
   *out_selected = false;
 
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_try_select_counter_mask(
+  const bool selected = loom_amdgpu_wait_packet_try_select_counter_mask(
       loom_low_lower_context_descriptor_set(context),
-      LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP, /*target_count=*/0, &selection,
-      &selected));
+      LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP, /*target_count=*/0, &selection);
   if (!selected) {
     return iree_ok_status();
   }
@@ -78,12 +76,12 @@ bool loom_amdgpu_workgroup_barrier_lowering_available(
              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_BARRIER_WAIT_ALL);
 }
 
-static iree_status_t loom_amdgpu_workgroup_memory_wait_lowering_available(
-    const loom_low_descriptor_set_t* descriptor_set, bool* out_available) {
+static bool loom_amdgpu_workgroup_memory_wait_lowering_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
   loom_amdgpu_wait_packet_selection_t selection = {0};
   return loom_amdgpu_wait_packet_try_select_counter_mask(
       descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP,
-      /*target_count=*/0, &selection, out_available);
+      /*target_count=*/0, &selection);
 }
 
 iree_status_t loom_amdgpu_select_workgroup_barrier_plan(
@@ -206,10 +204,8 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_barrier(
   }
 
   if (loom_kernel_barrier_scope(op) == LOOM_ATOMIC_SCOPE_SUBGROUP) {
-    bool wait_available = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_workgroup_memory_wait_lowering_available(
-        loom_target_low_legality_descriptor_set(context), &wait_available));
-    if (!wait_available) {
+    if (!loom_amdgpu_workgroup_memory_wait_lowering_available(
+            loom_target_low_legality_descriptor_set(context))) {
       return loom_amdgpu_low_legality_reject(
           context, op, IREE_SV("descriptor.workgroup_memory_wait"));
     }

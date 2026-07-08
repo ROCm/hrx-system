@@ -1047,9 +1047,8 @@ static iree_status_t loom_amdgpu_atomic_append_wait_counter_mask(
     bool* out_selected) {
   *out_selected = false;
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_try_select_counter_mask(
-      descriptor_set, counter_mask, /*target_count=*/0, &selection, &selected));
+  const bool selected = loom_amdgpu_wait_packet_try_select_counter_mask(
+      descriptor_set, counter_mask, /*target_count=*/0, &selection);
   if (!selected) {
     return iree_ok_status();
   }

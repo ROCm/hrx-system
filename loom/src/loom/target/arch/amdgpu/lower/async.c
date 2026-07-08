@@ -506,9 +506,9 @@ static iree_status_t loom_amdgpu_async_wait_select_packet(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t target_count,
     loom_amdgpu_wait_packet_selection_t* out_selection,
     loom_amdgpu_async_wait_diagnostic_t* diagnostic, bool* out_selected) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_try_select_counter_mask(
+  *out_selected = loom_amdgpu_wait_packet_try_select_counter_mask(
       descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count,
-      out_selection, out_selected));
+      out_selection);
   if (!*out_selected) {
     diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
   }
