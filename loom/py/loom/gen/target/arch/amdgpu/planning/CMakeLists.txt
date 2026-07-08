@@ -19,6 +19,7 @@ iree_py_library(
     "amdgpu_occupancy_tables.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::target_info
 )

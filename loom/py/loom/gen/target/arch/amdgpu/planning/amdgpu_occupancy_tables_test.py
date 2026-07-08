@@ -11,7 +11,10 @@ import dataclasses
 import pytest
 
 from loom.gen.target.arch.amdgpu.planning import amdgpu_occupancy_tables
-from loom.target.arch.amdgpu.target_info import sorted_occupancy_model_infos
+from loom.target.arch.amdgpu.target_info import (
+    AmdgpuOccupancyModelInfo,
+    sorted_occupancy_model_infos,
+)
 
 _OCCUPANCY_HEADER = "loom/target/arch/amdgpu/planning/occupancy_model.h"
 
@@ -28,6 +31,9 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert "loom_amdgpu_occupancy_pressure_cliff_model_t" in source
     assert ".pressure_cliffs =" in source
     assert ".pressure_cliff_count =" in source
+    assert "RegisterClassIndexByDescriptorRegClassId" in source
+    assert ".register_class_indices_by_descriptor_reg_class_id =" in source
+    assert ".descriptor_reg_class_count =" in source
     assert "kLoomAmdgpuOccupancyModels[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT]" in source
 
 
@@ -49,4 +55,22 @@ def test_occupancy_models_reject_missing_base_register_class() -> None:
         register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.vgpr"),
     )
     with pytest.raises(ValueError, match="missing base register classes"):
+        amdgpu_occupancy_tables._validate_models(models)
+
+
+def test_occupancy_models_reject_missing_spillable_register_class() -> None:
+    models = list(sorted_occupancy_model_infos())
+    model = next(info for info in models if info.descriptor_set_key == "amdgpu.cdna3.core")
+    model_index = models.index(model)
+    models[model_index] = AmdgpuOccupancyModelInfo(
+        descriptor_set_key=model.descriptor_set_key,
+        wave_size=model.wave_size,
+        max_waves_per_simd=model.max_waves_per_simd,
+        register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.agpr"),
+        resources=(),
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"missing spillable descriptor register classes: amdgpu\.agpr",
+    ):
         amdgpu_occupancy_tables._validate_models(models)
