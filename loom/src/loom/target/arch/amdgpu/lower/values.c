@@ -576,14 +576,10 @@ static bool loom_amdgpu_select_fact_only_vector_atomic_offset_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
   const loom_module_t* module = loom_low_lower_context_module(context);
-  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
-  if (loom_vector_iota_isa(source_op)) {
-    result = loom_vector_iota_result(source_op);
-  } else if (loom_vector_from_elements_isa(source_op)) {
-    result = loom_vector_from_elements_result(source_op);
-  } else {
+  if (source_op->result_count != 1) {
     return false;
   }
+  const loom_value_id_t result = loom_op_const_results(source_op)[0];
   if (!loom_amdgpu_value_only_feeds_vector_atomic_offsets(module, result)) {
     return false;
   }
