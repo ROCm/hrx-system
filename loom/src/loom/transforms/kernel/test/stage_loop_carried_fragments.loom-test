@@ -130,3 +130,100 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
 COMPILE-REPORT: source_low_transforms rows=1
 COMPILE-REPORT: source_low_transform[0] function=stage_after_sinking_single_use_fragment_read source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
+
+// ====
+// RUN: pass stage-loop-carried-fragments,dce
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %value = scalar.constant 0.0 : f32
+  %payload = vector.splat %value : vector<8xf32>
+  %input = vector.fragment<init> %payload shape [%m, %n] : vector<8xf32>
+  %lhs = vector.fragment<lhs> %payload shape [%m, %k] : vector<8xf32>
+  %rhs = vector.fragment<rhs> %payload shape [%k, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%zero to %four step %one](%acc0 = %input, %acc1 = %input, %acc2 = %input, %acc3 = %input : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %next0 = vector.mma %lhs, %rhs, %acc0 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%zero_offset] : buffer -> view<16x64xf32, #dense>
+  vector.fragment.store<result> %result0, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x64xf32, #dense>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %value = scalar.constant 0.0 : f32
+  %payload = vector.splat %value : vector<8xf32>
+  %input = vector.fragment<init> %payload shape [%m, %n] : vector<8xf32>
+  %lhs = vector.fragment<lhs> %payload shape [%m, %k] : vector<8xf32>
+  %rhs = vector.fragment<rhs> %payload shape [%k, %n] : vector<8xf32>
+  %30 = index.constant 16384 : offset
+  %31 = index.constant 0 : offset
+  %32 = index.constant 0 : index
+  %33 = encoding.layout.dense : encoding<layout>
+  %34 = buffer.alloca %30 {base_alignment = 16, memory_space = workgroup} : buffer
+  %35 = buffer.view %34[%31] : buffer -> view<16x256xf32, %33>
+  %36 = kernel.subgroup.id : index
+  %37 = index.constant 64 : index
+  %38 = index.mul %36, %37 : index
+  vector.fragment.store<result> %input, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  %39 = index.constant 16 : index
+  %40 = index.add %38, %39 : index
+  vector.fragment.store<result> %input, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  %41 = index.constant 32 : index
+  %42 = index.add %38, %41 : index
+  vector.fragment.store<result> %input, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  %43 = index.constant 48 : index
+  %44 = index.add %38, %43 : index
+  vector.fragment.store<result> %input, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  scf.for %45 = [%zero to %four step %one] {
+    %46 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+    %47 = vector.fragment.load<init> %35[%32, %40] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+    %48 = vector.fragment.load<init> %35[%32, %42] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+    %49 = vector.fragment.load<init> %35[%32, %44] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+    %next0 = vector.mma %lhs, %rhs, %46 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %47 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %48 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %49 : vector<8xf32>, vector<8xf32>, vector<8xf32>
+    vector.fragment.store<result> %next0, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+    vector.fragment.store<result> %next1, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+    vector.fragment.store<result> %next2, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+    vector.fragment.store<result> %next3, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  %result0 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%zero_offset] : buffer -> view<16x64xf32, #dense>
+  vector.fragment.store<result> %result0, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x64xf32, #dense>
+  kernel.return
+}

@@ -82,6 +82,8 @@ loom_cc_library(
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:compile_report",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target:selection",
         "//loom/src/loom/util:math",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
