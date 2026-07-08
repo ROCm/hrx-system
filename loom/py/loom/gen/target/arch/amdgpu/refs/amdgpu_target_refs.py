@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     build_amdgpu_core_descriptor_set_from_spec,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
+    AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_FLAT,
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_MUBUF,
@@ -53,6 +54,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
 from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
+    Immediate,
     Resource,
     ResourceKind,
     ScheduleClass,
@@ -106,6 +108,9 @@ _READFIRSTLANE_DESCRIPTOR_KEYS = frozenset(
     )
 )
 
+_DST_SEL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["DST_SEL"]
+_LITERAL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["LITERAL"]
+
 
 @dataclass(frozen=True, slots=True)
 class _DescriptorSetRefTable:
@@ -113,6 +118,8 @@ class _DescriptorSetRefTable:
     descriptor_set_key: str
     descriptor_ordinals: list[int | None]
     descriptor_traits: list[tuple[str, ...]]
+    sdwa_dst_sel_immediate_slots: list[int | None]
+    literal_immediate_slots: list[int | None]
     reg_class_traits: list[tuple[str, ...]]
 
 
@@ -179,6 +186,12 @@ def _descriptor_set_trait_table_name(key: str) -> str:
     suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
     c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
     return f"kAmdgpu{c_suffix}DescriptorTraits"
+
+
+def _descriptor_set_immediate_slot_table_name(key: str) -> str:
+    suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
+    c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
+    return f"kAmdgpu{c_suffix}DescriptorImmediateSlots"
 
 
 def _reg_class_trait_table_name(key: str) -> str:
@@ -264,6 +277,50 @@ def _descriptor_trait_names(
     return tuple(trait_names)
 
 
+def _descriptor_immediate_slot(
+    descriptor_set: DescriptorSet,
+    descriptor: Descriptor,
+    slot_name: str,
+    predicate: Callable[[Immediate], bool],
+) -> int | None:
+    slot_index: int | None = None
+    for index, immediate in enumerate(descriptor.immediates):
+        if not predicate(immediate):
+            continue
+        if slot_index is not None:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' has multiple {slot_name} immediates")
+        slot_index = index
+    return slot_index
+
+
+def _descriptor_sdwa_dst_sel_immediate_slot(
+    descriptor_set: DescriptorSet,
+    descriptor: Descriptor,
+    trait_names: tuple[str, ...],
+) -> int | None:
+    slot_index = _descriptor_immediate_slot(
+        descriptor_set,
+        descriptor,
+        "SDWA dst_sel",
+        lambda immediate: immediate.encoding_field_id == _DST_SEL_ENCODING_FIELD_ID,
+    )
+    if "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA" in trait_names and slot_index is None:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' SDWA descriptor '{descriptor.key}' has no dst_sel immediate")
+    return slot_index
+
+
+def _descriptor_literal_immediate_slot(
+    descriptor_set: DescriptorSet,
+    descriptor: Descriptor,
+) -> int | None:
+    return _descriptor_immediate_slot(
+        descriptor_set,
+        descriptor,
+        "literal",
+        lambda immediate: immediate.encoding_field_id == _LITERAL_ENCODING_FIELD_ID,
+    )
+
+
 def _validate_descriptor_trait_keys() -> None:
     descriptor_ref_keys = frozenset(amdgpu_descriptor_ref_keys())
     trait_descriptor_keys = _TRANSCENDENTAL_DESCRIPTOR_KEYS | _DPP_DESCRIPTOR_KEYS | _READFIRSTLANE_DESCRIPTOR_KEYS
@@ -311,12 +368,28 @@ def _materialize_descriptor_ref_tables(
         _validate_lowering_descriptor_contracts(descriptor_set)
         descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
         trait_context = _descriptor_trait_context(descriptor_set)
+        descriptor_traits = [_descriptor_trait_names(trait_context, descriptor) for descriptor in descriptor_set.descriptors]
+        sdwa_dst_sel_immediate_slots = [
+            _descriptor_sdwa_dst_sel_immediate_slot(
+                descriptor_set,
+                descriptor,
+                trait_names,
+            )
+            for descriptor, trait_names in zip(
+                descriptor_set.descriptors,
+                descriptor_traits,
+                strict=True,
+            )
+        ]
+        literal_immediate_slots = [_descriptor_literal_immediate_slot(descriptor_set, descriptor) for descriptor in descriptor_set.descriptors]
         descriptor_set_tables.append(
             _DescriptorSetRefTable(
                 descriptor_set_ordinal=amdgpu_descriptor_set_ordinal(descriptor_set_info.key),
                 descriptor_set_key=descriptor_set_info.key,
                 descriptor_ordinals=[descriptor_ordinals.get(key) for key in descriptor_ref_keys],
-                descriptor_traits=[_descriptor_trait_names(trait_context, descriptor) for descriptor in descriptor_set.descriptors],
+                descriptor_traits=descriptor_traits,
+                sdwa_dst_sel_immediate_slots=sdwa_dst_sel_immediate_slots,
+                literal_immediate_slots=literal_immediate_slots,
                 reg_class_traits=[_reg_class_trait_names(reg_class.name) for reg_class in descriptor_set.reg_classes],
             )
         )
@@ -397,6 +470,18 @@ def _emit_source(
                 lines.append("    0,")
         lines.append("};")
         lines.append("")
+        immediate_slot_table_name = _descriptor_set_immediate_slot_table_name(descriptor_set_table.descriptor_set_key)
+        lines.append(f"static const loom_amdgpu_descriptor_immediate_slots_t {immediate_slot_table_name}[] = {{")
+        for sdwa_dst_sel_slot, literal_slot in zip(
+            descriptor_set_table.sdwa_dst_sel_immediate_slots,
+            descriptor_set_table.literal_immediate_slots,
+            strict=True,
+        ):
+            sdwa_dst_sel_expr = "LOOM_LOW_ID_NONE" if sdwa_dst_sel_slot is None else f"UINT16_C({sdwa_dst_sel_slot})"
+            literal_expr = "LOOM_LOW_ID_NONE" if literal_slot is None else f"UINT16_C({literal_slot})"
+            lines.append(f"    {{.sdwa_dst_sel = {sdwa_dst_sel_expr}, .literal = {literal_expr}}},")
+        lines.append("};")
+        lines.append("")
         reg_class_trait_table_name = _reg_class_trait_table_name(descriptor_set_table.descriptor_set_key)
         lines.append(f"static const loom_amdgpu_reg_class_traits_t {reg_class_trait_table_name}[] = {{")
         for trait_names in descriptor_set_table.reg_class_traits:
@@ -417,6 +502,12 @@ def _emit_source(
     lines.append("const loom_amdgpu_descriptor_traits_t* const kLoomAmdgpuDescriptorTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
     for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
         table_expr = _descriptor_set_trait_table_name(descriptor_set_key)
+        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    lines.append("};")
+    lines.append("")
+    lines.append("const loom_amdgpu_descriptor_immediate_slots_t* const kLoomAmdgpuDescriptorImmediateSlotTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
+    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
+        table_expr = _descriptor_set_immediate_slot_table_name(descriptor_set_key)
         lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
     lines.append("};")
     lines.append("")

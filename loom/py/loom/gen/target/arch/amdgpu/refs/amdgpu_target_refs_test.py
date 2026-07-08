@@ -13,6 +13,7 @@ from pathlib import Path
 
 from loom.gen.target.arch.amdgpu.refs import amdgpu_target_refs
 from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_MUBUF,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
 )
@@ -20,6 +21,8 @@ from loom.target.low_descriptors import (
     AsmForm,
     Descriptor,
     DescriptorSet,
+    Immediate,
+    ImmediateKind,
     IssueUse,
     LatencyKind,
     ModelQuality,
@@ -52,6 +55,7 @@ def _descriptor(
     *,
     schedule_class: str = _SCHEDULE_NONE,
     encoding_format_id: int = 0,
+    immediates: tuple[Immediate, ...] = (),
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -61,6 +65,7 @@ def _descriptor(
         schedule_class=schedule_class,
         asm_forms=asm_forms,
         encoding_format_id=encoding_format_id,
+        immediates=immediates,
     )
 
 
@@ -228,6 +233,123 @@ def test_descriptor_traits_reject_missing_issue_resource() -> None:
 
     with _raises_value_error("schedule class 'valu' references missing resource 'missing'"):
         amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
+
+
+def test_descriptor_immediate_slots_publish_sdwa_dst_sel() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_mov_b32_sdwa",
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
+            immediates=(
+                Immediate("dst_unused", ImmediateKind.UNSIGNED),
+                Immediate(
+                    "dst_sel",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["DST_SEL"],
+                ),
+            ),
+        )
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+    descriptor = descriptor_set.descriptors[0]
+    trait_names = amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor)
+
+    assert amdgpu_target_refs._descriptor_sdwa_dst_sel_immediate_slot(descriptor_set, descriptor, trait_names) == 1
+
+
+def test_descriptor_immediate_slots_reject_duplicate_sdwa_dst_sel() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_bad_sdwa",
+            immediates=(
+                Immediate(
+                    "dst_sel",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["DST_SEL"],
+                ),
+                Immediate(
+                    "dst_sel2",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["DST_SEL"],
+                ),
+            ),
+        )
+    )
+
+    with _raises_value_error("descriptor 'amdgpu.v_bad_sdwa' has multiple SDWA dst_sel immediates"):
+        amdgpu_target_refs._descriptor_sdwa_dst_sel_immediate_slot(
+            descriptor_set,
+            descriptor_set.descriptors[0],
+            (),
+        )
+
+
+def test_descriptor_immediate_slots_reject_sdwa_without_dst_sel() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_bad_sdwa",
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
+        )
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+    descriptor = descriptor_set.descriptors[0]
+    trait_names = amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor)
+
+    with _raises_value_error("SDWA descriptor 'amdgpu.v_bad_sdwa' has no dst_sel immediate"):
+        amdgpu_target_refs._descriptor_sdwa_dst_sel_immediate_slot(
+            descriptor_set,
+            descriptor,
+            trait_names,
+        )
+
+
+def test_descriptor_immediate_slots_publish_literal() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_mov_b32",
+            immediates=(
+                Immediate(
+                    "imm32",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["LITERAL"],
+                ),
+            ),
+        )
+    )
+
+    assert (
+        amdgpu_target_refs._descriptor_literal_immediate_slot(
+            descriptor_set,
+            descriptor_set.descriptors[0],
+        )
+        == 0
+    )
+
+
+def test_descriptor_immediate_slots_reject_duplicate_literal() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_bad_literal",
+            immediates=(
+                Immediate(
+                    "literal0",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["LITERAL"],
+                ),
+                Immediate(
+                    "literal1",
+                    ImmediateKind.UNSIGNED,
+                    encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["LITERAL"],
+                ),
+            ),
+        )
+    )
+
+    with _raises_value_error("descriptor 'amdgpu.v_bad_literal' has multiple literal immediates"):
+        amdgpu_target_refs._descriptor_literal_immediate_slot(
+            descriptor_set,
+            descriptor_set.descriptors[0],
+        )
 
 
 def test_lowering_descriptor_contracts_accept_expected_asm_shapes() -> None:
