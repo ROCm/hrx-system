@@ -232,19 +232,6 @@ bool loom_amdgpu_wait_packet_try_select_counter_mask(
   return true;
 }
 
-iree_status_t loom_amdgpu_wait_packet_select_counter_mask(
-    const loom_low_descriptor_set_t* descriptor_set, uint32_t counter_mask,
-    uint16_t target_count, loom_amdgpu_wait_packet_selection_t* out_selection) {
-  if (!loom_amdgpu_wait_packet_try_select_counter_mask(
-          descriptor_set, counter_mask, target_count, out_selection)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target cannot materialize wait packet for counter mask 0x%x",
-        counter_mask);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_wait_packet_materialize_group(
     loom_amdgpu_wait_packet_builder_t* builder,
     const loom_amdgpu_wait_packet_group_t* group) {

@@ -684,8 +684,12 @@ static iree_status_t loom_amdgpu_system_memory_build_wait_counter_mask(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     uint32_t counter_mask, uint16_t target_count, loom_location_id_t location) {
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_select_counter_mask(
-      descriptor_set, counter_mask, target_count, &selection));
+  if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+          descriptor_set, counter_mask, target_count, &selection)) {
+    IREE_ASSERT_UNREACHABLE(
+        "validated AMDGPU system-memory wait counter packet");
+    IREE_BUILTIN_UNREACHABLE();
+  }
   loom_named_attr_t
       attrs[LOOM_AMDGPU_WAIT_PACKET_SELECTION_IMMEDIATE_CAPACITY] = {0};
   for (iree_host_size_t i = 0; i < selection.immediate_count; ++i) {
