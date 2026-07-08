@@ -807,6 +807,19 @@ func.def @iota_gather_in_bounds(%buffer: buffer, %base: offset) {
 
 // ====
 
+func.def @fact_identity_iota_gather_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %checked = sanitizer.assert.value %offsets [] : vector<4xindex>
+  %loaded = vector.gather %view[%c0][%checked] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
 func.def @iota_scatter_in_bounds(%buffer: buffer, %base: offset, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %c0 = index.constant 0 : index
@@ -865,6 +878,20 @@ func.def @iota_gather_out_of_bounds(%buffer: buffer, %base: offset) {
   %offsets = vector.iota %c1 step %c1 : vector<4xindex>
   // ERROR@+1: SUBRANGE/016 "vector.gather" "linear footprint upper bound" "linearized_origin + max(offsets) + 1 <= view_storage_span"
   %loaded = vector.gather %view[%c0][%offsets] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @fact_identity_iota_gather_out_of_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c1 step %c1 : vector<4xindex>
+  %checked = sanitizer.assert.value %offsets [] : vector<4xindex>
+  // ERROR@+1: SUBRANGE/016 "vector.gather" "linear footprint upper bound" "linearized_origin + max(offsets) + 1 <= view_storage_span"
+  %loaded = vector.gather %view[%c0][%checked] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
   func.return
 }
 
