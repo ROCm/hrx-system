@@ -68,6 +68,40 @@ def test_memory_cache_policy_fragments_are_data_only() -> None:
     assert "[LOOM_CACHE_TEMPORAL_BYPASS] = 3" in temporal_th
 
 
+def test_target_info_table_source_is_data_only() -> None:
+    descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
+    descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
+        info=descriptor_set_info,
+        sopp=amdgpu_target_info._AmdgpuSoppOpcodeRow(
+            nop=0,
+            delay_alu=0,
+            endpgm=1,
+            branch=2,
+            conditional_branch_scc0=4,
+            conditional_branch_scc1=5,
+        ),
+    )
+    processor = processor_info(
+        "gfx-test",
+        0x001,
+        descriptor_set_key=descriptor_set_info.key,
+    )
+
+    source = amdgpu_target_info._emit_tables_source(
+        processors=(processor,),
+        descriptor_set_rows=(descriptor_row,),
+    )
+
+    assert "typedef " not in source
+    assert "#ifndef " not in source
+    assert "#define LOOM_AMDGPU_DESCRIPTOR_SET_INFO" not in source
+    assert "#define LOOM_AMDGPU_PROCESSOR_INFO" not in source
+    assert "\nif " not in source
+    assert "\nreturn " not in source
+    assert ".descriptor_set = {" in source
+    assert ".kernel_descriptor = {" in source
+
+
 def test_memory_cache_policy_rejects_missing_encoding_row() -> None:
     rows = amdgpu_target_info_data.AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS[:-1]
 
