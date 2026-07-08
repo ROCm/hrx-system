@@ -32,6 +32,8 @@ typedef enum loom_amdgpu_structural_packet_flag_bits_e {
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES = 1u << 2,
   // The materialized packet writes target-visible VALU state.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU = 1u << 3,
+  // The materialized packet writes target-visible SALU state.
+  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_SALU = 1u << 4,
 } loom_amdgpu_structural_packet_flag_bits_t;
 typedef uint32_t loom_amdgpu_structural_packet_flags_t;
 

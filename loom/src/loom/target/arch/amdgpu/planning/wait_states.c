@@ -672,12 +672,15 @@ static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
 
 static loom_amdgpu_delay_alu_type_t
 loom_amdgpu_wait_state_structural_delay_alu_type(
-    const loom_amdgpu_wait_state_builder_t* builder, const loom_op_t* op) {
+    const loom_amdgpu_wait_state_builder_t* builder,
+    const loom_amdgpu_structural_packet_info_t* info) {
   if (!builder->has_delay_alu) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
   }
-  return loom_low_cond_br_isa(op) ? LOOM_AMDGPU_DELAY_ALU_TYPE_SALU
-                                  : LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
+  return iree_any_bit_set(info->flags,
+                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_SALU)
+             ? LOOM_AMDGPU_DELAY_ALU_TYPE_SALU
+             : LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
 }
 
 static uint16_t loom_amdgpu_wait_state_descriptor_latency_cycles(
@@ -1771,7 +1774,7 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
           LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_STRUCTURAL_WRITES_VALU;
     }
     out_info->delay_alu_type = loom_amdgpu_wait_state_structural_delay_alu_type(
-        builder, packet->node->op);
+        builder, &out_info->structural);
     return iree_ok_status();
   }
 
