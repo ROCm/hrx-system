@@ -741,6 +741,7 @@ loom_cc_test(
   SRCS
     "packet_test.cc"
   DEPS
+    ::descriptors
     ::packet
     iree::testing::gtest
     iree::testing::gtest_main

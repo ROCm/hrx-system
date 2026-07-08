@@ -49,12 +49,14 @@ bool loom_low_descriptor_operands_are_tied(
   const loom_low_operand_t* lhs = &operands[lhs_operand_index];
   const loom_low_operand_t* rhs = &operands[rhs_operand_index];
   if (lhs->role == LOOM_LOW_OPERAND_ROLE_RESULT &&
-      loom_low_operand_role_is_packet_operand(rhs->role)) {
+      loom_low_descriptor_operand_maps_to_packet_operand(
+          descriptor_set, descriptor, rhs_operand_index)) {
     return loom_low_descriptor_constraint_ties_operands(
         descriptor_set, descriptor, lhs_operand_index, rhs_operand_index);
   }
   if (rhs->role == LOOM_LOW_OPERAND_ROLE_RESULT &&
-      loom_low_operand_role_is_packet_operand(lhs->role)) {
+      loom_low_descriptor_operand_maps_to_packet_operand(
+          descriptor_set, descriptor, lhs_operand_index)) {
     return loom_low_descriptor_constraint_ties_operands(
         descriptor_set, descriptor, rhs_operand_index, lhs_operand_index);
   }
@@ -73,6 +75,20 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
   return loom_low_operand_role_is_packet_operand(operand->role);
+}
+
+bool loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    uint16_t descriptor_operand_index) {
+  if (!loom_low_descriptor_operand_maps_to_packet_operand(
+          descriptor_set, descriptor, descriptor_operand_index)) {
+    return false;
+  }
+  const loom_low_operand_t* operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  return !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT);
 }
 
 uint16_t loom_low_descriptor_operand_packet_index(

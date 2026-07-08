@@ -682,6 +682,7 @@ loom_cc_test(
     name = "packet_test",
     srcs = ["packet_test.cc"],
     deps = [
+        ":descriptors",
         ":packet",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

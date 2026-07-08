@@ -1073,18 +1073,25 @@ uint32_t loom_low_descriptor_set_lookup_canonical_asm_form(
 // Returns the stable diagnostic spelling for an operand role.
 iree_string_view_t loom_low_operand_role_name(loom_low_operand_role_t role);
 
-// Returns true if |role| names an explicit packet operand consumed by a low
-// descriptor. Result and implicit rows are not packet operands.
+// Returns true if |role| names a packet operand consumed by a low descriptor.
+// Result rows and rows with role IMPLICIT are not packet operands.
 bool loom_low_operand_role_is_packet_operand(loom_low_operand_role_t role);
 
-// Returns true if |descriptor_operand_index| names an explicit low packet
-// operand. The descriptor must be a verified row from |descriptor_set|.
+// Returns true if |descriptor_operand_index| names a low packet operand. Rows
+// flagged IMPLICIT still count as packet operands because they remain part of
+// the low op operand stream.
 bool loom_low_descriptor_operand_maps_to_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
+// Returns true if |descriptor_operand_index| names a low packet operand that is
+// not flagged IMPLICIT.
+bool loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
+
 // Returns the low packet operand index for |descriptor_operand_index|. The
-// descriptor operand must map to an explicit low packet operand.
+// descriptor operand must map to a low packet operand.
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);

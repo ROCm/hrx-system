@@ -235,36 +235,6 @@ loom_low_allocation_unit_liveness_note_op_operand_unit_uses(
   return iree_ok_status();
 }
 
-static bool
-loom_low_allocation_unit_liveness_descriptor_operand_is_explicit_packet_value(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index) {
-  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
-  const loom_low_operand_t* descriptor_operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  return loom_low_operand_role_is_packet_operand(descriptor_operand->role) &&
-         !iree_any_bit_set(descriptor_operand->flags,
-                           LOOM_LOW_OPERAND_FLAG_IMPLICIT);
-}
-
-static uint16_t
-loom_low_allocation_unit_liveness_descriptor_packet_operand_index(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index) {
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    if (loom_low_allocation_unit_liveness_descriptor_operand_is_explicit_packet_value(
-            descriptor_set, descriptor, i)) {
-      ++packet_operand_index;
-    }
-  }
-  return packet_operand_index;
-}
-
 static bool loom_low_allocation_unit_liveness_op_ties_result_to_operand(
     const loom_op_t* op, uint16_t result_index, uint16_t operand_index) {
   const loom_tied_result_t* tied_results = loom_op_tied_results(op);
@@ -286,15 +256,14 @@ loom_low_allocation_unit_liveness_note_early_clobber_operand_uses(
     const loom_low_descriptor_t* descriptor,
     uint16_t early_clobber_result_index, uint32_t clobber_point) {
   const loom_value_id_t* operands = loom_op_const_operands(op);
+  uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    if (!loom_low_allocation_unit_liveness_descriptor_operand_is_explicit_packet_value(
+    if (!loom_low_descriptor_operand_maps_to_explicit_packet_operand(
             descriptor_set, descriptor, i)) {
       continue;
     }
-    const uint16_t operand_index =
-        loom_low_allocation_unit_liveness_descriptor_packet_operand_index(
-            descriptor_set, descriptor, i);
+    const uint16_t operand_index = packet_operand_index++;
     if (operand_index >= op->operand_count) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

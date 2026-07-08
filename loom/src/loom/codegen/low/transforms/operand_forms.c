@@ -374,10 +374,8 @@ static uint16_t loom_low_descriptor_packet_operand_index(
   uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (loom_low_operand_role_is_packet_operand(operand->role) &&
-        !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    if (loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+            descriptor_set, descriptor, i)) {
       ++packet_operand_index;
     }
   }
