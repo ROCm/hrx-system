@@ -502,17 +502,17 @@ static bool loom_amdgpu_async_wait_stream_counts(
   return true;
 }
 
-static iree_status_t loom_amdgpu_async_wait_select_packet(
+static bool loom_amdgpu_async_wait_select_packet(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t target_count,
     loom_amdgpu_wait_packet_selection_t* out_selection,
-    loom_amdgpu_async_wait_diagnostic_t* diagnostic, bool* out_selected) {
-  *out_selected = loom_amdgpu_wait_packet_try_select_counter_mask(
+    loom_amdgpu_async_wait_diagnostic_t* diagnostic) {
+  const bool selected = loom_amdgpu_wait_packet_try_select_counter_mask(
       descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count,
       out_selection);
-  if (!*out_selected) {
+  if (!selected) {
     diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
   }
-  return iree_ok_status();
+  return selected;
 }
 
 iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
@@ -534,11 +534,9 @@ iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
   }
 
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_async_wait_select_packet(
-      loom_low_lower_context_descriptor_set(context), target_count, &selection,
-      &diagnostic, &selected));
-  if (!selected) {
+  if (!loom_amdgpu_async_wait_select_packet(
+          loom_low_lower_context_descriptor_set(context), target_count,
+          &selection, &diagnostic)) {
     return iree_ok_status();
   }
 
@@ -782,11 +780,9 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_wait(
     return iree_ok_status();
   }
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_async_wait_select_packet(
-      loom_target_low_legality_descriptor_set(context), target_count,
-      &selection, &diagnostic, &selected));
-  if (selected) {
+  if (loom_amdgpu_async_wait_select_packet(
+          loom_target_low_legality_descriptor_set(context), target_count,
+          &selection, &diagnostic)) {
     return iree_ok_status();
   }
   return loom_amdgpu_low_legality_reject(
