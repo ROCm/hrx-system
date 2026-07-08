@@ -2401,9 +2401,8 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
   const loom_memory_access_t store_access =
       loom_memory_access_cast(module, user_op);
   if (loom_memory_access_isa(store_access) &&
-      loom_traits_may_write(user_op->traits) &&
-      !loom_traits_may_read(user_op->traits) &&
-      !loom_memory_access_has_atomic_attrs(store_access) &&
+      loom_memory_access_operation_kind(store_access) ==
+          LOOM_MEMORY_ACCESS_OPERATION_STORE &&
       loom_memory_access_value(store_access) == value_id) {
     return true;
   }
