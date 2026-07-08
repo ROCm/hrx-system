@@ -1127,6 +1127,163 @@ static bool loom_amdgpu_source_value_known_distribution_facts(
   return true;
 }
 
+typedef uint16_t loom_amdgpu_source_producer_flags_t;
+
+enum loom_amdgpu_source_producer_flag_bits_e {
+  LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION = 1u << 0,
+  LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR = 1u << 1,
+  LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR = 1u << 2,
+  LOOM_AMDGPU_SOURCE_PRODUCER_INDEX_CAST = 1u << 3,
+  LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_EXTRACT = 1u << 4,
+  LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_REDUCE = 1u << 5,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT = 1u << 6,
+  LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE = 1u << 7,
+  LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS = 1u << 8,
+  LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT = 1u << 9,
+};
+
+#define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
+
+static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuKernelSourceProducerFlags[LOOM_OP_KERNEL_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_ID)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_ID)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_LANE_ID)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_BROADCAST)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_REDUCE)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_SCAN)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_SHUFFLE)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuKernelSourceProducerFlags) ==
+                  LOOM_OP_KERNEL_COUNT_,
+              "AMDGPU kernel source producer table out of sync");
+
+static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuIndexSourceProducerFlags[LOOM_OP_INDEX_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_CAST)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_INDEX_CAST,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_SUB)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_MUL)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_SHLI)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuIndexSourceProducerFlags) ==
+                  LOOM_OP_INDEX_COUNT_,
+              "AMDGPU index source producer table out of sync");
+
+static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuScfSourceProducerFlags[LOOM_OP_SCF_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCF_SELECT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuScfSourceProducerFlags) ==
+                  LOOM_OP_SCF_COUNT_,
+              "AMDGPU scf source producer table out of sync");
+
+static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuVectorSourceProducerFlags[LOOM_OP_VECTOR_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_FROM_ELEMENTS)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SELECT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SPLAT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_EXTRACT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_EXTRACT,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_LOAD)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_REDUCE)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_REDUCE,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuVectorSourceProducerFlags) ==
+                  LOOM_OP_VECTOR_COUNT_,
+              "AMDGPU vector source producer table out of sync");
+
+static const loom_amdgpu_source_producer_flags_t
+    kAmdgpuViewSourceProducerFlags[LOOM_OP_VIEW_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VIEW_LOAD)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VIEW_ATOMIC_RMW)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VIEW_ATOMIC_CMPXCHG)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuViewSourceProducerFlags) ==
+                  LOOM_OP_VIEW_COUNT_,
+              "AMDGPU view source producer table out of sync");
+
+#undef LOOM_AMDGPU_OP_INDEX
+
+typedef struct loom_amdgpu_source_producer_dialect_table_t {
+  // Borrowed op-indexed flag rows for one source dialect.
+  const loom_amdgpu_source_producer_flags_t* entries;
+  // Number of op-indexed entries in the flag row table.
+  iree_host_size_t count;
+} loom_amdgpu_source_producer_dialect_table_t;
+
+#define LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(table_) \
+  {.entries = (table_), .count = IREE_ARRAYSIZE(table_)}
+
+static const loom_amdgpu_source_producer_dialect_table_t
+    kAmdgpuSourceProducerDialectTables[LOOM_DIALECT_BUILTIN_COUNT_] = {
+        [LOOM_DIALECT_KERNEL] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuKernelSourceProducerFlags),
+        [LOOM_DIALECT_INDEX] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuIndexSourceProducerFlags),
+        [LOOM_DIALECT_SCF] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuScfSourceProducerFlags),
+        [LOOM_DIALECT_VECTOR] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuVectorSourceProducerFlags),
+        [LOOM_DIALECT_VIEW] = LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE(
+            kAmdgpuViewSourceProducerFlags),
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuSourceProducerDialectTables) ==
+                  LOOM_DIALECT_BUILTIN_COUNT_,
+              "AMDGPU source producer dialect table out of sync");
+
+#undef LOOM_AMDGPU_SOURCE_PRODUCER_DIALECT_TABLE
+
+static loom_amdgpu_source_producer_flags_t loom_amdgpu_source_producer_flags(
+    loom_op_kind_t kind) {
+  const uint8_t dialect_id = loom_op_dialect_id(kind);
+  if (dialect_id >= IREE_ARRAYSIZE(kAmdgpuSourceProducerDialectTables)) {
+    return 0;
+  }
+  const loom_amdgpu_source_producer_dialect_table_t* table =
+      &kAmdgpuSourceProducerDialectTables[dialect_id];
+  const uint8_t dialect_index = loom_op_dialect_index(kind);
+  return table->entries != NULL && dialect_index < table->count
+             ? table->entries[dialect_index]
+             : 0;
+}
+
+static bool loom_amdgpu_workitem_dimension_is_valid(
+    const loom_op_t* defining_op) {
+  switch (defining_op->kind) {
+    case LOOM_OP_KERNEL_WORKITEM_ID:
+      return loom_kernel_workitem_id_dimension(defining_op) <
+             LOOM_KERNEL_DIMENSION_COUNT_;
+    case LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID:
+      return loom_kernel_workitem_dispatch_id_dimension(defining_op) <
+             LOOM_KERNEL_DIMENSION_COUNT_;
+    default:
+      return false;
+  }
+}
+
 static bool loom_amdgpu_distribution_transfer_result_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
@@ -1318,64 +1475,66 @@ static bool loom_amdgpu_source_value_directly_prefers_vgpr(
       continue;
     }
 
-    switch (defining_op->kind) {
-      case LOOM_OP_KERNEL_WORKITEM_ID:
-      case LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID:
-        return true;
-      case LOOM_OP_KERNEL_SUBGROUP_ID:
-      case LOOM_OP_KERNEL_SUBGROUP_LANE_ID:
-        return true;
-      case LOOM_OP_KERNEL_SUBGROUP_BROADCAST:
-      case LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST:
-      case LOOM_OP_KERNEL_SUBGROUP_REDUCE:
-      case LOOM_OP_KERNEL_SUBGROUP_SCAN:
-      case LOOM_OP_KERNEL_SUBGROUP_SHUFFLE:
-        return loom_value_def_index(value) == 0;
-      case LOOM_OP_INDEX_CAST: {
-        const loom_value_id_t next_value_id =
-            loom_index_cast_input(defining_op);
-        if (next_value_id == source_value_id) {
-          return false;
-        }
-        source_value_id = next_value_id;
-        continue;
-      }
-      case LOOM_OP_VECTOR_EXTRACT:
-        return loom_amdgpu_source_value_naturally_prefers_vgpr(
-            module, loom_vector_extract_source(defining_op));
-      case LOOM_OP_VECTOR_REDUCE:
-        return loom_amdgpu_type_is_vector_32bit_register_range(
-            loom_module_value_type(module,
-                                   loom_vector_reduce_input(defining_op)));
-      case LOOM_OP_SCF_SELECT:
-        return loom_value_def_index(value) == 0 &&
-               (loom_amdgpu_source_value_directly_prefers_vgpr(
-                    module, loom_scf_select_true_value(defining_op),
-                    excluded_value_id) ||
-                loom_amdgpu_source_value_directly_prefers_vgpr(
-                    module, loom_scf_select_false_value(defining_op),
-                    excluded_value_id));
-      default: {
-        loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
-        loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
-        if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
-                module, source_value_id, defining_op, &lhs, &rhs)) {
-          return loom_amdgpu_source_value_directly_prefers_vgpr(
-                     module, lhs, source_value_id) ||
-                 loom_amdgpu_source_value_directly_prefers_vgpr(
-                     module, rhs, source_value_id);
-        }
-        if (loom_amdgpu_scalar_conversion_result_requires_vgpr(
-                module, source_value_id, defining_op)) {
-          return true;
-        }
-        loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
-        return loom_amdgpu_scalar_conversion_result_follows_operand_vgpr(
-                   module, source_value_id, defining_op, &operand) &&
-               loom_amdgpu_source_value_directly_prefers_vgpr(module, operand,
-                                                              source_value_id);
-      }
+    const loom_amdgpu_source_producer_flags_t producer_flags =
+        loom_amdgpu_source_producer_flags(defining_op->kind);
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION |
+                             LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR)) {
+      return true;
     }
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR)) {
+      return loom_value_def_index(value) == 0;
+    }
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_INDEX_CAST)) {
+      const loom_value_id_t next_value_id = loom_index_cast_input(defining_op);
+      if (next_value_id == source_value_id) {
+        return false;
+      }
+      source_value_id = next_value_id;
+      continue;
+    }
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_EXTRACT)) {
+      return loom_amdgpu_source_value_naturally_prefers_vgpr(
+          module, loom_vector_extract_source(defining_op));
+    }
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_REDUCE)) {
+      return loom_amdgpu_type_is_vector_32bit_register_range(
+          loom_module_value_type(module,
+                                 loom_vector_reduce_input(defining_op)));
+    }
+    if (iree_any_bit_set(producer_flags,
+                         LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT)) {
+      return loom_value_def_index(value) == 0 &&
+             (loom_amdgpu_source_value_directly_prefers_vgpr(
+                  module, loom_scf_select_true_value(defining_op),
+                  excluded_value_id) ||
+              loom_amdgpu_source_value_directly_prefers_vgpr(
+                  module, loom_scf_select_false_value(defining_op),
+                  excluded_value_id));
+    }
+
+    loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
+    if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
+            module, source_value_id, defining_op, &lhs, &rhs)) {
+      return loom_amdgpu_source_value_directly_prefers_vgpr(module, lhs,
+                                                            source_value_id) ||
+             loom_amdgpu_source_value_directly_prefers_vgpr(module, rhs,
+                                                            source_value_id);
+    }
+    if (loom_amdgpu_scalar_conversion_result_requires_vgpr(
+            module, source_value_id, defining_op)) {
+      return true;
+    }
+    loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+    return loom_amdgpu_scalar_conversion_result_follows_operand_vgpr(
+               module, source_value_id, defining_op, &operand) &&
+           loom_amdgpu_source_value_directly_prefers_vgpr(module, operand,
+                                                          source_value_id);
   }
 }
 
@@ -2416,16 +2575,13 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
 
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
-  if (loom_amdgpu_source_address_value_needs_64bit(
+  const loom_amdgpu_source_producer_flags_t producer_flags =
+      loom_amdgpu_source_producer_flags(defining_op->kind);
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT) &&
+      loom_amdgpu_source_address_value_needs_64bit(
           module, fact_table, source_value_id, source_type)) {
-    switch (defining_op->kind) {
-      case LOOM_OP_INDEX_SUB:
-      case LOOM_OP_INDEX_MUL:
-      case LOOM_OP_INDEX_SHLI:
-        return true;
-      default:
-        break;
-    }
+    return true;
   }
 
   if (loom_scalar_bitcast_isa(defining_op)) {
@@ -2459,70 +2615,63 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
         module, fact_table, view_regions, analysis, source_identity_value_id);
   }
 
-  switch (defining_op->kind) {
-    case LOOM_OP_KERNEL_WORKITEM_ID:
-      return loom_kernel_workitem_id_dimension(defining_op) <
-             LOOM_KERNEL_DIMENSION_COUNT_;
-    case LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID:
-      return loom_kernel_workitem_dispatch_id_dimension(defining_op) <
-             LOOM_KERNEL_DIMENSION_COUNT_;
-    case LOOM_OP_KERNEL_SUBGROUP_ID:
-    case LOOM_OP_KERNEL_SUBGROUP_LANE_ID:
-      return true;
-    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST:
-    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST:
-    case LOOM_OP_KERNEL_SUBGROUP_REDUCE:
-    case LOOM_OP_KERNEL_SUBGROUP_SCAN:
-      return loom_value_def_index(value) == 0;
-    case LOOM_OP_KERNEL_SUBGROUP_SHUFFLE:
-      return loom_value_def_index(value) == 0;
-    case LOOM_OP_VECTOR_FROM_ELEMENTS:
-    case LOOM_OP_VECTOR_SELECT:
-    case LOOM_OP_VECTOR_SPLAT: {
-      loom_amdgpu_vector_storage_t storage = {0};
-      return loom_value_def_index(value) == 0 &&
-             loom_amdgpu_type_vector_storage(source_type, &storage) &&
-             !iree_any_bit_set(
-                 loom_amdgpu_vector_storage_kind_flags(storage.kind),
-                 LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK);
-    }
-    case LOOM_OP_VECTOR_EXTRACT:
-      return loom_amdgpu_vector_extract_prefers_vgpr(module, fact_table,
-                                                     view_regions, defining_op);
-    case LOOM_OP_VECTOR_LOAD:
-    case LOOM_OP_VIEW_LOAD:
-      return loom_amdgpu_source_memory_access_prefers_vgpr(
-          module, fact_table, view_regions, defining_op, source_type);
-    case LOOM_OP_VECTOR_REDUCE:
-      return loom_amdgpu_type_is_vector_32bit_register_range(
-          loom_module_value_type(module,
-                                 loom_vector_reduce_input(defining_op)));
-    case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
-    case LOOM_OP_VIEW_ATOMIC_RMW:
-      return true;
-    default: {
-      loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
-      loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
-      if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
-              module, source_value_id, defining_op, &lhs, &rhs)) {
-        return loom_amdgpu_source_value_prefers_vgpr_impl(
-                   module, fact_table, view_regions, analysis, lhs) ||
-               loom_amdgpu_source_value_prefers_vgpr_impl(
-                   module, fact_table, view_regions, analysis, rhs);
-      }
-      if (loom_amdgpu_scalar_conversion_result_requires_vgpr(
-              module, source_value_id, defining_op) ||
-          loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(source_type) ||
-          loom_amdgpu_type_is_vector_32bit_register_range(source_type)) {
-        return true;
-      }
-      loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
-      return loom_amdgpu_scalar_conversion_result_follows_operand_vgpr(
-                 module, source_value_id, defining_op, &operand) &&
-             loom_amdgpu_source_value_prefers_vgpr_impl(
-                 module, fact_table, view_regions, analysis, operand);
-    }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION)) {
+    return loom_amdgpu_workitem_dimension_is_valid(defining_op);
   }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR)) {
+    return true;
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_RESULT0_VGPR)) {
+    return loom_value_def_index(value) == 0;
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE)) {
+    loom_amdgpu_vector_storage_t storage = {0};
+    return loom_value_def_index(value) == 0 &&
+           loom_amdgpu_type_vector_storage(source_type, &storage) &&
+           !iree_any_bit_set(
+               loom_amdgpu_vector_storage_kind_flags(storage.kind),
+               LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK);
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_EXTRACT)) {
+    return loom_amdgpu_vector_extract_prefers_vgpr(module, fact_table,
+                                                   view_regions, defining_op);
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_MEMORY_ACCESS)) {
+    return loom_amdgpu_source_memory_access_prefers_vgpr(
+        module, fact_table, view_regions, defining_op, source_type);
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_REDUCE)) {
+    return loom_amdgpu_type_is_vector_32bit_register_range(
+        loom_module_value_type(module, loom_vector_reduce_input(defining_op)));
+  }
+
+  loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
+          module, source_value_id, defining_op, &lhs, &rhs)) {
+    return loom_amdgpu_source_value_prefers_vgpr_impl(
+               module, fact_table, view_regions, analysis, lhs) ||
+           loom_amdgpu_source_value_prefers_vgpr_impl(
+               module, fact_table, view_regions, analysis, rhs);
+  }
+  if (loom_amdgpu_scalar_conversion_result_requires_vgpr(
+          module, source_value_id, defining_op) ||
+      loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(source_type) ||
+      loom_amdgpu_type_is_vector_32bit_register_range(source_type)) {
+    return true;
+  }
+  loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+  return loom_amdgpu_scalar_conversion_result_follows_operand_vgpr(
+             module, source_value_id, defining_op, &operand) &&
+         loom_amdgpu_source_value_prefers_vgpr_impl(
+             module, fact_table, view_regions, analysis, operand);
 }
 
 bool loom_amdgpu_source_value_prefers_vgpr(
