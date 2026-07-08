@@ -32,6 +32,16 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    adaptive_sort
+  HDRS
+    "adaptive_sort.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     diff
   HDRS
     "diff.h"

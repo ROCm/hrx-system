@@ -404,6 +404,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
+    loom::util::adaptive_sort
   PUBLIC
 )
 
