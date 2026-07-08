@@ -603,6 +603,92 @@ func.def @empty_store(%buffer: buffer, %offset: offset) {
 
 // ====
 
+// Zero-lane masked loads also have no footprint; their result is empty
+// regardless of inactive-lane passthrough.
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.empty : vector<0xi1>
+  %old = vector.empty : vector<0xf32>
+  %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<0xi1>, vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// Zero-lane scatters erase completely even though the address form carries
+// per-lane offsets.
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xf32>
+  vector.scatter %value, %view[0][%offsets] : vector<0xf32>, view<16xf32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane atomic RMWs produce the unique empty result and no memory update.
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+
+// ====
+
+// Zero-lane atomic reductions erase completely.
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane compare-exchange has no compare payload lanes and returns empty.
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %expected = vector.empty : vector<0xi32>
+  %replacement = vector.empty : vector<0xi32>
+  %r = vector.atomic.cmpxchg %expected, %replacement, %view[0][%offsets] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex> -> vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+
+// ====
+
 // Exact scalar facts splatted into a vector become a vector constant directly.
 func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
   %c = scalar.constant 7 : i32

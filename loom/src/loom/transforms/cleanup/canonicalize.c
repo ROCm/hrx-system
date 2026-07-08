@@ -299,152 +299,97 @@ static bool loom_canonicalize_can_replace_results_with_empty(
   return true;
 }
 
-static bool loom_canonicalize_single_empty_result(const loom_module_t* module,
-                                                  const loom_op_t* op) {
-  if (op->result_count != 1) return false;
-  return loom_canonicalize_value_is_static_empty_vector(
-      module, loom_op_const_results(op)[0]);
-}
-
 static bool loom_canonicalize_empty_value(const loom_module_t* module,
                                           loom_value_id_t value_id) {
   return loom_canonicalize_value_is_static_empty_vector(module, value_id);
+}
+
+static bool loom_canonicalize_optional_empty_value(const loom_module_t* module,
+                                                   loom_value_id_t value_id) {
+  return value_id == LOOM_VALUE_ID_INVALID ||
+         loom_canonicalize_empty_value(module, value_id);
+}
+
+static bool loom_canonicalize_required_empty_value(const loom_module_t* module,
+                                                   loom_value_id_t value_id) {
+  return value_id != LOOM_VALUE_ID_INVALID &&
+         loom_canonicalize_empty_value(module, value_id);
+}
+
+static bool loom_canonicalize_memory_access_results_are_empty(
+    const loom_module_t* module, const loom_op_t* op) {
+  if (op->result_count == 0) return false;
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (!loom_canonicalize_required_empty_value(module, results[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_canonicalize_memory_access_optional_roles_are_empty(
+    const loom_module_t* module, loom_memory_access_t access) {
+  return loom_canonicalize_optional_empty_value(
+             module, loom_memory_access_mask(access)) &&
+         loom_canonicalize_optional_empty_value(
+             module, loom_memory_access_passthrough(access)) &&
+         loom_canonicalize_optional_empty_value(
+             module, loom_memory_access_offsets(access));
+}
+
+static bool loom_canonicalize_memory_access_has_empty_footprint(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_memory_access_t access) {
+  if (!loom_canonicalize_memory_access_optional_roles_are_empty(module,
+                                                                access)) {
+    return false;
+  }
+
+  switch (loom_memory_access_operation_kind(access)) {
+    case LOOM_MEMORY_ACCESS_OPERATION_LOAD:
+      return loom_canonicalize_memory_access_results_are_empty(module, op);
+    case LOOM_MEMORY_ACCESS_OPERATION_STORE:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE:
+      return loom_canonicalize_required_empty_value(
+          module, loom_memory_access_value(access));
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW:
+      return loom_canonicalize_memory_access_results_are_empty(module, op) &&
+             loom_canonicalize_required_empty_value(
+                 module, loom_memory_access_value(access));
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG:
+      return loom_canonicalize_memory_access_results_are_empty(module, op) &&
+             loom_canonicalize_required_empty_value(
+                 module, loom_memory_access_expected(access)) &&
+             loom_canonicalize_required_empty_value(
+                 module, loom_memory_access_replacement(access));
+    case LOOM_MEMORY_ACCESS_OPERATION_PREFETCH:
+    case LOOM_MEMORY_ACCESS_OPERATION_COUNT_:
+      return false;
+  }
+  return false;
 }
 
 static iree_status_t loom_canonicalize_try_elide_empty_memory_effect(
     loom_rewriter_t* rewriter, loom_op_t* op, bool* out_elided) {
   *out_elided = false;
 
-  bool replace_result_with_empty = false;
-  bool erase_op = false;
-  switch (op->kind) {
-    case LOOM_OP_VECTOR_LOAD:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op);
-      break;
-    case LOOM_OP_VECTOR_LOAD_MASK:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_load_mask_mask(op)) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_load_mask_passthrough(op));
-      break;
-    case LOOM_OP_VECTOR_LOAD_EXPAND:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_load_expand_mask(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_load_expand_passthrough(op));
-      break;
-    case LOOM_OP_VECTOR_GATHER:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_gather_offsets(op));
-      break;
-    case LOOM_OP_VECTOR_GATHER_MASK:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_gather_mask_offsets(op)) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_gather_mask_mask(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_gather_mask_passthrough(op));
-      break;
-    case LOOM_OP_VECTOR_ATOMIC_RMW:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_atomic_rmw_value(op)) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_atomic_rmw_offsets(op));
-      break;
-    case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_rmw_mask_value(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_rmw_mask_offsets(op)) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_atomic_rmw_mask_mask(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_rmw_mask_passthrough(op));
-      break;
-    case LOOM_OP_VECTOR_ATOMIC_CMPXCHG:
-      replace_result_with_empty =
-          loom_canonicalize_single_empty_result(rewriter->module, op) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_cmpxchg_expected(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_cmpxchg_replacement(op)) &&
-          loom_canonicalize_empty_value(rewriter->module,
-                                        loom_vector_atomic_cmpxchg_offsets(op));
-      break;
-    case LOOM_OP_VECTOR_STORE:
-      erase_op = loom_canonicalize_empty_value(rewriter->module,
-                                               loom_vector_store_value(op));
-      break;
-    case LOOM_OP_VECTOR_STORE_MASK:
-      erase_op = loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_store_mask_value(op)) &&
-                 loom_canonicalize_empty_value(rewriter->module,
-                                               loom_vector_store_mask_mask(op));
-      break;
-    case LOOM_OP_VECTOR_STORE_COMPRESS:
-      erase_op = loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_store_compress_value(op)) &&
-                 loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_store_compress_mask(op));
-      break;
-    case LOOM_OP_VECTOR_SCATTER:
-      erase_op = loom_canonicalize_empty_value(rewriter->module,
-                                               loom_vector_scatter_value(op)) &&
-                 loom_canonicalize_empty_value(rewriter->module,
-                                               loom_vector_scatter_offsets(op));
-      break;
-    case LOOM_OP_VECTOR_SCATTER_MASK:
-      erase_op = loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_scatter_mask_value(op)) &&
-                 loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_scatter_mask_offsets(op)) &&
-                 loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_scatter_mask_mask(op));
-      break;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-      erase_op = loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_atomic_reduce_value(op)) &&
-                 loom_canonicalize_empty_value(
-                     rewriter->module, loom_vector_atomic_reduce_offsets(op));
-      break;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
-      erase_op =
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_reduce_mask_value(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_reduce_mask_offsets(op)) &&
-          loom_canonicalize_empty_value(
-              rewriter->module, loom_vector_atomic_reduce_mask_mask(op));
-      break;
-    default:
-      return iree_ok_status();
+  loom_memory_access_t access = loom_memory_access_cast(rewriter->module, op);
+  if (!loom_memory_access_isa(access)) return iree_ok_status();
+  if (!loom_canonicalize_memory_access_has_empty_footprint(rewriter->module, op,
+                                                           access)) {
+    return iree_ok_status();
   }
 
-  if (replace_result_with_empty) {
+  if (op->result_count != 0) {
     IREE_RETURN_IF_ERROR(
         loom_rewriter_replace_results_with_materialized_values_and_erase(
             rewriter, op, loom_empty_build));
     *out_elided = true;
     return iree_ok_status();
   }
-  if (erase_op) {
-    IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
-    *out_elided = true;
-    return iree_ok_status();
-  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
+  *out_elided = true;
   return iree_ok_status();
 }
 
