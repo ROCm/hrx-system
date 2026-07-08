@@ -309,7 +309,7 @@ def _emit_packed_ternary_candidate_array(
         yield f"            .packet_unit_count = {candidate.packet_unit_count},"
         yield "        },"
     yield "};"
-    yield f"const uint32_t {array.count_name} = {len(array.candidates)}u;"
+    yield (f'static_assert({array.count_name} == {len(array.candidates)}u, "{array.count_name} drifted from generated candidate rows");')
 
 
 def _emit_source(*, public_header: str) -> str:
