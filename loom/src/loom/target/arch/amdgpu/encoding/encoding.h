@@ -107,6 +107,21 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY_LITERAL = 68,
 } loom_amdgpu_encoding_format_t;
 
+typedef uint8_t loom_amdgpu_encoding_format_flags_t;
+
+enum loom_amdgpu_encoding_format_flag_bits_e {
+  // Format consumes a flat/global pointer address.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_GLOBAL_POINTER_ADDRESS = 1u << 0,
+  // Format consumes a scratch/private memory address.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_SCRATCH_ADDRESS = 1u << 1,
+  // Format consumes a data-share memory address.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_DATA_SHARE_ADDRESS = 1u << 2,
+  // Format consumes a buffer resource address.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_BUFFER_ADDRESS = 1u << 3,
+  // Format uses VOP source/destination VGPR-MSB selector slots.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_VOP_VGPR_MSB = 1u << 4,
+};
+
 // Stable target-owned encoding field identifiers used in
 // loom_amdgpu_encoding_field_value_t arrays.
 enum {
@@ -262,6 +277,10 @@ typedef struct loom_amdgpu_encoding_vopdxy_fields_t {
 
 // Returns a short stable diagnostic name for |encoding_format|.
 iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format);
+
+// Returns target-owned flags describing broad encoding-format categories.
+loom_amdgpu_encoding_format_flags_t loom_amdgpu_encoding_format_flags(
+    uint16_t encoding_format);
 
 // Returns true when |table| has a generated bit-layout row for
 // |encoding_format|.
