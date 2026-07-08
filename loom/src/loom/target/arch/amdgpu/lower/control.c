@@ -104,24 +104,19 @@ static iree_status_t loom_amdgpu_emit_plain_cond_branch(
                                 source_op->location, &low_cond_br_op);
 }
 
-static iree_status_t loom_amdgpu_condition_is_reg_class(
+static bool loom_amdgpu_condition_is_reg_class(
     loom_low_lower_context_t* context, loom_type_t low_type,
-    uint16_t reg_class_id, uint32_t unit_count, bool* out_match) {
-  *out_match = false;
+    uint16_t reg_class_id, uint32_t unit_count) {
   const bool is_class =
       loom_amdgpu_low_type_is_register_class(context, low_type, reg_class_id);
-  *out_match =
-      is_class && loom_low_register_type_unit_count(low_type) == unit_count;
-  return iree_ok_status();
+  return is_class && loom_low_register_type_unit_count(low_type) == unit_count;
 }
 
-static iree_status_t loom_amdgpu_low_type_is_native_i1_mask(
-    loom_low_lower_context_t* context, loom_type_t low_type, bool* out_match) {
-  *out_match = false;
+static bool loom_amdgpu_low_type_is_native_i1_mask(
+    loom_low_lower_context_t* context, loom_type_t low_type) {
   const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
-  *out_match = is_sgpr && loom_low_register_type_unit_count(low_type) == 2;
-  return iree_ok_status();
+  return is_sgpr && loom_low_register_type_unit_count(low_type) == 2;
 }
 
 static bool loom_amdgpu_single_predecessor_cfg_condition(
@@ -791,10 +786,8 @@ static iree_status_t loom_amdgpu_verify_if_else_merge_args(
         loom_block_arg_id(source_merge_dest, i);
     const loom_type_t source_merge_type =
         loom_module_value_type(module, source_merge_arg);
-    bool is_native_i1_mask = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_is_native_i1_mask(
-        context, merge_type, &is_native_i1_mask));
-    if (loom_amdgpu_type_is_i1(source_merge_type) && is_native_i1_mask) {
+    if (loom_amdgpu_type_is_i1(source_merge_type) &&
+        loom_amdgpu_low_type_is_native_i1_mask(context, merge_type)) {
       continue;
     }
 
@@ -1337,11 +1330,8 @@ iree_status_t loom_amdgpu_prepare_branch(void* user_data,
       context, source_terminator, loom_cfg_cond_br_condition(source_terminator),
       &condition_type));
 
-  bool is_sgpr_mask = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_condition_is_reg_class(
-      context, condition_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
-      &is_sgpr_mask));
-  if (!is_sgpr_mask) {
+  if (!loom_amdgpu_condition_is_reg_class(context, condition_type,
+                                          LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)) {
     return iree_ok_status();
   }
   return loom_amdgpu_prepare_exec_mask_branch(context, source_terminator);
@@ -1449,10 +1439,7 @@ static iree_status_t loom_amdgpu_emit_zero_native_i1_mask(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_type_t value_type, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  bool is_native_i1_mask = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_is_native_i1_mask(
-      context, value_type, &is_native_i1_mask));
-  if (!is_native_i1_mask) {
+  if (!loom_amdgpu_low_type_is_native_i1_mask(context, value_type)) {
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
   }
@@ -1469,10 +1456,7 @@ static iree_status_t loom_amdgpu_emit_zero_native_i1_mask(
 static iree_status_t loom_amdgpu_emit_zero_merge_value(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_type_t value_type, loom_value_id_t* out_value) {
-  bool is_native_i1_mask = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_is_native_i1_mask(
-      context, value_type, &is_native_i1_mask));
-  if (is_native_i1_mask) {
+  if (loom_amdgpu_low_type_is_native_i1_mask(context, value_type)) {
     return loom_amdgpu_emit_zero_native_i1_mask(context, source_op, value_type,
                                                 out_value);
   }
@@ -1621,10 +1605,7 @@ static iree_status_t loom_amdgpu_emit_masked_merge_value(
     loom_value_id_t low_true_value, loom_value_id_t low_condition,
     loom_type_t value_type, loom_value_id_t* out_merged_value) {
   *out_merged_value = LOOM_VALUE_ID_INVALID;
-  bool is_native_i1_mask = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_is_native_i1_mask(
-      context, value_type, &is_native_i1_mask));
-  if (is_native_i1_mask) {
+  if (loom_amdgpu_low_type_is_native_i1_mask(context, value_type)) {
     return loom_amdgpu_emit_native_i1_mask_merge(
         context, source_op, saved_exec, source_false_value, source_true_value,
         low_false_value, low_true_value, low_condition, value_type,
@@ -2035,28 +2016,20 @@ iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
   (void)user_data;
   loom_module_t* module = loom_low_lower_context_module(context);
   loom_type_t condition_type = loom_module_value_type(module, low_condition);
-  bool is_scc = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_condition_is_reg_class(
-      context, condition_type, LOOM_AMDGPU_REG_CLASS_ID_SCC, 1, &is_scc));
-  if (is_scc) {
+  if (loom_amdgpu_condition_is_reg_class(context, condition_type,
+                                         LOOM_AMDGPU_REG_CLASS_ID_SCC, 1)) {
     return loom_amdgpu_emit_plain_cond_branch(context, source_op, low_condition,
                                               low_true_dest, low_false_dest);
   }
 
-  bool is_sgpr_bool = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_condition_is_reg_class(
-      context, condition_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
-      &is_sgpr_bool));
-  if (is_sgpr_bool) {
+  if (loom_amdgpu_condition_is_reg_class(context, condition_type,
+                                         LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1)) {
     return loom_amdgpu_emit_sgpr_bool_cond_branch(
         context, source_op, low_condition, low_true_dest, low_false_dest);
   }
 
-  bool is_sgpr_mask = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_condition_is_reg_class(
-      context, condition_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
-      &is_sgpr_mask));
-  if (is_sgpr_mask) {
+  if (loom_amdgpu_condition_is_reg_class(context, condition_type,
+                                         LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)) {
     bool edge_implied_condition = false;
     if (loom_amdgpu_cfg_cond_br_edge_implied_bool(context, source_op,
                                                   &edge_implied_condition)) {
