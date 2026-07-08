@@ -2389,12 +2389,14 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
     const loom_module_t* module, loom_value_id_t value_id,
     const loom_use_t* use) {
   const loom_op_t* user_op = loom_use_user_op(*use);
-  if (loom_scalar_extf_isa(user_op)) {
+  const uint16_t operand_index = loom_use_operand_index(*use);
+  const loom_operand_role_t operand_role = loom_op_operand_role_at(
+      loom_op_vtable(module, user_op), user_op, operand_index);
+  if (operand_role == LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE) {
     const loom_type_t value_type = loom_module_value_type(module, value_id);
     const loom_scalar_type_t element_type = loom_type_element_type(value_type);
-    return loom_scalar_extf_input(user_op) == value_id &&
-           (element_type == LOOM_SCALAR_TYPE_F16 ||
-            element_type == LOOM_SCALAR_TYPE_BF16);
+    return element_type == LOOM_SCALAR_TYPE_F16 ||
+           element_type == LOOM_SCALAR_TYPE_BF16;
   }
   const loom_memory_access_t store_access =
       loom_memory_access_cast(module, user_op);
@@ -2405,23 +2407,17 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
       loom_memory_access_value(store_access) == value_id) {
     return true;
   }
-  if (loom_vector_from_elements_isa(user_op)) {
+  if (operand_role == LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT) {
     uint32_t payload_bit_count = 0;
     uint32_t register_count = 0;
-    if (!loom_amdgpu_type_packed_16bit_float_storage(
-            loom_module_value_type(module,
-                                   loom_vector_from_elements_result(user_op)),
+    if (user_op->result_count != 1 ||
+        !loom_amdgpu_type_packed_16bit_float_storage(
+            loom_module_value_type(module, loom_op_results(user_op)[0]),
             &payload_bit_count, &register_count) ||
         payload_bit_count == 0 || register_count == 0) {
       return false;
     }
-    const loom_value_slice_t elements =
-        loom_vector_from_elements_elements(user_op);
-    for (iree_host_size_t i = 0; i < elements.count; ++i) {
-      if (loom_value_slice_get(elements, i) == value_id) {
-        return true;
-      }
-    }
+    return true;
   }
   return false;
 }

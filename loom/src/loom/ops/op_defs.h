@@ -741,6 +741,8 @@ enum loom_operand_role_e {
   LOOM_OPERAND_ROLE_BROADCAST_SOURCE = 4,
   // Operand contributes one logical element to a composite result.
   LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT = 5,
+  // Operand is widened by a floating-point precision extension.
+  LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE = 6,
 };
 typedef uint8_t loom_operand_role_t;
 
@@ -755,6 +757,8 @@ enum loom_operand_role_mask_bits_e {
       1u << LOOM_OPERAND_ROLE_BROADCAST_SOURCE,
   LOOM_OPERAND_ROLE_MASK_COMPOSITE_ELEMENT =
       1u << LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT,
+  LOOM_OPERAND_ROLE_MASK_FLOAT_EXTENSION_SOURCE =
+      1u << LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE,
 };
 typedef uint8_t loom_operand_role_mask_t;
 
