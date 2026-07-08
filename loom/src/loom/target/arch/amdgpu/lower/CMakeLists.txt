@@ -247,6 +247,7 @@ loom_cc_library(
     "collective_payload.c"
     "collective_reduce.c"
     "collective_scan.c"
+    "constants.c"
     "control.c"
     "control_packet.c"
     "data_symbol.c"
