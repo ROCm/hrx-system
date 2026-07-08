@@ -122,6 +122,12 @@ iree_status_t loom_amdgpu_structural_packet_analyze(
   if (loom_low_live_in_isa(op) || loom_low_storage_reserve_isa(op)) {
     return iree_ok_status();
   }
+  if (loom_low_cond_br_isa(op)) {
+    out_info->flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES |
+                      LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_SALU;
+    out_info->instruction_count = 1;
+    return iree_ok_status();
+  }
   out_info->flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
   out_info->instruction_count = 1;
   return iree_ok_status();
