@@ -424,6 +424,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::schedule
     loom::ir
+    loom::ops::low
   PUBLIC
 )
 
@@ -686,6 +687,7 @@ loom_cc_library(
   SRCS
     "verify.c"
   DEPS
+    ::packet
     ::storage_layout
     ::target_binding
     iree::base
@@ -745,6 +747,7 @@ loom_cc_test(
     ::packet
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ops::low
 )
 
 loom_cc_test(

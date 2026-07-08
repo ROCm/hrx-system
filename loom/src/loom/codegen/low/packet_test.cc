@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/ops/low/ops.h"
 
 namespace loom {
 namespace {
@@ -29,6 +30,11 @@ struct PacketTestState {
   loom_low_schedule_table_t schedule = {};
   loom_low_packet_asm_form_table_t asm_form_table = {};
   loom_low_allocation_table_t allocation = {};
+};
+
+struct PacketAttrTestOp {
+  loom_op_t op = {};
+  loom_attribute_t attrs[3] = {};
 };
 
 void InitializePacketTestState(PacketTestState* state) {
@@ -147,6 +153,67 @@ TEST(LowPacketTest, ViewsBlockScheduledOrdinals) {
   EXPECT_EQ(packet.node_index, 0u);
   EXPECT_EQ(packet.node, &state.nodes[0]);
   EXPECT_EQ(packet.descriptor, &state.descriptors[1]);
+}
+
+TEST(LowPacketTest, GetsDescriptorPacketOpAttrs) {
+  loom_named_attr_t named_attrs[1] = {};
+  named_attrs[0].name_id = 7;
+  named_attrs[0].value = loom_attr_i64(42);
+
+  PacketAttrTestOp low_op_storage;
+  low_op_storage.op.kind = LOOM_OP_LOW_OP;
+  low_op_storage.op.attribute_count = IREE_ARRAYSIZE(low_op_storage.attrs);
+  low_op_storage.attrs[loom_low_op_attrs_ATTR_INDEX] =
+      loom_make_canonical_attr_dict(named_attrs, IREE_ARRAYSIZE(named_attrs));
+
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  uint16_t attrs_attr_index = UINT16_MAX;
+  EXPECT_TRUE(loom_low_packet_try_op_attrs(&low_op_storage.op, &attrs,
+                                           &attrs_attr_index));
+  EXPECT_EQ(attrs.entries, named_attrs);
+  EXPECT_EQ(attrs.count, 1u);
+  EXPECT_EQ(attrs_attr_index, loom_low_op_attrs_ATTR_INDEX);
+
+  PacketAttrTestOp low_const_storage;
+  low_const_storage.op.kind = LOOM_OP_LOW_CONST;
+  low_const_storage.op.attribute_count =
+      IREE_ARRAYSIZE(low_const_storage.attrs);
+  low_const_storage.attrs[loom_low_const_attrs_ATTR_INDEX] =
+      loom_make_canonical_attr_dict(named_attrs, IREE_ARRAYSIZE(named_attrs));
+
+  attrs = loom_named_attr_slice_empty();
+  attrs_attr_index = UINT16_MAX;
+  EXPECT_TRUE(loom_low_packet_try_op_attrs(&low_const_storage.op, &attrs,
+                                           &attrs_attr_index));
+  EXPECT_EQ(attrs.entries, named_attrs);
+  EXPECT_EQ(attrs.count, 1u);
+  EXPECT_EQ(attrs_attr_index, loom_low_const_attrs_ATTR_INDEX);
+}
+
+TEST(LowPacketTest, GetsPacketViewAttrs) {
+  loom_named_attr_t named_attrs[1] = {};
+  named_attrs[0].name_id = 7;
+  named_attrs[0].value = loom_attr_i64(42);
+
+  PacketAttrTestOp low_op_storage;
+  low_op_storage.op.kind = LOOM_OP_LOW_OP;
+  low_op_storage.op.attribute_count = IREE_ARRAYSIZE(low_op_storage.attrs);
+  low_op_storage.attrs[loom_low_op_attrs_ATTR_INDEX] =
+      loom_make_canonical_attr_dict(named_attrs, IREE_ARRAYSIZE(named_attrs));
+
+  loom_low_schedule_node_t node = {};
+  node.op = &low_op_storage.op;
+  loom_low_packet_view_t packet = {};
+  packet.node = &node;
+
+  loom_named_attr_slice_t attrs = loom_low_packet_attrs(&packet);
+  EXPECT_EQ(attrs.entries, named_attrs);
+  EXPECT_EQ(attrs.count, 1u);
+
+  node.op = nullptr;
+  attrs = loom_low_packet_attrs(&packet);
+  EXPECT_EQ(attrs.entries, nullptr);
+  EXPECT_EQ(attrs.count, 0u);
 }
 
 TEST(LowPacketTest, RejectsInvalidBlockScheduledOrdinal) {

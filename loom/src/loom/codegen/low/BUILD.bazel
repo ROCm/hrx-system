@@ -402,6 +402,7 @@ loom_cc_library(
         ":descriptors",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
     ],
 )
@@ -631,6 +632,7 @@ loom_cc_library(
     srcs = ["verify.c"],
     hdrs = ["verify.h"],
     deps = [
+        ":packet",
         ":storage_layout",
         ":target_binding",
         "//loom/src/loom/error:emitter",
@@ -684,6 +686,7 @@ loom_cc_test(
     deps = [
         ":descriptors",
         ":packet",
+        "//loom/src/loom/ops/low",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
