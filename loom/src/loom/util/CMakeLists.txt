@@ -100,6 +100,7 @@ loom_cc_library(
   DEPS
     ::math
     iree::base
+    loom::ir
   PUBLIC
 )
 

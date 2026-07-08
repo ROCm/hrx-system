@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/lower/memory_bank_conflict.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/util/numeric_format.h"
 
 static iree_status_t loom_amdgpu_fit_memory_u32_vaddr_term_operand(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -205,19 +206,6 @@ static iree_string_view_t loom_amdgpu_memory_report_storage_symbol(
   return symbol;
 }
 
-static loom_value_fact_numeric_format_flags_t
-loom_amdgpu_memory_report_direct_storage_element_format(
-    loom_scalar_type_t element_type) {
-  switch (element_type) {
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      return LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3;
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      return LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2;
-    default:
-      return LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
-  }
-}
-
 static void loom_amdgpu_memory_report_row_set_storage_schema(
     const loom_value_fact_storage_schema_t* schema,
     loom_low_lower_memory_report_row_t* row) {
@@ -279,8 +267,7 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
   }
   if (iree_string_view_is_empty(row->storage_element_format)) {
     const loom_value_fact_numeric_format_flags_t element_format =
-        loom_amdgpu_memory_report_direct_storage_element_format(
-            loom_type_element_type(view_type));
+        loom_numeric_format_from_scalar_type(loom_type_element_type(view_type));
     row->storage_element_format = loom_amdgpu_memory_report_storage_symbol(
         LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT, element_format,
         LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
