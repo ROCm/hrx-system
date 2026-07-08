@@ -256,6 +256,7 @@ loom_cc_library(
     "emit_support.c"
     "feedback.c"
     "lds_layout.c"
+    "legality.c"
     "mask.c"
     "materializers.c"
     "matrix.c"
