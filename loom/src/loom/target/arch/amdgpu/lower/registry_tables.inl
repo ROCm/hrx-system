@@ -197,7 +197,8 @@ static const loom_amdgpu_lower_dispatch_row_t
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_ALLOCA)] =
             LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
                 LOOM_OP_BUFFER_ALLOCA, loom_amdgpu_select_buffer_dispatch,
-                loom_amdgpu_emit_buffer_dispatch, NULL,
+                loom_amdgpu_emit_buffer_dispatch,
+                loom_amdgpu_low_legality_record_buffer_op,
                 LOOM_AMDGPU_STORAGE_NONE),
 };
 

@@ -14,8 +14,8 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
 
-static bool loom_amdgpu_select_buffer_alloca_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
+static bool loom_amdgpu_select_buffer_alloca_plan_from_facts(
+    const loom_value_fact_table_t* fact_table, const loom_op_t* source_op,
     loom_amdgpu_buffer_alloca_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_buffer_alloca_plan_t){0};
   const loom_value_fact_memory_space_t memory_space =
@@ -35,10 +35,9 @@ static bool loom_amdgpu_select_buffer_alloca_plan(
       !loom_amdgpu_u32_is_power_of_two((uint32_t)base_alignment)) {
     return false;
   }
-  const loom_value_fact_table_t* fact_table =
-      loom_low_lower_context_fact_table(context);
   int64_t byte_length = 0;
-  if (!loom_amdgpu_value_facts_as_exact_non_negative_i64(
+  if (fact_table == NULL ||
+      !loom_amdgpu_value_facts_as_exact_non_negative_i64(
           loom_value_fact_table_lookup(
               fact_table, loom_buffer_alloca_byte_length(source_op)),
           &byte_length) ||
@@ -48,6 +47,13 @@ static bool loom_amdgpu_select_buffer_alloca_plan(
   out_plan->byte_length = byte_length;
   out_plan->base_alignment = base_alignment;
   return true;
+}
+
+static bool loom_amdgpu_select_buffer_alloca_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_buffer_alloca_plan_t* out_plan) {
+  return loom_amdgpu_select_buffer_alloca_plan_from_facts(
+      loom_low_lower_context_fact_table(context), source_op, out_plan);
 }
 
 iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
@@ -76,6 +82,27 @@ iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
     default:
       return iree_ok_status();
   }
+}
+
+iree_status_t loom_amdgpu_low_legality_record_buffer_op(
+    const loom_target_low_legality_provider_t* provider,
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    bool* out_handled) {
+  (void)provider;
+  *out_handled = false;
+  if (op->kind != LOOM_OP_BUFFER_ALLOCA) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_buffer_alloca_plan_t plan = {0};
+  if (!loom_amdgpu_select_buffer_alloca_plan_from_facts(
+          loom_target_low_legality_fact_table(context), op, &plan)) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
+      context, loom_buffer_alloca_memory_space(op),
+      loom_buffer_alloca_result(op), (uint64_t)plan.byte_length,
+      (uint64_t)plan.base_alignment);
 }
 
 static iree_status_t loom_amdgpu_lower_buffer_alloca(
