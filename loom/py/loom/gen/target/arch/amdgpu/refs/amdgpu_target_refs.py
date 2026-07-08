@@ -113,6 +113,7 @@ class _DescriptorSetRefTable:
     descriptor_set_key: str
     descriptor_ordinals: list[int | None]
     descriptor_traits: list[tuple[str, ...]]
+    reg_class_traits: list[tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +179,12 @@ def _descriptor_set_trait_table_name(key: str) -> str:
     suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
     c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
     return f"kAmdgpu{c_suffix}DescriptorTraits"
+
+
+def _reg_class_trait_table_name(key: str) -> str:
+    suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
+    c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
+    return f"kAmdgpu{c_suffix}RegClassTraits"
 
 
 def _descriptor_by_key(descriptor_set: DescriptorSet, key: str) -> Descriptor:
@@ -265,6 +272,17 @@ def _validate_descriptor_trait_keys() -> None:
             raise ValueError(f"AMDGPU descriptor trait key '{descriptor_key}' is not listed as a descriptor ref")
 
 
+def _reg_class_trait_names(reg_class_name: str) -> tuple[str, ...]:
+    trait_names: list[str] = []
+    if reg_class_name == "amdgpu.agpr":
+        trait_names.append("LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR")
+    if reg_class_name == "amdgpu.m0":
+        trait_names.append("LOOM_AMDGPU_REG_CLASS_TRAIT_M0")
+    if reg_class_name == "amdgpu.vcc":
+        trait_names.append("LOOM_AMDGPU_REG_CLASS_TRAIT_VCC")
+    return tuple(trait_names)
+
+
 def _materialize_descriptor_ref_tables(
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
     descriptor_set_keys: Sequence[str],
@@ -299,6 +317,7 @@ def _materialize_descriptor_ref_tables(
                 descriptor_set_key=descriptor_set_info.key,
                 descriptor_ordinals=[descriptor_ordinals.get(key) for key in descriptor_ref_keys],
                 descriptor_traits=[_descriptor_trait_names(trait_context, descriptor) for descriptor in descriptor_set.descriptors],
+                reg_class_traits=[_reg_class_trait_names(reg_class.name) for reg_class in descriptor_set.reg_classes],
             )
         )
     descriptor_set_tables.sort(key=lambda table: table.descriptor_set_ordinal)
@@ -378,6 +397,15 @@ def _emit_source(
                 lines.append("    0,")
         lines.append("};")
         lines.append("")
+        reg_class_trait_table_name = _reg_class_trait_table_name(descriptor_set_table.descriptor_set_key)
+        lines.append(f"static const loom_amdgpu_reg_class_traits_t {reg_class_trait_table_name}[] = {{")
+        for trait_names in descriptor_set_table.reg_class_traits:
+            if trait_names:
+                lines.append(f"    {' | '.join(trait_names)},")
+            else:
+                lines.append("    0,")
+        lines.append("};")
+        lines.append("")
 
     tables_by_ordinal = {table.descriptor_set_ordinal: table.descriptor_set_key for table in descriptor_set_tables}
     lines.append("const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
@@ -389,6 +417,12 @@ def _emit_source(
     lines.append("const loom_amdgpu_descriptor_traits_t* const kLoomAmdgpuDescriptorTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
     for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
         table_expr = _descriptor_set_trait_table_name(descriptor_set_key)
+        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    lines.append("};")
+    lines.append("")
+    lines.append("const loom_amdgpu_reg_class_traits_t* const kLoomAmdgpuRegClassTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
+    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
+        table_expr = _reg_class_trait_table_name(descriptor_set_key)
         lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
     lines.append("};")
     return "\n".join(lines) + "\n"

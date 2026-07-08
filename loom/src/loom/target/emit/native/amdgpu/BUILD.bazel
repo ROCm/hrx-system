@@ -44,7 +44,10 @@ _AMDGPU_TOOLING_VISIBILITY = [
 loom_cc_library(
     name = "register_class",
     hdrs = ["register_class.h"],
-    deps = ["//loom/src/loom/codegen/low:descriptors"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+    ],
 )
 
 loom_cc_library(

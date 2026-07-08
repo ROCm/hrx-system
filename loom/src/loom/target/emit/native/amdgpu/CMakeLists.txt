@@ -17,6 +17,7 @@ loom_cc_library(
     "register_class.h"
   DEPS
     loom::codegen::low::descriptors
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
 endif()
