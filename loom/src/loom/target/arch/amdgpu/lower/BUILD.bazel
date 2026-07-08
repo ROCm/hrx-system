@@ -161,6 +161,7 @@ loom_cc_library(
         "feedback.c",
         "lds_layout.c",
         "mask.c",
+        "materializers.c",
         "matrix.c",
         "matrix_fragment.c",
         "memory.c",
