@@ -96,7 +96,7 @@ iree_status_t loom_amdgpu_wait_packet_select_counter_mask(
 
 // Tries to select one concrete wait packet that drains |counter_mask| to
 // |target_count| on |descriptor_set|. Missing target coverage is reported as
-// |out_selected| false; malformed descriptor tables remain status failures.
+// |out_selected| false.
 iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t counter_mask,
     uint16_t target_count, loom_amdgpu_wait_packet_selection_t* out_selection,
