@@ -37,6 +37,30 @@ bool loom_amdgpu_type_is_i1(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1;
 }
 
+uint32_t loom_amdgpu_integer_scalar_type_bit_count(
+    loom_scalar_type_t scalar_type) {
+  switch (scalar_type) {
+    case LOOM_SCALAR_TYPE_I8:
+      return 8;
+    case LOOM_SCALAR_TYPE_I16:
+      return 16;
+    case LOOM_SCALAR_TYPE_I32:
+      return 32;
+    case LOOM_SCALAR_TYPE_I64:
+      return 64;
+    default:
+      return 0;
+  }
+}
+
+uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type) {
+  if (!loom_type_is_scalar(type)) {
+    return 0;
+  }
+  return loom_amdgpu_integer_scalar_type_bit_count(
+      loom_type_element_type(type));
+}
+
 bool loom_amdgpu_type_is_address_scalar(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          (loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX ||
@@ -550,4 +574,13 @@ bool loom_amdgpu_low_value_is_register_class_count(
   return loom_amdgpu_low_type_is_register_class_count(
       context, loom_module_value_type(module, low_value), reg_class_id,
       register_unit_count);
+}
+
+loom_type_t loom_amdgpu_low_register_lane_type(const loom_module_t* module,
+                                               loom_value_id_t low_value) {
+  const loom_type_t low_type = loom_module_value_type(module, low_value);
+  if (!loom_low_type_is_register(low_type)) {
+    return loom_type_none();
+  }
+  return loom_low_register_type_with_unit_count(low_type, 1);
 }

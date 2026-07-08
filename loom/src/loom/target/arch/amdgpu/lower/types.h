@@ -41,6 +41,15 @@ bool loom_amdgpu_type_is_i8(loom_type_t type);
 // Returns true when the source type is a scalar i1.
 bool loom_amdgpu_type_is_i1(loom_type_t type);
 
+// Returns the bit count for i8/i16/i32/i64 scalar payloads, or zero when the
+// scalar type is not an ordinary integer payload.
+uint32_t loom_amdgpu_integer_scalar_type_bit_count(
+    loom_scalar_type_t scalar_type);
+
+// Returns the bit count for i8/i16/i32/i64 scalar source types, or zero when
+// the source type is not an ordinary integer scalar payload.
+uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type);
+
 // Returns true when the source type is an address-sized scalar lowered through
 // the current 32-bit AMDGPU scalar path.
 bool loom_amdgpu_type_is_address_scalar(loom_type_t type);
@@ -250,6 +259,11 @@ bool loom_amdgpu_low_type_is_register_class_count(
 bool loom_amdgpu_low_value_is_register_class_count(
     loom_low_lower_context_t* context, loom_value_id_t low_value,
     uint16_t reg_class_id, uint32_t register_unit_count);
+
+// Returns the one-unit lane register type for a low register value, or none
+// when the value is not a low register.
+loom_type_t loom_amdgpu_low_register_lane_type(const loom_module_t* module,
+                                               loom_value_id_t low_value);
 
 // Returns true when the source value should prefer a VGPR mapping even if its
 // scalar type could otherwise map to an SGPR. Fact and view-region tables
