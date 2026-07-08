@@ -352,14 +352,6 @@ static bool loom_amdgpu_vopd_target_supports_base_vopd(
   return loom_amdgpu_vopd_descriptor_set_supports_packetization(descriptor_set);
 }
 
-static bool loom_amdgpu_vopd_processor_has_valu_trans_use_depctr(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
-}
-
 static void loom_amdgpu_vopd_append_schedule_pair_affinity(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t first_descriptor_ref,
@@ -667,8 +659,9 @@ static bool loom_amdgpu_vopd_schedule_has_trans_result_packet(
 
 static iree_status_t loom_amdgpu_vopd_plan_allocate_trans_result_guard(
     loom_amdgpu_vopd_plan_builder_t* builder) {
-  if (!loom_amdgpu_vopd_processor_has_valu_trans_use_depctr(
-          builder->processor) ||
+  if (!loom_amdgpu_processor_has_scheduling(
+          builder->processor,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR) ||
       !loom_amdgpu_vopd_schedule_has_trans_result_packet(builder)) {
     return iree_ok_status();
   }
