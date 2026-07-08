@@ -93,6 +93,8 @@ loom_cc_library(
     loom::rewrite::remap
     loom::rewrite::rewriter
     loom::target::compile_report
+    loom::target::launch
+    loom::target::selection
     loom::util::math
     loom::util::walk
   PUBLIC
