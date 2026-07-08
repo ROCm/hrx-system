@@ -496,26 +496,11 @@ static bool loom_amdgpu_wait_plan_node_forwards_dependencies(
          builder->node_states[node_index].forwards_dependencies;
 }
 
-static bool loom_amdgpu_wait_plan_processor_has_valu_trans_use_depctr(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
-}
-
-static bool loom_amdgpu_wait_plan_processor_has_valu_sgpr_read_depctr(
-    const loom_amdgpu_processor_info_t* processor) {
-  return processor != NULL &&
-         iree_any_bit_set(
-             processor->features.scheduling,
-             LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR);
-}
-
 static bool loom_amdgpu_wait_plan_needs_trans_result_state(
     const loom_amdgpu_wait_plan_builder_t* builder) {
-  if (!loom_amdgpu_wait_plan_processor_has_valu_trans_use_depctr(
-          builder->processor)) {
+  if (!loom_amdgpu_processor_has_scheduling(
+          builder->processor,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR)) {
     return false;
   }
   for (iree_host_size_t i = 0; i < builder->schedule->node_count; ++i) {
@@ -528,8 +513,9 @@ static bool loom_amdgpu_wait_plan_needs_trans_result_state(
 
 static bool loom_amdgpu_wait_plan_needs_sgpr_read_state(
     const loom_amdgpu_wait_plan_builder_t* builder) {
-  return loom_amdgpu_wait_plan_processor_has_valu_sgpr_read_depctr(
-      builder->processor);
+  return loom_amdgpu_processor_has_scheduling(
+      builder->processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
@@ -1435,9 +1421,9 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
   const loom_low_schedule_table_t* schedule = builder->schedule;
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
-  const bool has_valu_trans_use_depctr =
-      loom_amdgpu_wait_plan_processor_has_valu_trans_use_depctr(
-          builder->processor);
+  const bool has_valu_trans_use_depctr = loom_amdgpu_processor_has_scheduling(
+      builder->processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[i];
     if (node_state->has_generic_counter_effect) {

@@ -381,6 +381,14 @@ static inline bool loom_amdgpu_processor_info_has_flags(
   return processor != NULL && iree_all_bits_set(processor->flags, flags);
 }
 
+// Returns true when |processor| advertises every requested scheduling bit.
+static inline bool loom_amdgpu_processor_has_scheduling(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_processor_scheduling_bits_t bits) {
+  return processor != NULL &&
+         iree_all_bits_set(processor->features.scheduling, bits);
+}
+
 // Returns true when |descriptor_set| advertises every requested descriptor-set
 // info flag.
 static inline bool loom_amdgpu_descriptor_set_info_has_flags(
