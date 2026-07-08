@@ -135,10 +135,8 @@ static iree_status_t loom_amdgpu_select_subgroup_vote_plan(
   *out_wavefront_size = 0;
   *out_selected = false;
 
-  bool full_wave_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_full_wave_direct_subgroup_width(
-      context, out_wavefront_size, &full_wave_selected));
-  if (!full_wave_selected) {
+  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
+                                                          out_wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -186,10 +184,8 @@ static iree_status_t loom_amdgpu_select_subgroup_mask_result(
   *out_wavefront_size = 0;
   *out_selected = false;
 
-  bool full_wave_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_full_wave_direct_subgroup_width(
-      context, out_wavefront_size, &full_wave_selected));
-  if (!full_wave_selected) {
+  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
+                                                          out_wavefront_size)) {
     return iree_ok_status();
   }
 

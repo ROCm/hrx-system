@@ -1065,9 +1065,8 @@ iree_status_t loom_amdgpu_lower_sanitizer_assert_access(
       IREE_ASSERT_UNREACHABLE("unsupported AMDGPU sanitizer reporting mode");
       IREE_BUILTIN_UNREACHABLE();
   }
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(
-      loom_low_lower_context_bundle(context), &wavefront_size));
+  const uint32_t wavefront_size =
+      loom_amdgpu_target_wavefront_size(loom_low_lower_context_bundle(context));
   loom_amdgpu_sanitizer_access_config_t access_config = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_sanitizer_access_config(
       builder, descriptor_set, state->asan_config_symbol, source_op->location,

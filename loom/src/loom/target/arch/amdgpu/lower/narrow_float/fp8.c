@@ -1184,9 +1184,8 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_u16_repair_split(
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   IREE_ASSERT(builder->ip.before_op == NULL);
 
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(
-      loom_low_lower_context_bundle(context), &wavefront_size));
+  const uint32_t wavefront_size =
+      loom_amdgpu_target_wavefront_size(loom_low_lower_context_bundle(context));
 
   loom_value_id_t low_has_condition_scc = LOOM_VALUE_ID_INVALID;
   if (wavefront_size == 32) {
