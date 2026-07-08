@@ -1508,6 +1508,11 @@ loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
 loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
     loom_memory_access_t access);
 
+// Returns true when the operand at |operand_index| is a written value,
+// compare-exchange expected value, or compare-exchange replacement value.
+bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
+                                                 uint16_t operand_index);
+
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);
 

@@ -1389,6 +1389,53 @@ loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
                 : LOOM_MEMORY_ACCESS_OPERATION_COUNT_;
 }
 
+static bool loom_memory_access_operand_field_contains(
+    loom_memory_access_t access, uint8_t operand_field_index,
+    uint16_t operand_index) {
+  if (!access.op || !access.op_vtable ||
+      operand_field_index == LOOM_OPERAND_INDEX_NONE ||
+      operand_index >= access.op->operand_count) {
+    return false;
+  }
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    return operand_field_index == operand_index;
+  }
+  const loom_value_slice_t span = loom_op_operand_field_span(
+      access.op_vtable, access.op, operand_field_index);
+  if (span.count == 0 || span.values == NULL) {
+    return false;
+  }
+  const uintptr_t operand_base = (uintptr_t)loom_op_const_operands(access.op);
+  const uintptr_t span_base = (uintptr_t)span.values;
+  if (span_base < operand_base) {
+    return false;
+  }
+  const uintptr_t span_offset_bytes = span_base - operand_base;
+  if (span_offset_bytes % sizeof(*span.values) != 0) {
+    return false;
+  }
+  const uintptr_t first_operand_index =
+      span_offset_bytes / sizeof(*span.values);
+  return operand_index >= first_operand_index &&
+         operand_index < first_operand_index + span.count;
+}
+
+bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
+                                                 uint16_t operand_index) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  if (!vtable ||
+      !loom_memory_access_operation_kind_has_payload_operands(
+          (loom_memory_access_operation_kind_t)vtable->operation_kind)) {
+    return false;
+  }
+  return loom_memory_access_operand_field_contains(
+             access, vtable->value_operand_index, operand_index) ||
+         loom_memory_access_operand_field_contains(
+             access, vtable->expected_operand_index, operand_index) ||
+         loom_memory_access_operand_field_contains(
+             access, vtable->replacement_operand_index, operand_index);
+}
+
 static loom_value_id_t loom_memory_access_operand(loom_memory_access_t access,
                                                   uint8_t operand_field_index) {
   if (!access.op || !access.op_vtable ||
