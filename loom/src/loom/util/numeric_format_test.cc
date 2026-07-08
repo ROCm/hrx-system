@@ -103,4 +103,35 @@ TEST(NumericFormatTest, LeavesScaleExponentFormatOutOfPayloadSelectors) {
       loom_numeric_format_needs_encoded_payload_selector(info->format));
 }
 
+TEST(NumericFormatTest, MapsDirectScalarTypesToNumericFormats) {
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I1),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_I1);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I8),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_I8);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I16),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_I16);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I32),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_I32);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F8E4M3),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F8E5M2),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F16),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F16);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_BF16),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F32),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F32);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F64),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F64);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_INDEX),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_OFFSET),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I64),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_COUNT_),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+}
+
 }  // namespace

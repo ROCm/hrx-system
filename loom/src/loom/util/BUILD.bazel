@@ -86,6 +86,7 @@ loom_cc_library(
     hdrs = ["numeric_format.h"],
     deps = [
         ":math",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
     ],
 )

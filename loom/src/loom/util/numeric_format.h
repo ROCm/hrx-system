@@ -14,6 +14,7 @@
 #define LOOM_UTIL_NUMERIC_FORMAT_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/scalar_type.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -193,6 +194,11 @@ bool loom_numeric_format_is_finite_only(
 // format.
 bool loom_numeric_format_needs_encoded_payload_selector(
     loom_value_fact_numeric_format_flags_t format);
+
+// Returns the numeric-format fact corresponding to a directly represented Loom
+// scalar type, or NONE when no single numeric-format fact exists.
+loom_value_fact_numeric_format_flags_t loom_numeric_format_from_scalar_type(
+    loom_scalar_type_t type);
 
 #ifdef __cplusplus
 }

@@ -221,6 +221,23 @@ static const loom_numeric_format_info_t
             LOOM_NUMERIC_FORMAT_FLAG_SIGNED),
 };
 
+static const loom_value_fact_numeric_format_flags_t
+    kLoomNumericFormatsByScalarType[LOOM_SCALAR_TYPE_COUNT_] = {
+        [LOOM_SCALAR_TYPE_I1] = LOOM_VALUE_FACT_NUMERIC_FORMAT_I1,
+        [LOOM_SCALAR_TYPE_I8] = LOOM_VALUE_FACT_NUMERIC_FORMAT_I8,
+        [LOOM_SCALAR_TYPE_I16] = LOOM_VALUE_FACT_NUMERIC_FORMAT_I16,
+        [LOOM_SCALAR_TYPE_I32] = LOOM_VALUE_FACT_NUMERIC_FORMAT_I32,
+        [LOOM_SCALAR_TYPE_F8E4M3] = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3,
+        [LOOM_SCALAR_TYPE_F8E5M2] = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2,
+        [LOOM_SCALAR_TYPE_F16] = LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
+        [LOOM_SCALAR_TYPE_BF16] = LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16,
+        [LOOM_SCALAR_TYPE_F32] = LOOM_VALUE_FACT_NUMERIC_FORMAT_F32,
+        [LOOM_SCALAR_TYPE_F64] = LOOM_VALUE_FACT_NUMERIC_FORMAT_F64,
+};
+static_assert(IREE_ARRAYSIZE(kLoomNumericFormatsByScalarType) ==
+                  LOOM_SCALAR_TYPE_COUNT_,
+              "scalar type numeric-format table out of sync");
+
 static bool loom_numeric_format_is_single_bit(
     loom_value_fact_numeric_format_flags_t format) {
   return format != 0 && (format & (format - 1)) == 0;
@@ -262,6 +279,13 @@ bool loom_numeric_format_needs_encoded_payload_selector(
   return loom_numeric_format_info(format, &info) &&
          iree_any_bit_set(info->flags,
                           LOOM_NUMERIC_FORMAT_FLAG_ENCODED_PAYLOAD_SELECTOR);
+}
+
+loom_value_fact_numeric_format_flags_t loom_numeric_format_from_scalar_type(
+    loom_scalar_type_t type) {
+  return type < IREE_ARRAYSIZE(kLoomNumericFormatsByScalarType)
+             ? kLoomNumericFormatsByScalarType[type]
+             : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
 }
 
 #undef LOOM_NUMERIC_FORMAT_FINITE_NAN_UNSIGNED_ZERO_SELECTOR_FLAGS
