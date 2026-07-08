@@ -255,7 +255,6 @@ loom_cc_library(
     "dot.c"
     "emit_support.c"
     "feedback.c"
-    "lds_layout.c"
     "legality.c"
     "mask.c"
     "materializers.c"
@@ -280,6 +279,7 @@ loom_cc_library(
     "sanitizer_race_report.c"
     "sanitizer_report.c"
     "signal.c"
+    "source_alloca_layout.c"
     "structural.c"
     "subgroup_broadcast.c"
     "subgroup_crosslane.c"
@@ -350,6 +350,7 @@ loom_cc_library(
     loom::util::fact_table
     loom::util::math
     loom::util::numeric_format
+    loom::util::walk
   PUBLIC
 )
 endif()

@@ -1561,8 +1561,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_reject_memory_selection(
 static bool loom_amdgpu_sanitizer_race_access_plan_build(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
-    loom_func_like_t source_function, const loom_op_t* op,
-    loom_amdgpu_sanitizer_race_access_plan_t* out_plan,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
+    const loom_op_t* op, loom_amdgpu_sanitizer_race_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_source_diagnostic,
     loom_amdgpu_memory_access_diagnostic_t* out_memory_diagnostic) {
   *out_plan = (loom_amdgpu_sanitizer_race_access_plan_t){0};
@@ -1604,7 +1604,7 @@ static bool loom_amdgpu_sanitizer_race_access_plan_build(
   access.source = source;
   out_plan->address.source = source;
   if (!loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
-          module, fact_table, view_regions, source_function, &source, &access,
+          module, fact_table, view_regions, alloca_layout, &source, &access,
           out_memory_diagnostic)) {
     return false;
   }
@@ -1637,13 +1637,15 @@ static iree_status_t loom_amdgpu_sanitizer_race_verify_access_address(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &alloca_layout));
   loom_amdgpu_sanitizer_race_access_plan_t plan = {0};
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   if (!loom_amdgpu_sanitizer_race_access_plan_build(
           module, loom_target_low_legality_fact_table(context), view_regions,
-          loom_target_low_legality_function(context), op, &plan,
-          &source_diagnostic, &memory_diagnostic)) {
+          alloca_layout, op, &plan, &source_diagnostic, &memory_diagnostic)) {
     if (source_diagnostic.rejection_bits != 0) {
       if (iree_any_bit_set(source_diagnostic.rejection_bits,
                            LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_LAYOUT)) {
@@ -1706,13 +1708,16 @@ iree_status_t loom_amdgpu_select_sanitizer_race_access_plan(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
+      context, &alloca_layout));
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   if (!loom_amdgpu_sanitizer_race_access_plan_build(
           loom_low_lower_context_module(context),
           loom_low_lower_context_fact_table(context), view_regions,
-          loom_low_lower_context_source_function(context), source_op, out_plan,
-          &source_diagnostic, &memory_diagnostic)) {
+          alloca_layout, source_op, out_plan, &source_diagnostic,
+          &memory_diagnostic)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_site_id_for_op(

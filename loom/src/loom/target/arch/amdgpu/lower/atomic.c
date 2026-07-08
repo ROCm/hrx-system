@@ -1199,6 +1199,7 @@ static bool loom_amdgpu_atomic_select(
     loom_func_like_t source_function,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_amdgpu_atomic_source_t* atomic_source,
     loom_amdgpu_atomic_selection_t* out_selection,
     loom_low_source_memory_access_diagnostic_t* source_diagnostic,
@@ -1231,8 +1232,7 @@ static bool loom_amdgpu_atomic_select(
       out_selection->address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT;
       uint64_t root_byte_offset = 0;
       if (!loom_amdgpu_source_alloca_layout_lookup_root(
-              fact_table, source_function,
-              LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+              alloca_layout, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
               out_selection->source.root_value_id, &root_byte_offset)) {
         memory_diagnostic->rejection_bits |=
             LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_WORKGROUP_ROOT;
@@ -1499,12 +1499,15 @@ iree_status_t loom_amdgpu_select_atomic_plan(
       loom_low_lower_context_view_regions(context, &view_regions));
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_payload_placement_from_context(
       context, &atomic_source, &atomic_source.payload_placement_flags));
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
+      context, &alloca_layout));
   const bool selected = loom_amdgpu_atomic_select(
       module, loom_low_lower_context_fact_table(context),
       loom_low_lower_context_source_function(context),
       loom_low_lower_context_descriptor_set(context), view_regions,
-      &atomic_source, &selection, &source_diagnostic, &memory_diagnostic,
-      &diagnostic);
+      alloca_layout, &atomic_source, &selection, &source_diagnostic,
+      &memory_diagnostic, &diagnostic);
   if (!selected) {
     return iree_ok_status();
   }
@@ -1923,12 +1926,15 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
       loom_amdgpu_atomic_payload_placement_from_source_facts(
           module, loom_target_low_legality_fact_table(context), view_regions,
           &atomic_source);
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &alloca_layout));
   const bool selected = loom_amdgpu_atomic_select(
       module, loom_target_low_legality_fact_table(context),
       loom_target_low_legality_function(context),
       loom_target_low_legality_descriptor_set(context), view_regions,
-      &atomic_source, &selection, &source_diagnostic, &memory_diagnostic,
-      &diagnostic);
+      alloca_layout, &atomic_source, &selection, &source_diagnostic,
+      &memory_diagnostic, &diagnostic);
   if (selected) {
     return iree_ok_status();
   }
