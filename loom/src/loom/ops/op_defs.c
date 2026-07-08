@@ -1324,6 +1324,13 @@ static const loom_memory_access_vtable_t* loom_memory_access_vtable(
   return access.op_vtable ? access.op_vtable->memory_access : NULL;
 }
 
+loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
+    loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return vtable ? (loom_memory_access_operation_kind_t)vtable->operation_kind
+                : LOOM_MEMORY_ACCESS_OPERATION_COUNT_;
+}
+
 static loom_value_id_t loom_memory_access_operand(loom_memory_access_t access,
                                                   uint8_t operand_field_index) {
   if (!access.op || !access.op_vtable ||

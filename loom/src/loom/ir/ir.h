@@ -1143,11 +1143,24 @@ typedef struct loom_region_branch_t {
 // MemoryAccess interface vtable
 //===----------------------------------------------------------------------===//
 
+typedef enum loom_memory_access_operation_kind_e {
+  LOOM_MEMORY_ACCESS_OPERATION_LOAD = 0,
+  LOOM_MEMORY_ACCESS_OPERATION_STORE = 1,
+  LOOM_MEMORY_ACCESS_OPERATION_PREFETCH = 2,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE = 3,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW = 4,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG = 5,
+  LOOM_MEMORY_ACCESS_OPERATION_COUNT_ = 6,
+} loom_memory_access_operation_kind_t;
+
 // Interface descriptor for ops that access memory through a view-like operand.
 // Every field is an operand or attr index resolved from MemoryAccessInterface
 // declarations in the Python DSL. LOOM_*_INDEX_NONE marks roles that are not
 // part of a particular op shape.
 typedef struct loom_memory_access_vtable_t {
+  // Memory operation family represented by this op shape.
+  uint8_t operation_kind;
+
   // Index of the view or memory-object operand being accessed.
   uint8_t view_operand_index;
 

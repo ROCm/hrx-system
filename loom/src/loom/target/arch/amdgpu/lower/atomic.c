@@ -274,7 +274,7 @@ static bool loom_amdgpu_atomic_source_describe(
   loom_low_source_memory_operation_kind_t source_operation_kind =
       LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   if (!loom_low_source_memory_operation_kind_from_access(
-          module, op, access, &source_operation_kind) ||
+          access, &source_operation_kind) ||
       !loom_amdgpu_atomic_operation_kind_from_source_memory(
           source_operation_kind, &out_source->operation_kind)) {
     return false;
