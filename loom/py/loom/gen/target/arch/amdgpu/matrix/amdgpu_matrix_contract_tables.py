@@ -463,6 +463,85 @@ def _validate_contract_wait_state_payload(contract: AmdgpuMatrixContract) -> Non
     raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unsupported wait-state result payload register count {contract.result.register_count}; expected one of {expected_counts}")
 
 
+def _contract_descriptor_key(
+    contract: AmdgpuMatrixContract,
+    *,
+    keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
+    descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> str | None:
+    descriptor_key = _resolve_contract_descriptor_key(
+        contract,
+        keys_by_semantic_tag=keys_by_semantic_tag,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+    )
+    if descriptor_key is None:
+        return None
+    _validate_contract_descriptor_shape(
+        contract,
+        descriptor_key,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+    )
+    _validate_contract_descriptor_immediates(
+        contract,
+        descriptor_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
+    )
+    return descriptor_key
+
+
+def _contract_descriptor_keys(
+    *,
+    keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
+    descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> tuple[str | None, ...]:
+    descriptor_keys: list[str | None] = []
+    seen_keys: dict[str, AmdgpuMatrixContract] = {}
+    for contract in AMDGPU_MATRIX_CONTRACTS:
+        descriptor_key = _contract_descriptor_key(
+            contract,
+            keys_by_semantic_tag=keys_by_semantic_tag,
+            descriptor_shapes_by_key=descriptor_shapes_by_key,
+            descriptor_immediates_by_key=descriptor_immediates_by_key,
+        )
+        descriptor_keys.append(descriptor_key)
+        if descriptor_key is None:
+            continue
+        signature = _contract_wait_state_signature(contract)
+        if signature is None:
+            continue
+        previous_contract = seen_keys.get(descriptor_key)
+        if previous_contract is not None:
+            previous_signature = _contract_wait_state_signature(previous_contract)
+            if previous_signature != signature:
+                raise ValueError(f"AMDGPU matrix contracts '{previous_contract.name}' and '{contract.name}' both map to low descriptor '{descriptor_key}' but have different wait-state signatures")
+            continue
+        seen_keys[descriptor_key] = contract
+    return tuple(descriptor_keys)
+
+
+def _contract_wait_state_signature(
+    contract: AmdgpuMatrixContract,
+) -> tuple[str, int] | None:
+    if contract.family not in _MATRIX_WAIT_RESULT_FAMILIES:
+        return None
+    return (contract.family, contract.result.register_count)
+
+
+def _contract_wait_state_ordinals_by_descriptor_ref(
+    descriptor_keys: Sequence[str | None],
+) -> list[int | None]:
+    contract_ordinals_by_descriptor_key: dict[str, int] = {}
+    for ordinal, (contract, descriptor_key) in enumerate(zip(AMDGPU_MATRIX_CONTRACTS, descriptor_keys, strict=True)):
+        if descriptor_key is None:
+            continue
+        if _contract_wait_state_signature(contract) is None:
+            continue
+        contract_ordinals_by_descriptor_key.setdefault(descriptor_key, ordinal)
+    return [contract_ordinals_by_descriptor_key.get(descriptor_key) for descriptor_key in amdgpu_descriptor_ref_keys()]
+
+
 def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
     numeric_type = _NUMERIC_TYPE_C_NAMES.get(payload.numeric_type)
     if numeric_type is None:
@@ -511,22 +590,12 @@ def _contract_initializer(
     if contract.scale_kind != "none" and "scale_formats" not in contract.flags and not contract.implicit_scale_formats:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' with scale operands must have selector operands or implicit scale formats")
     _validate_contract_wait_state_payload(contract)
-    descriptor_key = _resolve_contract_descriptor_key(
+    descriptor_key = _contract_descriptor_key(
         contract,
         keys_by_semantic_tag=keys_by_semantic_tag,
         descriptor_shapes_by_key=descriptor_shapes_by_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
     )
-    if descriptor_key is not None:
-        _validate_contract_descriptor_shape(
-            contract,
-            descriptor_key,
-            descriptor_shapes_by_key=descriptor_shapes_by_key,
-        )
-        _validate_contract_descriptor_immediates(
-            contract,
-            descriptor_key,
-            descriptor_immediates_by_key=descriptor_immediates_by_key,
-        )
     low_descriptor_ref = "LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE" if descriptor_key is None else _descriptor_ref_constant_name(descriptor_key)
     family = _FAMILY_C_NAMES.get(contract.family)
     if family is None:
@@ -599,6 +668,8 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_contract_descriptor_t",
         "    kLoomAmdgpuMatrixContractDescriptors[];",
         "extern const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount;",
+        "extern const uint16_t",
+        "    kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[];",
         "",
         "#ifdef __cplusplus",
         '}  // extern "C"',
@@ -613,6 +684,11 @@ def _emit_source(*, public_header: str) -> str:
     keys_by_semantic_tag = _matrix_descriptor_keys_by_semantic_tag()
     descriptor_shapes_by_key = _matrix_descriptor_shapes_by_key()
     descriptor_immediates_by_key = _matrix_descriptor_immediates_by_key()
+    descriptor_keys = _contract_descriptor_keys(
+        keys_by_semantic_tag=keys_by_semantic_tag,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
+    )
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -642,8 +718,16 @@ def _emit_source(*, public_header: str) -> str:
             "",
             "const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount =",
             "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors);",
+            "",
+            "const uint16_t kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[] = {",
         ]
     )
+    for contract_ordinal in _contract_wait_state_ordinals_by_descriptor_ref(descriptor_keys):
+        if contract_ordinal is None:
+            lines.append("    UINT16_MAX,")
+        else:
+            lines.append(f"    UINT16_C({contract_ordinal}),")
+    lines.append("};")
     return "\n".join(lines) + "\n"
 
 

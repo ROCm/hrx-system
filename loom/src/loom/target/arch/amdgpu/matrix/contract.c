@@ -718,6 +718,23 @@ loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index) {
   return &kLoomAmdgpuMatrixContractDescriptors[index];
 }
 
+const loom_amdgpu_matrix_contract_descriptor_t*
+loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+    loom_amdgpu_descriptor_ref_t low_descriptor_ref) {
+  if (low_descriptor_ref >= LOOM_AMDGPU_DESCRIPTOR_REF_COUNT) {
+    return NULL;
+  }
+  const uint16_t* contract_ordinals =
+      kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef;
+  const uint16_t contract_ordinal = contract_ordinals[low_descriptor_ref];
+  if (contract_ordinal == UINT16_MAX) {
+    return NULL;
+  }
+  IREE_ASSERT_LT((iree_host_size_t)contract_ordinal,
+                 kLoomAmdgpuMatrixContractDescriptorCount);
+  return &kLoomAmdgpuMatrixContractDescriptors[contract_ordinal];
+}
+
 bool loom_amdgpu_matrix_contract_is_available(
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor,
     loom_amdgpu_matrix_feature_bits_t feature_bits, uint32_t wave_size) {
