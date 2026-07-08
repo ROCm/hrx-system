@@ -404,6 +404,7 @@ def _vector_cast(
     source_constraint: Callable[[str], Constraint],
     doc: str,
     constraints: Sequence[Constraint] = (),
+    input_role: OperandRole = OperandRole.NONE,
     facts: str = "",
     canonicalize: str = "",
     **kwargs: Any,
@@ -413,7 +414,7 @@ def _vector_cast(
         name,
         group=vector_ops,
         doc=doc,
-        operands=[Operand("input", VECTOR)],
+        operands=[Operand("input", VECTOR, role=input_role)],
         results=[Result("result", VECTOR)],
         constraints=[
             source_constraint("input"),
@@ -3346,6 +3347,7 @@ vector_extf = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise floating-point precision extension. Source and result shapes match exactly; only the floating-point element type widens."),
     constraints=[ElementWidthGreaterThan("result", "input")],
+    input_role=OperandRole.FLOAT_EXTENSION_SOURCE,
     facts="loom_vector_extf_facts",
     canonicalize="loom_vector_extf_canonicalize",
 )

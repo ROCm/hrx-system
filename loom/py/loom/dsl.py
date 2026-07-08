@@ -398,6 +398,7 @@ class OperandRole(Enum):
     SELECT_PAYLOAD = "select_payload"
     BROADCAST_SOURCE = "broadcast_source"
     COMPOSITE_ELEMENT = "composite_element"
+    FLOAT_EXTENSION_SOURCE = "float_extension_source"
 
 
 @dataclass(frozen=True, slots=True)
@@ -4174,6 +4175,7 @@ def cast_op(
     from_constraint: TypeConstraint,
     to_constraint: TypeConstraint,
     doc: str,
+    input_role: OperandRole = OperandRole.NONE,
     traits: list[Trait] | None = None,
     **kwargs: Any,
 ) -> Op:
@@ -4191,7 +4193,7 @@ def cast_op(
         name=name,
         group=group,
         doc=doc,
-        operands=[Operand("input", from_constraint)],
+        operands=[Operand("input", from_constraint, role=input_role)],
         results=[Result("result", to_constraint)],
         traits=op_traits,
         format=[
