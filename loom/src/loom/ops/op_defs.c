@@ -372,6 +372,28 @@ bool loom_op_operand_field_present(const loom_op_vtable_t* vtable,
   return loom_op_operand_field_span(vtable, op, field_index).count > 0;
 }
 
+loom_value_slice_t loom_op_result_field_span(const loom_op_vtable_t* vtable,
+                                             const loom_op_t* op,
+                                             uint8_t field_index) {
+  if (!vtable || !op) return (loom_value_slice_t){0};
+  if (field_index < vtable->fixed_result_count) {
+    if (field_index >= op->result_count) return (loom_value_slice_t){0};
+    return (loom_value_slice_t){
+        .values = loom_op_results(op) + field_index,
+        .count = 1,
+    };
+  }
+  if (iree_any_bit_set(vtable->vtable_flags, LOOM_OP_VTABLE_VARIADIC_RESULTS) &&
+      field_index == vtable->fixed_result_count) {
+    if (field_index > op->result_count) return (loom_value_slice_t){0};
+    return (loom_value_slice_t){
+        .values = loom_op_results(op) + field_index,
+        .count = (uint16_t)(op->result_count - field_index),
+    };
+  }
+  return (loom_value_slice_t){0};
+}
+
 bool loom_op_operand_descriptor_at(
     const loom_op_vtable_t* vtable, const loom_op_t* op, uint16_t operand_index,
     const loom_operand_descriptor_t** out_descriptor, uint8_t* out_field_index,

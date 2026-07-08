@@ -209,6 +209,27 @@ static loom_value_id_t loom_low_lower_rule_source_value(
   }
 }
 
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index) {
+  const loom_low_lower_value_ref_t* value_ref =
+      &rule_set->value_refs[value_ref_index];
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, source_op);
+  switch (value_ref->kind) {
+    case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
+      return loom_op_operand_field_span(vtable, source_op, value_ref->index);
+    case LOOM_LOW_LOWER_VALUE_REF_RESULT:
+      return loom_op_result_field_span(vtable, source_op, value_ref->index);
+    case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+      return (loom_value_slice_t){0};
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown generated value ref kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static iree_status_t loom_low_lower_rule_can_materialize_value(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
@@ -3057,6 +3078,30 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule) {
+  if (iree_all_bits_set(rule->flags,
+                        LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
+    IREE_ASSERT_EQ(rule->alias_ref_count, 1);
+    const uint16_t source_ref_index = rule->alias_ref_start;
+    const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
+    const loom_low_lower_value_ref_t* source_ref =
+        &rule_set->value_refs[source_ref_index];
+    const loom_low_lower_value_ref_t* result_ref =
+        &rule_set->value_refs[result_ref_index];
+    IREE_ASSERT_EQ(source_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
+    IREE_ASSERT_EQ(result_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
+    const loom_value_slice_t source_span =
+        loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
+                                                 source_op, source_ref_index);
+    const loom_value_slice_t result_span =
+        loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
+                                                 source_op, result_ref_index);
+    IREE_ASSERT_EQ(source_span.count, result_span.count);
+    for (iree_host_size_t i = 0; i < source_span.count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_value_alias(
+          context, source_span.values[i], result_span.values[i]));
+    }
+    return iree_ok_status();
+  }
   for (uint16_t i = 0; i < rule->alias_ref_count; ++i) {
     const uint16_t source_ref_index = (uint16_t)(rule->alias_ref_start + i * 2);
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);

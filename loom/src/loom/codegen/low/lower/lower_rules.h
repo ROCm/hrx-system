@@ -679,6 +679,10 @@ typedef uint16_t loom_low_lower_rule_flags_t;
 #define LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY \
   ((loom_low_lower_rule_flags_t)1u << 0)
 
+// Alias-ref pair names operand and result fields whose values alias by ordinal.
+#define LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS \
+  ((loom_low_lower_rule_flags_t)1u << 1)
+
 // Rule row has no structured report key.
 #define LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE ((uint16_t)0)
 
@@ -858,6 +862,12 @@ void loom_low_lower_rule_materialize_diagnostic_params(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_diagnostic_t* diagnostic,
     loom_diagnostic_param_t* out_params);
+
+// Resolves an operand/result value-ref row to the flat source-op value span for
+// that field. Non-source value refs return an empty span.
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index);
 
 // Resolves a rule-set-local descriptor ref against |match_context|'s selected
 // descriptor set. Missing optional descriptors return NULL.

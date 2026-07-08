@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
 from loom.target.contracts import (
@@ -18,6 +19,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
     ValueAliasRule,
@@ -91,6 +93,22 @@ def test_alias_rule_validates_source_and_result() -> None:
     )
 
     assert table.cases[0].source_op == vector.vector_fragment
+
+
+def test_ordinal_alias_rule_validates_variadic_identity_fields() -> None:
+    table = ContractFragment(
+        name="value.ordinal_alias",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            OrdinalValueAliasRule(
+                source_op=scalar_analysis.scalar_assume,
+                source=ValueRef.operand("values"),
+                result=ValueRef.result("results"),
+            )
+        ],
+    )
+
+    assert table.cases[0].source_op == scalar_analysis.scalar_assume
 
 
 def test_elide_rule_validates_source_results() -> None:

@@ -33,6 +33,7 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     Guard,
     GuardDiagnostic,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
     TypePattern,
@@ -547,20 +548,19 @@ def _bitcast_alias_rule(
     )
 
 
-def _scalar_assume_alias_rule(type_pattern: TypePattern) -> ValueAliasRule:
-    return ValueAliasRule(
+def _scalar_assume_alias_rule(type_pattern: TypePattern) -> OrdinalValueAliasRule:
+    return OrdinalValueAliasRule(
         source_op=scalar_analysis.scalar_assume,
         source=ValueRef.operand("values"),
         result=ValueRef.result("results"),
         guards=(
-            Guard.operand_segment_count("values", 1),
             _value_type("values", type_pattern),
             _value_type("results", type_pattern),
         ),
     )
 
 
-def _scalar_assume_alias_rules() -> tuple[ValueAliasRule, ...]:
+def _scalar_assume_alias_rules() -> tuple[OrdinalValueAliasRule, ...]:
     return tuple(
         _scalar_assume_alias_rule(type_pattern)
         for type_pattern in (

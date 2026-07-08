@@ -592,15 +592,28 @@ static void loom_low_lower_mark_rule_storage_demands(
     loom_low_lower_mark_source_memory_access_storage_demands(
         context, &source_memory_access);
   }
-  for (uint16_t alias_ordinal = 0; alias_ordinal < rule->alias_ref_count;
-       ++alias_ordinal) {
-    const uint16_t value_ref_index =
-        (uint16_t)(rule->alias_ref_start + alias_ordinal * 2);
-    loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
-    if (loom_low_lower_rule_value_ref_source_value(
-            context, rule_set, selected_plan->source_op, value_ref_index,
-            &source_value_id)) {
-      loom_low_lower_mark_value_storage_required(context, source_value_id);
+  if (iree_all_bits_set(rule->flags,
+                        LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
+    IREE_ASSERT_EQ(rule->alias_ref_count, 1);
+    const loom_value_slice_t source_span =
+        loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
+                                                 selected_plan->source_op,
+                                                 rule->alias_ref_start);
+    for (iree_host_size_t i = 0; i < source_span.count; ++i) {
+      loom_low_lower_mark_value_storage_required(context,
+                                                 source_span.values[i]);
+    }
+  } else {
+    for (uint16_t alias_ordinal = 0; alias_ordinal < rule->alias_ref_count;
+         ++alias_ordinal) {
+      const uint16_t value_ref_index =
+          (uint16_t)(rule->alias_ref_start + alias_ordinal * 2);
+      loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
+      if (loom_low_lower_rule_value_ref_source_value(
+              context, rule_set, selected_plan->source_op, value_ref_index,
+              &source_value_id)) {
+        loom_low_lower_mark_value_storage_required(context, source_value_id);
+      }
     }
   }
   if (rule->alias_ref_count == 0) return;

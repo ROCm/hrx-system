@@ -57,6 +57,7 @@ from loom.target.contracts.kinds import SourceValueKind
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.rules import (
     DescriptorRule,
+    OrdinalValueAliasRule,
     RecipeRule,
     ValueAliasRule,
     ValueElideRule,
@@ -128,6 +129,7 @@ LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE = 1 << 5
 LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE = 1 << 6
 LOWER_SOURCE_MEMORY_NONE = 0
 LOWER_RULE_FLAG_CONTRACT_ONLY = 1 << 0
+LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS = 1 << 1
 
 _LOW_VALUE_GUARD_KINDS = (
     GuardKind.LOW_VALUE_REGISTER_CLASS,
@@ -343,7 +345,22 @@ class _LowerRuleSetCompiler:
             if isinstance(contract_case, DescriptorRule):
                 self._append_descriptor_rule(authored_case_index, contract_case)
             elif isinstance(contract_case, ValueAliasRule):
-                self._append_alias_rule(authored_case_index, contract_case)
+                self._append_alias_rule(
+                    authored_case_index,
+                    contract_case.source_op,
+                    contract_case.source,
+                    contract_case.result,
+                    contract_case.guards,
+                )
+            elif isinstance(contract_case, OrdinalValueAliasRule):
+                self._append_alias_rule(
+                    authored_case_index,
+                    contract_case.source_op,
+                    contract_case.source,
+                    contract_case.result,
+                    contract_case.guards,
+                    flags=LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
+                )
             elif isinstance(contract_case, ValueElideRule):
                 self._append_elide_rule(authored_case_index, contract_case)
             elif isinstance(contract_case, RecipeRule):
@@ -405,26 +422,32 @@ class _LowerRuleSetCompiler:
     def _append_alias_rule(
         self,
         authored_case_index: int,
-        rule: ValueAliasRule,
+        source_op: Op,
+        source: ValueRef,
+        result: ValueRef,
+        guards: tuple[Guard, ...],
+        *,
+        flags: int = 0,
     ) -> None:
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in rule.guards:
-            self._append_guard(rule.source_op, guard, type_patterns_by_field)
+        for guard in guards:
+            self._append_guard(source_op, guard, type_patterns_by_field)
         alias_ref_start = self._append_value_ref_sequence(
             (
-                self._lower_value_ref(rule.source_op, rule.source, {}),
-                self._lower_value_ref(rule.source_op, rule.result, {}),
+                self._lower_value_ref(source_op, source, {}),
+                self._lower_value_ref(source_op, result, {}),
             )
         )
         self._rules.append(
             LowerRule(
-                source_op=rule.source_op,
+                source_op=source_op,
                 temporary_count=0,
                 guard_start=guard_start,
                 guard_count=len(self._guards) - guard_start,
                 emit_start=0,
                 emit_count=0,
+                flags=flags,
                 alias_ref_start=alias_ref_start,
                 alias_ref_count=1,
             )
