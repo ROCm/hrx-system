@@ -224,6 +224,15 @@ loom_generated_textual_header(
 )
 
 loom_generated_textual_header(
+    name = "wait_packet_descriptor_lookups_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_descriptor_lookups.inl",
+    output_flag = "--descriptor-lookups",
+)
+
+loom_generated_textual_header(
     name = "wait_packet_immediates_gen",
     args = _AMDGPU_ISA_XML_ARGS,
     generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
@@ -255,6 +264,7 @@ loom_cc_library(
     srcs = ["wait_packet_tables.c"],
     hdrs = ["wait_packet_tables.h"],
     textual_hdrs = [
+        ":wait_packet_descriptor_lookups.inl",
         ":wait_packet_descriptor_ranges.inl",
         ":wait_packet_descriptors.inl",
         ":wait_packet_immediates.inl",

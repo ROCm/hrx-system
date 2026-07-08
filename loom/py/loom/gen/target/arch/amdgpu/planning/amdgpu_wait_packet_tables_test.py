@@ -111,7 +111,7 @@ def test_classifies_wait_packet_descriptor_rows() -> None:
         ),
     )
 
-    descriptor_rows, immediate_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
+    descriptor_rows, immediate_rows, descriptor_lookup_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
         _descriptor_set(descriptor),
         descriptor_set_ordinal=2,
         descriptor_ref_key_set={"amdgpu.s_waitcnt"},
@@ -132,8 +132,10 @@ def test_classifies_wait_packet_descriptor_rows() -> None:
     assert immediate_rows[0].counter_mask == amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD)
     assert immediate_rows[1].field_name == "lgkmcnt"
     assert immediate_rows[1].counter_mask == amdgpu_wait_packet_tables._counter_mask(_COUNTER_LDS)
+    assert descriptor_lookup_rows == (1,)
     assert range_row.first_descriptor == 7
     assert range_row.descriptor_count == 1
+    assert range_row.descriptor_lookup_count == 1
     assert range_row.max_descriptor_immediate_count == 2
 
 
@@ -220,7 +222,7 @@ def test_classifies_split_wait_packet_descriptor_rows() -> None:
         ),
     )
 
-    descriptor_rows, immediate_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
+    descriptor_rows, immediate_rows, descriptor_lookup_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
         _descriptor_set(load_descriptor, store_descriptor, scalar_descriptor),
         descriptor_set_ordinal=4,
         descriptor_ref_key_set={
@@ -253,8 +255,10 @@ def test_classifies_split_wait_packet_descriptor_rows() -> None:
         amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_STORE),
         amdgpu_wait_packet_tables._counter_mask(_COUNTER_SMEM),
     ]
+    assert descriptor_lookup_rows == (1, 2, 3)
     assert range_row.first_descriptor == 8
     assert range_row.descriptor_count == 3
+    assert range_row.descriptor_lookup_count == 3
     assert range_row.max_descriptor_immediate_count == 1
 
 
@@ -265,7 +269,7 @@ def test_skips_non_counter_descriptors() -> None:
         immediates=(),
     )
 
-    descriptor_rows, immediate_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
+    descriptor_rows, immediate_rows, descriptor_lookup_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
         _descriptor_set(descriptor),
         descriptor_set_ordinal=0,
         descriptor_ref_key_set={"amdgpu.s_nop"},
@@ -275,7 +279,9 @@ def test_skips_non_counter_descriptors() -> None:
 
     assert descriptor_rows == ()
     assert immediate_rows == ()
+    assert descriptor_lookup_rows == (0,)
     assert range_row.descriptor_count == 0
+    assert range_row.descriptor_lookup_count == 1
     assert range_row.max_descriptor_immediate_count == 0
 
 
@@ -286,7 +292,7 @@ def test_skips_zero_counter_effects() -> None:
         immediates=(),
     )
 
-    descriptor_rows, immediate_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
+    descriptor_rows, immediate_rows, descriptor_lookup_rows, range_row = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
         _descriptor_set(descriptor),
         descriptor_set_ordinal=0,
         descriptor_ref_key_set={"amdgpu.s_wait_idle"},
@@ -296,7 +302,9 @@ def test_skips_zero_counter_effects() -> None:
 
     assert descriptor_rows == ()
     assert immediate_rows == ()
+    assert descriptor_lookup_rows == (0,)
     assert range_row.descriptor_count == 0
+    assert range_row.descriptor_lookup_count == 1
     assert range_row.max_descriptor_immediate_count == 0
 
 
@@ -420,7 +428,7 @@ def test_combined_immediate_maps_multiple_counter_effects() -> None:
         effects=(_wait_effect(_COUNTER_LDS), _wait_effect(_COUNTER_SMEM)),
         immediates=(_wait_immediate("lgkmcnt", _WAIT_COUNTER_LGKM_ENCODING_ID),),
     )
-    descriptor_rows, immediate_rows, _ = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
+    descriptor_rows, immediate_rows, _, _ = amdgpu_wait_packet_tables._descriptor_set_wait_packet_rows(
         _descriptor_set(descriptor),
         descriptor_set_ordinal=0,
         descriptor_ref_key_set={"amdgpu.s_waitcnt"},
@@ -461,9 +469,12 @@ def test_generated_fragments_are_data_only() -> None:
                 descriptor_set_ordinal=0,
                 first_descriptor=0,
                 descriptor_count=1,
+                first_descriptor_lookup=0,
+                descriptor_lookup_count=1,
                 max_descriptor_immediate_count=1,
             ),
         ),
+        descriptor_lookup_rows=(1,),
         selection_rows=(
             amdgpu_wait_packet_tables._WaitPacketSelectionRow(
                 descriptor_set_key="amdgpu.test.core",
@@ -479,6 +490,7 @@ def test_generated_fragments_are_data_only() -> None:
         amdgpu_wait_packet_tables._emit_descriptor_rows(tables),
         amdgpu_wait_packet_tables._emit_immediate_rows(tables),
         amdgpu_wait_packet_tables._emit_range_rows(tables),
+        amdgpu_wait_packet_tables._emit_descriptor_lookup_rows(tables),
         amdgpu_wait_packet_tables._emit_selection_rows(tables),
     )
 
@@ -505,6 +517,7 @@ def test_rejects_descriptor_row_with_out_of_bounds_immediates() -> None:
         ),
         immediate_rows=(),
         range_rows=(),
+        descriptor_lookup_rows=(),
         selection_rows=(),
     )
 
@@ -522,9 +535,12 @@ def test_rejects_descriptor_range_with_out_of_bounds_descriptors() -> None:
                 descriptor_set_ordinal=0,
                 first_descriptor=1,
                 descriptor_count=1,
+                first_descriptor_lookup=0,
+                descriptor_lookup_count=0,
                 max_descriptor_immediate_count=1,
             ),
         ),
+        descriptor_lookup_rows=(),
         selection_rows=(),
     )
 
@@ -561,9 +577,12 @@ def test_rejects_selection_row_with_out_of_bounds_descriptor() -> None:
                 descriptor_set_ordinal=0,
                 first_descriptor=0,
                 descriptor_count=1,
+                first_descriptor_lookup=0,
+                descriptor_lookup_count=1,
                 max_descriptor_immediate_count=1,
             ),
         ),
+        descriptor_lookup_rows=(1,),
         selection_rows=tuple(
             amdgpu_wait_packet_tables._WaitPacketSelectionRow(
                 descriptor_set_key="amdgpu.test.core",
@@ -571,6 +590,57 @@ def test_rejects_selection_row_with_out_of_bounds_descriptor() -> None:
                 counter_mask=counter_mask,
                 descriptor_index=2 if counter_mask == amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD) else 0,
                 covered_counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD) if counter_mask == amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD) else 0,
+            )
+            for counter_mask in range(amdgpu_wait_packet_tables._WAIT_COUNTER_MASK_COUNT)
+        ),
+    )
+
+    with _raises_value_error("descriptor index is out of bounds"):
+        amdgpu_wait_packet_tables._validate_wait_packet_tables(tables)
+
+
+def test_rejects_descriptor_lookup_row_with_out_of_bounds_descriptor() -> None:
+    tables = amdgpu_wait_packet_tables._WaitPacketTables(
+        descriptor_rows=(
+            amdgpu_wait_packet_tables._WaitPacketDescriptorRow(
+                descriptor_set_key="amdgpu.test.core",
+                descriptor_set_ordinal=0,
+                descriptor_key="amdgpu.s_waitcnt",
+                descriptor_ref="LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT",
+                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
+                counter_count=1,
+                immediate_start=0,
+                immediate_count=1,
+            ),
+        ),
+        immediate_rows=(
+            amdgpu_wait_packet_tables._WaitPacketImmediateRow(
+                descriptor_key="amdgpu.s_waitcnt",
+                descriptor_immediate_index=0,
+                field_name="vmcnt",
+                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
+                no_wait_value=63,
+            ),
+        ),
+        range_rows=(
+            amdgpu_wait_packet_tables._WaitPacketDescriptorRange(
+                descriptor_set_key="amdgpu.test.core",
+                descriptor_set_ordinal=0,
+                first_descriptor=0,
+                descriptor_count=1,
+                first_descriptor_lookup=0,
+                descriptor_lookup_count=1,
+                max_descriptor_immediate_count=1,
+            ),
+        ),
+        descriptor_lookup_rows=(2,),
+        selection_rows=tuple(
+            amdgpu_wait_packet_tables._WaitPacketSelectionRow(
+                descriptor_set_key="amdgpu.test.core",
+                descriptor_set_ordinal=0,
+                counter_mask=counter_mask,
+                descriptor_index=0,
+                covered_counter_mask=0,
             )
             for counter_mask in range(amdgpu_wait_packet_tables._WAIT_COUNTER_MASK_COUNT)
         ),
