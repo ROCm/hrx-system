@@ -1,20 +1,21 @@
 amdgpu.target<gfx1100> @id4_gfx1100
 
-config.decl @id4.qwen3_vl.linear_fp8_block_scaled_wmma.dispatch_token_count : %value: index where [range(%value, 64, 65536), mul(%value, 64)]
+config.decl @id4.qwen3_vl.linear_fp8_block_scaled_wmma.dispatch_token_count : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
 
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_wmma.input_size : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
 
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_wmma.output_size : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs") @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs() {
+kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs") @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs() {
   %unit = index.constant 1 : index
   %sixty_four = index.constant 64 : index
-  %workgroup_size_x = index.constant 32 : index
+  %one_twenty_eight = index.constant 128 : index
+  %workgroup_size_x = index.constant 64 : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_wmma.dispatch_token_count : index
   %output_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_wmma.output_size : index
-  %token_quad_count = index.div %dispatch_token_count, %sixty_four : index
+  %token_tile_count = index.div %dispatch_token_count, %one_twenty_eight : index
   %row_quad_count = index.div %output_size, %sixty_four : index
-  kernel.launch.config workgroups(%token_quad_count, %row_quad_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%token_tile_count, %row_quad_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
@@ -25,8 +26,9 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %sixty_four = index.constant 64 : index
   %one_twenty_eight = index.constant 128 : index
   %two_fifty_six = index.constant 256 : index
-  %token_quad = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<x> : index
   %row_quad = kernel.workgroup.id<y> : index
+  %subgroup_id = kernel.subgroup.id : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_wmma.input_size : index
   %output_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_wmma.output_size : index
@@ -36,7 +38,9 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %output_tile_count = index.div %output_size, %sixteen : index
   %packed_tile_count = index.mul %output_tile_count, %k_tile_count : index
   %packed_element_count = index.mul %packed_tile_count, %two_fifty_six : index
-  %token_origin0 = index.mul %token_quad, %sixty_four : index
+  %token_base = index.mul %token_tile, %one_twenty_eight : index
+  %token_wave_offset = index.mul %subgroup_id, %sixty_four : index
+  %token_origin0 = index.add %token_base, %token_wave_offset : index
   %token_origin1 = index.add %token_origin0, %sixteen : index
   %token_origin2 = index.add %token_origin0, %thirty_two : index
   %token_origin3 = index.add %token_origin0, %forty_eight : index
@@ -155,93 +159,67 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   kernel.return
 }
 
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small_case {
-  %input = check.generate.fill value(1.0) : tensor<64x128xbf16>
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_small_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128xbf16>
   %weight = check.generate.fill value(1.0) : tensor<16384xf8E4M3>
   %scale = check.generate.fill value(2.0) : tensor<1x1xf32>
-  %output = check.generate.fill value(0.0) : tensor<64x128xbf16>
-  %expected = check.generate.fill value(256.0) : tensor<64x128xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<64x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
+  %output = check.generate.fill value(0.0) : tensor<128x128xbf16>
+  %expected = check.generate.fill value(256.0) : tensor<128x128xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs(%input, %weight, %scale, %output) : (tensor<128x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<128x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128xbf16>
   check.return
 }
 
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_zero_case {
-  %input = check.generate.fill value(1.0) : tensor<64x128xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<16384xf8E4M3>
-  %scale = check.generate.fill value(2.0) : tensor<1x1xf32>
-  %output = check.generate.fill value(1.0) : tensor<64x128xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<64x128xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<64x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
-  check.return
-}
-
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024_case {
-  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<16777216xf8E4M3>
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero_case {
+  %input = check.generate.fill value(0.0078125) : tensor<512x4096xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<16777216xf8E4M3>
   %scale = check.generate.fill value(1.0) : tensor<32x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<1024x4096xbf16>, tensor<16777216xf8E4M3>, tensor<32x32xf32>, tensor<1024x4096xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x4096xbf16>
+  %expected = check.generate.fill value(16.0) : tensor<512x4096xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs(%input, %weight, %scale, %output) : (tensor<512x4096xbf16>, tensor<16777216xf8E4M3>, tensor<32x32xf32>, tensor<512x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x4096xbf16>
   check.return
 }
 
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_1024_case {
-  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<4194304xf8E4M3>
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_kv_shape_nonzero_case {
+  %input = check.generate.fill value(0.0078125) : tensor<512x4096xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<4194304xf8E4M3>
   %scale = check.generate.fill value(1.0) : tensor<8x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<1024x1024xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x1024xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<1024x4096xbf16>, tensor<4194304xf8E4M3>, tensor<8x32xf32>, tensor<1024x1024xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x1024xbf16>
-  check.return
-}
-
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_512_case {
-  %input = check.generate.fill value(1.0) : tensor<512x4096xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<4194304xf8E4M3>
-  %scale = check.generate.fill value(1.0) : tensor<8x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<512x1024xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<512x1024xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<512x4096xbf16>, tensor<4194304xf8E4M3>, tensor<8x32xf32>, tensor<512x1024xbf16>)
+  %output = check.generate.fill value(0.0) : tensor<512x1024xbf16>
+  %expected = check.generate.fill value(16.0) : tensor<512x1024xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs(%input, %weight, %scale, %output) : (tensor<512x4096xbf16>, tensor<4194304xf8E4M3>, tensor<8x32xf32>, tensor<512x1024xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x1024xbf16>
   check.return
 }
 
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_1024_case {
-  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<50331648xf8E4M3>
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_up_shape_nonzero_case {
+  %input = check.generate.fill value(0.0078125) : tensor<512x4096xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
   %scale = check.generate.fill value(1.0) : tensor<96x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<1024x4096xbf16>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<1024x12288xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x12288xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x12288xbf16>
+  %expected = check.generate.fill value(16.0) : tensor<512x12288xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs(%input, %weight, %scale, %output) : (tensor<512x4096xbf16>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<512x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x12288xbf16>
   check.return
 }
 
-check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024_case {
-  %input = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<50331648xf8E4M3>
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_nonzero_case {
+  %input = check.generate.fill value(0.0078125) : tensor<512x12288xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
   %scale = check.generate.fill value(1.0) : tensor<32x96xf32>
-  %output = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
-  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs(%input, %weight, %scale, %output) : (tensor<1024x12288xbf16>, tensor<50331648xf8E4M3>, tensor<32x96xf32>, tensor<1024x4096xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x4096xbf16>
+  %expected = check.generate.fill value(48.0) : tensor<512x4096xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs(%input, %weight, %scale, %output) : (tensor<512x12288xbf16>, tensor<50331648xf8E4M3>, tensor<32x96xf32>, tensor<512x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x4096xbf16>
   check.return
 }
 
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_small_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_small
 
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_zero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_zero
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero
 
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_kv_shape_nonzero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_kv_shape_nonzero
 
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_1024_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_1024
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_up_shape_nonzero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_up_shape_nonzero
 
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_512_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_kv_shape_512
-
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_1024_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_1024
-
-check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_nonzero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_nonzero
