@@ -156,42 +156,40 @@ static void loom_low_source_memory_access_dynamic_index_source(
     const loom_value_fact_table_t* fact_table, loom_value_id_t index,
     loom_low_source_memory_dynamic_index_source_t* out_source,
     loom_kernel_dimension_t* out_dimension) {
+  static const loom_low_source_memory_dynamic_index_source_t
+      kSources[LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_] = {
+          [LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE] =
+              LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
+          [LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID] =
+              LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID,
+          [LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID] =
+              LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID,
+          [LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID] =
+              LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
+      };
+  static const loom_kernel_dimension_t
+      kDimensions[LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_] = {
+          [LOOM_VALUE_FACT_TOPOLOGY_AXIS_X] = LOOM_KERNEL_DIMENSION_X,
+          [LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y] = LOOM_KERNEL_DIMENSION_Y,
+          [LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z] = LOOM_KERNEL_DIMENSION_Z,
+          [LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE] = LOOM_KERNEL_DIMENSION_COUNT_,
+      };
   *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
   *out_dimension = LOOM_KERNEL_DIMENSION_COUNT_;
   if (!fact_table || index == LOOM_VALUE_ID_INVALID ||
       !loom_value_fact_table_has_entry(fact_table, index)) {
     return;
   }
-  const uint32_t topology_flags =
-      loom_value_fact_table_lookup(fact_table, index).flags &
-      LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
-  switch (topology_flags) {
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_X;
-      return;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_Y;
-      return;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_Z;
-      return;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_X;
-      return;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_Y;
-      return;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z:
-      *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID;
-      *out_dimension = LOOM_KERNEL_DIMENSION_Z;
-      return;
-    default:
-      return;
+  const loom_value_fact_topology_domain_t* domain =
+      loom_value_facts_topology_domain(
+          loom_value_fact_table_lookup(fact_table, index));
+  if (!domain) {
+    return;
+  }
+  *out_source = kSources[domain->value_kind];
+  *out_dimension = kDimensions[domain->axis];
+  if (*out_dimension == LOOM_KERNEL_DIMENSION_COUNT_) {
+    *out_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
   }
 }
 

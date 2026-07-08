@@ -17,6 +17,16 @@
 
 #define LOOM_KERNEL_DEFAULT_MAX_SUBGROUP_SIZE 128u
 
+static_assert((int)LOOM_KERNEL_DIMENSION_X ==
+                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+              "kernel x dimension must match the topology fact x axis");
+static_assert((int)LOOM_KERNEL_DIMENSION_Y ==
+                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+              "kernel y dimension must match the topology fact y axis");
+static_assert((int)LOOM_KERNEL_DIMENSION_Z ==
+                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+              "kernel z dimension must match the topology fact z axis");
+
 static loom_value_facts_t loom_kernel_hal_coordinate_facts(void) {
   return loom_value_facts_make(0, (int64_t)UINT32_MAX, 1);
 }
@@ -193,36 +203,16 @@ static uint32_t loom_kernel_max_workgroup_count(
 
 static void loom_kernel_mark_workitem_topology_domain(
     loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
-  switch (dimension) {
-    case LOOM_KERNEL_DIMENSION_X:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X;
-      break;
-    case LOOM_KERNEL_DIMENSION_Y:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y;
-      break;
-    case LOOM_KERNEL_DIMENSION_Z:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z;
-      break;
-    default:
-      break;
-  }
+  loom_value_facts_mark_topology_domain(
+      facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+      (loom_value_fact_topology_axis_t)dimension);
 }
 
 static void loom_kernel_mark_workgroup_topology_domain(
     loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
-  switch (dimension) {
-    case LOOM_KERNEL_DIMENSION_X:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X;
-      break;
-    case LOOM_KERNEL_DIMENSION_Y:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y;
-      break;
-    case LOOM_KERNEL_DIMENSION_Z:
-      facts->flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z;
-      break;
-    default:
-      break;
-  }
+  loom_value_facts_mark_topology_domain(
+      facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+      (loom_value_fact_topology_axis_t)dimension);
 }
 
 static bool loom_kernel_launch_config_operand_facts(
@@ -620,7 +610,9 @@ iree_status_t loom_kernel_subgroup_lane_id_facts(
       loom_kernel_max_subgroup_lane_count(context, module);
   result_facts[0] = loom_value_facts_make(0, (int64_t)max_lane_count - 1, 1);
   loom_value_facts_mark_lane_varying(&result_facts[0]);
-  result_facts[0].flags |= LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE;
+  loom_value_facts_mark_topology_domain(
+      &result_facts[0], LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
+      LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE);
   return iree_ok_status();
 }
 

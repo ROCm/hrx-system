@@ -166,6 +166,42 @@ typedef enum loom_value_fact_memory_space_e {
   LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC = 7,
 } loom_value_fact_memory_space_t;
 
+// Target-independent topology value family.
+typedef enum loom_value_fact_topology_value_kind_e {
+  // No topology value family is known.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE = 0,
+  // Per-workitem coordinate within the current workgroup.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID = 1,
+  // Per-workgroup coordinate within the current dispatch grid.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID = 2,
+  // Per-subgroup-lane coordinate within the current subgroup.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID = 3,
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_ = 4,
+} loom_value_fact_topology_value_kind_t;
+
+// Target-independent topology coordinate axis.
+typedef enum loom_value_fact_topology_axis_e {
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_X = 0,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y = 1,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z = 2,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE = 3,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_ = 4,
+} loom_value_fact_topology_axis_t;
+
+// Decoded topology fact domain.
+typedef struct loom_value_fact_topology_domain_t {
+  // Fact flag that uniquely identifies the topology domain.
+  loom_value_fact_flags_t fact_flag;
+  // Value family represented by the domain.
+  loom_value_fact_topology_value_kind_t value_kind;
+  // Coordinate axis represented by the domain.
+  loom_value_fact_topology_axis_t axis;
+  // Stable value-family spelling for structured diagnostics.
+  iree_string_view_t value_kind_name;
+  // Stable axis spelling for structured diagnostics.
+  iree_string_view_t axis_name;
+} loom_value_fact_topology_domain_t;
+
 //===----------------------------------------------------------------------===//
 // Struct
 //===----------------------------------------------------------------------===//
@@ -230,6 +266,26 @@ bool loom_value_facts_scalar_type_domain(loom_scalar_type_t scalar_type,
 // conservative fact set for the value.
 loom_value_facts_t loom_value_facts_clamp_domain(loom_value_facts_t facts,
                                                  int64_t lo, int64_t hi);
+
+// Returns the topology domain encoded by |flags|. Exactly one topology domain
+// bit must be present.
+const loom_value_fact_topology_domain_t*
+loom_value_fact_topology_domain_from_flags(loom_value_fact_flags_t flags);
+
+// Returns the topology domain encoded by |facts|, if any.
+const loom_value_fact_topology_domain_t* loom_value_facts_topology_domain(
+    loom_value_facts_t facts);
+
+// Returns the topology domain matching |value_kind| and |axis|, if any.
+const loom_value_fact_topology_domain_t* loom_value_fact_topology_domain_lookup(
+    loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis);
+
+// Marks |facts| with the topology domain matching |value_kind| and |axis|.
+// Returns false if the requested domain does not exist.
+bool loom_value_facts_mark_topology_domain(
+    loom_value_facts_t* facts, loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis);
 
 // Tightens facts to the dynamic extent domain. Extents are non-negative
 // integer sizes; incompatible float or negative-only facts degrade to the
