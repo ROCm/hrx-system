@@ -134,6 +134,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",

@@ -138,6 +138,12 @@ TEST_F(LowAllocationMoveTopologyTest, ClassifiesPacketMoveOps) {
   ASSERT_NE(copy_op, nullptr);
   ASSERT_NE(concat_op, nullptr);
   ASSERT_NE(return_op, nullptr);
+  EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(copy_op),
+            LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY);
+  EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(concat_op),
+            LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT);
+  EXPECT_EQ(loom_low_allocation_move_topology_packet_move_op_kind(return_op),
+            LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE);
   EXPECT_TRUE(loom_low_allocation_move_topology_op_has_packet_moves(copy_op));
   EXPECT_TRUE(loom_low_allocation_move_topology_op_has_packet_moves(concat_op));
   EXPECT_FALSE(

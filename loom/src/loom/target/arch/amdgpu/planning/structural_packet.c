@@ -7,13 +7,9 @@
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 
 #include "iree/base/bitfield.h"
+#include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/move_sequence.h"
 #include "loom/ops/low/ops.h"
-
-typedef enum loom_amdgpu_structural_packet_movement_kind_e {
-  LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_SLICE = 0,
-  LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_CONCAT = 1,
-} loom_amdgpu_structural_packet_movement_kind_t;
 
 static const loom_low_allocation_assignment_t*
 loom_amdgpu_structural_packet_assignment(
@@ -57,21 +53,26 @@ static iree_status_t loom_amdgpu_structural_packet_analyze_copy(
 
 static iree_status_t loom_amdgpu_structural_packet_analyze_units(
     const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    loom_amdgpu_structural_packet_movement_kind_t movement_kind,
+    loom_low_allocation_packet_move_op_kind_t packet_move_kind,
     loom_amdgpu_structural_packet_info_t* out_info) {
   out_info->flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT;
   iree_host_size_t move_count = 0;
-  switch (movement_kind) {
-    case LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_SLICE: {
+  switch (packet_move_kind) {
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE: {
       IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
           allocation, op, &move_count));
       break;
     }
-    case LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_CONCAT: {
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT: {
       IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
           allocation, op, &move_count));
       break;
     }
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU structural packet unit analysis requires slice or concat");
+      return iree_status_from_code(IREE_STATUS_INTERNAL);
   }
   out_info->instruction_count = move_count;
   if (move_count == 0) {
@@ -98,25 +99,25 @@ iree_status_t loom_amdgpu_structural_packet_analyze(
       iree_all_bits_set(
           analysis_flags,
           LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION)) {
-    if (loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-        loom_low_concat_isa(op)) {
+    if (loom_low_allocation_move_topology_op_has_packet_moves(op)) {
       out_info->flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT |
                         LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
       out_info->instruction_count = 1;
       return iree_ok_status();
     }
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_amdgpu_structural_packet_analyze_copy(allocation, op, out_info);
-  }
-  if (loom_low_slice_isa(op)) {
-    return loom_amdgpu_structural_packet_analyze_units(
-        allocation, op, LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_SLICE, out_info);
-  }
-  if (loom_low_concat_isa(op)) {
-    return loom_amdgpu_structural_packet_analyze_units(
-        allocation, op, LOOM_AMDGPU_STRUCTURAL_PACKET_MOVEMENT_CONCAT,
-        out_info);
+  const loom_low_allocation_packet_move_op_kind_t packet_move_kind =
+      loom_low_allocation_move_topology_packet_move_op_kind(op);
+  switch (packet_move_kind) {
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
+      return loom_amdgpu_structural_packet_analyze_copy(allocation, op,
+                                                        out_info);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:
+      return loom_amdgpu_structural_packet_analyze_units(
+          allocation, op, packet_move_kind, out_info);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
+      break;
   }
   if (loom_low_live_in_isa(op) || loom_low_storage_reserve_isa(op)) {
     return iree_ok_status();
