@@ -225,6 +225,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/lower",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/transforms/vector:to_scalar",
         "//runtime/src/iree/base",
     ],
