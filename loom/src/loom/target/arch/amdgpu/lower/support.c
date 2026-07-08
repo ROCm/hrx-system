@@ -3080,6 +3080,24 @@ static bool loom_amdgpu_source_value_register_shape(
              source_type, out_shape);
 }
 
+static bool loom_amdgpu_source_value_cached_register_shape(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id, loom_type_t source_type,
+    loom_amdgpu_register_shape_t* out_shape) {
+  bool has_shape = false;
+  if (!loom_amdgpu_source_value_analysis_cached_register_shape(
+          analysis, source_value_id, &has_shape, out_shape)) {
+    has_shape = loom_amdgpu_source_value_register_shape(
+        module, fact_table, view_regions, analysis, source_value_id,
+        source_type, out_shape);
+    loom_amdgpu_source_value_analysis_record_register_shape(
+        analysis, source_value_id, out_shape, has_shape);
+  }
+  return has_shape;
+}
+
 iree_status_t loom_amdgpu_map_type(void* user_data,
                                    loom_low_lower_context_t* context,
                                    const loom_op_t* source_op,
@@ -3129,17 +3147,10 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
         loom_amdgpu_source_value_analysis_for_context(context, &analysis));
   }
   loom_amdgpu_register_shape_t shape = {0};
-  bool has_shape = false;
-  if (!loom_amdgpu_source_value_analysis_cached_register_shape(
-          analysis, source_value_id, &has_shape, &shape)) {
-    has_shape = loom_amdgpu_source_value_register_shape(
-        loom_low_lower_context_module(context),
-        loom_low_lower_context_fact_table(context), view_regions, analysis,
-        source_value_id, source_type, &shape);
-    loom_amdgpu_source_value_analysis_record_register_shape(
-        analysis, source_value_id, &shape, has_shape);
-  }
-  if (has_shape) {
+  if (loom_amdgpu_source_value_cached_register_shape(
+          loom_low_lower_context_module(context),
+          loom_low_lower_context_fact_table(context), view_regions, analysis,
+          source_value_id, source_type, &shape)) {
     return loom_amdgpu_make_register_type(context, shape.class_id,
                                           shape.unit_count, out_low_type);
   }
@@ -3173,7 +3184,7 @@ iree_status_t loom_amdgpu_map_contract_value(
         environment, &analysis));
   }
   loom_amdgpu_register_shape_t shape = {0};
-  if (loom_amdgpu_source_value_register_shape(
+  if (loom_amdgpu_source_value_cached_register_shape(
           environment->module, environment->fact_table,
           environment->view_regions, analysis, source_value_id, source_type,
           &shape)) {
