@@ -4,42 +4,28 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
-enum {
-  LOOM_AMDGPU_FP8_DESCRIPTOR_SOURCE_TYPE_COUNT =
-      LOOM_SCALAR_TYPE_F8E5M2 - LOOM_SCALAR_TYPE_F8E4M3 + 1,
-  LOOM_AMDGPU_FP8_DESCRIPTOR_RESULT_TYPE_COUNT =
-      LOOM_SCALAR_TYPE_F32 - LOOM_SCALAR_TYPE_F16 + 1,
-};
-
-static_assert(LOOM_SCALAR_TYPE_F8E5M2 == LOOM_SCALAR_TYPE_F8E4M3 + 1,
-              "FP8 descriptor lookup assumes dense FP8/BF8 scalar types");
-static_assert(LOOM_SCALAR_TYPE_BF16 == LOOM_SCALAR_TYPE_F16 + 1 &&
-                  LOOM_SCALAR_TYPE_F32 == LOOM_SCALAR_TYPE_F16 + 2,
-              "FP8 descriptor lookup assumes dense 16/32-bit float results");
-
-static bool loom_amdgpu_fp8_descriptor_source_type_index(
-    loom_scalar_type_t source_element_type, iree_host_size_t* out_index) {
-  if (source_element_type < LOOM_SCALAR_TYPE_F8E4M3 ||
-      source_element_type > LOOM_SCALAR_TYPE_F8E5M2) {
+static bool loom_amdgpu_fp8_descriptor_row_index(
+    const uint8_t (*row_index_by_type)[LOOM_SCALAR_TYPE_COUNT_],
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type, size_t* out_row_index) {
+  *out_row_index = 0;
+  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
     return false;
   }
-  *out_index = source_element_type - LOOM_SCALAR_TYPE_F8E4M3;
-  return true;
-}
-
-static bool loom_amdgpu_fp8_descriptor_result_type_index(
-    loom_scalar_type_t result_element_type, iree_host_size_t* out_index) {
-  if (result_element_type < LOOM_SCALAR_TYPE_F16 ||
-      result_element_type > LOOM_SCALAR_TYPE_F32) {
+  const uint8_t encoded_row_index =
+      row_index_by_type[source_element_type][result_element_type];
+  if (encoded_row_index == 0) {
     return false;
   }
-  *out_index = result_element_type - LOOM_SCALAR_TYPE_F16;
+  *out_row_index = encoded_row_index - 1;
   return true;
 }
 
@@ -63,14 +49,12 @@ static const loom_amdgpu_fp8_native_descriptor_ref_row_t
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows) <= 64,
               "native descriptor cache stores row state in one u64 bitset");
 
-static const uint8_t kLoomAmdgpuFp8NativeDescriptorRefRowIndex
-    [LOOM_AMDGPU_FP8_DESCRIPTOR_SOURCE_TYPE_COUNT]
-    [LOOM_AMDGPU_FP8_DESCRIPTOR_RESULT_TYPE_COUNT] = {
-#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(                   \
-    row_index, source_type, result_type, lane_ref, pair_ref)         \
-  [source_type -                                                     \
-      LOOM_SCALAR_TYPE_F8E4M3][result_type - LOOM_SCALAR_TYPE_F16] = \
-      (row_index) + 1
+static const uint8_t
+    kLoomAmdgpuFp8NativeDescriptorRefRowIndex[LOOM_SCALAR_TYPE_COUNT_]
+                                             [LOOM_SCALAR_TYPE_COUNT_] = {
+#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(           \
+    row_index, source_type, result_type, lane_ref, pair_ref) \
+  [source_type][result_type] = (row_index) + 1
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
 };
@@ -84,20 +68,11 @@ static bool loom_amdgpu_fp8_native_descriptor_ref_row(
       .lane = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
       .pair = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
   };
-  iree_host_size_t source_index = 0;
-  iree_host_size_t result_index = 0;
-  if (!loom_amdgpu_fp8_descriptor_source_type_index(source_element_type,
-                                                    &source_index) ||
-      !loom_amdgpu_fp8_descriptor_result_type_index(result_element_type,
-                                                    &result_index)) {
+  if (!loom_amdgpu_fp8_descriptor_row_index(
+          kLoomAmdgpuFp8NativeDescriptorRefRowIndex, source_element_type,
+          result_element_type, out_row_index)) {
     return false;
   }
-  const uint8_t encoded_row_index =
-      kLoomAmdgpuFp8NativeDescriptorRefRowIndex[source_index][result_index];
-  if (encoded_row_index == 0) {
-    return false;
-  }
-  *out_row_index = encoded_row_index - 1;
   IREE_ASSERT_LT(*out_row_index,
                  IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows));
   const loom_amdgpu_fp8_native_descriptor_ref_row_t* row =
@@ -193,14 +168,12 @@ static const loom_amdgpu_fp8_scaled_descriptor_ref_row_t
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8ScaledDescriptorRefRows) <= 64,
               "scaled descriptor cache stores row state in one u64 bitset");
 
-static const uint8_t kLoomAmdgpuFp8ScaledDescriptorRefRowIndex
-    [LOOM_AMDGPU_FP8_DESCRIPTOR_SOURCE_TYPE_COUNT]
-    [LOOM_AMDGPU_FP8_DESCRIPTOR_RESULT_TYPE_COUNT] = {
+static const uint8_t
+    kLoomAmdgpuFp8ScaledDescriptorRefRowIndex[LOOM_SCALAR_TYPE_COUNT_]
+                                             [LOOM_SCALAR_TYPE_COUNT_] = {
 #define LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(                        \
     row_index, source_type, result_type, scalef32_pair_ref, e8m0_pk8_ref) \
-  [source_type -                                                          \
-      LOOM_SCALAR_TYPE_F8E4M3][result_type - LOOM_SCALAR_TYPE_F16] =      \
-      (row_index) + 1
+  [source_type][result_type] = (row_index) + 1
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_scaled_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW
 };
@@ -211,20 +184,11 @@ static bool loom_amdgpu_fp8_scaled_descriptor_ref_row(
     const loom_amdgpu_fp8_scaled_descriptor_ref_row_t** out_row) {
   *out_row_index = 0;
   *out_row = NULL;
-  iree_host_size_t source_index = 0;
-  iree_host_size_t result_index = 0;
-  if (!loom_amdgpu_fp8_descriptor_source_type_index(source_element_type,
-                                                    &source_index) ||
-      !loom_amdgpu_fp8_descriptor_result_type_index(result_element_type,
-                                                    &result_index)) {
+  if (!loom_amdgpu_fp8_descriptor_row_index(
+          kLoomAmdgpuFp8ScaledDescriptorRefRowIndex, source_element_type,
+          result_element_type, out_row_index)) {
     return false;
   }
-  const uint8_t encoded_row_index =
-      kLoomAmdgpuFp8ScaledDescriptorRefRowIndex[source_index][result_index];
-  if (encoded_row_index == 0) {
-    return false;
-  }
-  *out_row_index = encoded_row_index - 1;
   IREE_ASSERT_LT(*out_row_index,
                  IREE_ARRAYSIZE(kLoomAmdgpuFp8ScaledDescriptorRefRows));
   *out_row = &kLoomAmdgpuFp8ScaledDescriptorRefRows[*out_row_index];
