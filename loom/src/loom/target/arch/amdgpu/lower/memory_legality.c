@@ -7,8 +7,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
-#include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
@@ -62,21 +61,30 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   if (!loom_amdgpu_low_legality_bundle_is_amdgpu(bundle)) {
     return iree_ok_status();
   }
-  *out_handled = true;
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   const loom_low_descriptor_set_t* descriptor_set =
       loom_target_low_legality_descriptor_set(context);
-  if (op->kind == LOOM_OP_VIEW_PREFETCH) {
+  const loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
+    *out_handled = false;
+    return iree_ok_status();
+  }
+
+  const loom_memory_access_operation_kind_t operation_kind =
+      loom_memory_access_operation_kind(access);
+  if (operation_kind == LOOM_MEMORY_ACCESS_OPERATION_PREFETCH) {
+    *out_handled = true;
     IREE_RETURN_IF_ERROR(loom_amdgpu_record_view_prefetch_diagnostic(
         context, op, descriptor_set));
     return iree_ok_status();
   }
-  if (op->kind != LOOM_OP_VECTOR_LOAD && op->kind != LOOM_OP_VECTOR_STORE &&
-      op->kind != LOOM_OP_VIEW_LOAD && op->kind != LOOM_OP_VIEW_STORE) {
+  if (operation_kind != LOOM_MEMORY_ACCESS_OPERATION_LOAD &&
+      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_STORE) {
     *out_handled = false;
     return iree_ok_status();
   }
+  *out_handled = true;
 
   loom_low_source_memory_access_plan_t source = {0};
   loom_amdgpu_memory_access_plan_t plan = {0};
