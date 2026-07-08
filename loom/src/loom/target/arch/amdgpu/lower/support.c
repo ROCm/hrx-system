@@ -1127,7 +1127,7 @@ static bool loom_amdgpu_source_value_known_distribution_facts(
   return true;
 }
 
-typedef uint16_t loom_amdgpu_source_producer_flags_t;
+typedef uint32_t loom_amdgpu_source_producer_flags_t;
 
 enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION = 1u << 0,
@@ -1143,6 +1143,9 @@ enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT = 1u << 10,
   LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND = 1u << 11,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_BITCAST = 1u << 12,
+  LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE = 1u << 13,
+  LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL = 1u << 14,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI = 1u << 15,
 };
 
 #define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
@@ -1182,6 +1185,9 @@ static const loom_amdgpu_source_producer_flags_t
             LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_SHLI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_CMP)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL,
 };
 static_assert(IREE_ARRAYSIZE(kAmdgpuIndexSourceProducerFlags) ==
                   LOOM_OP_INDEX_COUNT_,
@@ -1240,6 +1246,12 @@ static const loom_amdgpu_source_producer_flags_t
             LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_BITCAST)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_BITCAST,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPI)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL |
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE,
 };
 static_assert(IREE_ARRAYSIZE(kAmdgpuScalarSourceProducerFlags) ==
                   LOOM_OP_SCALAR_COUNT_,
@@ -1608,27 +1620,6 @@ static bool loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
              module, loom_vector_from_elements_result(user_op))) != 0;
 }
 
-static bool loom_amdgpu_scalar_cmpi_i64_requires_native_mask(
-    const loom_module_t* module, const loom_op_t* source_op) {
-  if (!loom_scalar_cmpi_isa(source_op)) {
-    return false;
-  }
-  const loom_value_id_t lhs = loom_scalar_cmpi_lhs(source_op);
-  const loom_value_id_t rhs = loom_scalar_cmpi_rhs(source_op);
-  if (lhs >= module->values.count || rhs >= module->values.count ||
-      !loom_amdgpu_type_is_i64(loom_module_value_type(module, lhs)) ||
-      !loom_amdgpu_type_is_i64(loom_module_value_type(module, rhs))) {
-    return false;
-  }
-  switch (loom_scalar_cmpi_predicate(source_op)) {
-    case LOOM_SCALAR_CMPI_PREDICATE_EQ:
-    case LOOM_SCALAR_CMPI_PREDICATE_NE:
-      return false;
-    default:
-      return true;
-  }
-}
-
 typedef uint8_t loom_amdgpu_i1_compare_flags_t;
 
 enum loom_amdgpu_i1_compare_flag_bits_e {
@@ -1645,33 +1636,49 @@ typedef struct loom_amdgpu_i1_compare_values_t {
   loom_amdgpu_i1_compare_flags_t flags;
 } loom_amdgpu_i1_compare_values_t;
 
+static bool loom_amdgpu_scalar_cmpi_i64_requires_native_mask(
+    const loom_module_t* module, const loom_op_t* source_op,
+    const loom_amdgpu_i1_compare_values_t* values) {
+  if (values->lhs >= module->values.count ||
+      values->rhs >= module->values.count ||
+      !loom_amdgpu_type_is_i64(loom_module_value_type(module, values->lhs)) ||
+      !loom_amdgpu_type_is_i64(loom_module_value_type(module, values->rhs)) ||
+      source_op->attribute_count == 0) {
+    return false;
+  }
+  const uint8_t predicate = loom_attr_as_enum(loom_op_attrs(source_op)[0]);
+  return predicate != LOOM_SCALAR_CMPI_PREDICATE_EQ &&
+         predicate != LOOM_SCALAR_CMPI_PREDICATE_NE;
+}
+
 static bool loom_amdgpu_i1_compare_values(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_amdgpu_i1_compare_values_t* out_values) {
   out_values->lhs = LOOM_VALUE_ID_INVALID;
   out_values->rhs = LOOM_VALUE_ID_INVALID;
   out_values->flags = 0;
-  switch (source_op->kind) {
-    case LOOM_OP_SCALAR_CMPI:
-      out_values->lhs = loom_scalar_cmpi_lhs(source_op);
-      out_values->rhs = loom_scalar_cmpi_rhs(source_op);
-      out_values->flags |= LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL;
-      if (loom_amdgpu_scalar_cmpi_i64_requires_native_mask(module, source_op)) {
-        out_values->flags |= LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK;
-      }
-      return true;
-    case LOOM_OP_SCALAR_CMPF:
-      out_values->lhs = loom_scalar_cmpf_lhs(source_op);
-      out_values->rhs = loom_scalar_cmpf_rhs(source_op);
-      return true;
-    case LOOM_OP_INDEX_CMP:
-      out_values->lhs = loom_index_cmp_lhs(source_op);
-      out_values->rhs = loom_index_cmp_rhs(source_op);
-      out_values->flags |= LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL;
-      return true;
-    default:
-      return false;
+  const loom_amdgpu_source_producer_flags_t producer_flags =
+      loom_amdgpu_source_producer_flags(source_op->kind);
+  if (!iree_any_bit_set(producer_flags,
+                        LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE) ||
+      source_op->operand_count != 2 || source_op->result_count != 1) {
+    return false;
   }
+  const loom_value_id_t* operands = loom_op_const_operands(source_op);
+  out_values->lhs = operands[0];
+  out_values->rhs = operands[1];
+  if (iree_any_bit_set(
+          producer_flags,
+          LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL)) {
+    out_values->flags |= LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL;
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI) &&
+      loom_amdgpu_scalar_cmpi_i64_requires_native_mask(module, source_op,
+                                                       out_values)) {
+    out_values->flags |= LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK;
+  }
+  return true;
 }
 
 static bool loom_amdgpu_i1_compare_has_direct_vgpr_operand(
