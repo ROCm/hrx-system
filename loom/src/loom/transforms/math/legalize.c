@@ -91,58 +91,35 @@ typedef struct loom_math_legalize_state_t {
   loom_math_legalize_target_state_t target;
 } loom_math_legalize_state_t;
 
-static loom_target_math_fastmath_flags_t
-loom_math_legalize_scalar_fastmath_flags(uint8_t source_flags) {
-  loom_target_math_fastmath_flags_t flags = 0;
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_REASSOC)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_REASSOC;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NNAN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NNAN;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NINF)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NINF;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NSZ)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NSZ;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_ARCP)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_CONTRACT)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_CONTRACT;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_AFN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_AFN;
-  }
-  return flags;
-}
+#define LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(dialect, flag) \
+  static_assert(LOOM_##dialect##_FASTMATHFLAGS_##flag ==       \
+                    LOOM_TARGET_MATH_FASTMATH_FLAG_##flag,     \
+                #dialect " fastmath flag " #flag " must match target math")
 
-static loom_target_math_fastmath_flags_t
-loom_math_legalize_vector_fastmath_flags(uint8_t source_flags) {
-  loom_target_math_fastmath_flags_t flags = 0;
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_REASSOC)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_REASSOC;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NNAN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NNAN;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NINF)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NINF;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NSZ)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NSZ;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_ARCP)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_CONTRACT)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_CONTRACT;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_AFN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_AFN;
-  }
-  return flags;
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, REASSOC);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NNAN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NINF);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NSZ);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, ARCP);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, CONTRACT);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, AFN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, FAST);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, REASSOC);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NNAN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NINF);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NSZ);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, ARCP);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, CONTRACT);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, AFN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, FAST);
+
+#undef LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT
+
+static loom_target_math_fastmath_flags_t loom_math_legalize_fastmath_flags(
+    uint8_t source_flags) {
+  return (
+      loom_target_math_fastmath_flags_t)(source_flags &
+                                         LOOM_TARGET_MATH_FASTMATH_FLAG_FAST);
 }
 
 static iree_status_t loom_math_legalize_parse_option(void* user_data,
@@ -376,16 +353,14 @@ static bool loom_math_legalize_query_for_op(
   if (math_op != LOOM_TARGET_MATH_OP_UNKNOWN) {
     return loom_math_legalize_scalar_result_query(
         module, op, math_op,
-        loom_math_legalize_scalar_fastmath_flags(op->instance_flags),
-        out_query);
+        loom_math_legalize_fastmath_flags(op->instance_flags), out_query);
   }
 
   math_op = loom_math_legalize_vector_op_kind(op);
   if (math_op != LOOM_TARGET_MATH_OP_UNKNOWN) {
     return loom_math_legalize_vector_result_query(
         module, op, math_op,
-        loom_math_legalize_vector_fastmath_flags(op->instance_flags),
-        out_query);
+        loom_math_legalize_fastmath_flags(op->instance_flags), out_query);
   }
 
   return false;
