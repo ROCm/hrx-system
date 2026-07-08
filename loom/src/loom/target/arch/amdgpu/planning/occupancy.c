@@ -127,19 +127,32 @@ static const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_select_model(
   return model;
 }
 
-static bool loom_amdgpu_occupancy_assignment_contributes_register_resources(
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_allocation_assignment_t* assignment) {
-  const uint16_t descriptor_reg_class_id = assignment->descriptor_reg_class_id;
-  if (descriptor_reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
-      descriptor_reg_class_id >=
-          allocation->target.descriptor_set->reg_class_count) {
-    return true;
+static uint32_t loom_amdgpu_occupancy_register_class_index(
+    const loom_amdgpu_occupancy_model_t* model,
+    uint16_t descriptor_reg_class_id) {
+  if (descriptor_reg_class_id >= model->descriptor_reg_class_count) {
+    return LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
   }
-  const loom_low_reg_class_t* reg_class =
-      &allocation->target.descriptor_set->reg_classes[descriptor_reg_class_id];
-  return !iree_any_bit_set(reg_class->flags,
-                           LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
+  const uint16_t class_index =
+      model->register_class_indices_by_descriptor_reg_class_id
+          [descriptor_reg_class_id];
+  if (class_index == UINT16_MAX) {
+    return LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
+  }
+  IREE_ASSERT(class_index < model->register_class_count);
+  return class_index;
+}
+
+static bool loom_amdgpu_occupancy_assignment_contributes_register_resources(
+    const loom_amdgpu_occupancy_model_t* model,
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t* out_class_index) {
+  const uint16_t descriptor_reg_class_id = assignment->descriptor_reg_class_id;
+  *out_class_index = descriptor_reg_class_id == LOOM_LOW_REG_CLASS_NONE
+                         ? LOOM_AMDGPU_OCCUPANCY_CLASS_NONE
+                         : loom_amdgpu_occupancy_register_class_index(
+                               model, descriptor_reg_class_id);
+  return *out_class_index != LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
 }
 
 iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
@@ -185,46 +198,9 @@ iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_occupancy_find_register_class(
-    const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_occupancy_register_class_t* register_classes,
-    iree_host_size_t register_class_count, uint16_t descriptor_reg_class_id,
-    uint32_t* out_index) {
-  for (iree_host_size_t i = 0; i < register_class_count; ++i) {
-    if (register_classes[i].descriptor_reg_class_id ==
-        descriptor_reg_class_id) {
-      if (i > UINT32_MAX) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "AMDGPU occupancy class index overflows");
-      }
-      *out_index = (uint32_t)i;
-      return iree_ok_status();
-    }
-  }
-  if (descriptor_reg_class_id >=
-      allocation->target.descriptor_set->reg_class_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU occupancy assignment references invalid descriptor register "
-        "class ID %" PRIu16,
-        descriptor_reg_class_id);
-  }
-  const loom_low_reg_class_t* descriptor_reg_class =
-      &allocation->target.descriptor_set->reg_classes[descriptor_reg_class_id];
-  iree_string_view_t register_class =
-      loom_low_descriptor_set_string(allocation->target.descriptor_set,
-                                     descriptor_reg_class->name_string_offset);
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "AMDGPU occupancy model for descriptor set '%.*s' does not cover "
-      "register class '%.*s'",
-      (int)allocation->target.descriptor_set_key.size,
-      allocation->target.descriptor_set_key.data, (int)register_class.size,
-      register_class.data);
-}
-
 static iree_status_t loom_amdgpu_occupancy_collect_allocations(
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_occupancy_model_t* model,
     loom_amdgpu_occupancy_register_class_t* class_summaries,
     iree_host_size_t class_summary_count) {
   for (iree_host_size_t i = 0; i < allocation->assignment_count; ++i) {
@@ -233,14 +209,12 @@ static iree_status_t loom_amdgpu_occupancy_collect_allocations(
     if (assignment->value_class.type_kind != LOOM_TYPE_REGISTER) {
       continue;
     }
+    uint32_t class_index = LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
     if (!loom_amdgpu_occupancy_assignment_contributes_register_resources(
-            allocation, assignment)) {
+            model, assignment, &class_index)) {
       continue;
     }
-    uint32_t class_index = LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_find_register_class(
-        allocation, class_summaries, class_summary_count,
-        assignment->descriptor_reg_class_id, &class_index));
+    IREE_ASSERT(class_index < class_summary_count);
     if (assignment->location_kind !=
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
       continue;
@@ -273,6 +247,7 @@ static iree_status_t loom_amdgpu_occupancy_add_u32(uint32_t lhs, uint32_t rhs,
 
 static iree_status_t loom_amdgpu_occupancy_collect_spills(
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_occupancy_model_t* model,
     loom_amdgpu_occupancy_register_class_t* class_summaries,
     iree_host_size_t class_summary_count,
     loom_amdgpu_occupancy_table_t* table) {
@@ -297,10 +272,15 @@ static iree_status_t loom_amdgpu_occupancy_collect_spills(
     }
     const loom_low_allocation_assignment_t* assignment =
         &allocation->assignments[spill_plan->assignment_index];
-    uint32_t class_index = LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_find_register_class(
-        allocation, class_summaries, class_summary_count,
-        assignment->descriptor_reg_class_id, &class_index));
+    const uint32_t class_index = loom_amdgpu_occupancy_register_class_index(
+        model, assignment->descriptor_reg_class_id);
+    if (class_index >= class_summary_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU occupancy spill plan references non-modeled descriptor "
+          "register class ID %" PRIu16,
+          assignment->descriptor_reg_class_id);
+    }
 
     loom_amdgpu_occupancy_register_class_t* class_summary =
         &class_summaries[class_index];
@@ -699,9 +679,10 @@ iree_status_t loom_amdgpu_occupancy_build(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_collect_allocations(
-      allocation, register_classes, model->register_class_count));
+      allocation, model, register_classes, model->register_class_count));
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_collect_spills(
-      allocation, register_classes, model->register_class_count, &table));
+      allocation, model, register_classes, model->register_class_count,
+      &table));
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_finalize_limits(
       model, register_classes, pressure_resources, &table));
 

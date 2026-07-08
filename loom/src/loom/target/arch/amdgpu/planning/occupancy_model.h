@@ -75,6 +75,11 @@ typedef struct loom_amdgpu_occupancy_model_t {
   const loom_amdgpu_occupancy_register_class_model_t* register_classes;
   // Number of entries in register_classes.
   iree_host_size_t register_class_count;
+  // Model index by descriptor-set-local register class ID, or UINT16_MAX for
+  // descriptor classes that do not contribute to occupancy.
+  const uint16_t* register_class_indices_by_descriptor_reg_class_id;
+  // Number of entries in register_class_indices_by_descriptor_reg_class_id.
+  iree_host_size_t descriptor_reg_class_count;
   // Derived occupancy resources in diagnostic order.
   const loom_amdgpu_occupancy_resource_model_t* resources;
   // Number of entries in resources.

@@ -35,6 +35,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     sorted_descriptor_set_infos,
     sorted_occupancy_model_infos,
 )
+from loom.target.low_descriptors import RegClass, RegClassFlag  # noqa: E402
 
 
 def _c_string_literal(value: str) -> str:
@@ -87,6 +88,13 @@ def _descriptor_reg_class_ids(descriptor_set_key: str) -> dict[str, int]:
         if descriptor_set.key != descriptor_set_key:
             continue
         return {reg_class.name: index for index, reg_class in enumerate(descriptor_set.reg_classes)}
+    raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
+
+
+def _descriptor_reg_classes(descriptor_set_key: str) -> tuple[RegClass, ...]:
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        if descriptor_set.key == descriptor_set_key:
+            return descriptor_set.reg_classes
     raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
 
 
@@ -170,6 +178,13 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
                 raise ValueError(f"AMDGPU occupancy pool for {row.register_class} must be positive")
             if row.allocation_granularity <= 0:
                 raise ValueError(f"AMDGPU occupancy granularity for {row.register_class} must be positive")
+        modeled_register_classes = set(register_classes)
+        missing_spillable_classes = sorted(
+            reg_class.name for reg_class in _descriptor_reg_classes(model.descriptor_set_key) if RegClassFlag.UNSPILLABLE not in reg_class.flags and reg_class.name not in modeled_register_classes
+        )
+        if missing_spillable_classes:
+            missing = ", ".join(missing_spillable_classes)
+            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} is missing spillable descriptor register classes: {missing}")
         resources = [row.resource for row in model.resources]
         if len(resources) != len(set(resources)):
             raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has duplicate resources")
@@ -207,6 +222,7 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
     for model in models:
         suffix = _model_c_suffix(model.descriptor_set_key)
         descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
+        descriptor_reg_class_rows = _descriptor_reg_classes(model.descriptor_set_key)
         register_class_indices = {row.register_class: index for index, row in enumerate(model.register_classes)}
         pressure_cliffs_by_register_class = {row.register_class: _pressure_cliffs(row, model.max_waves_per_simd) for row in model.register_classes}
         pressure_cliff_count = sum(len(cliffs) for cliffs in pressure_cliffs_by_register_class.values())
@@ -259,6 +275,17 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                     "  },",
                 ]
             )
+        lines.append("};")
+        lines.extend(
+            [
+                "",
+                f"static const uint16_t kAmdgpu{suffix}RegisterClassIndexByDescriptorRegClassId[] = {{",
+            ]
+        )
+        for descriptor_reg_class in descriptor_reg_class_rows:
+            register_class_index = register_class_indices.get(descriptor_reg_class.name)
+            index_expr = "UINT16_MAX" if register_class_index is None else _u16_expr(register_class_index)
+            lines.append(f"  [{_u16_expr(descriptor_reg_classes[descriptor_reg_class.name])}] = {index_expr},")
         lines.append("};")
         for resource in model.resources:
             resource_suffix = _resource_c_suffix(resource.resource)
@@ -314,6 +341,8 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                 f"  .pressure_cliff_count = {pressure_cliff_count},",
                 f"  .register_classes = kAmdgpu{suffix}RegisterClasses,",
                 f"  .register_class_count = IREE_ARRAYSIZE(kAmdgpu{suffix}RegisterClasses),",
+                f"  .register_class_indices_by_descriptor_reg_class_id = kAmdgpu{suffix}RegisterClassIndexByDescriptorRegClassId,",
+                f"  .descriptor_reg_class_count = IREE_ARRAYSIZE(kAmdgpu{suffix}RegisterClassIndexByDescriptorRegClassId),",
                 f"  .resources = {resource_initializer},",
                 f"  .resource_count = {resource_count_initializer},",
                 "};",
