@@ -161,10 +161,10 @@ typedef struct loom_amdgpu_fp8_encoded_operand_format_row_t {
 } loom_amdgpu_fp8_encoded_operand_format_row_t;
 
 static const loom_amdgpu_fp8_encoded_operand_format_row_t
-    kLoomAmdgpuFp8EncodedOperandFormatRows[] = {
+    kLoomAmdgpuFp8EncodedOperandFormatRows[LOOM_SCALAR_TYPE_COUNT_] = {
 #define LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(           \
     row_element_type, row_encoded_operand_formats)            \
-  [row_element_type - LOOM_SCALAR_TYPE_F8E4M3] = {            \
+  [row_element_type] = {                                      \
       .element_type = row_element_type,                       \
       .encoded_operand_formats = row_encoded_operand_formats, \
   }
@@ -172,20 +172,17 @@ static const loom_amdgpu_fp8_encoded_operand_format_row_t
 #undef LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW
 };
 
-static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8EncodedOperandFormatRows) ==
-                  LOOM_SCALAR_TYPE_F8E5M2 - LOOM_SCALAR_TYPE_F8E4M3 + 1,
-              "FP8 encoded operand format rows cover dense FP8/BF8 types");
-
 static bool loom_amdgpu_fp8_element_format_matches(
     loom_value_fact_numeric_format_flags_t element_format,
     loom_scalar_type_t element_type) {
-  if (element_type < LOOM_SCALAR_TYPE_F8E4M3 ||
-      element_type > LOOM_SCALAR_TYPE_F8E5M2) {
+  if (element_type >= IREE_ARRAYSIZE(kLoomAmdgpuFp8EncodedOperandFormatRows)) {
     return false;
   }
   const loom_amdgpu_fp8_encoded_operand_format_row_t* row =
-      &kLoomAmdgpuFp8EncodedOperandFormatRows[element_type -
-                                              LOOM_SCALAR_TYPE_F8E4M3];
+      &kLoomAmdgpuFp8EncodedOperandFormatRows[element_type];
+  if (row->encoded_operand_formats == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return false;
+  }
   IREE_ASSERT_EQ(row->element_type, element_type);
   return element_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE &&
          (element_format & (element_format - 1)) == 0 &&
