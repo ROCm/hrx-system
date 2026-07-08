@@ -1146,6 +1146,7 @@ enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE = 1u << 13,
   LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL = 1u << 14,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI = 1u << 15,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY = 1u << 16,
 };
 
 #define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
@@ -1252,6 +1253,12 @@ static const loom_amdgpu_source_producer_flags_t
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPF)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ANDI)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ORI)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_XORI)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY,
 };
 static_assert(IREE_ARRAYSIZE(kAmdgpuScalarSourceProducerFlags) ==
                   LOOM_OP_SCALAR_COUNT_,
@@ -2031,29 +2038,14 @@ static bool loom_amdgpu_source_i1_value_has_cross_block_use(
   return false;
 }
 
-static const bool kAmdgpuScalarLogicalBinaryKinds[LOOM_OP_SCALAR_COUNT_] = {
-    [LOOM_OP_SCALAR_ANDI & 0xFF] = true,
-    [LOOM_OP_SCALAR_ORI & 0xFF] = true,
-    [LOOM_OP_SCALAR_XORI & 0xFF] = true,
-};
-static_assert(IREE_ARRAYSIZE(kAmdgpuScalarLogicalBinaryKinds) ==
-                  LOOM_OP_SCALAR_COUNT_,
-              "AMDGPU scalar logical binary table out of sync");
-
-static bool loom_amdgpu_op_kind_is_scalar_logical_binary(loom_op_kind_t kind) {
-  return loom_op_dialect_id(kind) == LOOM_DIALECT_SCALAR &&
-         loom_op_dialect_index(kind) <
-             IREE_ARRAYSIZE(kAmdgpuScalarLogicalBinaryKinds) &&
-         kAmdgpuScalarLogicalBinaryKinds[loom_op_dialect_index(kind)];
-}
-
 static bool loom_amdgpu_scalar_logical_binary_values(
     const loom_op_t* op, loom_value_id_t* out_lhs, loom_value_id_t* out_rhs,
     loom_value_id_t* out_result) {
   *out_lhs = LOOM_VALUE_ID_INVALID;
   *out_rhs = LOOM_VALUE_ID_INVALID;
   *out_result = LOOM_VALUE_ID_INVALID;
-  if (!loom_amdgpu_op_kind_is_scalar_logical_binary(op->kind) ||
+  if (!iree_any_bit_set(loom_amdgpu_source_producer_flags(op->kind),
+                        LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY) ||
       op->operand_count != 2 || op->result_count != 1) {
     return false;
   }
