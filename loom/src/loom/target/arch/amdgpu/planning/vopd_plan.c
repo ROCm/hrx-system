@@ -111,6 +111,22 @@ typedef struct loom_amdgpu_vopd_component_descriptor_lookup_range_t {
   uint16_t descriptor_lookup_count;
 } loom_amdgpu_vopd_component_descriptor_lookup_range_t;
 
+typedef struct loom_amdgpu_vopd_pair_affinity_range_t {
+  // First pair-affinity row for this descriptor-set ordinal.
+  uint16_t first_pair_affinity;
+  // Number of pair-affinity rows for this descriptor-set ordinal.
+  uint16_t pair_affinity_count;
+} loom_amdgpu_vopd_pair_affinity_range_t;
+
+typedef struct loom_amdgpu_vopd_pair_affinity_row_t {
+  // Descriptor ordinal for the first scheduled packet.
+  uint16_t first_descriptor_ordinal;
+  // Descriptor ordinal for the second scheduled packet.
+  uint16_t second_descriptor_ordinal;
+  // Scheduler priority for this descriptor pair.
+  uint16_t priority;
+} loom_amdgpu_vopd_pair_affinity_row_t;
+
 typedef struct loom_amdgpu_vopd_plan_builder_t {
   // Schedule table being analyzed.
   const loom_low_schedule_table_t* schedule;
@@ -220,6 +236,35 @@ static const loom_amdgpu_vopd_component_descriptor_lookup_range_t
 };
 
 #undef LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE
+
+#define LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE(                                  \
+    descriptor_set_ordinal_value, first_pair_value, pair_affinity_count_value) \
+  [descriptor_set_ordinal_value] = {                                           \
+      .first_pair_affinity = first_pair_value,                                 \
+      .pair_affinity_count = pair_affinity_count_value,                        \
+  },
+
+static const loom_amdgpu_vopd_pair_affinity_range_t
+    kVopdPairAffinityRanges[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {
+#include "loom/target/arch/amdgpu/planning/vopd_pair_affinity_ranges.inl"
+};
+
+#undef LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE
+
+#define LOOM_AMDGPU_VOPD_PAIR_AFFINITY(first_descriptor_ordinal_value,  \
+                                       second_descriptor_ordinal_value, \
+                                       priority_value)                  \
+  {                                                                     \
+      .first_descriptor_ordinal = first_descriptor_ordinal_value,       \
+      .second_descriptor_ordinal = second_descriptor_ordinal_value,     \
+      .priority = priority_value,                                       \
+  },
+
+static const loom_amdgpu_vopd_pair_affinity_row_t kVopdPairAffinities[] = {
+#include "loom/target/arch/amdgpu/planning/vopd_pair_affinities.inl"
+};
+
+#undef LOOM_AMDGPU_VOPD_PAIR_AFFINITY
 
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
     row_index_value, op_value, same_op_reason_value, op_name_value,           \
@@ -388,6 +433,31 @@ loom_amdgpu_vopd_component_rule_for_descriptor_ordinal(
   return &kVopdComponentRules[rule_index];
 }
 
+static const loom_amdgpu_vopd_pair_affinity_row_t*
+loom_amdgpu_vopd_pair_affinities_for_descriptor_set(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_host_size_t* out_pair_affinity_count) {
+  *out_pair_affinity_count = 0;
+  if (descriptor_set == NULL || descriptor_set->descriptor_set_ordinal >=
+                                    IREE_ARRAYSIZE(kVopdPairAffinityRanges)) {
+    return NULL;
+  }
+  const uint16_t descriptor_set_ordinal =
+      descriptor_set->descriptor_set_ordinal;
+  const loom_amdgpu_vopd_pair_affinity_range_t* range =
+      &kVopdPairAffinityRanges[descriptor_set_ordinal];
+  if (range->pair_affinity_count == 0) {
+    return NULL;
+  }
+  IREE_ASSERT_LE(range->first_pair_affinity,
+                 IREE_ARRAYSIZE(kVopdPairAffinities));
+  IREE_ASSERT_LE(
+      range->pair_affinity_count,
+      IREE_ARRAYSIZE(kVopdPairAffinities) - range->first_pair_affinity);
+  *out_pair_affinity_count = range->pair_affinity_count;
+  return &kVopdPairAffinities[range->first_pair_affinity];
+}
+
 static bool loom_amdgpu_vopd_descriptor_set_supports_packetization(
     const loom_low_descriptor_set_t* descriptor_set) {
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
@@ -409,18 +479,6 @@ static bool loom_amdgpu_vopd_target_supports_base_vopd(
     return false;
   }
   return loom_amdgpu_vopd_descriptor_set_supports_packetization(descriptor_set);
-}
-
-static void loom_amdgpu_vopd_append_schedule_pair_affinity(
-    const loom_low_descriptor_t* first_descriptor,
-    const loom_low_descriptor_t* second_descriptor, uint16_t priority,
-    loom_low_schedule_pair_affinity_t* affinities,
-    iree_host_size_t* affinity_count) {
-  affinities[(*affinity_count)++] = (loom_low_schedule_pair_affinity_t){
-      .first_descriptor = first_descriptor,
-      .second_descriptor = second_descriptor,
-      .priority = priority,
-  };
 }
 
 static bool loom_amdgpu_vopd_component_can_use_lane(
@@ -474,66 +532,32 @@ iree_status_t loom_amdgpu_vopd_build_schedule_pair_affinities(
   }
   const loom_low_descriptor_set_t* descriptor_set = target->descriptor_set;
 
-  const loom_amdgpu_vopd_component_rule_t*
-      component_rules[IREE_ARRAYSIZE(kVopdComponentRules)] = {0};
-  const loom_low_descriptor_t*
-      component_descriptors[IREE_ARRAYSIZE(kVopdComponentRules)] = {0};
-  iree_host_size_t component_rule_count = 0;
-  iree_host_size_t descriptor_lookup_count = 0;
-  const uint8_t* descriptor_lookup =
-      loom_amdgpu_vopd_component_lookup_for_descriptor_set(
-          descriptor_set, &descriptor_lookup_count);
-  IREE_ASSERT(descriptor_lookup != NULL);
-  for (iree_host_size_t descriptor_ordinal = 0;
-       descriptor_ordinal < descriptor_lookup_count; ++descriptor_ordinal) {
-    const loom_amdgpu_vopd_component_rule_t* rule =
-        loom_amdgpu_vopd_component_rule_for_descriptor_ordinal(
-            descriptor_lookup, descriptor_lookup_count,
-            (uint32_t)descriptor_ordinal);
-    if (rule == NULL) {
-      continue;
-    }
-    IREE_ASSERT_LT(component_rule_count, IREE_ARRAYSIZE(component_rules));
-    const loom_low_descriptor_t* descriptor =
-        loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                              descriptor_ordinal);
-    IREE_ASSERT(descriptor != NULL);
-    component_descriptors[component_rule_count] = descriptor;
-    component_rules[component_rule_count++] = rule;
-  }
-  if (component_rule_count == 0) {
+  iree_host_size_t affinity_count = 0;
+  const loom_amdgpu_vopd_pair_affinity_row_t* rows =
+      loom_amdgpu_vopd_pair_affinities_for_descriptor_set(descriptor_set,
+                                                          &affinity_count);
+  if (affinity_count == 0) {
     return iree_ok_status();
   }
 
-  const iree_host_size_t max_affinity_count =
-      component_rule_count * component_rule_count;
   loom_low_schedule_pair_affinity_t* affinities = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, max_affinity_count, sizeof(*affinities), (void**)&affinities));
-  iree_host_size_t affinity_count = 0;
-  for (iree_host_size_t first_index = 0; first_index < component_rule_count;
-       ++first_index) {
-    const loom_amdgpu_vopd_component_rule_t* first_rule =
-        component_rules[first_index];
+      arena, affinity_count, sizeof(*affinities), (void**)&affinities));
+  for (iree_host_size_t i = 0; i < affinity_count; ++i) {
+    const loom_amdgpu_vopd_pair_affinity_row_t* row = &rows[i];
     const loom_low_descriptor_t* first_descriptor =
-        component_descriptors[first_index];
-    for (iree_host_size_t second_index = 0; second_index < component_rule_count;
-         ++second_index) {
-      const loom_amdgpu_vopd_component_rule_t* second_rule =
-          component_rules[second_index];
-      const loom_low_descriptor_t* second_descriptor =
-          component_descriptors[second_index];
-      loom_amdgpu_vopd_pair_reason_t reason =
-          LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN;
-      if (!loom_amdgpu_vopd_component_infos_pair_reason(
-              &first_rule->info, &second_rule->info, &reason)) {
-        continue;
-      }
-      const uint16_t priority = first_descriptor == second_descriptor ? 2 : 1;
-      loom_amdgpu_vopd_append_schedule_pair_affinity(
-          first_descriptor, second_descriptor, priority, affinities,
-          &affinity_count);
-    }
+        loom_low_descriptor_set_descriptor_at(descriptor_set,
+                                              row->first_descriptor_ordinal);
+    const loom_low_descriptor_t* second_descriptor =
+        loom_low_descriptor_set_descriptor_at(descriptor_set,
+                                              row->second_descriptor_ordinal);
+    IREE_ASSERT(first_descriptor != NULL);
+    IREE_ASSERT(second_descriptor != NULL);
+    affinities[i] = (loom_low_schedule_pair_affinity_t){
+        .first_descriptor = first_descriptor,
+        .second_descriptor = second_descriptor,
+        .priority = row->priority,
+    };
   }
   *out_affinities = (loom_low_schedule_pair_affinity_list_t){
       .values = affinities,
