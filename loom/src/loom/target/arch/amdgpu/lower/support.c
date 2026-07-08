@@ -1363,16 +1363,11 @@ static loom_amdgpu_source_producer_flags_t loom_amdgpu_source_producer_flags(
 
 static bool loom_amdgpu_workitem_dimension_is_valid(
     const loom_op_t* defining_op) {
-  switch (defining_op->kind) {
-    case LOOM_OP_KERNEL_WORKITEM_ID:
-      return loom_kernel_workitem_id_dimension(defining_op) <
+  return iree_any_bit_set(loom_amdgpu_source_producer_flags(defining_op->kind),
+                          LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION) &&
+         defining_op->attribute_count != 0 &&
+         loom_attr_as_enum(loom_op_attrs(defining_op)[0]) <
              LOOM_KERNEL_DIMENSION_COUNT_;
-    case LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID:
-      return loom_kernel_workitem_dispatch_id_dimension(defining_op) <
-             LOOM_KERNEL_DIMENSION_COUNT_;
-    default:
-      return false;
-  }
 }
 
 static bool loom_amdgpu_distribution_transfer_result_prefers_vgpr(
