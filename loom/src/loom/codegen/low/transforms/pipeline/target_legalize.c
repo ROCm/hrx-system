@@ -517,45 +517,6 @@ static bool loom_low_target_legalize_predicate_const_range(
   }
 }
 
-static bool loom_low_target_legalize_topology_domain(
-    loom_value_facts_t facts, iree_string_view_t* out_value_kind,
-    iree_string_view_t* out_axis) {
-  const uint32_t topology_flags =
-      facts.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
-  switch (topology_flags) {
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("x");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("y");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("z");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("x");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("y");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("z");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE:
-      *out_value_kind = IREE_SV("subgroup.lane.id");
-      *out_axis = IREE_SV("lane");
-      return true;
-    default:
-      return false;
-  }
-}
-
 static bool loom_low_target_legalize_lookup_assume_operand_facts(
     const loom_value_fact_table_t* fact_table, loom_value_slice_t values,
     const loom_predicate_t* predicate, loom_value_facts_t* out_facts) {
@@ -781,9 +742,9 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
             fact_table, values, &predicates[i], &facts)) {
       continue;
     }
-    iree_string_view_t value_kind = iree_string_view_empty();
-    iree_string_view_t axis = iree_string_view_empty();
-    if (!loom_low_target_legalize_topology_domain(facts, &value_kind, &axis)) {
+    const loom_value_fact_topology_domain_t* domain =
+        loom_value_facts_topology_domain(facts);
+    if (!domain) {
       continue;
     }
     if (assumed_minimum <= facts.range_lo &&
@@ -791,8 +752,8 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_low_target_legalize_emit_topology_assume_error(
-        state, op, value_kind, axis, facts.range_lo, facts.range_hi,
-        assumed_minimum, assumed_maximum));
+        state, op, domain->value_kind_name, domain->axis_name, facts.range_lo,
+        facts.range_hi, assumed_minimum, assumed_maximum));
   }
   return iree_ok_status();
 }

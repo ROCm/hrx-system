@@ -47,6 +47,62 @@ TEST(FactsFloatPredicates, FiniteImpliesNotNanAndNotInf) {
   EXPECT_TRUE(loom_value_facts_is_not_inf(f));
 }
 
+TEST(FactsTopologyDomain, LookupAndMarkRoundTrip) {
+  struct TestCase {
+    loom_value_fact_flags_t fact_flag;
+    loom_value_fact_topology_value_kind_t value_kind;
+    loom_value_fact_topology_axis_t axis;
+  };
+  const TestCase cases[] = {
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
+      {LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE},
+  };
+  for (const TestCase& test_case : cases) {
+    const loom_value_fact_topology_domain_t* domain =
+        loom_value_fact_topology_domain_from_flags(test_case.fact_flag);
+    ASSERT_NE(domain, nullptr);
+    EXPECT_EQ(domain->value_kind, test_case.value_kind);
+    EXPECT_EQ(domain->axis, test_case.axis);
+
+    loom_value_facts_t facts = loom_value_facts_make(0, 63, 1);
+    facts.flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X;
+    ASSERT_TRUE(loom_value_facts_mark_topology_domain(
+        &facts, test_case.value_kind, test_case.axis));
+    EXPECT_EQ(facts.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK,
+              test_case.fact_flag);
+    EXPECT_EQ(loom_value_facts_topology_domain(facts), domain);
+  }
+
+  EXPECT_EQ(loom_value_fact_topology_domain_from_flags(0), nullptr);
+  EXPECT_EQ(loom_value_fact_topology_domain_from_flags(
+                LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X |
+                LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y),
+            nullptr);
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  EXPECT_FALSE(loom_value_facts_mark_topology_domain(
+      &facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE,
+      LOOM_VALUE_FACT_TOPOLOGY_AXIS_X));
+}
+
 TEST(FactsExactI64, Zero) {
   loom_value_facts_t f = loom_value_facts_exact_i64(0);
   EXPECT_TRUE(loom_value_facts_is_exact(f));

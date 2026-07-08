@@ -130,6 +130,106 @@ bool loom_value_facts_scalar_type_domain(loom_scalar_type_t scalar_type,
   return loom_scalar_type_integer_domain(scalar_type, out_lo, out_hi);
 }
 
+static const loom_value_fact_topology_domain_t kValueFactTopologyDomains[] = {
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+        .value_kind_name = IREE_SVL("workitem.id"),
+        .axis_name = IREE_SVL("x"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+        .value_kind_name = IREE_SVL("workitem.id"),
+        .axis_name = IREE_SVL("y"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+        .value_kind_name = IREE_SVL("workitem.id"),
+        .axis_name = IREE_SVL("z"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+        .value_kind_name = IREE_SVL("workgroup.id"),
+        .axis_name = IREE_SVL("x"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+        .value_kind_name = IREE_SVL("workgroup.id"),
+        .axis_name = IREE_SVL("y"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+        .value_kind_name = IREE_SVL("workgroup.id"),
+        .axis_name = IREE_SVL("z"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE,
+        .value_kind_name = IREE_SVL("subgroup.lane.id"),
+        .axis_name = IREE_SVL("lane"),
+    },
+};
+
+const loom_value_fact_topology_domain_t*
+loom_value_fact_topology_domain_from_flags(loom_value_fact_flags_t flags) {
+  flags &= LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+  if (flags == 0 || (flags & (flags - 1)) != 0) {
+    return NULL;
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kValueFactTopologyDomains);
+       ++i) {
+    if (kValueFactTopologyDomains[i].fact_flag == flags) {
+      return &kValueFactTopologyDomains[i];
+    }
+  }
+  return NULL;
+}
+
+const loom_value_fact_topology_domain_t* loom_value_facts_topology_domain(
+    loom_value_facts_t facts) {
+  return loom_value_fact_topology_domain_from_flags(facts.flags);
+}
+
+const loom_value_fact_topology_domain_t* loom_value_fact_topology_domain_lookup(
+    loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kValueFactTopologyDomains);
+       ++i) {
+    const loom_value_fact_topology_domain_t* domain =
+        &kValueFactTopologyDomains[i];
+    if (domain->value_kind == value_kind && domain->axis == axis) {
+      return domain;
+    }
+  }
+  return NULL;
+}
+
+bool loom_value_facts_mark_topology_domain(
+    loom_value_facts_t* facts, loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis) {
+  IREE_ASSERT_ARGUMENT(facts);
+  const loom_value_fact_topology_domain_t* domain =
+      loom_value_fact_topology_domain_lookup(value_kind, axis);
+  if (!domain) {
+    return false;
+  }
+  facts->flags &= ~LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+  facts->flags |= domain->fact_flag;
+  return true;
+}
+
 loom_value_facts_t loom_value_facts_clamp_domain(loom_value_facts_t facts,
                                                  int64_t lo, int64_t hi) {
   if (loom_value_facts_is_float(facts)) {
