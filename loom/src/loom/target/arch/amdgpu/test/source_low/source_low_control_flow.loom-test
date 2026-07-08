@@ -1416,12 +1416,10 @@ low.func.def target(@target) abi(hal_kernel) @divergent_if_q6_nibble_i8_result(%
   %high_shifted = v_lshrrev_b32_lit %code, 4
   %low_i32 = v_and_b32_lit %code, 15
   %high_i32 = v_and_b32_lit %high_shifted, 15
-  %23 = v_lshlrev_b32_src0_inline %low_i32, 24
-  %low = v_ashrrev_i32_src0_inline %23, 24
-  %25 = v_lshlrev_b32_src0_inline %high_i32, 24
-  %high = v_ashrrev_i32_src0_inline %25, 24
-  %27 = v_mov_b32_copy %limit
-  %cond = v_cmp_lt_i32 %selector, %27
+  %low = v_bfe_i32_offset_width_inline %low_i32 {offset = 0, width = 8}
+  %high = v_bfe_i32_offset_width_inline %high_i32 {offset = 0, width = 8}
+  %25 = v_mov_b32_copy %limit
+  %cond = v_cmp_lt_i32 %selector, %25
   %selected = v_cndmask_b32 %low, %high, %cond
   return %selected
 }
