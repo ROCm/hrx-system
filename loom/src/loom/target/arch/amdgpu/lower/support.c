@@ -968,7 +968,9 @@ static void loom_amdgpu_source_value_analysis_record_bit(
     loom_amdgpu_source_value_analysis_bits_t bit, bool value) {
   loom_amdgpu_source_value_analysis_record_t* record =
       loom_amdgpu_source_value_analysis_lookup(analysis, source_value_id);
-  if (record == NULL) return;
+  if (record == NULL) {
+    return;
+  }
   record->known_bits |= bit;
   if (value) {
     record->value_bits |= bit;
@@ -1002,7 +1004,9 @@ static void loom_amdgpu_source_value_analysis_record_register_shape(
     bool valid) {
   loom_amdgpu_source_value_analysis_record_t* record =
       loom_amdgpu_source_value_analysis_lookup(analysis, source_value_id);
-  if (record == NULL) return;
+  if (record == NULL) {
+    return;
+  }
   record->known_bits |= LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE;
   if (valid) {
     record->value_bits |= LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE;
@@ -1626,7 +1630,9 @@ static bool loom_amdgpu_select_payload_prefers_vgpr(
 static bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_op_t* op, loom_value_id_t excluded_value_id) {
-  if (op == NULL) return false;
+  if (op == NULL) {
+    return false;
+  }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (loom_amdgpu_select_payload_prefers_vgpr(module, fact_table, results[i],
@@ -1641,7 +1647,9 @@ static bool loom_amdgpu_op_operands_with_role_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_op_t* op, loom_operand_role_t role,
     loom_value_id_t excluded_value_id) {
-  if (op == NULL) return false;
+  if (op == NULL) {
+    return false;
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   if (vtable == NULL || !iree_any_bit_set(vtable->operand_role_mask,
                                           loom_operand_role_mask_bit(role))) {
@@ -2576,27 +2584,15 @@ static bool loom_amdgpu_source_value_select_payload_use_requires_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_amdgpu_source_value_analysis_t* analysis,
-    loom_value_id_t source_value_id, const loom_op_t* user_op) {
-  if (user_op == NULL) return false;
-  const loom_op_vtable_t* vtable = loom_op_vtable(module, user_op);
-  if (vtable == NULL ||
-      !iree_any_bit_set(vtable->operand_role_mask,
-                        LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD)) {
+    loom_value_id_t source_value_id, const loom_op_t* user_op,
+    uint16_t operand_index) {
+  if (user_op == NULL || operand_index >= user_op->operand_count ||
+      loom_op_const_operands(user_op)[operand_index] != source_value_id ||
+      !loom_op_operand_has_role(module, user_op, operand_index,
+                                LOOM_OPERAND_ROLE_SELECT_PAYLOAD)) {
     return false;
   }
-  const loom_value_id_t* operands = loom_op_const_operands(user_op);
-  bool is_select_payload = false;
-  for (uint16_t i = 0; i < user_op->operand_count; ++i) {
-    if (operands[i] == source_value_id &&
-        loom_op_operand_role_at(vtable, user_op, i) ==
-            LOOM_OPERAND_ROLE_SELECT_PAYLOAD) {
-      is_select_payload = true;
-      break;
-    }
-  }
-  if (!is_select_payload) {
-    return false;
-  }
+
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
   if (!loom_op_first_operand_with_role(
           module, user_op, LOOM_OPERAND_ROLE_SELECT_CONDITION, &condition)) {
@@ -2633,11 +2629,12 @@ static bool loom_amdgpu_source_value_has_vgpr_payload_use(
   const loom_use_t* use = NULL;
   loom_value_for_each_use(value, use) {
     const loom_op_t* user_op = loom_use_user_op(*use);
+    const uint16_t operand_index = loom_use_operand_index(*use);
     if (loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
             module, source_value_id, user_op) ||
         loom_amdgpu_source_value_select_payload_use_requires_vgpr(
             module, fact_table, view_regions, analysis, source_value_id,
-            user_op)) {
+            user_op, operand_index)) {
       return true;
     }
   }
