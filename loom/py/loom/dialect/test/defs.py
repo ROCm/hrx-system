@@ -103,6 +103,7 @@ from loom.dsl import (
     OffsetCountMatchesRank,
     Op,
     Operand,
+    OperandRole,
     Reads,
     ReadWrites,
     RegionDef,
@@ -1379,7 +1380,9 @@ test_branch = Op(
     "test.branch",
     group=test_ops,
     doc="Test if/else with both regions always present.",
-    operands=[Operand("condition", INTEGER)],
+    operands=[
+        Operand("condition", INTEGER, role=OperandRole.CONTROL_CONDITION),
+    ],
     results=[Result("results", ANY, variadic=True)],
     regions=[
         RegionDef(

@@ -294,6 +294,38 @@ TEST_F(BuilderTest, ResultAccessors) {
   EXPECT_EQ(loom_test_addi_result(op), 7u);
 }
 
+TEST_F(BuilderTest, OperandRoleAndResultHelpers) {
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(loom_builder_allocate_op(&builder_, LOOM_OP_TEST_BRANCH, 1, 2,
+                                          2, 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+  loom_op_operands(op)[0] = 42;
+  loom_op_results(op)[0] = 7;
+  loom_op_results(op)[1] = 8;
+
+  EXPECT_EQ(loom_op_operand_role(module_, op, 0),
+            LOOM_OPERAND_ROLE_CONTROL_CONDITION);
+  EXPECT_TRUE(loom_op_operand_has_role(module_, op, 0,
+                                       LOOM_OPERAND_ROLE_CONTROL_CONDITION));
+  EXPECT_FALSE(loom_op_operand_has_role(module_, op, 0,
+                                        LOOM_OPERAND_ROLE_SELECT_CONDITION));
+  EXPECT_FALSE(
+      loom_op_operand_has_role(module_, op, 0, LOOM_OPERAND_ROLE_NONE));
+
+  loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+  EXPECT_TRUE(loom_op_first_operand_with_role(
+      module_, op, LOOM_OPERAND_ROLE_CONTROL_CONDITION, &operand));
+  EXPECT_EQ(operand, 42u);
+  EXPECT_FALSE(loom_op_first_operand_with_role(
+      module_, op, LOOM_OPERAND_ROLE_SELECT_PAYLOAD, &operand));
+  EXPECT_EQ(operand, LOOM_VALUE_ID_INVALID);
+
+  EXPECT_TRUE(loom_op_defines_value(op, 7));
+  EXPECT_TRUE(loom_op_defines_value(op, 8));
+  EXPECT_FALSE(loom_op_defines_value(op, 9));
+  EXPECT_FALSE(loom_op_defines_value(op, LOOM_VALUE_ID_INVALID));
+  EXPECT_FALSE(loom_op_defines_value(NULL, 7));
+}
+
 TEST_F(BuilderTest, IsaCheck) {
   loom_op_t* addi = NULL;
   IREE_ASSERT_OK(loom_builder_allocate_op(&builder_, LOOM_OP_TEST_ADDI, 2, 1, 0,

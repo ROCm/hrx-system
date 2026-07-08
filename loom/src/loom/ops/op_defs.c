@@ -434,6 +434,50 @@ loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
   return descriptor->role;
 }
 
+loom_operand_role_t loom_op_operand_role(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         uint16_t operand_index) {
+  if (module == NULL || op == NULL) return LOOM_OPERAND_ROLE_NONE;
+  return loom_op_operand_role_at(loom_op_vtable(module, op), op, operand_index);
+}
+
+bool loom_op_operand_has_role(const loom_module_t* module, const loom_op_t* op,
+                              uint16_t operand_index,
+                              loom_operand_role_t role) {
+  if (role == LOOM_OPERAND_ROLE_NONE) return false;
+  return loom_op_operand_role(module, op, operand_index) == role;
+}
+
+bool loom_op_first_operand_with_role(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     loom_operand_role_t role,
+                                     loom_value_id_t* out_value_id) {
+  *out_value_id = LOOM_VALUE_ID_INVALID;
+  if (module == NULL || op == NULL) return false;
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  if (vtable == NULL || !iree_any_bit_set(vtable->operand_role_mask,
+                                          loom_operand_role_mask_bit(role))) {
+    return false;
+  }
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    if (loom_op_operand_role_at(vtable, op, i) == role) {
+      *out_value_id = operands[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loom_op_defines_value(const loom_op_t* op, loom_value_id_t value_id) {
+  if (op == NULL || value_id == LOOM_VALUE_ID_INVALID) return false;
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (results[i] == value_id) return true;
+  }
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // Effect query helpers
 //===----------------------------------------------------------------------===//

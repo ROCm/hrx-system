@@ -158,9 +158,9 @@ bool loom_amdgpu_select_fma_mix_source(
       loom_amdgpu_source_defining_op(module, value_id);
   if (defining_op != NULL && defining_op->operand_count == 1 &&
       defining_op->result_count == 1 &&
-      loom_op_results(defining_op)[0] == value_id &&
-      loom_op_operand_role_at(loom_op_vtable(module, defining_op), defining_op,
-                              0) == LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE) {
+      loom_op_defines_value(defining_op, value_id) &&
+      loom_op_operand_has_role(module, defining_op, 0,
+                               LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE)) {
     const loom_value_id_t input = loom_op_const_operands(defining_op)[0];
     const loom_type_t input_type = loom_module_value_type(module, input);
     const loom_type_t result_type = loom_module_value_type(module, value_id);
