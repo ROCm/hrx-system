@@ -205,12 +205,8 @@ iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
   if (packet_descriptor == NULL || covered_counter_mask != counter_mask) {
     return iree_ok_status();
   }
-  if (packet_descriptor->immediate_count >
-      LOOM_AMDGPU_WAIT_PACKET_SELECTION_IMMEDIATE_CAPACITY) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AMDGPU wait packet selection immediate capacity exceeded");
-  }
+  IREE_ASSERT_LE(packet_descriptor->immediate_count,
+                 LOOM_AMDGPU_WAIT_PACKET_SELECTION_IMMEDIATE_CAPACITY);
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_wait_packet_resolve_descriptor(descriptor_set,
                                                  packet_descriptor);
@@ -257,14 +253,7 @@ iree_status_t loom_amdgpu_wait_packet_select_counter_mask(
 static iree_status_t loom_amdgpu_wait_packet_materialize_group(
     loom_amdgpu_wait_packet_builder_t* builder,
     const loom_amdgpu_wait_packet_group_t* group) {
-  const uint32_t unknown_mask =
-      group->counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL;
-  if (unknown_mask != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU wait packet group has unknown counter "
-                            "mask 0x%x",
-                            unknown_mask);
-  }
+  IREE_ASSERT_EQ(group->counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL, 0u);
   uint32_t remaining_counter_mask = group->counter_mask;
   while (remaining_counter_mask != 0) {
     uint32_t covered_counter_mask = 0;
@@ -459,15 +448,7 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write_cstring(&stream, "\"descriptor\":"));
-    const uint32_t descriptor_ordinal =
-        loom_low_descriptor_set_descriptor_ordinal(
-            schedule->target.descriptor_set, packet->descriptor);
-    if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU wait packet descriptor row does not belong to the selected "
-          "descriptor set");
-    }
+    IREE_ASSERT_NE(packet->descriptor, NULL);
     iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
         schedule->target.descriptor_set, packet->descriptor->key_string_offset);
     IREE_RETURN_IF_ERROR(
@@ -491,12 +472,7 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
       }
       const iree_host_size_t immediate_index = packet->immediate_start + j;
-      if (immediate_index >= plan->immediate_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU wait packet immediate index %zu is out of range",
-            immediate_index);
-      }
+      IREE_ASSERT_LT(immediate_index, plan->immediate_count);
       const loom_amdgpu_wait_packet_immediate_t* immediate =
           &plan->immediates[immediate_index];
       IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
