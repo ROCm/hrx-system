@@ -1181,6 +1181,7 @@ enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI = 1u << 15,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY = 1u << 16,
   LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK = 1u << 17,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CONSTANT = 1u << 18,
 };
 
 #define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
@@ -1272,6 +1273,8 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuViewSourceProducerFlags) ==
 
 static const loom_amdgpu_source_producer_flags_t
     kAmdgpuScalarSourceProducerFlags[LOOM_OP_SCALAR_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CONSTANT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CONSTANT,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FPTOSI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FPTOUI)] =
@@ -2203,7 +2206,10 @@ static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
                source_identity_value_id, next_excluded_value_id);
   }
 
-  if (loom_scalar_constant_isa(defining_op)) {
+  const loom_amdgpu_source_producer_flags_t producer_flags =
+      loom_amdgpu_source_producer_flags(defining_op->kind);
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CONSTANT)) {
     return true;
   }
 
