@@ -548,7 +548,8 @@ static bool loom_amdgpu_value_use_is_atomic_offset(const loom_module_t* module,
                                                    loom_value_id_t value_id) {
   loom_memory_access_t access = loom_memory_access_cast(module, user_op);
   return loom_memory_access_isa(access) &&
-         loom_memory_access_has_atomic_attrs(access) &&
+         loom_memory_access_operation_kind_is_atomic(
+             loom_memory_access_operation_kind(access)) &&
          loom_memory_access_offsets(access) == value_id;
 }
 

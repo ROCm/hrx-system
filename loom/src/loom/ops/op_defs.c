@@ -1540,16 +1540,6 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access) {
       access, vtable ? vtable->atomic_scope_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
-bool loom_memory_access_has_atomic_attrs(loom_memory_access_t access) {
-  return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_success_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_failure_ordering(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_scope(access));
-}
-
 //===----------------------------------------------------------------------===//
 // Builder
 //===----------------------------------------------------------------------===//

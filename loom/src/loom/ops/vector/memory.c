@@ -148,7 +148,8 @@ loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
       loom_memory_access_mask(access) != LOOM_VALUE_ID_INVALID;
   const bool has_offsets =
       loom_memory_access_offsets(access) != LOOM_VALUE_ID_INVALID;
-  const bool has_atomic = loom_memory_access_has_atomic_attrs(access);
+  const bool has_atomic = loom_memory_access_operation_kind_is_atomic(
+      loom_memory_access_operation_kind(access));
   if (has_atomic) {
     return has_mask ? LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_ATOMIC_PER_LANE
                     : LOOM_VECTOR_MEMORY_FOOTPRINT_ATOMIC_PER_LANE;
