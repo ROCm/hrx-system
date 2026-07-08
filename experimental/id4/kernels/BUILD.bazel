@@ -7258,6 +7258,30 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024",
     },
     {
+        "actual_case": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small_case",
+        "benchmark": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_residual_wmma.token_count=128",
+            "--config=id4.qwen3_vl.linear_residual_wmma.dispatch_token_count=128",
+            "--config=id4.qwen3_vl.linear_residual_wmma.input_size=16",
+            "--config=id4.qwen3_vl.linear_residual_wmma.output_size=64",
+        ],
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m128n64_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024",
+            "--config=id4.qwen3_vl.linear_residual_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
+            "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m128n64_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_mlp_down_shape_1024",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_residual_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small_case",
         "benchmark": "@id4_qwen3_vl_linear_residual_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small",
         "configs": [
@@ -7588,6 +7612,28 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_nonzero",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=128",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=16",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=64",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs_qwen_projection_shape_nonzero",
     },
     {
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs_small_case",
@@ -8437,6 +8483,28 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_1024",
     },
     {
+        "actual_case": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_small_case",
+        "benchmark": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_small",
+        "configs": [
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=128",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=16",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=32",
+        ],
+        "source": "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_qwen_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_qwen_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=12288",
+        ],
+        "source": "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs.loom",
+        "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs_qwen_shape_1024",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_case",
         "benchmark": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape",
         "configs": [
@@ -9055,6 +9123,7 @@ _KERNEL_SOURCES = [
     "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m128n64_2wave_compact_rhs.loom",
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n64_compact_rhs.loom",
     "qwen3_vl/linear_bf16_f32_wmma.loom",
     "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
@@ -9063,10 +9132,12 @@ _KERNEL_SOURCES = [
     "qwen3_vl/linear_input_pack_f32_bf16.loom",
     "qwen3_vl/linear_residual_bf16_wmma.loom",
     "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom",
+    "qwen3_vl/linear_residual_bf16_wmma_m128n64_2wave_compact_rhs.loom",
     "qwen3_vl/linear_residual_fp8_block_scaled_bf16_wmma_compact_rhs.loom",
     "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom",
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom",
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom",
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_m128n32_2wave_compact_rhs.loom",
     "qwen3_vl/mlp_gate_up_silu_product_fp8_block_scaled_bf16_wmma_compact_rhs.loom",
     "qwen3_vl/residual_add_f32.loom",
     "qwen3_vl/rotary_embedding.loom",
