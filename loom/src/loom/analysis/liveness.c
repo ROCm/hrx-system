@@ -6,7 +6,6 @@
 
 #include "loom/analysis/liveness.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/internal/math.h"
@@ -1008,28 +1007,93 @@ typedef struct loom_liveness_pressure_event_t {
   int8_t value_delta;
 } loom_liveness_pressure_event_t;
 
-static int loom_liveness_pressure_event_compare(const void* lhs_ptr,
-                                                const void* rhs_ptr) {
-  const loom_liveness_pressure_event_t* lhs =
-      (const loom_liveness_pressure_event_t*)lhs_ptr;
-  const loom_liveness_pressure_event_t* rhs =
-      (const loom_liveness_pressure_event_t*)rhs_ptr;
+static bool loom_liveness_pressure_event_less(
+    const loom_liveness_pressure_event_t* lhs,
+    const loom_liveness_pressure_event_t* rhs) {
   if (lhs->point != rhs->point) {
-    return lhs->point < rhs->point ? -1 : 1;
+    return lhs->point < rhs->point;
   }
   if (lhs->value_delta != rhs->value_delta) {
-    return lhs->value_delta < rhs->value_delta ? -1 : 1;
+    return lhs->value_delta < rhs->value_delta;
   }
-  if (lhs->interval->value_id == rhs->interval->value_id) {
-    return 0;
+  return lhs->interval->value_id < rhs->interval->value_id;
+}
+
+static void loom_liveness_pressure_event_swap(
+    loom_liveness_pressure_event_t* lhs, loom_liveness_pressure_event_t* rhs) {
+  loom_liveness_pressure_event_t temporary = *lhs;
+  *lhs = *rhs;
+  *rhs = temporary;
+}
+
+static void loom_liveness_pressure_event_insertion_sort(
+    loom_liveness_pressure_event_t* events, iree_host_size_t event_count) {
+  for (iree_host_size_t i = 1; i < event_count; ++i) {
+    loom_liveness_pressure_event_t value = events[i];
+    iree_host_size_t j = i;
+    while (j > 0 && loom_liveness_pressure_event_less(&value, &events[j - 1])) {
+      events[j] = events[j - 1];
+      --j;
+    }
+    events[j] = value;
   }
-  return lhs->interval->value_id < rhs->interval->value_id ? -1 : 1;
+}
+
+static void loom_liveness_pressure_event_heap_sift_down(
+    loom_liveness_pressure_event_t* events, iree_host_size_t root,
+    iree_host_size_t event_count) {
+  while (true) {
+    const iree_host_size_t left_child = root * 2u + 1u;
+    if (left_child >= event_count) return;
+
+    iree_host_size_t child = left_child;
+    const iree_host_size_t right_child = left_child + 1u;
+    if (right_child < event_count &&
+        loom_liveness_pressure_event_less(&events[child],
+                                          &events[right_child])) {
+      child = right_child;
+    }
+    if (!loom_liveness_pressure_event_less(&events[root], &events[child])) {
+      return;
+    }
+    loom_liveness_pressure_event_swap(&events[root], &events[child]);
+    root = child;
+  }
+}
+
+static void loom_liveness_pressure_event_heap_sort(
+    loom_liveness_pressure_event_t* events, iree_host_size_t event_count) {
+  iree_host_size_t root = event_count / 2u;
+  while (root > 0) {
+    --root;
+    loom_liveness_pressure_event_heap_sift_down(events, root, event_count);
+  }
+
+  iree_host_size_t end = event_count;
+  while (end > 1) {
+    --end;
+    loom_liveness_pressure_event_swap(&events[0], &events[end]);
+    loom_liveness_pressure_event_heap_sift_down(events, 0, end);
+  }
 }
 
 static void loom_liveness_pressure_event_sort(
     loom_liveness_pressure_event_t* events, iree_host_size_t event_count) {
-  qsort(events, event_count, sizeof(*events),
-        loom_liveness_pressure_event_compare);
+  if (event_count < 2) return;
+
+  iree_host_size_t adjacent_inversion_count = 0;
+  for (iree_host_size_t i = 1; i < event_count; ++i) {
+    if (loom_liveness_pressure_event_less(&events[i], &events[i - 1])) {
+      ++adjacent_inversion_count;
+    }
+  }
+  if (adjacent_inversion_count == 0) return;
+
+  if (event_count <= 64 || adjacent_inversion_count <= event_count / 16u) {
+    loom_liveness_pressure_event_insertion_sort(events, event_count);
+    return;
+  }
+  loom_liveness_pressure_event_heap_sort(events, event_count);
 }
 
 typedef struct loom_liveness_pressure_sweep_t {
