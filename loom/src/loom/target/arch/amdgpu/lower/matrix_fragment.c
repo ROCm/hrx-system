@@ -612,8 +612,8 @@ static bool loom_amdgpu_fragment_memory_can_extend_result_store(
 
 static bool loom_amdgpu_fragment_memory_scalar_type_is_16bit_float(
     loom_scalar_type_t element_type) {
-  return element_type == LOOM_SCALAR_TYPE_F16 ||
-         element_type == LOOM_SCALAR_TYPE_BF16;
+  return loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
+                                       element_type);
 }
 
 static bool loom_amdgpu_fragment_memory_role_is_matrix_input(

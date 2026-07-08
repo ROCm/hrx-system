@@ -97,9 +97,8 @@ bool loom_amdgpu_type_is_f16_or_bf16(loom_type_t type) {
   if (!loom_type_is_scalar(type)) {
     return false;
   }
-  return loom_scalar_type_set_contains(
-      LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_BF16,
-      loom_type_element_type(type));
+  return loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
+                                       loom_type_element_type(type));
 }
 
 typedef enum loom_amdgpu_vector_storage_rule_flag_bits_e {
