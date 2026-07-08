@@ -1844,31 +1844,38 @@ static bool loom_amdgpu_source_i1_value_has_cross_block_use(
   return false;
 }
 
+static const bool kAmdgpuScalarLogicalBinaryKinds[LOOM_OP_SCALAR_COUNT_] = {
+    [LOOM_OP_SCALAR_ANDI & 0xFF] = true,
+    [LOOM_OP_SCALAR_ORI & 0xFF] = true,
+    [LOOM_OP_SCALAR_XORI & 0xFF] = true,
+};
+static_assert(IREE_ARRAYSIZE(kAmdgpuScalarLogicalBinaryKinds) ==
+                  LOOM_OP_SCALAR_COUNT_,
+              "AMDGPU scalar logical binary table out of sync");
+
+static bool loom_amdgpu_op_kind_is_scalar_logical_binary(loom_op_kind_t kind) {
+  return loom_op_dialect_id(kind) == LOOM_DIALECT_SCALAR &&
+         loom_op_dialect_index(kind) <
+             IREE_ARRAYSIZE(kAmdgpuScalarLogicalBinaryKinds) &&
+         kAmdgpuScalarLogicalBinaryKinds[loom_op_dialect_index(kind)];
+}
+
 static bool loom_amdgpu_scalar_logical_binary_values(
     const loom_op_t* op, loom_value_id_t* out_lhs, loom_value_id_t* out_rhs,
     loom_value_id_t* out_result) {
   *out_lhs = LOOM_VALUE_ID_INVALID;
   *out_rhs = LOOM_VALUE_ID_INVALID;
   *out_result = LOOM_VALUE_ID_INVALID;
-  switch (op->kind) {
-    case LOOM_OP_SCALAR_ANDI:
-      *out_lhs = loom_scalar_andi_lhs(op);
-      *out_rhs = loom_scalar_andi_rhs(op);
-      *out_result = loom_scalar_andi_result(op);
-      return true;
-    case LOOM_OP_SCALAR_ORI:
-      *out_lhs = loom_scalar_ori_lhs(op);
-      *out_rhs = loom_scalar_ori_rhs(op);
-      *out_result = loom_scalar_ori_result(op);
-      return true;
-    case LOOM_OP_SCALAR_XORI:
-      *out_lhs = loom_scalar_xori_lhs(op);
-      *out_rhs = loom_scalar_xori_rhs(op);
-      *out_result = loom_scalar_xori_result(op);
-      return true;
-    default:
-      return false;
+  if (!loom_amdgpu_op_kind_is_scalar_logical_binary(op->kind) ||
+      op->operand_count != 2 || op->result_count != 1) {
+    return false;
   }
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(op);
+  *out_lhs = operands[0];
+  *out_rhs = operands[1];
+  *out_result = results[0];
+  return true;
 }
 
 static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
