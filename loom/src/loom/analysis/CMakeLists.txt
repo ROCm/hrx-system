@@ -125,6 +125,7 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::op_defs
+    loom::util::adaptive_sort
   PUBLIC
 )
 
