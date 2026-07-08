@@ -48,6 +48,13 @@ typedef enum loom_amdgpu_reg_class_trait_bit_e {
 } loom_amdgpu_reg_class_trait_bit_t;
 typedef uint8_t loom_amdgpu_reg_class_traits_t;
 
+typedef struct loom_amdgpu_descriptor_immediate_slots_t {
+  // Descriptor-local SDWA destination-selector immediate, or LOOM_LOW_ID_NONE.
+  uint16_t sdwa_dst_sel;
+  // Descriptor-local literal payload immediate, or LOOM_LOW_ID_NONE.
+  uint16_t literal;
+} loom_amdgpu_descriptor_immediate_slots_t;
+
 uint32_t loom_amdgpu_descriptor_ref_ordinal(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
@@ -58,6 +65,12 @@ const loom_low_descriptor_t* loom_amdgpu_descriptor_ref_descriptor(
 
 // Returns generated target-owned semantic trait bits for |descriptor|.
 loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
+// Returns generated target-owned descriptor-local immediate semantic slots for
+// |descriptor|.
+loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
 

@@ -1100,15 +1100,15 @@ static bool loom_amdgpu_vopd_component_result_is_used_by(
   return false;
 }
 
-static const loom_named_attr_t* loom_amdgpu_vopd_find_packet_attr_by_name(
-    const loom_amdgpu_vopd_plan_builder_t* builder,
-    const loom_low_packet_view_t* packet, iree_string_view_t name) {
-  const loom_module_t* module = builder->schedule->module;
+static const loom_named_attr_t* loom_amdgpu_vopd_find_packet_attr(
+    const loom_low_packet_view_t* packet, loom_string_id_t name_id) {
+  if (name_id == LOOM_STRING_ID_INVALID) {
+    return NULL;
+  }
   loom_named_attr_slice_t attrs = loom_low_packet_attrs(packet);
   for (iree_host_size_t i = 0; i < attrs.count; ++i) {
     const loom_named_attr_t* attr = &attrs.entries[i];
-    if (attr->name_id < module->strings.count &&
-        iree_string_view_equal(module->strings.entries[attr->name_id], name)) {
+    if (attr->name_id == name_id) {
       return attr;
     }
   }
@@ -1120,28 +1120,21 @@ static iree_status_t loom_amdgpu_vopd_read_immediate_u32(
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
     uint32_t* out_value) {
   *out_value = 0;
-  if (descriptor_immediate_index >= packet->descriptor->immediate_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU VOPD descriptor immediate index %" PRIu16
-                            " is out of range",
-                            descriptor_immediate_index);
-  }
+  IREE_ASSERT_LT(descriptor_immediate_index,
+                 packet->descriptor->immediate_count);
   const loom_low_descriptor_set_t* descriptor_set =
       builder->schedule->target.descriptor_set;
   const uint32_t immediate_row =
       packet->descriptor->immediate_start + descriptor_immediate_index;
-  if (immediate_row >= descriptor_set->immediate_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU VOPD descriptor immediate row %" PRIu32
-                            " is out of range",
-                            immediate_row);
-  }
+  IREE_ASSERT_LT(immediate_row, descriptor_set->immediate_count);
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_row];
   iree_string_view_t immediate_name = loom_low_descriptor_set_string(
       descriptor_set, immediate->field_name_string_offset);
-  const loom_named_attr_t* attr = loom_amdgpu_vopd_find_packet_attr_by_name(
-      builder, packet, immediate_name);
+  const loom_string_id_t immediate_name_id =
+      loom_module_lookup_string(builder->schedule->module, immediate_name);
+  const loom_named_attr_t* attr =
+      loom_amdgpu_vopd_find_packet_attr(packet, immediate_name_id);
   if (attr == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU VOPD immediate '%.*s' is required",
@@ -1229,6 +1222,19 @@ static bool loom_amdgpu_vopd_immediate_is_inline_u32(
                                                 &source_selector);
 }
 
+static bool loom_amdgpu_vopd_literal_immediate_index(
+    const loom_amdgpu_vopd_plan_builder_t* builder,
+    const loom_low_packet_view_t* packet, uint16_t* out_immediate_index) {
+  const loom_amdgpu_descriptor_immediate_slots_t immediate_slots =
+      loom_amdgpu_descriptor_immediate_slots(
+          builder->schedule->target.descriptor_set, packet->descriptor);
+  if (immediate_slots.literal == LOOM_LOW_ID_NONE) {
+    return false;
+  }
+  *out_immediate_index = immediate_slots.literal;
+  return true;
+}
+
 static iree_status_t loom_amdgpu_vopd_read_tied_accumulate_component(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet,
@@ -1287,8 +1293,10 @@ static iree_status_t loom_amdgpu_vopd_read_literal_fma_component(
   *out_eligible = false;
 
   const loom_op_t* op = packet->node->op;
+  uint16_t literal_immediate_index = LOOM_LOW_ID_NONE;
   if (op->result_count != 1 || op->operand_count != 2 ||
-      packet->descriptor->immediate_count != 1) {
+      !loom_amdgpu_vopd_literal_immediate_index(builder, packet,
+                                                &literal_immediate_index)) {
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -1312,7 +1320,7 @@ static iree_status_t loom_amdgpu_vopd_read_literal_fma_component(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_read_immediate_u32(
-      builder, packet, 0, &out_component->literal_u32));
+      builder, packet, literal_immediate_index, &out_component->literal_u32));
   *out_eligible = true;
   return iree_ok_status();
 }
@@ -1361,8 +1369,10 @@ static iree_status_t loom_amdgpu_vopd_read_mov_component(
   *out_eligible = false;
 
   const loom_op_t* op = packet->node->op;
+  uint16_t literal_immediate_index = LOOM_LOW_ID_NONE;
   if (op->result_count != 1 || op->operand_count != 0 ||
-      packet->descriptor->immediate_count != 1) {
+      !loom_amdgpu_vopd_literal_immediate_index(builder, packet,
+                                                &literal_immediate_index)) {
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -1373,7 +1383,7 @@ static iree_status_t loom_amdgpu_vopd_read_mov_component(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_read_immediate_u32(
-      builder, packet, 0, &out_component->literal_u32));
+      builder, packet, literal_immediate_index, &out_component->literal_u32));
   if (!loom_amdgpu_vopd_immediate_is_inline_u32(builder,
                                                 out_component->literal_u32)) {
     return iree_ok_status();

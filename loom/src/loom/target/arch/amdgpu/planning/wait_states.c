@@ -787,50 +787,42 @@ static iree_status_t loom_amdgpu_wait_state_read_dst_sel_immediate(
   if (descriptor == NULL) {
     return iree_ok_status();
   }
-  if (descriptor->immediate_start > descriptor_set->immediate_count ||
-      descriptor->immediate_count >
-          descriptor_set->immediate_count - descriptor->immediate_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU wait-state descriptor immediate range is out of range");
+  const loom_amdgpu_descriptor_immediate_slots_t immediate_slots =
+      loom_amdgpu_descriptor_immediate_slots(descriptor_set, descriptor);
+  if (immediate_slots.sdwa_dst_sel == LOOM_LOW_ID_NONE) {
+    return iree_ok_status();
   }
-  for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
-    const uint32_t immediate_index = descriptor->immediate_start + i;
-    const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[immediate_index];
-    if (!loom_amdgpu_encoding_field_is_dst_sel(immediate->encoding_field_id)) {
-      continue;
+  const uint16_t descriptor_immediate_index = immediate_slots.sdwa_dst_sel;
+  IREE_ASSERT_LT(descriptor_immediate_index, descriptor->immediate_count);
+  const uint32_t immediate_index =
+      descriptor->immediate_start + descriptor_immediate_index;
+  IREE_ASSERT_LT(immediate_index, descriptor_set->immediate_count);
+  const loom_low_immediate_t* immediate =
+      &descriptor_set->immediates[immediate_index];
+  const iree_string_view_t field_name = loom_low_descriptor_set_string(
+      descriptor_set, immediate->field_name_string_offset);
+  const loom_string_id_t field_name_id =
+      loom_module_lookup_string(builder->schedule->module, field_name);
+  const loom_named_attr_t* attr = loom_amdgpu_wait_state_find_packet_attr(
+      loom_low_packet_attrs(packet), field_name_id);
+  if (attr == NULL) {
+    if (iree_all_bits_set(immediate->flags,
+                          LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
+      *out_has_value = true;
+      *out_value = immediate->default_value;
+      return iree_ok_status();
     }
-    if (*out_has_value) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU wait-state descriptor has multiple dst_sel immediates");
-    }
-    const iree_string_view_t field_name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
-    const loom_string_id_t field_name_id =
-        loom_module_lookup_string(builder->schedule->module, field_name);
-    const loom_named_attr_t* attr = loom_amdgpu_wait_state_find_packet_attr(
-        loom_low_packet_attrs(packet), field_name_id);
-    if (attr == NULL) {
-      if (iree_all_bits_set(immediate->flags,
-                            LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
-        *out_has_value = true;
-        *out_value = immediate->default_value;
-        continue;
-      }
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU wait-state SDWA descriptor requires "
-                              "dst_sel immediate");
-    }
-    if (attr->value.kind != LOOM_ATTR_I64) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU wait-state dst_sel immediate must be "
-                              "i64");
-    }
-    *out_has_value = true;
-    *out_value = loom_attr_as_i64(attr->value);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU wait-state SDWA descriptor requires "
+                            "dst_sel immediate");
   }
+  if (attr->value.kind != LOOM_ATTR_I64) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU wait-state dst_sel immediate must be "
+                            "i64");
+  }
+  *out_has_value = true;
+  *out_value = loom_attr_as_i64(attr->value);
   return iree_ok_status();
 }
 
