@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/to_scalar.h"
 
@@ -29,13 +30,19 @@ static loom_vector_mma_to_scalar_options_t loom_vector_mma_options(
 
 static bool loom_vector_mma_has_fragment_store_user(const loom_module_t* module,
                                                     const loom_op_t* op) {
-  const loom_value_t* result =
-      loom_module_value(module, loom_vector_mma_result(op));
+  const loom_value_id_t result_id = loom_vector_mma_result(op);
+  const loom_value_t* result = loom_module_value(module, result_id);
   const loom_use_t* use = NULL;
   loom_value_for_each_use(result, use) {
     const loom_op_t* user = loom_use_user_op(*use);
-    if (loom_vector_fragment_store_isa(user) &&
-        loom_vector_fragment_store_value(user) == loom_vector_mma_result(op)) {
+    if (loom_vector_memory_op_footprint_kind(module, user) !=
+        LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
+      continue;
+    }
+    loom_memory_access_t access = loom_memory_access_cast(module, user);
+    if (loom_memory_access_operation_kind(access) ==
+            LOOM_MEMORY_ACCESS_OPERATION_STORE &&
+        loom_memory_access_value(access) == result_id) {
       return true;
     }
   }

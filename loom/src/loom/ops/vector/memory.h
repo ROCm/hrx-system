@@ -184,6 +184,11 @@ bool loom_vector_memory_footprint_describe(
     const loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, loom_vector_memory_footprint_t* out_footprint);
 
+// Returns the semantic vector memory footprint family for |op| without
+// decomposing view/vector layout details. Non-vector memory ops return NONE.
+loom_vector_memory_footprint_kind_t loom_vector_memory_op_footprint_kind(
+    const loom_module_t* module, const loom_op_t* op);
+
 // Copies full-rank static logical extents for the footprint into |out_extents|.
 // Returns false when any footprint axis is dynamic or when |capacity| is
 // smaller than the view rank.

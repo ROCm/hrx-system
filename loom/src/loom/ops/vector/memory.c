@@ -162,6 +162,18 @@ loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
                   : LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE;
 }
 
+loom_vector_memory_footprint_kind_t loom_vector_memory_op_footprint_kind(
+    const loom_module_t* module, const loom_op_t* op) {
+  if (!module || !op || loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
+    return LOOM_VECTOR_MEMORY_FOOTPRINT_NONE;
+  }
+  loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
+    return LOOM_VECTOR_MEMORY_FOOTPRINT_NONE;
+  }
+  return loom_vector_memory_classify_footprint_kind(op, access);
+}
+
 bool loom_vector_memory_footprint_describe(
     const loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, loom_vector_memory_footprint_t* out_footprint) {
