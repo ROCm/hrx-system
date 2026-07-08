@@ -2507,26 +2507,6 @@ static bool loom_amdgpu_memory_access_select_packet(
 
   if (descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_LDS ||
       descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_SCRATCH) {
-    if (access->source.root_value_id >=
-        selection_context->module->values.count) {
-      out_diagnostic->rejection_bits |=
-          loom_amdgpu_memory_access_alloca_root_rejection_bit(
-              access->source.memory_space);
-      return false;
-    }
-    const loom_value_t* root_value = loom_module_value(
-        selection_context->module, access->source.root_value_id);
-    const loom_op_t* root_op = loom_value_is_block_arg(root_value)
-                                   ? NULL
-                                   : loom_value_def_op(root_value);
-    if (root_op == NULL || !loom_buffer_alloca_isa(root_op) ||
-        loom_buffer_alloca_memory_space(root_op) !=
-            access->source.memory_space) {
-      out_diagnostic->rejection_bits |=
-          loom_amdgpu_memory_access_alloca_root_rejection_bit(
-              access->source.memory_space);
-      return false;
-    }
     if (descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_LDS) {
       loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(access);
     }

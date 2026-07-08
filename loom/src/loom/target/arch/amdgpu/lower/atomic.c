@@ -10,7 +10,6 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/context.h"
-#include "loom/ops/buffer/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/candidates/atomic_candidates.h"
@@ -18,6 +17,7 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -27,7 +27,6 @@ typedef uint32_t loom_amdgpu_atomic_rejection_flags_t;
 #define LOOM_AMDGPU_ATOMIC_REJECTION_SOURCE_OP ((uint32_t)1u << 0)
 #define LOOM_AMDGPU_ATOMIC_REJECTION_OPERATION_KIND ((uint32_t)1u << 1)
 #define LOOM_AMDGPU_ATOMIC_REJECTION_MEMORY_SPACE ((uint32_t)1u << 2)
-#define LOOM_AMDGPU_ATOMIC_REJECTION_WORKGROUP_ROOT ((uint32_t)1u << 3)
 #define LOOM_AMDGPU_ATOMIC_REJECTION_SHAPE ((uint32_t)1u << 4)
 #define LOOM_AMDGPU_ATOMIC_REJECTION_ATOMIC_KIND ((uint32_t)1u << 5)
 #define LOOM_AMDGPU_ATOMIC_REJECTION_VALUE_TYPE ((uint32_t)1u << 6)
@@ -156,10 +155,6 @@ static const loom_amdgpu_atomic_rejection_key_t kAmdgpuAtomicRejectionKeys[] = {
     {
         .rejection_bit = LOOM_AMDGPU_ATOMIC_REJECTION_MEMORY_SPACE,
         .constraint_key = IREE_SVL("atomic.memory_space"),
-    },
-    {
-        .rejection_bit = LOOM_AMDGPU_ATOMIC_REJECTION_WORKGROUP_ROOT,
-        .constraint_key = IREE_SVL("atomic.workgroup_root"),
     },
     {
         .rejection_bit = LOOM_AMDGPU_ATOMIC_REJECTION_SHAPE,
@@ -571,21 +566,6 @@ static iree_status_t loom_amdgpu_atomic_payload_placement_from_context(
     *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR;
   }
   return iree_ok_status();
-}
-
-static bool loom_amdgpu_atomic_source_plan_proves_workgroup_root(
-    const loom_module_t* module,
-    const loom_low_source_memory_access_plan_t* source) {
-  if (source->root_value_id >= module->values.count) {
-    return false;
-  }
-  const loom_value_t* root_value =
-      loom_module_value(module, source->root_value_id);
-  if (loom_value_is_block_arg(root_value)) {
-    return false;
-  }
-  const loom_op_t* root_op = loom_value_def_op(root_value);
-  return root_op != NULL && loom_buffer_alloca_isa(root_op);
 }
 
 static bool loom_amdgpu_atomic_memory_space_candidate_index(
@@ -1151,6 +1131,7 @@ static void loom_amdgpu_atomic_select_packet_attrs(
 
 static iree_status_t loom_amdgpu_atomic_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_func_like_t source_function,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     const loom_amdgpu_atomic_source_t* atomic_source,
@@ -1184,10 +1165,13 @@ static iree_status_t loom_amdgpu_atomic_select(
   switch (out_selection->source.memory_space) {
     case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
       out_selection->address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT;
-      if (!loom_amdgpu_atomic_source_plan_proves_workgroup_root(
-              module, &out_selection->source)) {
-        diagnostic->rejection_bits |=
-            LOOM_AMDGPU_ATOMIC_REJECTION_WORKGROUP_ROOT;
+      uint64_t root_byte_offset = 0;
+      if (!loom_amdgpu_source_alloca_layout_lookup_root(
+              fact_table, source_function,
+              LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+              out_selection->source.root_value_id, &root_byte_offset)) {
+        memory_diagnostic->rejection_bits |=
+            LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_WORKGROUP_ROOT;
         return iree_ok_status();
       }
       break;
@@ -1458,6 +1442,7 @@ iree_status_t loom_amdgpu_select_atomic_plan(
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       module, loom_low_lower_context_fact_table(context),
+      loom_low_lower_context_source_function(context),
       loom_low_lower_context_descriptor_set(context), view_regions,
       &atomic_source, &selection, &source_diagnostic, &memory_diagnostic,
       &diagnostic, &selected));
@@ -1884,6 +1869,7 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       module, loom_target_low_legality_fact_table(context),
+      loom_target_low_legality_function(context),
       loom_target_low_legality_descriptor_set(context), view_regions,
       &atomic_source, &selection, &source_diagnostic, &memory_diagnostic,
       &diagnostic, &selected));
