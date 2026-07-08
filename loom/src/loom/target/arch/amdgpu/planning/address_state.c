@@ -52,10 +52,8 @@ static iree_status_t loom_amdgpu_intern_descriptor_opcode(
   *out_opcode_id = LOOM_STRING_ID_INVALID;
   iree_string_view_t key = loom_low_descriptor_set_string(
       descriptor_set, descriptor->key_string_offset);
-  if (iree_string_view_is_empty(key)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU address-state descriptor has no key");
-  }
+  IREE_ASSERT(!iree_string_view_is_empty(key),
+              "generated address-state descriptor must have a key");
   return loom_module_intern_string(module, key, out_opcode_id);
 }
 
@@ -85,11 +83,9 @@ static iree_status_t loom_amdgpu_address_state_initialize_context(
 static iree_status_t loom_amdgpu_vgpr_msb_insert_slot_bank(
     loom_amdgpu_vgpr_msb_mode_requirement_t* requirement,
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank) {
-  if (slot == LOOM_AMDGPU_VGPR_MSB_SLOT_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target-state VGPR operand has no S_SET_VGPR_MSB slot");
-  }
+  IREE_ASSERT(slot != LOOM_AMDGPU_VGPR_MSB_SLOT_NONE,
+              "generated target-state VGPR operand must have an "
+              "S_SET_VGPR_MSB slot");
   if (bank > 3) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -200,13 +196,12 @@ static iree_status_t loom_amdgpu_collect_vgpr_msb_mode_requirement(
           assignment->value_id, assignment->location_count,
           operand->unit_count);
     }
-    if (operand->addressable_unit_count == 0) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU target-state VGPR operand has no "
-                              "addressable window size");
-    }
+    IREE_ASSERT(
+        operand->addressable_unit_count == LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE,
+        "generated target-state VGPR operand must use the "
+        "S_SET_VGPR_MSB addressable window");
     const uint32_t bank =
-        assignment->location_base / operand->addressable_unit_count;
+        assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
     const loom_amdgpu_vgpr_msb_slot_t slot = loom_amdgpu_encoding_vgpr_msb_slot(
         descriptor->encoding_format_id, operand->encoding_field_id);
     IREE_RETURN_IF_ERROR(

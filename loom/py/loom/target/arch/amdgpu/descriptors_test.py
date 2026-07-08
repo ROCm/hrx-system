@@ -1067,6 +1067,35 @@ def test_gfx125x_target_state_validation_requires_encoding_slot() -> None:
     )
 
 
+def test_gfx125x_target_state_validation_requires_window_size() -> None:
+    descriptor = _with_mode_state_read(
+        Descriptor(
+            key="amdgpu.test.bad_vgpr_msb_window",
+            mnemonic="bad_vgpr_msb_window",
+            semantic_tag="test.bad_vgpr_msb_window",
+            operands=(
+                Operand(
+                    "dst",
+                    OperandRole.RESULT,
+                    (RegClassAlt("amdgpu.vgpr"),),
+                    encoding_field_id=amdgpu_encoding_field_id("VDST"),
+                    address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                    addressable_unit_count=128,
+                ),
+            ),
+            schedule_class=_SCHEDULE_VALU,
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP1,
+        )
+    )
+
+    _expect_value_error_contains(
+        "expected 256",
+        lambda: _with_gfx125x_vgpr_msb_address_states(
+            _descriptor_set(_s_set_vgpr_msb_descriptor(), descriptor)
+        ),
+    )
+
+
 def test_amdgpu_descriptor_categories_are_stable() -> None:
     assert tuple(category.key for category in AMDGPU_DESCRIPTOR_CATEGORIES) == (
         "scalar",

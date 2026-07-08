@@ -310,6 +310,16 @@ def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> N
                     f"'{operand.field_name}' as VGPR-MSB target-state, but "
                     "the operand encoding field has no S_SET_VGPR_MSB slot"
                 )
+            if (
+                operand.addressable_unit_count
+                != _GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT
+            ):
+                raise ValueError(
+                    f"gfx125x descriptor '{descriptor.key}' marks operand "
+                    f"'{operand.field_name}' as VGPR-MSB target-state with "
+                    f"{operand.addressable_unit_count} addressable units; "
+                    f"expected {_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT}"
+                )
         if has_target_state_operand and not any(
             _is_mode_state_read(operand) for operand in descriptor.operands
         ):
