@@ -63,7 +63,7 @@ typedef struct loom_amdgpu_wait_packet_target_t {
 } loom_amdgpu_wait_packet_target_t;
 
 // Populates the generated wait-packet rows available on |descriptor_set|.
-iree_status_t loom_amdgpu_wait_packet_analyze_target(
+void loom_amdgpu_wait_packet_analyze_target(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_wait_packet_target_t* out_target);
 
