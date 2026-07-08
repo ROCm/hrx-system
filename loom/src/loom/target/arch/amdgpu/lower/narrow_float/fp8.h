@@ -55,6 +55,21 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
+typedef enum loom_amdgpu_fp8_decode_plan_capability_bits_e {
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_NONE = 0u,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_EXACT_REPAIR = 1u << 0,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_ZERO_REPAIR = 1u << 1,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_MASK_REPAIR_SPLIT = 1u << 2,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_INLINE_SGPR64_ZERO_COMPARE = 1u << 3,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_COMBINED_FINITE_NAN_CONDITION = 1u
+                                                                         << 4,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_COMBINED_NON_NORMAL_CONDITION = 1u
+                                                                         << 5,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_F16_PAYLOAD = 1u << 6,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_BF16_PAYLOAD = 1u << 7,
+} loom_amdgpu_fp8_decode_plan_capability_bits_t;
+typedef uint32_t loom_amdgpu_fp8_decode_plan_capabilities_t;
+
 // Per-value facts that can simplify the generated special-value decode path.
 // These describe the actual value being decoded, not the full source FP8 type.
 typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
@@ -144,6 +159,8 @@ typedef struct loom_amdgpu_fp8_native_descriptors_t {
 typedef struct loom_amdgpu_fp8_decode_plan_t {
   // Available native packet helpers selected from the active descriptor set.
   loom_amdgpu_fp8_decode_plan_flags_t flags;
+  // Derived route capabilities computed from descriptor flags and FP8 format.
+  loom_amdgpu_fp8_decode_plan_capabilities_t capabilities;
   // Parsed FP8 source format.
   loom_scalar_type_fp8_format_t format;
   // Packed unsigned BF16 subnormal payload tables for two-bit mantissas.
