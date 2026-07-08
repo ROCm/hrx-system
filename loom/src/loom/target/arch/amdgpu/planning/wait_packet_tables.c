@@ -6,8 +6,6 @@
 
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 
-#include <inttypes.h>
-
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
@@ -94,38 +92,18 @@ static const loom_amdgpu_wait_packet_selection_template_t
 static_assert(sizeof(loom_amdgpu_wait_packet_selection_template_t) == 4,
               "wait-packet selection rows must stay compact");
 
-static iree_status_t loom_amdgpu_wait_packet_verify_target(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (descriptor_set == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU wait packet materialization requires a descriptor set");
-  }
-  if (descriptor_set->target_stable_id != LOOM_AMDGPU_TARGET_STABLE_ID) {
-    iree_string_view_t target_key = loom_low_descriptor_set_string(
-        descriptor_set, descriptor_set->target_key_string_offset);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU wait packet materialization received target '%.*s'",
-        (int)target_key.size, target_key.data);
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_amdgpu_wait_packet_analyze_target(
+void loom_amdgpu_wait_packet_analyze_target(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_wait_packet_target_t* out_target) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_verify_target(descriptor_set));
+  IREE_ASSERT_ARGUMENT(descriptor_set);
+  IREE_ASSERT_ARGUMENT(out_target);
+  IREE_ASSERT_EQ(descriptor_set->target_stable_id,
+                 LOOM_AMDGPU_TARGET_STABLE_ID);
   *out_target = (loom_amdgpu_wait_packet_target_t){0};
   const uint16_t descriptor_set_ordinal =
       descriptor_set->descriptor_set_ordinal;
-  if (descriptor_set_ordinal >=
-      IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptorRanges)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU descriptor set ordinal %" PRIu16
-                            " has no generated wait-packet table",
-                            descriptor_set_ordinal);
-  }
+  IREE_ASSERT_LT(descriptor_set_ordinal,
+                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptorRanges));
   const loom_amdgpu_wait_packet_descriptor_range_t* range =
       &kAmdgpuWaitPacketDescriptorRanges[descriptor_set_ordinal];
   IREE_ASSERT_LE(range->first_descriptor,
@@ -141,7 +119,6 @@ iree_status_t loom_amdgpu_wait_packet_analyze_target(
           IREE_ARRAYSIZE(kAmdgpuWaitPacketSelections[descriptor_set_ordinal]),
       .max_descriptor_immediate_count = range->max_descriptor_immediate_count,
   };
-  return iree_ok_status();
 }
 
 const loom_amdgpu_wait_packet_descriptor_immediate_template_t*
@@ -241,8 +218,7 @@ iree_status_t loom_amdgpu_wait_packet_explicit_counter_mask(
   *out_counter_mask = 0;
 
   loom_amdgpu_wait_packet_target_t target = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_packet_analyze_target(descriptor_set, &target));
+  loom_amdgpu_wait_packet_analyze_target(descriptor_set, &target);
 
   const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_find_descriptor_template(

@@ -196,8 +196,7 @@ iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
   loom_amdgpu_wait_packet_builder_t builder = {
       .descriptor_set = descriptor_set,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_packet_analyze_target(descriptor_set, &builder.target));
+  loom_amdgpu_wait_packet_analyze_target(descriptor_set, &builder.target);
 
   uint32_t covered_counter_mask = 0;
   const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor =
@@ -371,8 +370,8 @@ iree_status_t loom_amdgpu_wait_packet_plan_build(
       .descriptor_set = wait_plan->schedule->target.descriptor_set,
       .arena = arena,
   };
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_analyze_target(
-      builder.descriptor_set, &builder.target));
+  loom_amdgpu_wait_packet_analyze_target(builder.descriptor_set,
+                                         &builder.target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_allocate(&builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_build_packets(&builder));
   *out_plan = (loom_amdgpu_wait_packet_plan_t){
