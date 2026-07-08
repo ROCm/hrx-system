@@ -594,30 +594,6 @@ static loom_scalar_type_t loom_amdgpu_scalar_type_or_none(loom_type_t type) {
   return loom_type_element_type(type);
 }
 
-static uint32_t loom_amdgpu_scalar_type_integer_bit_count(
-    loom_scalar_type_t scalar_type) {
-  switch (scalar_type) {
-    case LOOM_SCALAR_TYPE_I8:
-      return 8;
-    case LOOM_SCALAR_TYPE_I16:
-      return 16;
-    case LOOM_SCALAR_TYPE_I32:
-      return 32;
-    case LOOM_SCALAR_TYPE_I64:
-      return 64;
-    default:
-      return 0;
-  }
-}
-
-static uint32_t loom_amdgpu_scalar_integer_bit_count(loom_type_t type) {
-  const loom_scalar_type_t scalar_type = loom_amdgpu_scalar_type_or_none(type);
-  if (scalar_type == LOOM_SCALAR_TYPE_COUNT_) {
-    return 0;
-  }
-  return loom_amdgpu_scalar_type_integer_bit_count(scalar_type);
-}
-
 static bool loom_amdgpu_type_is_index_scalar(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX;
@@ -3882,9 +3858,9 @@ static bool loom_amdgpu_select_scalar_conversion_plan_from_table(
       .source = source,
       .result = result,
       .source_bit_count =
-          loom_amdgpu_scalar_type_integer_bit_count(source_type),
+          loom_amdgpu_integer_scalar_type_bit_count(source_type),
       .result_bit_count =
-          loom_amdgpu_scalar_type_integer_bit_count(result_type),
+          loom_amdgpu_integer_scalar_type_bit_count(result_type),
       .convert_descriptor_ref = rule->convert_descriptor_ref,
   };
   return true;
@@ -4036,8 +4012,8 @@ loom_amdgpu_vector_conversion_lane_rule(
   if (iree_all_bits_set(
           rule->flags,
           LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_SOURCE_WIDER_THAN_RESULT) &&
-      loom_amdgpu_scalar_type_integer_bit_count(source_element_type) <=
-          loom_amdgpu_scalar_type_integer_bit_count(result_element_type)) {
+      loom_amdgpu_integer_scalar_type_bit_count(source_element_type) <=
+          loom_amdgpu_integer_scalar_type_bit_count(result_element_type)) {
     return NULL;
   }
   return rule;
@@ -4662,15 +4638,6 @@ static iree_status_t loom_amdgpu_extract_packed_register_lane(
       register_bit_offset, source_register, lane_type, &shifted_lane));
   return loom_amdgpu_emit_vgpr_sign_extend_narrow(
       context, source_op, shifted_lane, plan->lane_bit_count, out_lane);
-}
-
-static loom_type_t loom_amdgpu_low_register_lane_type(
-    const loom_module_t* module, loom_value_id_t low_value) {
-  const loom_type_t low_type = loom_module_value_type(module, low_value);
-  if (!loom_low_type_is_register(low_type)) {
-    return loom_type_none();
-  }
-  return loom_low_register_type_with_unit_count(low_type, 1);
 }
 
 static iree_status_t loom_amdgpu_extract_vector_conversion_packed_lane(
