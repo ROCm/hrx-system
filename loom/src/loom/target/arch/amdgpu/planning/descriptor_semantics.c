@@ -6,9 +6,6 @@
 
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 
-#define LOOM_AMDGPU_VGPR_REGISTER_CLASS_NAME IREE_SV("amdgpu.vgpr")
-#define LOOM_AMDGPU_EXEC_REGISTER_CLASS_NAME IREE_SV("amdgpu.exec")
-
 bool loom_amdgpu_descriptor_uses_vector_alu(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -71,31 +68,12 @@ iree_status_t loom_amdgpu_descriptor_build_structural_state_reads(
     loom_low_schedule_structural_state_read_list_t* out_state_reads) {
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
 
-  uint16_t vgpr_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-  if (!loom_low_descriptor_set_lookup_register_class(
-          descriptor_set, LOOM_AMDGPU_VGPR_REGISTER_CLASS_NAME,
-          &vgpr_reg_class_id, NULL)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU descriptor set does not define structural result register "
-        "class 'amdgpu.vgpr'");
-  }
-  uint16_t exec_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-  if (!loom_low_descriptor_set_lookup_register_class(
-          descriptor_set, LOOM_AMDGPU_EXEC_REGISTER_CLASS_NAME,
-          &exec_reg_class_id, NULL)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU descriptor set does not define structural state register "
-        "class 'amdgpu.exec'");
-  }
-
   loom_low_schedule_structural_state_read_t* state_reads = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, 1, sizeof(*state_reads),
                                                  (void**)&state_reads));
   state_reads[0] = (loom_low_schedule_structural_state_read_t){
-      .result_reg_class_id = vgpr_reg_class_id,
-      .state_reg_class_id = exec_reg_class_id,
+      .result_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+      .state_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_EXEC,
   };
   *out_state_reads = (loom_low_schedule_structural_state_read_list_t){
       .values = state_reads,
