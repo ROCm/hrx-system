@@ -100,13 +100,16 @@ typedef struct loom_amdgpu_vopd_trans_result_vgpr_t {
 } loom_amdgpu_vopd_trans_result_vgpr_t;
 
 typedef struct loom_amdgpu_vopd_component_rule_t {
-  // Descriptor reference for the low packet component.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-  // Descriptor set ordinals where this component row is legal.
-  uint32_t descriptor_set_mask;
   // Descriptor-independent VOPD component facts.
   loom_amdgpu_vopd_component_info_t info;
 } loom_amdgpu_vopd_component_rule_t;
+
+typedef struct loom_amdgpu_vopd_component_descriptor_lookup_range_t {
+  // First descriptor-ordinal lookup row for this descriptor-set ordinal.
+  uint16_t first_descriptor_lookup;
+  // Number of descriptor-ordinal lookup rows for this descriptor-set ordinal.
+  uint16_t descriptor_lookup_count;
+} loom_amdgpu_vopd_component_descriptor_lookup_range_t;
 
 typedef struct loom_amdgpu_vopd_plan_builder_t {
   // Schedule table being analyzed.
@@ -121,9 +124,10 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_amdgpu_wait_state_plan_t* wait_states;
   // Arena owning all output and scratch arrays.
   iree_arena_allocator_t* arena;
-  // Descriptor-ordinal-indexed component rows for the selected descriptor set.
-  const loom_amdgpu_vopd_component_rule_t**
-      component_rules_by_descriptor_ordinal;
+  // Descriptor-ordinal-indexed VOPD component rule index + 1 rows.
+  const uint8_t* component_rule_lookup;
+  // Number of rows in |component_rule_lookup|.
+  iree_host_size_t component_rule_lookup_count;
   // Per-scheduled-packet private planner flags.
   loom_amdgpu_vopd_packet_flags_t* packet_flags;
   // Per-physical-VGPR state for GFX11 TRANS-result packetization windows.
@@ -150,17 +154,13 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   loom_amdgpu_vopd_packet_t* packets;
 } loom_amdgpu_vopd_plan_builder_t;
 
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(ordinal) (UINT32_C(1) << (ordinal))
-
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, descriptor_ref_value, descriptor_set_mask_value,         \
-    op_value, same_op_reason_value, op_name_value, same_op_reason_name_value, \
-    assembly_mnemonic_value, rdna4_assembly_mnemonic_value, form_value,       \
-    accumulator_index_value, src0_index_value, vsrc1_index_value,             \
-    lane_mask_value, pairing_mask_value, source_register_mask_value)          \
+    row_index_value, op_value, same_op_reason_value, op_name_value,           \
+    same_op_reason_name_value, assembly_mnemonic_value,                       \
+    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
+    source_register_mask_value)                                               \
   [row_index_value] = {                                                       \
-      .descriptor_ref = descriptor_ref_value,                                 \
-      .descriptor_set_mask = descriptor_set_mask_value,                       \
       .info =                                                                 \
           {                                                                   \
               .op = op_value,                                                 \
@@ -195,12 +195,38 @@ static const loom_amdgpu_vopd_component_rule_t kVopdComponentRules[] = {
 static_assert(IREE_ARRAYSIZE(kVopdComponentRules) < UINT8_MAX,
               "VOPD component row indexes use uint8_t + 1 sentinels");
 
+#define LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP( \
+    rule_index_plus_one_value)                        \
+  rule_index_plus_one_value,
+
+static const uint8_t kVopdComponentDescriptorLookups[] = {
+#include "loom/target/arch/amdgpu/planning/vopd_component_descriptor_lookups.inl"
+};
+
+#undef LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP
+
+#define LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE(      \
+    descriptor_set_ordinal_value, first_descriptor_lookup_value, \
+    descriptor_lookup_count_value)                               \
+  [descriptor_set_ordinal_value] = {                             \
+      .first_descriptor_lookup = first_descriptor_lookup_value,  \
+      .descriptor_lookup_count = descriptor_lookup_count_value,  \
+  },
+
+static const loom_amdgpu_vopd_component_descriptor_lookup_range_t
+    kVopdComponentDescriptorLookupRanges
+        [LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {
+#include "loom/target/arch/amdgpu/planning/vopd_component_descriptor_lookup_ranges.inl"
+};
+
+#undef LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE
+
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, descriptor_ref_value, descriptor_set_mask_value,         \
-    op_value, same_op_reason_value, op_name_value, same_op_reason_name_value, \
-    assembly_mnemonic_value, rdna4_assembly_mnemonic_value, form_value,       \
-    accumulator_index_value, src0_index_value, vsrc1_index_value,             \
-    lane_mask_value, pairing_mask_value, source_register_mask_value)          \
+    row_index_value, op_value, same_op_reason_value, op_name_value,           \
+    same_op_reason_name_value, assembly_mnemonic_value,                       \
+    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
+    source_register_mask_value)                                               \
   [op_value] = (uint8_t)((row_index_value) + 1),
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
                                                row_index_value)
@@ -214,11 +240,11 @@ static const uint8_t
 #undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
 
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, descriptor_ref_value, descriptor_set_mask_value,         \
-    op_value, same_op_reason_value, op_name_value, same_op_reason_name_value, \
-    assembly_mnemonic_value, rdna4_assembly_mnemonic_value, form_value,       \
-    accumulator_index_value, src0_index_value, vsrc1_index_value,             \
-    lane_mask_value, pairing_mask_value, source_register_mask_value)
+    row_index_value, op_value, same_op_reason_value, op_name_value,           \
+    same_op_reason_name_value, assembly_mnemonic_value,                       \
+    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
+    source_register_mask_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
                                                row_index_value)      \
   [same_op_reason_value] = (uint8_t)((row_index_value) + 1),
@@ -318,17 +344,48 @@ const loom_amdgpu_vopd_packet_t* loom_amdgpu_vopd_plan_packet_at(
   return packet->role == LOOM_AMDGPU_VOPD_PACKET_ROLE_NONE ? NULL : packet;
 }
 
-static bool loom_amdgpu_vopd_component_rule_applies_to_descriptor_set(
-    const loom_amdgpu_vopd_component_rule_t* rule,
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (rule == NULL || descriptor_set == NULL ||
+static const uint8_t* loom_amdgpu_vopd_component_lookup_for_descriptor_set(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_host_size_t* out_lookup_count) {
+  *out_lookup_count = 0;
+  if (descriptor_set == NULL ||
       descriptor_set->descriptor_set_ordinal >=
-          LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT) {
-    return false;
+          IREE_ARRAYSIZE(kVopdComponentDescriptorLookupRanges)) {
+    return NULL;
   }
-  return iree_any_bit_set(rule->descriptor_set_mask,
-                          LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(
-                              descriptor_set->descriptor_set_ordinal));
+  const uint16_t descriptor_set_ordinal =
+      descriptor_set->descriptor_set_ordinal;
+  const loom_amdgpu_vopd_component_descriptor_lookup_range_t* range =
+      &kVopdComponentDescriptorLookupRanges[descriptor_set_ordinal];
+  if (range->descriptor_lookup_count == 0) {
+    return NULL;
+  }
+  IREE_ASSERT_LE(range->first_descriptor_lookup,
+                 IREE_ARRAYSIZE(kVopdComponentDescriptorLookups));
+  IREE_ASSERT_LE(range->descriptor_lookup_count,
+                 IREE_ARRAYSIZE(kVopdComponentDescriptorLookups) -
+                     range->first_descriptor_lookup);
+  IREE_ASSERT_EQ(range->descriptor_lookup_count,
+                 descriptor_set->descriptor_count);
+  *out_lookup_count = range->descriptor_lookup_count;
+  return &kVopdComponentDescriptorLookups[range->first_descriptor_lookup];
+}
+
+static const loom_amdgpu_vopd_component_rule_t*
+loom_amdgpu_vopd_component_rule_for_descriptor_ordinal(
+    const uint8_t* descriptor_lookup, iree_host_size_t descriptor_lookup_count,
+    uint32_t descriptor_ordinal) {
+  if (descriptor_lookup == NULL ||
+      descriptor_ordinal >= descriptor_lookup_count) {
+    return NULL;
+  }
+  const uint8_t rule_index_plus_one = descriptor_lookup[descriptor_ordinal];
+  if (rule_index_plus_one == 0) {
+    return NULL;
+  }
+  const uint8_t rule_index = (uint8_t)(rule_index_plus_one - 1);
+  IREE_ASSERT_LT(rule_index, IREE_ARRAYSIZE(kVopdComponentRules));
+  return &kVopdComponentRules[rule_index];
 }
 
 static bool loom_amdgpu_vopd_descriptor_set_supports_packetization(
@@ -355,20 +412,10 @@ static bool loom_amdgpu_vopd_target_supports_base_vopd(
 }
 
 static void loom_amdgpu_vopd_append_schedule_pair_affinity(
-    const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t first_descriptor_ref,
-    loom_amdgpu_descriptor_ref_t second_descriptor_ref, uint16_t priority,
+    const loom_low_descriptor_t* first_descriptor,
+    const loom_low_descriptor_t* second_descriptor, uint16_t priority,
     loom_low_schedule_pair_affinity_t* affinities,
     iree_host_size_t* affinity_count) {
-  const loom_low_descriptor_t* first_descriptor =
-      loom_amdgpu_descriptor_ref_descriptor(descriptor_set,
-                                            first_descriptor_ref);
-  const loom_low_descriptor_t* second_descriptor =
-      loom_amdgpu_descriptor_ref_descriptor(descriptor_set,
-                                            second_descriptor_ref);
-  if (first_descriptor == NULL || second_descriptor == NULL) {
-    return;
-  }
   affinities[(*affinity_count)++] = (loom_low_schedule_pair_affinity_t){
       .first_descriptor = first_descriptor,
       .second_descriptor = second_descriptor,
@@ -429,19 +476,29 @@ iree_status_t loom_amdgpu_vopd_build_schedule_pair_affinities(
 
   const loom_amdgpu_vopd_component_rule_t*
       component_rules[IREE_ARRAYSIZE(kVopdComponentRules)] = {0};
+  const loom_low_descriptor_t*
+      component_descriptors[IREE_ARRAYSIZE(kVopdComponentRules)] = {0};
   iree_host_size_t component_rule_count = 0;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVopdComponentRules); ++i) {
-    const loom_amdgpu_vopd_component_rule_t* rule = &kVopdComponentRules[i];
-    if (!loom_amdgpu_vopd_component_rule_applies_to_descriptor_set(
-            rule, descriptor_set)) {
+  iree_host_size_t descriptor_lookup_count = 0;
+  const uint8_t* descriptor_lookup =
+      loom_amdgpu_vopd_component_lookup_for_descriptor_set(
+          descriptor_set, &descriptor_lookup_count);
+  IREE_ASSERT(descriptor_lookup != NULL);
+  for (iree_host_size_t descriptor_ordinal = 0;
+       descriptor_ordinal < descriptor_lookup_count; ++descriptor_ordinal) {
+    const loom_amdgpu_vopd_component_rule_t* rule =
+        loom_amdgpu_vopd_component_rule_for_descriptor_ordinal(
+            descriptor_lookup, descriptor_lookup_count,
+            (uint32_t)descriptor_ordinal);
+    if (rule == NULL) {
       continue;
     }
-    const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
-        descriptor_set, rule->descriptor_ref);
-    if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-      continue;
-    }
-    IREE_ASSERT(descriptor_ordinal < descriptor_set->descriptor_count);
+    IREE_ASSERT_LT(component_rule_count, IREE_ARRAYSIZE(component_rules));
+    const loom_low_descriptor_t* descriptor =
+        loom_low_descriptor_set_descriptor_at(descriptor_set,
+                                              descriptor_ordinal);
+    IREE_ASSERT(descriptor != NULL);
+    component_descriptors[component_rule_count] = descriptor;
     component_rules[component_rule_count++] = rule;
   }
   if (component_rule_count == 0) {
@@ -458,61 +515,30 @@ iree_status_t loom_amdgpu_vopd_build_schedule_pair_affinities(
        ++first_index) {
     const loom_amdgpu_vopd_component_rule_t* first_rule =
         component_rules[first_index];
+    const loom_low_descriptor_t* first_descriptor =
+        component_descriptors[first_index];
     for (iree_host_size_t second_index = 0; second_index < component_rule_count;
          ++second_index) {
       const loom_amdgpu_vopd_component_rule_t* second_rule =
           component_rules[second_index];
+      const loom_low_descriptor_t* second_descriptor =
+          component_descriptors[second_index];
       loom_amdgpu_vopd_pair_reason_t reason =
           LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN;
       if (!loom_amdgpu_vopd_component_infos_pair_reason(
               &first_rule->info, &second_rule->info, &reason)) {
         continue;
       }
-      const uint16_t priority =
-          first_rule->descriptor_ref == second_rule->descriptor_ref ? 2 : 1;
+      const uint16_t priority = first_descriptor == second_descriptor ? 2 : 1;
       loom_amdgpu_vopd_append_schedule_pair_affinity(
-          descriptor_set, first_rule->descriptor_ref,
-          second_rule->descriptor_ref, priority, affinities, &affinity_count);
+          first_descriptor, second_descriptor, priority, affinities,
+          &affinity_count);
     }
   }
   *out_affinities = (loom_low_schedule_pair_affinity_list_t){
       .values = affinities,
       .count = affinity_count,
   };
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_vopd_plan_build_component_lookup(
-    loom_amdgpu_vopd_plan_builder_t* builder) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      builder->schedule->target.descriptor_set;
-  if (descriptor_set->descriptor_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      builder->arena, descriptor_set->descriptor_count,
-      sizeof(*builder->component_rules_by_descriptor_ordinal),
-      (void**)&builder->component_rules_by_descriptor_ordinal));
-  memset(builder->component_rules_by_descriptor_ordinal, 0,
-         descriptor_set->descriptor_count *
-             sizeof(*builder->component_rules_by_descriptor_ordinal));
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVopdComponentRules); ++i) {
-    const loom_amdgpu_vopd_component_rule_t* rule = &kVopdComponentRules[i];
-    if (!loom_amdgpu_vopd_component_rule_applies_to_descriptor_set(
-            rule, descriptor_set)) {
-      continue;
-    }
-    const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
-        descriptor_set, rule->descriptor_ref);
-    if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-      continue;
-    }
-    IREE_ASSERT(descriptor_ordinal < descriptor_set->descriptor_count);
-    const loom_amdgpu_vopd_component_rule_t** slot =
-        &builder->component_rules_by_descriptor_ordinal[descriptor_ordinal];
-    IREE_ASSERT(*slot == NULL);
-    *slot = rule;
-  }
   return iree_ok_status();
 }
 
@@ -742,7 +768,6 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate_trans_result_guard(
 static iree_status_t loom_amdgpu_vopd_plan_allocate(
     loom_amdgpu_vopd_plan_builder_t* builder) {
   const iree_host_size_t packet_count = builder->schedule->scheduled_node_count;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build_component_lookup(builder));
   builder->pair_capacity = packet_count / 2;
   builder->rejection_capacity = packet_count == 0 ? 0 : packet_count - 1;
   if (builder->pair_capacity > UINT32_MAX) {
@@ -1404,12 +1429,13 @@ static iree_status_t loom_amdgpu_vopd_read_component(
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
                                                  packet->descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
-      builder->component_rules_by_descriptor_ordinal == NULL) {
+  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     return iree_ok_status();
   }
   const loom_amdgpu_vopd_component_rule_t* rule =
-      builder->component_rules_by_descriptor_ordinal[descriptor_ordinal];
+      loom_amdgpu_vopd_component_rule_for_descriptor_ordinal(
+          builder->component_rule_lookup, builder->component_rule_lookup_count,
+          descriptor_ordinal);
   if (rule == NULL) {
     return iree_ok_status();
   }
@@ -2108,6 +2134,12 @@ iree_status_t loom_amdgpu_vopd_plan_build(
     return iree_ok_status();
   }
 
+  iree_host_size_t component_rule_lookup_count = 0;
+  const uint8_t* component_rule_lookup =
+      loom_amdgpu_vopd_component_lookup_for_descriptor_set(
+          schedule->target.descriptor_set, &component_rule_lookup_count);
+  IREE_ASSERT(component_rule_lookup != NULL);
+
   loom_amdgpu_vopd_plan_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
@@ -2116,6 +2148,8 @@ iree_status_t loom_amdgpu_vopd_plan_build(
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .arena = arena,
+      .component_rule_lookup = component_rule_lookup,
+      .component_rule_lookup_count = component_rule_lookup_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_allocate(&builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build_pairs(&builder));
