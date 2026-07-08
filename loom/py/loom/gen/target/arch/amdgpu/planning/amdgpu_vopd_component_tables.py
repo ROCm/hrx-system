@@ -56,10 +56,13 @@ _FORM_INLINE_MOV = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV"
 _FORM_TIED_ACCUMULATE = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE"
 
 _LANE_XY = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY"
+_LANE_X = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_X"
 _LANE_Y = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y"
 
 _PAIR_ANY = "LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY"
 _PAIR_MIXED_OPCODE = "LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE"
+_PAIR_SAME_OPCODE = "LOOM_AMDGPU_VOPD_COMPONENT_PAIR_SAME_OPCODE"
+_PAIR_REASON_UNKNOWN = "LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN"
 
 _SOURCE_BINARY = "LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY"
 _SOURCE_NONE = "LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_NONE"
@@ -102,10 +105,27 @@ class _VopdComponentDescriptorLookupRange:
 
 
 @dataclass(frozen=True, slots=True)
+class _VopdPairAffinityRange:
+    descriptor_set_key: str
+    descriptor_set_ordinal: int
+    first_pair_affinity: int
+    pair_affinity_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _VopdPairAffinityRow:
+    first_descriptor_ordinal: int
+    second_descriptor_ordinal: int
+    priority: int
+
+
+@dataclass(frozen=True, slots=True)
 class _VopdComponentTables:
     rules: tuple[_VopdComponentRule, ...]
     descriptor_lookup_ranges: tuple[_VopdComponentDescriptorLookupRange, ...]
     descriptor_lookup_rows: tuple[int, ...]
+    pair_affinity_ranges: tuple[_VopdPairAffinityRange, ...]
+    pair_affinity_rows: tuple[_VopdPairAffinityRow, ...]
 
 
 def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
@@ -457,18 +477,122 @@ def _descriptor_lookup_rows_for_set(
     return tuple(rule_by_descriptor_key.get(descriptor_key, 0) for descriptor_key in descriptor_keys)
 
 
+def _component_can_use_lane(
+    component: _VopdComponentDefinition,
+    lane_mask: str,
+) -> bool:
+    return component.lane_mask in (lane_mask, _LANE_XY)
+
+
+def _component_can_pair(
+    component: _VopdComponentDefinition,
+    pairing_mask: str,
+) -> bool:
+    return component.pairing_mask in (pairing_mask, _PAIR_ANY)
+
+
+def _components_can_pair(
+    first_component: _VopdComponentDefinition,
+    second_component: _VopdComponentDefinition,
+) -> bool:
+    if not _component_can_use_lane(first_component, _LANE_X):
+        return False
+    if not _component_can_use_lane(second_component, _LANE_Y):
+        return False
+    if first_component.op_value == second_component.op_value:
+        has_same_reason = first_component.same_op_reason != _PAIR_REASON_UNKNOWN
+        return _component_can_pair(first_component, _PAIR_SAME_OPCODE) and has_same_reason
+    first_can_pair_mixed = _component_can_pair(first_component, _PAIR_MIXED_OPCODE)
+    second_can_pair_mixed = _component_can_pair(
+        second_component,
+        _PAIR_MIXED_OPCODE,
+    )
+    return first_can_pair_mixed and second_can_pair_mixed
+
+
+def _pair_affinity_rows_for_set(
+    rules: Sequence[_VopdComponentRule],
+    descriptor_lookup_rows: Sequence[int],
+) -> tuple[_VopdPairAffinityRow, ...]:
+    rows: list[_VopdPairAffinityRow] = []
+    for first_ordinal, first_rule_index_plus_one in enumerate(descriptor_lookup_rows):
+        if first_rule_index_plus_one == 0:
+            continue
+        first_rule = rules[first_rule_index_plus_one - 1]
+        for second_ordinal, second_rule_index_plus_one in enumerate(descriptor_lookup_rows):
+            if second_rule_index_plus_one == 0:
+                continue
+            second_rule = rules[second_rule_index_plus_one - 1]
+            if not _components_can_pair(first_rule.component, second_rule.component):
+                continue
+            rows.append(
+                _VopdPairAffinityRow(
+                    first_descriptor_ordinal=first_ordinal,
+                    second_descriptor_ordinal=second_ordinal,
+                    priority=2 if first_ordinal == second_ordinal else 1,
+                )
+            )
+    return tuple(rows)
+
+
 def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
     rule_count = len(tables.rules)
     lookup_count = len(tables.descriptor_lookup_rows)
+    lookup_ranges_by_set_key = {row.descriptor_set_key: row for row in tables.descriptor_lookup_ranges}
     for row in tables.descriptor_lookup_ranges:
         owner = f"AMDGPU VOPD descriptor lookup range '{row.descriptor_set_key}'"
-        if row.first_descriptor_lookup > lookup_count or row.descriptor_lookup_count > lookup_count - row.first_descriptor_lookup:
+        remaining_lookup_count = lookup_count - row.first_descriptor_lookup
+        lookup_start_oob = row.first_descriptor_lookup > lookup_count
+        lookup_count_oob = row.descriptor_lookup_count > remaining_lookup_count
+        if lookup_start_oob or lookup_count_oob:
             raise ValueError(f"{owner} is out of bounds")
-        for descriptor_index_plus_one in tables.descriptor_lookup_rows[row.first_descriptor_lookup : row.first_descriptor_lookup + row.descriptor_lookup_count]:
+        _validate_uint16(
+            owner,
+            "first descriptor lookup",
+            row.first_descriptor_lookup,
+        )
+        _validate_uint16(
+            owner,
+            "descriptor lookup count",
+            row.descriptor_lookup_count,
+        )
+        lookup_stop = row.first_descriptor_lookup + row.descriptor_lookup_count
+        for descriptor_index_plus_one in tables.descriptor_lookup_rows[row.first_descriptor_lookup : lookup_stop]:
             if descriptor_index_plus_one == 0:
                 continue
             if descriptor_index_plus_one > rule_count:
                 raise ValueError(f"{owner} references an out-of-bounds rule")
+    pair_affinity_count = len(tables.pair_affinity_rows)
+    for row in tables.pair_affinity_ranges:
+        owner = f"AMDGPU VOPD pair-affinity range '{row.descriptor_set_key}'"
+        lookup_range = lookup_ranges_by_set_key.get(row.descriptor_set_key)
+        if lookup_range is None:
+            raise ValueError(f"{owner} has no descriptor lookup range")
+        remaining_pair_count = pair_affinity_count - row.first_pair_affinity
+        pair_start_oob = row.first_pair_affinity > pair_affinity_count
+        pair_count_oob = row.pair_affinity_count > remaining_pair_count
+        if pair_start_oob or pair_count_oob:
+            raise ValueError(f"{owner} is out of bounds")
+        _validate_uint16(owner, "first pair affinity", row.first_pair_affinity)
+        _validate_uint16(owner, "pair affinity count", row.pair_affinity_count)
+        pair_stop = row.first_pair_affinity + row.pair_affinity_count
+        for pair in tables.pair_affinity_rows[row.first_pair_affinity : pair_stop]:
+            _validate_uint16(
+                owner,
+                "first descriptor ordinal",
+                pair.first_descriptor_ordinal,
+            )
+            _validate_uint16(
+                owner,
+                "second descriptor ordinal",
+                pair.second_descriptor_ordinal,
+            )
+            _validate_uint16(owner, "priority", pair.priority)
+            descriptor_lookup_count = lookup_range.descriptor_lookup_count
+            first_descriptor_oob = pair.first_descriptor_ordinal >= descriptor_lookup_count
+            second_descriptor_oob = pair.second_descriptor_ordinal >= descriptor_lookup_count
+            if first_descriptor_oob or second_descriptor_oob:
+                raise ValueError(f"{owner} references an out-of-bounds descriptor ordinal")
 
 
 def _materialize_vopd_component_tables(
@@ -505,6 +629,8 @@ def _materialize_vopd_component_tables(
 
     descriptor_lookup_ranges: list[_VopdComponentDescriptorLookupRange] = []
     descriptor_lookup_rows: list[int] = []
+    pair_affinity_ranges: list[_VopdPairAffinityRange] = []
+    pair_affinity_rows: list[_VopdPairAffinityRow] = []
     for info in descriptor_sets_by_ordinal:
         if not _descriptor_set_supports_vopd(info):
             continue
@@ -525,11 +651,26 @@ def _materialize_vopd_component_tables(
             )
         )
         descriptor_lookup_rows.extend(set_lookup_rows)
+        set_pair_affinity_rows = _pair_affinity_rows_for_set(
+            rules,
+            set_lookup_rows,
+        )
+        pair_affinity_ranges.append(
+            _VopdPairAffinityRange(
+                descriptor_set_key=info.key,
+                descriptor_set_ordinal=descriptor_set_ordinal,
+                first_pair_affinity=len(pair_affinity_rows),
+                pair_affinity_count=len(set_pair_affinity_rows),
+            )
+        )
+        pair_affinity_rows.extend(set_pair_affinity_rows)
 
     tables = _VopdComponentTables(
         rules=tuple(rules),
         descriptor_lookup_ranges=tuple(descriptor_lookup_ranges),
         descriptor_lookup_rows=tuple(descriptor_lookup_rows),
+        pair_affinity_ranges=tuple(pair_affinity_ranges),
+        pair_affinity_rows=tuple(pair_affinity_rows),
     )
     _validate_vopd_component_tables(tables)
     return tables
@@ -601,6 +742,26 @@ def _descriptor_lookup_row_initializer(rule_index_plus_one: int) -> str:
     return f"LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP({rule_index_plus_one})"
 
 
+def _pair_affinity_range_initializer(row: _VopdPairAffinityRange) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE(",
+            f"    {row.descriptor_set_ordinal}, {row.first_pair_affinity},",
+            f"    {row.pair_affinity_count})",
+        ]
+    )
+
+
+def _pair_affinity_row_initializer(row: _VopdPairAffinityRow) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_VOPD_PAIR_AFFINITY(",
+            f"    {row.first_descriptor_ordinal},",
+            f"    {row.second_descriptor_ordinal}, {row.priority})",
+        ]
+    )
+
+
 def _emit_component_rules(tables: _VopdComponentTables) -> str:
     reason_initializers = [initializer for index, rule in enumerate(tables.rules) if (initializer := _component_reason_initializer(index, rule)) is not None]
     return (
@@ -639,6 +800,30 @@ def _emit_descriptor_lookup_rows(tables: _VopdComponentTables) -> str:
     )
 
 
+def _emit_pair_affinity_ranges(tables: _VopdComponentTables) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_pair_affinity_range_initializer(row) for row in tables.pair_affinity_ranges),
+            ]
+        )
+        + "\n"
+    )
+
+
+def _emit_pair_affinity_rows(tables: _VopdComponentTables) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_pair_affinity_row_initializer(row) for row in tables.pair_affinity_rows),
+            ]
+        )
+        + "\n"
+    )
+
+
 def _write_output(path: Path, contents: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")
@@ -667,8 +852,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated VOPD descriptor-ordinal lookup fragment path.",
     )
+    parser.add_argument(
+        "--pair-affinity-ranges",
+        type=Path,
+        help="Generated VOPD pair-affinity range fragment path.",
+    )
+    parser.add_argument(
+        "--pair-affinities",
+        type=Path,
+        help="Generated VOPD pair-affinity row fragment path.",
+    )
     args = parser.parse_args(argv)
-    if args.component_rules is None and args.descriptor_lookup_ranges is None and args.descriptor_lookups is None:
+    requested_outputs = (
+        args.component_rules,
+        args.descriptor_lookup_ranges,
+        args.descriptor_lookups,
+        args.pair_affinity_ranges,
+        args.pair_affinities,
+    )
+    if not any(path is not None for path in requested_outputs):
         parser.error("at least one output path is required")
 
     tables = _materialize_vopd_component_tables(
@@ -678,9 +880,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.component_rules is not None:
         _write_output(args.component_rules, _emit_component_rules(tables))
     if args.descriptor_lookup_ranges is not None:
-        _write_output(args.descriptor_lookup_ranges, _emit_descriptor_lookup_ranges(tables))
+        _write_output(
+            args.descriptor_lookup_ranges,
+            _emit_descriptor_lookup_ranges(tables),
+        )
     if args.descriptor_lookups is not None:
         _write_output(args.descriptor_lookups, _emit_descriptor_lookup_rows(tables))
+    if args.pair_affinity_ranges is not None:
+        _write_output(
+            args.pair_affinity_ranges,
+            _emit_pair_affinity_ranges(tables),
+        )
+    if args.pair_affinities is not None:
+        _write_output(args.pair_affinities, _emit_pair_affinity_rows(tables))
     return 0
 
 
