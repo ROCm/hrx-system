@@ -38,6 +38,16 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 
+typedef enum loom_amdgpu_reg_class_trait_bit_e {
+  // Register class is the CDNA accumulator file.
+  LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR = 1u << 0,
+  // Register class is the M0 scalar special register.
+  LOOM_AMDGPU_REG_CLASS_TRAIT_M0 = 1u << 1,
+  // Register class is the VCC vector condition mask.
+  LOOM_AMDGPU_REG_CLASS_TRAIT_VCC = 1u << 2,
+} loom_amdgpu_reg_class_trait_bit_t;
+typedef uint8_t loom_amdgpu_reg_class_traits_t;
+
 uint32_t loom_amdgpu_descriptor_ref_ordinal(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
@@ -50,6 +60,10 @@ const loom_low_descriptor_t* loom_amdgpu_descriptor_ref_descriptor(
 loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
+
+// Returns generated target-owned semantic trait bits for |reg_class_id|.
+loom_amdgpu_reg_class_traits_t loom_amdgpu_reg_class_traits(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id);
 
 #ifdef __cplusplus
 }  // extern "C"

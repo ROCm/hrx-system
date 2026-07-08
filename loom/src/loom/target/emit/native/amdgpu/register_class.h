@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/descriptors.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,42 +23,27 @@ extern "C" {
 // the same numeric ID for M0 that CDNA4 uses for AGPR.
 static inline bool loom_amdgpu_register_class_is_agpr(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id) {
-  if (descriptor_set == NULL ||
-      reg_class_id >= descriptor_set->reg_class_count) {
-    return false;
-  }
-  iree_string_view_t register_class = loom_low_descriptor_set_string(
-      descriptor_set,
-      descriptor_set->reg_classes[reg_class_id].name_string_offset);
-  return iree_string_view_equal(register_class, IREE_SV("amdgpu.agpr"));
+  return iree_any_bit_set(
+      loom_amdgpu_reg_class_traits(descriptor_set, reg_class_id),
+      LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR);
 }
 
 // Returns true when |reg_class_id| names the M0 special-register class in
 // |descriptor_set|.
 static inline bool loom_amdgpu_register_class_is_m0(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id) {
-  if (descriptor_set == NULL ||
-      reg_class_id >= descriptor_set->reg_class_count) {
-    return false;
-  }
-  iree_string_view_t register_class = loom_low_descriptor_set_string(
-      descriptor_set,
-      descriptor_set->reg_classes[reg_class_id].name_string_offset);
-  return iree_string_view_equal(register_class, IREE_SV("amdgpu.m0"));
+  return iree_any_bit_set(
+      loom_amdgpu_reg_class_traits(descriptor_set, reg_class_id),
+      LOOM_AMDGPU_REG_CLASS_TRAIT_M0);
 }
 
 // Returns true when |reg_class_id| names the VCC condition-mask register class
 // in |descriptor_set|.
 static inline bool loom_amdgpu_register_class_is_vcc(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id) {
-  if (descriptor_set == NULL ||
-      reg_class_id >= descriptor_set->reg_class_count) {
-    return false;
-  }
-  iree_string_view_t register_class = loom_low_descriptor_set_string(
-      descriptor_set,
-      descriptor_set->reg_classes[reg_class_id].name_string_offset);
-  return iree_string_view_equal(register_class, IREE_SV("amdgpu.vcc"));
+  return iree_any_bit_set(
+      loom_amdgpu_reg_class_traits(descriptor_set, reg_class_id),
+      LOOM_AMDGPU_REG_CLASS_TRAIT_VCC);
 }
 
 #ifdef __cplusplus

@@ -11,6 +11,8 @@
 extern const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
 extern const loom_amdgpu_descriptor_traits_t* const
     kLoomAmdgpuDescriptorTraitTables[];
+extern const loom_amdgpu_reg_class_traits_t* const
+    kLoomAmdgpuRegClassTraitTables[];
 
 static uint16_t loom_amdgpu_target_ref_descriptor_set_ordinal(
     const loom_low_descriptor_set_t* descriptor_set) {
@@ -45,6 +47,16 @@ loom_amdgpu_descriptor_trait_table(
     return NULL;
   }
   return kLoomAmdgpuDescriptorTraitTables[descriptor_set_ordinal];
+}
+
+static const loom_amdgpu_reg_class_traits_t* loom_amdgpu_reg_class_trait_table(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const uint16_t descriptor_set_ordinal =
+      loom_amdgpu_target_ref_descriptor_set_ordinal(descriptor_set);
+  if (descriptor_set_ordinal == LOOM_LOW_DESCRIPTOR_SET_ORDINAL_NONE) {
+    return NULL;
+  }
+  return kLoomAmdgpuRegClassTraitTables[descriptor_set_ordinal];
 }
 
 uint32_t loom_amdgpu_descriptor_ref_ordinal(
@@ -83,4 +95,18 @@ loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(
     return 0;
   }
   return trait_table[descriptor_ordinal];
+}
+
+loom_amdgpu_reg_class_traits_t loom_amdgpu_reg_class_traits(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id) {
+  if (descriptor_set == NULL ||
+      reg_class_id >= descriptor_set->reg_class_count) {
+    return 0;
+  }
+  const loom_amdgpu_reg_class_traits_t* trait_table =
+      loom_amdgpu_reg_class_trait_table(descriptor_set);
+  if (trait_table == NULL) {
+    return 0;
+  }
+  return trait_table[reg_class_id];
 }

@@ -184,6 +184,13 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
     )
 
 
+def test_reg_class_trait_names_classify_special_register_files() -> None:
+    assert amdgpu_target_refs._reg_class_trait_names("amdgpu.agpr") == ("LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR",)
+    assert amdgpu_target_refs._reg_class_trait_names("amdgpu.m0") == ("LOOM_AMDGPU_REG_CLASS_TRAIT_M0",)
+    assert amdgpu_target_refs._reg_class_trait_names("amdgpu.vcc") == ("LOOM_AMDGPU_REG_CLASS_TRAIT_VCC",)
+    assert amdgpu_target_refs._reg_class_trait_names("amdgpu.vgpr") == ()
+
+
 def test_descriptor_traits_reject_missing_schedule_class() -> None:
     descriptor_set = _descriptor_set(_descriptor("amdgpu.test", schedule_class="missing"))
     trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
