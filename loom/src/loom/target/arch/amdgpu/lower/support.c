@@ -1593,22 +1593,6 @@ static bool loom_amdgpu_select_payload_prefers_vgpr(
                                                         condition_value_id);
 }
 
-static loom_operand_role_t loom_amdgpu_operand_role_at(
-    const loom_module_t* module, const loom_op_t* op, uint16_t operand_index) {
-  if (module == NULL || op == NULL) return LOOM_OPERAND_ROLE_NONE;
-  return loom_op_operand_role_at(loom_op_vtable(module, op), op, operand_index);
-}
-
-static bool loom_amdgpu_op_has_result(loom_value_id_t value_id,
-                                      const loom_op_t* op) {
-  if (op == NULL) return false;
-  const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    if (results[i] == value_id) return true;
-  }
-  return false;
-}
-
 static bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_op_t* op, loom_value_id_t excluded_value_id) {
@@ -1652,8 +1636,8 @@ static bool loom_amdgpu_select_condition_use_needs_native_i1_mask(
     loom_value_id_t source_value_id) {
   if (operand_index >= user_op->operand_count ||
       loom_op_const_operands(user_op)[operand_index] != source_value_id ||
-      loom_amdgpu_operand_role_at(module, user_op, operand_index) !=
-          LOOM_OPERAND_ROLE_SELECT_CONDITION) {
+      !loom_op_operand_has_role(module, user_op, operand_index,
+                                LOOM_OPERAND_ROLE_SELECT_CONDITION)) {
     return false;
   }
   return loom_amdgpu_op_results_prefer_vgpr(module, fact_table, user_op,
@@ -1671,7 +1655,7 @@ static bool loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
     return false;
   }
   const loom_operand_role_t role =
-      loom_amdgpu_operand_role_at(module, user_op, operand_index);
+      loom_op_operand_role(module, user_op, operand_index);
   if (role != LOOM_OPERAND_ROLE_BROADCAST_SOURCE &&
       role != LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT) {
     return false;
@@ -2067,8 +2051,8 @@ static bool loom_amdgpu_i1_use_is_control_condition(
     uint16_t operand_index, loom_value_id_t source_value_id) {
   return operand_index < user_op->operand_count &&
          loom_op_const_operands(user_op)[operand_index] == source_value_id &&
-         loom_amdgpu_operand_role_at(module, user_op, operand_index) ==
-             LOOM_OPERAND_ROLE_CONTROL_CONDITION;
+         loom_op_operand_has_role(module, user_op, operand_index,
+                                  LOOM_OPERAND_ROLE_CONTROL_CONDITION);
 }
 
 static bool loom_amdgpu_source_i1_value_has_cross_block_use(
@@ -2530,35 +2514,12 @@ static bool loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
   loom_memory_access_t access = loom_memory_access_cast(module, user_op);
   const loom_memory_access_operation_kind_t operation_kind =
       loom_memory_access_operation_kind(access);
-  if (operation_kind != LOOM_MEMORY_ACCESS_OPERATION_STORE &&
-      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE &&
-      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW &&
-      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG) {
+  if (!loom_memory_access_operation_kind_has_payload_operands(operation_kind)) {
     return false;
   }
   return loom_memory_access_value(access) == source_value_id ||
          loom_memory_access_expected(access) == source_value_id ||
          loom_memory_access_replacement(access) == source_value_id;
-}
-
-static bool loom_amdgpu_op_first_operand_with_role(
-    const loom_module_t* module, const loom_op_t* op, loom_operand_role_t role,
-    loom_value_id_t* out_value_id) {
-  *out_value_id = LOOM_VALUE_ID_INVALID;
-  if (op == NULL) return false;
-  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
-  if (vtable == NULL || !iree_any_bit_set(vtable->operand_role_mask,
-                                          loom_operand_role_mask_bit(role))) {
-    return false;
-  }
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    if (loom_op_operand_role_at(vtable, op, i) == role) {
-      *out_value_id = operands[i];
-      return true;
-    }
-  }
-  return false;
 }
 
 static bool loom_amdgpu_source_value_select_payload_use_requires_vgpr(
@@ -2587,7 +2548,7 @@ static bool loom_amdgpu_source_value_select_payload_use_requires_vgpr(
     return false;
   }
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
-  if (!loom_amdgpu_op_first_operand_with_role(
+  if (!loom_op_first_operand_with_role(
           module, user_op, LOOM_OPERAND_ROLE_SELECT_CONDITION, &condition)) {
     return false;
   }
@@ -2600,13 +2561,13 @@ static bool loom_amdgpu_select_result_requires_vgpr(
     const loom_view_region_table_t* view_regions,
     const loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, const loom_op_t* defining_op) {
-  if (!loom_amdgpu_op_has_result(source_value_id, defining_op)) {
+  if (!loom_op_defines_value(defining_op, source_value_id)) {
     return false;
   }
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
-  if (!loom_amdgpu_op_first_operand_with_role(
-          module, defining_op, LOOM_OPERAND_ROLE_SELECT_CONDITION,
-          &condition)) {
+  if (!loom_op_first_operand_with_role(module, defining_op,
+                                       LOOM_OPERAND_ROLE_SELECT_CONDITION,
+                                       &condition)) {
     return false;
   }
   return loom_amdgpu_source_value_is_native_i1_mask_excluding(

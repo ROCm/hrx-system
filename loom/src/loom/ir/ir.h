@@ -1153,6 +1153,16 @@ typedef enum loom_memory_access_operation_kind_e {
   LOOM_MEMORY_ACCESS_OPERATION_COUNT_ = 6,
 } loom_memory_access_operation_kind_t;
 
+// Returns true when the operation family carries written value operands such as
+// store values, atomic contributions, or compare-exchange pairs.
+static inline bool loom_memory_access_operation_kind_has_payload_operands(
+    loom_memory_access_operation_kind_t kind) {
+  return kind == LOOM_MEMORY_ACCESS_OPERATION_STORE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+}
+
 // Interface descriptor for ops that access memory through a view-like operand.
 // Every field is an operand or attr index resolved from MemoryAccessInterface
 // declarations in the Python DSL. LOOM_*_INDEX_NONE marks roles that are not

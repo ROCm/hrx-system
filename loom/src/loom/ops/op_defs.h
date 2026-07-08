@@ -1068,6 +1068,25 @@ loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
                                             const loom_op_t* op,
                                             uint16_t operand_index);
 
+// Returns the semantic role for a flat operand index using the op's module
+// vtable, or LOOM_OPERAND_ROLE_NONE when unavailable.
+loom_operand_role_t loom_op_operand_role(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         uint16_t operand_index);
+
+// Returns true when the op operand at |operand_index| has |role|.
+bool loom_op_operand_has_role(const loom_module_t* module, const loom_op_t* op,
+                              uint16_t operand_index, loom_operand_role_t role);
+
+// Returns the first operand value with |role|, if present.
+bool loom_op_first_operand_with_role(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     loom_operand_role_t role,
+                                     loom_value_id_t* out_value_id);
+
+// Returns true when |op| defines |value_id| as one of its results.
+bool loom_op_defines_value(const loom_op_t* op, loom_value_id_t value_id);
+
 // Binding kind for BindingList format elements.
 typedef enum loom_binding_kind_e {
   // Block arg has the same type as the operand.
