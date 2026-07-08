@@ -1069,6 +1069,8 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   // Adjacent-lane f32 result values are exchanged with a DPP packet.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP = 1u
                                                                            << 1,
+  // Same-lane f32 result values are packed into one BF16 store packet.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE = 1u << 19,
   // FP8 load payloads are decoded with native packed FP8-to-F32 conversion.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 2,
   // FP8 load payloads are decoded with native scale-f32 BF16 conversion using

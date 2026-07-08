@@ -3636,6 +3636,12 @@ static bool loom_amdgpu_fragment_memory_plan_push_packet(
   }
   plan->packets[plan->packet_count++] = *packet;
   plan->packet_flags |= packet->flags;
+  if (plan->payload_form ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 &&
+      packet->result_register_count > 1) {
+    plan->packet_flags |=
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE;
+  }
   return true;
 }
 
@@ -3655,10 +3661,10 @@ loom_amdgpu_fragment_memory_plan_epilogue_strategy(
                ? LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE
                : LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE;
   }
-  for (uint16_t i = 0; i < plan->packet_count; ++i) {
-    if (plan->packets[i].result_register_count > 1) {
-      return LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE;
-    }
+  if (iree_any_bit_set(
+          plan->packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE)) {
+    return LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE;
   }
   return plan->packet_count != 0
              ? LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE
