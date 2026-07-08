@@ -862,12 +862,12 @@ typedef struct loom_amdgpu_subgroup_scan_plan_t {
   loom_amdgpu_subgroup_payload_kind_t payload_kind;
   // Number of 32-bit registers in the scanned payload.
   uint32_t register_count;
-  // Combining operation selected by the source op.
-  loom_combining_kind_t kind;
   // Inclusive or exclusive scan mode selected by the source op.
   loom_kernel_subgroup_scan_mode_t mode;
   // Lane order selected by the source op.
   loom_kernel_subgroup_scan_direction_t direction;
+  // 32-bit identity element bit pattern used by exclusive scans.
+  uint32_t identity_bits;
   // Exact subgroup width selected by the active target bundle.
   uint32_t wavefront_size;
   // Number of low-numbered lanes participating in the emitted scan tree.
@@ -897,12 +897,12 @@ typedef struct loom_amdgpu_workgroup_scan_plan_t {
   loom_amdgpu_subgroup_payload_kind_t payload_kind;
   // Number of 32-bit registers in the scanned payload.
   uint32_t register_count;
-  // Combining operation selected by the source op.
-  loom_combining_kind_t kind;
   // Inclusive or exclusive scan mode selected by the source op.
   loom_kernel_subgroup_scan_mode_t mode;
   // Lane order selected by the source op.
   loom_kernel_subgroup_scan_direction_t direction;
+  // 32-bit identity element bit pattern used by exclusive or cross-wave scans.
+  uint32_t identity_bits;
   // Exact subgroup width selected by the active target bundle.
   uint32_t wavefront_size;
   // Exact flattened workgroup size selected by launch configuration.
