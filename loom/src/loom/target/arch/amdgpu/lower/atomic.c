@@ -214,23 +214,30 @@ static bool loom_amdgpu_atomic_value_is_vector(const loom_module_t* module,
   return loom_type_is_vector(loom_module_value_type(module, value));
 }
 
-static bool loom_amdgpu_atomic_operation_kind_from_source_memory(
-    loom_low_source_memory_operation_kind_t source_kind,
+static bool loom_amdgpu_atomic_operation_kind_from_memory_access(
+    loom_memory_access_operation_kind_t access_kind,
     loom_amdgpu_atomic_operation_kind_t* out_kind) {
-  *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
-  switch (source_kind) {
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE;
-      return true;
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_RMW;
-      return true;
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG;
-      return true;
-    default:
-      return false;
+  static const uint8_t kAmdgpuAtomicOperationKindCodeByMemoryAccess
+      [LOOM_MEMORY_ACCESS_OPERATION_COUNT_] = {
+          [LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE] =
+              LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE + 1u,
+          [LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW] =
+              LOOM_AMDGPU_ATOMIC_OPERATION_RMW + 1u,
+          [LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG] =
+              LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG + 1u,
+      };
+  if (access_kind >= LOOM_MEMORY_ACCESS_OPERATION_COUNT_) {
+    *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
+    return false;
   }
+  const uint8_t kind_code =
+      kAmdgpuAtomicOperationKindCodeByMemoryAccess[access_kind];
+  if (kind_code == 0) {
+    *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
+    return false;
+  }
+  *out_kind = (loom_amdgpu_atomic_operation_kind_t)(kind_code - 1u);
+  return true;
 }
 
 static void loom_amdgpu_atomic_source_describe_update(
@@ -266,12 +273,9 @@ static bool loom_amdgpu_atomic_source_describe(
   if (!loom_memory_access_isa(access)) return false;
   out_source->access = access;
 
-  loom_low_source_memory_operation_kind_t source_operation_kind =
-      LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  if (!loom_low_source_memory_operation_kind_from_access(
-          access, &source_operation_kind) ||
-      !loom_amdgpu_atomic_operation_kind_from_source_memory(
-          source_operation_kind, &out_source->operation_kind)) {
+  if (!loom_amdgpu_atomic_operation_kind_from_memory_access(
+          loom_memory_access_operation_kind(access),
+          &out_source->operation_kind)) {
     return false;
   }
 
@@ -1155,7 +1159,7 @@ static iree_status_t loom_amdgpu_atomic_select(
   }
   loom_amdgpu_atomic_operation_kind_t memory_operation_kind =
       LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
-  if (!loom_amdgpu_atomic_operation_kind_from_source_memory(
+  if (!loom_amdgpu_atomic_operation_kind_from_memory_access(
           out_selection->source.operation_kind, &memory_operation_kind) ||
       memory_operation_kind != atomic_source->operation_kind) {
     diagnostic->rejection_bits |= LOOM_AMDGPU_ATOMIC_REJECTION_OPERATION_KIND;
