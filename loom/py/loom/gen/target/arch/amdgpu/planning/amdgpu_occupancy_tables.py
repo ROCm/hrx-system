@@ -158,6 +158,10 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
             raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many register classes")
         if len(register_classes) != len(set(register_classes)):
             raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has duplicate register classes")
+        missing_base_classes = sorted({"amdgpu.sgpr", "amdgpu.vgpr"} - set(register_classes))
+        if missing_base_classes:
+            missing = ", ".join(missing_base_classes)
+            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} is missing base register classes: {missing}")
         descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
         for row in model.register_classes:
             if row.register_class not in descriptor_reg_classes:
