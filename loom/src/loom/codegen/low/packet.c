@@ -9,6 +9,48 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/ops/low/ops.h"
+
+bool loom_low_packet_try_op_attrs(const loom_op_t* op,
+                                  loom_named_attr_slice_t* out_attrs,
+                                  uint16_t* out_attrs_attr_index) {
+  if (out_attrs != NULL) {
+    *out_attrs = loom_named_attr_slice_empty();
+  }
+  if (out_attrs_attr_index != NULL) {
+    *out_attrs_attr_index = UINT16_MAX;
+  }
+  if (loom_low_op_isa(op)) {
+    if (out_attrs != NULL) {
+      *out_attrs = loom_low_op_attrs(op);
+    }
+    if (out_attrs_attr_index != NULL) {
+      *out_attrs_attr_index = loom_low_op_attrs_ATTR_INDEX;
+    }
+    return true;
+  }
+  if (loom_low_const_isa(op)) {
+    if (out_attrs != NULL) {
+      *out_attrs = loom_low_const_attrs(op);
+    }
+    if (out_attrs_attr_index != NULL) {
+      *out_attrs_attr_index = loom_low_const_attrs_ATTR_INDEX;
+    }
+    return true;
+  }
+  return false;
+}
+
+loom_named_attr_slice_t loom_low_packet_attrs(
+    const loom_low_packet_view_t* packet) {
+  if (packet == NULL || packet->node == NULL) {
+    return loom_named_attr_slice_empty();
+  }
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  (void)loom_low_packet_try_op_attrs(packet->node->op, &attrs, NULL);
+  return attrs;
+}
+
 iree_status_t loom_low_packet_validate_tables(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation) {

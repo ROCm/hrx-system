@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -207,22 +208,6 @@ static iree_string_view_t loom_low_verify_string_or_empty(
     return iree_string_view_empty();
   }
   return module->strings.entries[string_id];
-}
-
-static bool loom_low_verify_get_packet_attrs(const loom_op_t* op,
-                                             loom_named_attr_slice_t* out_attrs,
-                                             uint16_t* out_attrs_attr_index) {
-  if (loom_low_op_isa(op)) {
-    *out_attrs = loom_low_op_attrs(op);
-    *out_attrs_attr_index = loom_low_op_attrs_ATTR_INDEX;
-    return true;
-  }
-  if (loom_low_const_isa(op)) {
-    *out_attrs = loom_low_const_attrs(op);
-    *out_attrs_attr_index = loom_low_const_attrs_ATTR_INDEX;
-    return true;
-  }
-  return false;
 }
 
 static iree_status_t loom_low_verify_emit_missing_descriptor(
@@ -751,7 +736,7 @@ static iree_status_t loom_low_verify_descriptor_immediates(
       function_state->target->descriptor_set;
   loom_named_attr_slice_t attrs = loom_make_named_attr_slice(NULL, 0);
   uint16_t attrs_attr_index = 0;
-  if (!loom_low_verify_get_packet_attrs(op, &attrs, &attrs_attr_index)) {
+  if (!loom_low_packet_try_op_attrs(op, &attrs, &attrs_attr_index)) {
     return iree_ok_status();
   }
 

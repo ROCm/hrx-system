@@ -580,12 +580,8 @@ static iree_status_t loom_low_packet_json_write_low_packet_attrs(
     const loom_text_print_options_t* type_print_options,
     const loom_low_schedule_node_t* node, loom_output_stream_t* stream) {
   const loom_module_t* module = schedule->module;
-  loom_named_attr_slice_t attrs = {0};
-  if (loom_low_op_isa(node->op)) {
-    attrs = loom_low_op_attrs(node->op);
-  } else if (loom_low_const_isa(node->op)) {
-    attrs = loom_low_const_attrs(node->op);
-  }
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  (void)loom_low_packet_try_op_attrs(node->op, &attrs, NULL);
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(stream, ",\"attributes\":"));
   IREE_RETURN_IF_ERROR(loom_low_packet_json_write_named_attrs(
@@ -724,7 +720,7 @@ static iree_status_t loom_low_packet_json_write_packet(
   IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value_array(
       allocation, type_print_options, loom_op_const_operands(node->op),
       node->op->operand_count, stream));
-  if (loom_low_op_isa(node->op) || loom_low_const_isa(node->op)) {
+  if (loom_low_packet_try_op_attrs(node->op, NULL, NULL)) {
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_low_packet_attrs(
         schedule, type_print_options, node, stream));
   } else {

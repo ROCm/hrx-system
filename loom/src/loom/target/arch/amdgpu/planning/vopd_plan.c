@@ -1067,23 +1067,11 @@ static bool loom_amdgpu_vopd_component_result_is_used_by(
   return false;
 }
 
-static loom_named_attr_slice_t loom_amdgpu_vopd_packet_attrs(
-    const loom_low_packet_view_t* packet) {
-  const loom_op_t* op = packet->node->op;
-  if (loom_low_op_isa(op)) {
-    return loom_low_op_attrs(op);
-  }
-  if (loom_low_const_isa(op)) {
-    return loom_low_const_attrs(op);
-  }
-  return loom_make_named_attr_slice(NULL, 0);
-}
-
 static const loom_named_attr_t* loom_amdgpu_vopd_find_packet_attr_by_name(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet, iree_string_view_t name) {
   const loom_module_t* module = builder->schedule->module;
-  loom_named_attr_slice_t attrs = loom_amdgpu_vopd_packet_attrs(packet);
+  loom_named_attr_slice_t attrs = loom_low_packet_attrs(packet);
   for (iree_host_size_t i = 0; i < attrs.count; ++i) {
     const loom_named_attr_t* attr = &attrs.entries[i];
     if (attr->name_id < module->strings.count &&

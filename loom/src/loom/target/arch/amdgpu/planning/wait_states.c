@@ -740,18 +740,6 @@ static uint16_t loom_amdgpu_wait_state_delay_alu_latency_cycles(
   }
 }
 
-static loom_named_attr_slice_t loom_amdgpu_wait_state_packet_attrs(
-    const loom_low_packet_view_t* packet) {
-  const loom_op_t* op = packet->node->op;
-  if (loom_low_op_isa(op)) {
-    return loom_low_op_attrs(op);
-  }
-  if (loom_low_const_isa(op)) {
-    return loom_low_const_attrs(op);
-  }
-  return loom_named_attr_slice_empty();
-}
-
 static const loom_named_attr_t* loom_amdgpu_wait_state_find_packet_attr(
     loom_named_attr_slice_t attrs, loom_string_id_t name_id) {
   if (name_id == LOOM_STRING_ID_INVALID) {
@@ -801,7 +789,7 @@ static iree_status_t loom_amdgpu_wait_state_read_dst_sel_immediate(
     const loom_string_id_t field_name_id =
         loom_module_lookup_string(builder->schedule->module, field_name);
     const loom_named_attr_t* attr = loom_amdgpu_wait_state_find_packet_attr(
-        loom_amdgpu_wait_state_packet_attrs(packet), field_name_id);
+        loom_low_packet_attrs(packet), field_name_id);
     if (attr == NULL) {
       if (iree_all_bits_set(immediate->flags,
                             LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
