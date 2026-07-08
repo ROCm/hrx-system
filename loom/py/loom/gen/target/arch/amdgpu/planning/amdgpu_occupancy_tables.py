@@ -141,6 +141,9 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
     model_keys = [info.descriptor_set_key for info in models]
     if len(model_keys) != len(set(model_keys)):
         raise ValueError("AMDGPU occupancy descriptor-set keys must be unique")
+    missing_model_keys = sorted(descriptor_set_keys - set(model_keys))
+    if missing_model_keys:
+        raise ValueError(f"AMDGPU occupancy models missing descriptor sets: {', '.join(missing_model_keys)}")
     for model in models:
         if model.descriptor_set_key not in descriptor_set_keys:
             raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{model.descriptor_set_key}'")

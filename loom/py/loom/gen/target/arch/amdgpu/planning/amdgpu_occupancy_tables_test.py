@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from loom.gen.target.arch.amdgpu.planning import amdgpu_occupancy_tables
 from loom.target.arch.amdgpu.target_info import sorted_occupancy_model_infos
 
@@ -25,3 +27,13 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert ".pressure_cliffs =" in source
     assert ".pressure_cliff_count =" in source
     assert "kLoomAmdgpuOccupancyModels[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT]" in source
+
+
+def test_occupancy_models_cover_all_descriptor_sets() -> None:
+    amdgpu_occupancy_tables._validate_models(sorted_occupancy_model_infos())
+
+
+def test_occupancy_models_reject_missing_descriptor_set() -> None:
+    models = sorted_occupancy_model_infos()[:-1]
+    with pytest.raises(ValueError, match="missing descriptor sets"):
+        amdgpu_occupancy_tables._validate_models(models)
