@@ -27,7 +27,6 @@ _ensure_runtime_py_on_path()
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    amdgpu_descriptor_ref_keys,
     build_amdgpu_core_descriptor_set_from_spec,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
@@ -43,7 +42,6 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
 )
-from loom.target.low_descriptors import target_relative_name  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 
@@ -92,14 +90,22 @@ class _VopdComponentDefinition:
 @dataclass(frozen=True, slots=True)
 class _VopdComponentRule:
     component: _VopdComponentDefinition
-    descriptor_ref: str
     descriptor_set_keys: tuple[str, ...]
-    descriptor_set_mask: str
+
+
+@dataclass(frozen=True, slots=True)
+class _VopdComponentDescriptorLookupRange:
+    descriptor_set_key: str
+    descriptor_set_ordinal: int
+    first_descriptor_lookup: int
+    descriptor_lookup_count: int
 
 
 @dataclass(frozen=True, slots=True)
 class _VopdComponentTables:
     rules: tuple[_VopdComponentRule, ...]
+    descriptor_lookup_ranges: tuple[_VopdComponentDescriptorLookupRange, ...]
+    descriptor_lookup_rows: tuple[int, ...]
 
 
 def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
@@ -122,28 +128,6 @@ def _parse_isa_xml_arguments(values: Sequence[str]) -> dict[str, AmdgpuIsaFactSo
         paths[key] = path
         specs[key] = parse_amdgpu_isa_xml_path(path)
     return specs
-
-
-def _descriptor_ref_constant_name(key: str) -> str:
-    ref_name = amdgpu_c_identifier_fragment(target_relative_name("amdgpu", key))
-    return f"LOOM_AMDGPU_DESCRIPTOR_REF_{ref_name}"
-
-
-def _descriptor_set_ordinal_constant_name(key: str) -> str:
-    ordinal_name = amdgpu_c_identifier_fragment(target_relative_name("amdgpu", key))
-    if ordinal_name.endswith("_CORE"):
-        ordinal_name = ordinal_name[: -len("_CORE")]
-    return f"LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_{ordinal_name}"
-
-
-def _descriptor_set_bit_expr(key: str) -> str:
-    return f"LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT({_descriptor_set_ordinal_constant_name(key)})"
-
-
-def _descriptor_set_mask_expr(keys: Sequence[str]) -> str:
-    if not keys:
-        raise ValueError("AMDGPU VOPD component row has no descriptor sets")
-    return " | ".join(_descriptor_set_bit_expr(key) for key in keys)
 
 
 def _descriptor_set_supports_vopd(info: AmdgpuDescriptorSetInfo) -> bool:
@@ -411,11 +395,11 @@ def _descriptor_set_infos_by_key(
     return {info.key: info for info in descriptor_set_infos}
 
 
-def _descriptor_sets_by_key(
+def _descriptor_keys_by_set_key(
     descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
-) -> dict[str, set[str]]:
-    descriptor_sets: dict[str, set[str]] = {}
+) -> dict[str, tuple[str, ...]]:
+    descriptor_keys: dict[str, tuple[str, ...]] = {}
     for info in descriptor_set_infos:
         try:
             spec = isa_specs[info.isa_xml_key]
@@ -427,22 +411,19 @@ def _descriptor_sets_by_key(
         )
         if descriptor_set.key != info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
-        descriptor_sets[info.key] = {descriptor.key for descriptor in descriptor_set.descriptors}
-    return descriptor_sets
+        descriptor_keys[info.key] = tuple(descriptor.key for descriptor in descriptor_set.descriptors)
+    return descriptor_keys
 
 
 def _validate_component_definition(
     component: _VopdComponentDefinition,
     descriptor_set_keys: Sequence[str],
     descriptor_set_infos_by_key: Mapping[str, AmdgpuDescriptorSetInfo],
-    descriptor_keys_by_set_key: Mapping[str, set[str]],
+    descriptor_keys_by_set_key: Mapping[str, tuple[str, ...]],
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
-    descriptor_ref_key_set: set[str],
 ) -> None:
     owner = f"AMDGPU VOPD component '{component.descriptor_key}'"
     _validate_uint16(owner, "opcode", component.op_value)
-    if component.descriptor_key not in descriptor_ref_key_set:
-        raise ValueError(f"{owner} requires a descriptor ref")
     if not descriptor_set_keys:
         raise ValueError(f"{owner} has no target descriptor sets")
 
@@ -452,10 +433,42 @@ def _validate_component_definition(
             raise ValueError(f"{owner} references unknown descriptor set '{descriptor_set_key}'")
         if not _descriptor_set_supports_vopd(info):
             raise ValueError(f"{owner} references non-VOPD descriptor set '{descriptor_set_key}'")
-        descriptor_keys = descriptor_keys_by_set_key[descriptor_set_key]
+        descriptor_keys = set(descriptor_keys_by_set_key[descriptor_set_key])
         if component.descriptor_key not in descriptor_keys:
             raise ValueError(f"{owner} references descriptor set '{descriptor_set_key}' where the scalar component descriptor is absent")
         _validate_xml_instruction(component, info, isa_specs[info.isa_xml_key])
+
+
+def _descriptor_lookup_rows_for_set(
+    descriptor_set_key: str,
+    descriptor_keys: Sequence[str],
+    rules: Sequence[_VopdComponentRule],
+) -> tuple[int, ...]:
+    rule_by_descriptor_key: dict[str, int] = {}
+    for rule_index, rule in enumerate(rules):
+        if descriptor_set_key not in rule.descriptor_set_keys:
+            continue
+        previous_index = rule_by_descriptor_key.setdefault(
+            rule.component.descriptor_key,
+            rule_index + 1,
+        )
+        if previous_index != rule_index + 1:
+            raise ValueError(f"AMDGPU VOPD descriptor '{rule.component.descriptor_key}' has multiple component rows for descriptor set '{descriptor_set_key}'")
+    return tuple(rule_by_descriptor_key.get(descriptor_key, 0) for descriptor_key in descriptor_keys)
+
+
+def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
+    rule_count = len(tables.rules)
+    lookup_count = len(tables.descriptor_lookup_rows)
+    for row in tables.descriptor_lookup_ranges:
+        owner = f"AMDGPU VOPD descriptor lookup range '{row.descriptor_set_key}'"
+        if row.first_descriptor_lookup > lookup_count or row.descriptor_lookup_count > lookup_count - row.first_descriptor_lookup:
+            raise ValueError(f"{owner} is out of bounds")
+        for descriptor_index_plus_one in tables.descriptor_lookup_rows[row.first_descriptor_lookup : row.first_descriptor_lookup + row.descriptor_lookup_count]:
+            if descriptor_index_plus_one == 0:
+                continue
+            if descriptor_index_plus_one > rule_count:
+                raise ValueError(f"{owner} references an out-of-bounds rule")
 
 
 def _materialize_vopd_component_tables(
@@ -463,8 +476,7 @@ def _materialize_vopd_component_tables(
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> _VopdComponentTables:
     infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
-    descriptor_keys_by_set_key = _descriptor_sets_by_key(descriptor_set_infos, isa_specs)
-    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
+    descriptor_keys_by_set_key = _descriptor_keys_by_set_key(descriptor_set_infos, isa_specs)
     components = _component_definitions()
 
     rules: list[_VopdComponentRule] = []
@@ -483,18 +495,44 @@ def _materialize_vopd_component_tables(
             infos_by_key,
             descriptor_keys_by_set_key,
             isa_specs,
-            descriptor_ref_key_set,
         )
         rules.append(
             _VopdComponentRule(
                 component=component,
-                descriptor_ref=_descriptor_ref_constant_name(component.descriptor_key),
                 descriptor_set_keys=descriptor_set_keys,
-                descriptor_set_mask=_descriptor_set_mask_expr(descriptor_set_keys),
             )
         )
 
-    return _VopdComponentTables(rules=tuple(rules))
+    descriptor_lookup_ranges: list[_VopdComponentDescriptorLookupRange] = []
+    descriptor_lookup_rows: list[int] = []
+    for info in descriptor_sets_by_ordinal:
+        if not _descriptor_set_supports_vopd(info):
+            continue
+        descriptor_set_ordinal = amdgpu_descriptor_set_ordinal(info.key)
+        if descriptor_set_ordinal < 0:
+            raise ValueError(f"AMDGPU descriptor set '{info.key}' has invalid ordinal {descriptor_set_ordinal}")
+        set_lookup_rows = _descriptor_lookup_rows_for_set(
+            info.key,
+            descriptor_keys_by_set_key[info.key],
+            rules,
+        )
+        descriptor_lookup_ranges.append(
+            _VopdComponentDescriptorLookupRange(
+                descriptor_set_key=info.key,
+                descriptor_set_ordinal=descriptor_set_ordinal,
+                first_descriptor_lookup=len(descriptor_lookup_rows),
+                descriptor_lookup_count=len(set_lookup_rows),
+            )
+        )
+        descriptor_lookup_rows.extend(set_lookup_rows)
+
+    tables = _VopdComponentTables(
+        rules=tuple(rules),
+        descriptor_lookup_ranges=tuple(descriptor_lookup_ranges),
+        descriptor_lookup_rows=tuple(descriptor_lookup_rows),
+    )
+    _validate_vopd_component_tables(tables)
+    return tables
 
 
 def _generated_header() -> list[str]:
@@ -520,8 +558,6 @@ def _component_rule_initializer(index: int, rule: _VopdComponentRule) -> str:
         [
             "LOOM_AMDGPU_VOPD_COMPONENT_RULE(",
             f"    {index},",
-            f"    {rule.descriptor_ref},",
-            f"    {rule.descriptor_set_mask},",
             f"    {component.op}, {component.same_op_reason},",
             f"    {_c_string_arg(component.op_name)},",
             f"    {_c_string_arg(component.same_op_reason_name)},",
@@ -551,6 +587,20 @@ def _component_reason_initializer(
     )
 
 
+def _descriptor_lookup_range_initializer(row: _VopdComponentDescriptorLookupRange) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE(",
+            f"    {row.descriptor_set_ordinal}, {row.first_descriptor_lookup},",
+            f"    {row.descriptor_lookup_count})",
+        ]
+    )
+
+
+def _descriptor_lookup_row_initializer(rule_index_plus_one: int) -> str:
+    return f"LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP({rule_index_plus_one})"
+
+
 def _emit_component_rules(tables: _VopdComponentTables) -> str:
     reason_initializers = [initializer for index, rule in enumerate(tables.rules) if (initializer := _component_reason_initializer(index, rule)) is not None]
     return (
@@ -559,6 +609,30 @@ def _emit_component_rules(tables: _VopdComponentTables) -> str:
                 *_generated_header(),
                 *(_component_rule_initializer(index, rule) for index, rule in enumerate(tables.rules)),
                 *reason_initializers,
+            ]
+        )
+        + "\n"
+    )
+
+
+def _emit_descriptor_lookup_ranges(tables: _VopdComponentTables) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_descriptor_lookup_range_initializer(row) for row in tables.descriptor_lookup_ranges),
+            ]
+        )
+        + "\n"
+    )
+
+
+def _emit_descriptor_lookup_rows(tables: _VopdComponentTables) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_descriptor_lookup_row_initializer(row) for row in tables.descriptor_lookup_rows),
             ]
         )
         + "\n"
@@ -583,15 +657,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated VOPD component rule row fragment path.",
     )
+    parser.add_argument(
+        "--descriptor-lookup-ranges",
+        type=Path,
+        help="Generated VOPD descriptor-set lookup range fragment path.",
+    )
+    parser.add_argument(
+        "--descriptor-lookups",
+        type=Path,
+        help="Generated VOPD descriptor-ordinal lookup fragment path.",
+    )
     args = parser.parse_args(argv)
-    if args.component_rules is None:
+    if args.component_rules is None and args.descriptor_lookup_ranges is None and args.descriptor_lookups is None:
         parser.error("at least one output path is required")
 
     tables = _materialize_vopd_component_tables(
         sorted_descriptor_set_infos(),
         _parse_isa_xml_arguments(args.isa_xml),
     )
-    _write_output(args.component_rules, _emit_component_rules(tables))
+    if args.component_rules is not None:
+        _write_output(args.component_rules, _emit_component_rules(tables))
+    if args.descriptor_lookup_ranges is not None:
+        _write_output(args.descriptor_lookup_ranges, _emit_descriptor_lookup_ranges(tables))
+    if args.descriptor_lookups is not None:
+        _write_output(args.descriptor_lookups, _emit_descriptor_lookup_rows(tables))
     return 0
 
 

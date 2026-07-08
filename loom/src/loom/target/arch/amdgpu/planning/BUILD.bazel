@@ -259,6 +259,24 @@ loom_generated_textual_header(
     output_flag = "--component-rules",
 )
 
+loom_generated_textual_header(
+    name = "vopd_component_descriptor_lookup_ranges_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_component_descriptor_lookup_ranges.inl",
+    output_flag = "--descriptor-lookup-ranges",
+)
+
+loom_generated_textual_header(
+    name = "vopd_component_descriptor_lookups_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_component_descriptor_lookups.inl",
+    output_flag = "--descriptor-lookups",
+)
+
 loom_cc_library(
     name = "wait_packet_tables",
     srcs = ["wait_packet_tables.c"],
@@ -319,7 +337,11 @@ loom_cc_library(
     name = "vopd_plan",
     srcs = ["vopd_plan.c"],
     hdrs = ["vopd_plan.h"],
-    textual_hdrs = [":vopd_component_rules.inl"],
+    textual_hdrs = [
+        ":vopd_component_descriptor_lookup_ranges.inl",
+        ":vopd_component_descriptor_lookups.inl",
+        ":vopd_component_rules.inl",
+    ],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         ":descriptor_semantics",
