@@ -9,7 +9,6 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -73,7 +72,7 @@ class AmdgpuWaitPacketTest : public ::testing::Test {
                    << ToString(expected.descriptor_set_key);
     }
     loom_amdgpu_wait_packet_selection_t selection = {};
-    IREE_ASSERT_OK(loom_amdgpu_wait_packet_select_counter_mask(
+    ASSERT_TRUE(loom_amdgpu_wait_packet_try_select_counter_mask(
         descriptor_set, expected.counter_mask, /*target_count=*/0, &selection));
 
     EXPECT_EQ(selection.counter_mask, expected.counter_mask);
@@ -152,7 +151,7 @@ TEST_F(AmdgpuWaitPacketTest, ClampsTargetCountToNoWaitEncoding) {
   ASSERT_NE(descriptor_set, nullptr);
 
   loom_amdgpu_wait_packet_selection_t selection = {};
-  IREE_ASSERT_OK(loom_amdgpu_wait_packet_select_counter_mask(
+  ASSERT_TRUE(loom_amdgpu_wait_packet_try_select_counter_mask(
       descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
       /*target_count=*/UINT16_MAX, &selection));
 
