@@ -684,6 +684,15 @@ static iree_status_t loom_target_low_legality_reject_contract_query(
   return loom_target_low_legality_emit_no_target_contract(context, op);
 }
 
+static iree_status_t
+loom_target_low_legality_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data) {
+  return loom_target_low_legality_get_or_allocate_target_state(
+      (loom_target_low_legality_context_t*)user_data, key, data_length,
+      out_data);
+}
+
 static iree_status_t loom_target_low_legality_try_contract_query_op(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
@@ -704,8 +713,15 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
       .target_ref = context->options->target_ref,
       .descriptor_set = context->descriptor_set,
       .fact_table = context->fact_table,
+      .value_domain = context->value_domain,
       .view_regions = view_regions,
       .arena = &context->arena,
+      .target_state_allocator =
+          {
+              .fn =
+                  loom_target_low_legality_contract_query_get_or_allocate_target_state,
+              .user_data = context,
+          },
   };
   loom_target_contract_query_result_t result =
       loom_target_contract_query_result_empty();

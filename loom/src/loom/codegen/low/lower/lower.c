@@ -982,6 +982,13 @@ static bool loom_low_lower_rule_selection_is_better_failure(
               failed_rule_selection.matched_guard_count);
 }
 
+static iree_status_t loom_low_lower_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data) {
+  return loom_low_lower_get_or_allocate_target_state(
+      (loom_low_lower_context_t*)user_data, key, data_length, out_data);
+}
+
 static iree_status_t loom_low_lower_query_environment_from_context(
     loom_low_lower_context_t* context,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -997,8 +1004,14 @@ static iree_status_t loom_low_lower_query_environment_from_context(
       .target_ref = context->options->target_ref,
       .descriptor_set = descriptor_set,
       .fact_table = context->lowering.fact_table,
+      .value_domain = &context->lowering.value_domain,
       .view_regions = view_regions,
       .arena = &context->arena,
+      .target_state_allocator =
+          {
+              .fn = loom_low_lower_contract_query_get_or_allocate_target_state,
+              .user_data = context,
+          },
   };
   return iree_ok_status();
 }
@@ -1241,6 +1254,20 @@ static iree_status_t loom_low_lower_query_target_contract_from_context(
   }
   iree_status_t status = iree_ok_status();
   loom_target_contract_query_environment_t query_environment = *environment;
+  if (query_environment.value_domain == NULL) {
+    query_environment.value_domain =
+        loom_low_lower_context_value_domain(context);
+  }
+  if (query_environment.arena == NULL) {
+    query_environment.arena = &context->arena;
+  }
+  if (query_environment.target_state_allocator.fn == NULL) {
+    query_environment.target_state_allocator =
+        (loom_target_contract_query_state_allocator_t){
+            .fn = loom_low_lower_contract_query_get_or_allocate_target_state,
+            .user_data = context,
+        };
+  }
   if (query_environment.view_regions == NULL) {
     const loom_view_region_table_t* view_regions = NULL;
     status = loom_low_lower_context_view_regions(context, &view_regions);

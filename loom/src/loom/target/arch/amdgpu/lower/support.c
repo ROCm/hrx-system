@@ -804,6 +804,8 @@ typedef struct loom_amdgpu_source_value_analysis_record_t {
 typedef struct loom_amdgpu_source_value_analysis_t {
   // Dense source value domain owned by the current source-to-low lowering run.
   const loom_local_value_domain_t* value_domain;
+  // Fact table used to derive records.
+  const loom_value_fact_table_t* fact_table;
   // Cached analysis records indexed by function-local source value ordinal.
   loom_amdgpu_source_value_analysis_record_t* records;
   // Number of initialized records.
@@ -821,13 +823,16 @@ static int loom_amdgpu_source_value_analysis_state_key;
 
 static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_module_t* module, loom_func_like_t source_function,
+    const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena,
     loom_amdgpu_source_value_analysis_t* analysis) {
   if (analysis->value_domain != value_domain ||
+      analysis->fact_table != fact_table ||
       (value_domain != NULL &&
        analysis->record_count < value_domain->value_count)) {
     analysis->value_domain = value_domain;
+    analysis->fact_table = fact_table;
     analysis->records = NULL;
     analysis->record_count =
         value_domain != NULL ? value_domain->value_count : 0;
@@ -865,6 +870,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_context(
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       loom_low_lower_context_module(context),
       loom_low_lower_context_source_function(context),
+      loom_low_lower_context_fact_table(context),
       loom_low_lower_context_value_domain(context),
       loom_low_lower_context_scratch_arena(context), analysis));
   *out_analysis = analysis;
@@ -885,8 +891,31 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_target_low_legality(
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       loom_target_low_legality_module(context),
       loom_target_low_legality_function(context),
+      loom_target_low_legality_fact_table(context),
       loom_target_low_legality_value_domain(context),
       loom_target_low_legality_scratch_arena(context), analysis));
+  *out_analysis = analysis;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_source_value_analysis_for_contract_query(
+    const loom_target_contract_query_environment_t* environment,
+    loom_amdgpu_source_value_analysis_t** out_analysis) {
+  *out_analysis = NULL;
+  if (environment->value_domain == NULL ||
+      environment->target_state_allocator.fn == NULL) {
+    return iree_ok_status();
+  }
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_contract_query_get_or_allocate_target_state(
+      environment, &loom_amdgpu_source_value_analysis_state_key,
+      sizeof(*analysis), (void**)&analysis));
+  if (analysis == NULL) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
+      environment->module, environment->function, environment->fact_table,
+      environment->value_domain, environment->arena, analysis));
   *out_analysis = analysis;
   return iree_ok_status();
 }
@@ -3117,11 +3146,16 @@ iree_status_t loom_amdgpu_map_contract_value(
   *out_mapped_value = loom_low_lower_rule_mapped_value_none();
   const loom_type_t source_type =
       loom_module_value_type(environment->module, source_value_id);
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  if (loom_amdgpu_source_value_register_shape_needs_analysis(source_type)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_for_contract_query(
+        environment, &analysis));
+  }
   loom_amdgpu_register_shape_t shape = {0};
   if (loom_amdgpu_source_value_register_shape(
           environment->module, environment->fact_table,
-          environment->view_regions, /*analysis=*/NULL, source_value_id,
-          source_type, &shape)) {
+          environment->view_regions, analysis, source_value_id, source_type,
+          &shape)) {
     loom_amdgpu_map_contract_register(environment, shape.class_id,
                                       shape.unit_count, out_mapped_value);
   }
