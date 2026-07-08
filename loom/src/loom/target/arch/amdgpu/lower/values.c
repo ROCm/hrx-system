@@ -6001,10 +6001,11 @@ static bool loom_amdgpu_vector_fp8_query_storage_pair_set(
     const loom_amdgpu_vector_fp8_decode_value_flag_cache_t* value_flag_cache,
     uint32_t pair_count, loom_amdgpu_vector_fp8_pair_storage_t* pair_storage,
     loom_amdgpu_fp8_decode_value_flags_t* out_value_flags) {
-  if (pair_count == 0 || pair_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS ||
-      plan->storage_register_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS ||
-      plan->lane_count == 0 || plan->lane_count > pair_count * 2u ||
-      plan->lane_count <= (pair_count - 1u) * 2u) {
+  const uint32_t required_pair_count = (plan->lane_count + 1u) / 2u;
+  if (required_pair_count == 0 ||
+      required_pair_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS ||
+      pair_count != required_pair_count ||
+      plan->storage_register_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS) {
     return false;
   }
 
@@ -7508,31 +7509,34 @@ typedef uint32_t loom_amdgpu_vector_fp8_conversion_capabilities_t;
 
 static bool loom_amdgpu_vector_fp8_plan_has_pair_storage(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  for (uint32_t lane_index = 0; lane_index < plan->lane_count;
-       lane_index += 2u) {
-    loom_amdgpu_vector_fp8_pair_storage_t pair_storage;
-    if (!loom_amdgpu_vector_fp8_query_storage_pair(plan, lane_index,
-                                                   &pair_storage)) {
-      return false;
-    }
+  if (plan->lane_count == 0 || plan->storage_lane_stride != 1u) {
+    return false;
   }
-  return true;
+  const uint32_t pair_count = (plan->lane_count + 1u) / 2u;
+  const uint32_t first_byte_offset = plan->storage_lane_offset & 3u;
+  if (first_byte_offset == 3u ||
+      (pair_count > 1u && (first_byte_offset & 1u) != 0)) {
+    return false;
+  }
+  const uint64_t required_storage_lane_count =
+      ((uint64_t)plan->lane_count + 1u) & ~UINT64_C(1);
+  const uint64_t last_storage_lane =
+      (uint64_t)plan->storage_lane_offset + required_storage_lane_count - 1u;
+  return last_storage_lane < (uint64_t)plan->storage_lane_count &&
+         last_storage_lane / 4u < (uint64_t)plan->storage_register_count;
 }
 
 static bool loom_amdgpu_vector_fp8_plan_has_octet_storage(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  if (plan->lane_count == 0 || (plan->lane_count & 7u) != 0) {
+  if (plan->lane_count == 0 || (plan->lane_count & 7u) != 0 ||
+      plan->storage_lane_stride != 1u ||
+      (plan->storage_lane_offset & 3u) != 0) {
     return false;
   }
-  for (uint32_t lane_index = 0; lane_index < plan->lane_count;
-       lane_index += 8u) {
-    loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
-    if (!loom_amdgpu_vector_fp8_query_storage_octet(plan, lane_index,
-                                                    &octet_storage)) {
-      return false;
-    }
-  }
-  return true;
+  const uint64_t last_storage_lane =
+      (uint64_t)plan->storage_lane_offset + (uint64_t)plan->lane_count - 1u;
+  return last_storage_lane < (uint64_t)plan->storage_lane_count &&
+         last_storage_lane / 4u < (uint64_t)plan->storage_register_count;
 }
 
 static bool loom_amdgpu_vector_fp8_descriptor_set_has_ref(
