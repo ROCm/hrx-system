@@ -16,6 +16,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
@@ -122,6 +123,14 @@ static iree_status_t loom_symbolic_expr_stabilize_scratch_terms(
 //===----------------------------------------------------------------------===//
 // Constructors and normalization
 //===----------------------------------------------------------------------===//
+
+static bool loom_symbolic_term_less(const loom_symbolic_term_t* lhs,
+                                    const loom_symbolic_term_t* rhs) {
+  return lhs->value_id < rhs->value_id;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_symbolic_expr_sort_terms, loom_symbolic_term_t,
+                          loom_symbolic_term_less)
 
 static loom_value_facts_t loom_symbolic_expr_lookup_facts(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
@@ -390,15 +399,8 @@ static bool loom_symbolic_expr_bounded_raw_append_term(
 static bool loom_symbolic_expr_bounded_normalize_raw_terms(
     loom_symbolic_term_t* terms, iree_host_size_t* inout_term_count) {
   const iree_host_size_t term_count = *inout_term_count;
-  for (iree_host_size_t i = 1; i < term_count; ++i) {
-    const loom_symbolic_term_t term = terms[i];
-    iree_host_size_t insertion_index = i;
-    while (insertion_index > 0 &&
-           terms[insertion_index - 1].value_id > term.value_id) {
-      terms[insertion_index] = terms[insertion_index - 1];
-      --insertion_index;
-    }
-    terms[insertion_index] = term;
+  if (term_count > 1) {
+    loom_symbolic_expr_sort_terms(terms, term_count);
   }
 
   iree_host_size_t write_index = 0;
@@ -933,36 +935,6 @@ void loom_symbolic_expr_constant(int64_t value,
       .facts = loom_value_facts_exact_i64(value),
       .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
   };
-}
-
-static void loom_symbolic_expr_sort_terms(loom_symbolic_term_t* terms,
-                                          iree_host_size_t term_count) {
-  if (term_count <= 16) {
-    for (iree_host_size_t i = 1; i < term_count; ++i) {
-      const loom_symbolic_term_t term = terms[i];
-      iree_host_size_t insertion_index = i;
-      while (insertion_index > 0 &&
-             terms[insertion_index - 1].value_id > term.value_id) {
-        terms[insertion_index] = terms[insertion_index - 1];
-        --insertion_index;
-      }
-      terms[insertion_index] = term;
-    }
-    return;
-  }
-
-  for (iree_host_size_t gap = term_count / 2; gap > 0; gap /= 2) {
-    for (iree_host_size_t i = gap; i < term_count; ++i) {
-      const loom_symbolic_term_t term = terms[i];
-      iree_host_size_t insertion_index = i;
-      while (insertion_index >= gap &&
-             terms[insertion_index - gap].value_id > term.value_id) {
-        terms[insertion_index] = terms[insertion_index - gap];
-        insertion_index -= gap;
-      }
-      terms[insertion_index] = term;
-    }
-  }
 }
 
 static iree_status_t loom_symbolic_expr_make_linear(

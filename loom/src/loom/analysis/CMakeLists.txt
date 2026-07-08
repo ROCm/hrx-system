@@ -787,6 +787,7 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::scalar
     loom::ops::scf
+    loom::util::adaptive_sort
     loom::util::fact_table
     loom::util::math
   PUBLIC
