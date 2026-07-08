@@ -39,18 +39,11 @@ bool loom_amdgpu_type_is_i1(loom_type_t type) {
 
 uint32_t loom_amdgpu_integer_scalar_type_bit_count(
     loom_scalar_type_t scalar_type) {
-  switch (scalar_type) {
-    case LOOM_SCALAR_TYPE_I8:
-      return 8;
-    case LOOM_SCALAR_TYPE_I16:
-      return 16;
-    case LOOM_SCALAR_TYPE_I32:
-      return 32;
-    case LOOM_SCALAR_TYPE_I64:
-      return 64;
-    default:
-      return 0;
+  if (!loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
+                                     scalar_type)) {
+    return 0;
   }
+  return (uint32_t)loom_scalar_type_bitwidth(scalar_type);
 }
 
 uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type) {
@@ -63,8 +56,8 @@ uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type) {
 
 bool loom_amdgpu_type_is_address_scalar(loom_type_t type) {
   return loom_type_is_scalar(type) &&
-         (loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX ||
-          loom_type_element_type(type) == LOOM_SCALAR_TYPE_OFFSET);
+         loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_ADDRESS,
+                                       loom_type_element_type(type));
 }
 
 bool loom_amdgpu_source_address_value_needs_64bit(
@@ -104,9 +97,9 @@ bool loom_amdgpu_type_is_f16_or_bf16(loom_type_t type) {
   if (!loom_type_is_scalar(type)) {
     return false;
   }
-  const loom_scalar_type_t element_type = loom_type_element_type(type);
-  return element_type == LOOM_SCALAR_TYPE_F16 ||
-         element_type == LOOM_SCALAR_TYPE_BF16;
+  return loom_scalar_type_set_contains(
+      LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_BF16,
+      loom_type_element_type(type));
 }
 
 typedef enum loom_amdgpu_vector_storage_rule_flag_bits_e {
