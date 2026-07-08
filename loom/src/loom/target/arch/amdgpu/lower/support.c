@@ -1034,6 +1034,9 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_type_t source_type) {
+  if (!loom_memory_access_isa(loom_memory_access_cast(module, source_op))) {
+    return false;
+  }
   if (fact_table == NULL || view_regions == NULL) {
     return true;
   }
@@ -1743,10 +1746,7 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
     return false;
   }
   const loom_op_t* defining_op = loom_value_def_op(incoming_value);
-  if (defining_op == NULL ||
-      (defining_op->kind != LOOM_OP_VECTOR_LOAD &&
-       defining_op->kind != LOOM_OP_VIEW_LOAD) ||
-      loom_value_def_index(incoming_value) != 0) {
+  if (defining_op == NULL || loom_value_def_index(incoming_value) != 0) {
     return false;
   }
   return loom_amdgpu_source_memory_access_prefers_vgpr(
