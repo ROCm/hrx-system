@@ -77,6 +77,8 @@ typedef enum loom_amdgpu_vopd_packet_flag_bits_e {
   LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED = 1u << 0,
   // Packet has a planned ALU depctr wait before it.
   LOOM_AMDGPU_VOPD_PACKET_FLAG_TRANS_RESULT_CLEAR = 1u << 1,
+  // Packet forwards dependencies without materializing a target packet.
+  LOOM_AMDGPU_VOPD_PACKET_FLAG_TRANSPARENT = 1u << 2,
 } loom_amdgpu_vopd_packet_flag_bits_t;
 typedef uint8_t loom_amdgpu_vopd_packet_flags_t;
 
@@ -640,6 +642,37 @@ static iree_status_t loom_amdgpu_vopd_mark_wait_state_insertions(
         wait_state->scheduled_ordinal, &packet_index));
     builder->packet_flags[packet_index] |=
         LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_vopd_mark_transparent_packets(
+    loom_amdgpu_vopd_plan_builder_t* builder) {
+  if (builder->packet_flags == NULL) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t packet_index = 0;
+       packet_index < builder->schedule->scheduled_node_count; ++packet_index) {
+    if (iree_any_bit_set(builder->packet_flags[packet_index],
+                         LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED)) {
+      continue;
+    }
+    loom_low_packet_view_t packet = {0};
+    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
+        builder->schedule, builder->allocation, packet_index, &packet));
+    if (packet.descriptor != NULL) {
+      continue;
+    }
+
+    loom_amdgpu_structural_packet_info_t info = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
+        builder->allocation, packet.node->op, 0, &info));
+    if (iree_any_bit_set(
+            info.flags,
+            LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES)) {
+      builder->packet_flags[packet_index] |=
+          LOOM_AMDGPU_VOPD_PACKET_FLAG_TRANSPARENT;
+    }
   }
   return iree_ok_status();
 }
@@ -1558,30 +1591,6 @@ static void loom_amdgpu_vopd_append_rejection(
       };
 }
 
-static iree_status_t loom_amdgpu_vopd_packet_is_transparent(
-    const loom_amdgpu_vopd_plan_builder_t* builder,
-    iree_host_size_t packet_index, bool* out_transparent) {
-  *out_transparent = false;
-  if (iree_any_bit_set(builder->packet_flags[packet_index],
-                       LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED)) {
-    return iree_ok_status();
-  }
-
-  loom_low_packet_view_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-      builder->schedule, builder->allocation, packet_index, &packet));
-  if (packet.descriptor != NULL) {
-    return iree_ok_status();
-  }
-
-  loom_amdgpu_structural_packet_info_t info = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-      builder->allocation, packet.node->op, 0, &info));
-  *out_transparent = iree_any_bit_set(
-      info.flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_vopd_find_visible_packet(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_schedule_block_t* block,
@@ -1594,10 +1603,8 @@ static iree_status_t loom_amdgpu_vopd_find_visible_packet(
       block->scheduled_node_start + block->scheduled_node_count;
   for (iree_host_size_t packet_index = search_packet_index;
        packet_index < block_end; ++packet_index) {
-    bool transparent = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_packet_is_transparent(
-        builder, packet_index, &transparent));
-    if (transparent) {
+    if (iree_any_bit_set(builder->packet_flags[packet_index],
+                         LOOM_AMDGPU_VOPD_PACKET_FLAG_TRANSPARENT)) {
       continue;
     }
     *out_packet_index = packet_index;
@@ -1679,6 +1686,7 @@ static iree_status_t loom_amdgpu_vopd_plan_build_pairs(
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(builder->allocation, &scratch));
   iree_status_t status = iree_ok_status();
+  status = loom_amdgpu_vopd_mark_transparent_packets(builder);
   for (iree_host_size_t i = 0;
        i < builder->schedule->block_count && iree_status_is_ok(status); ++i) {
     status =
