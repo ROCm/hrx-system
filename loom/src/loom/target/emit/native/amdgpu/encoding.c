@@ -817,34 +817,47 @@ static iree_status_t loom_amdgpu_descriptor_operand_field_already_encoded(
   return iree_ok_status();
 }
 
+static uint32_t loom_amdgpu_descriptor_immediate_row(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    uint16_t descriptor_immediate_index) {
+  IREE_ASSERT(descriptor_set->immediates != NULL);
+  IREE_ASSERT_LT(descriptor_immediate_index, descriptor->immediate_count);
+  const uint64_t immediate_row =
+      (uint64_t)descriptor->immediate_start + descriptor_immediate_index;
+  IREE_ASSERT_LE(immediate_row, UINT32_MAX);
+  IREE_ASSERT_LT(immediate_row, descriptor_set->immediate_count);
+  return (uint32_t)immediate_row;
+}
+
+static const loom_low_immediate_t* loom_amdgpu_descriptor_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    uint16_t descriptor_immediate_index) {
+  return &descriptor_set->immediates[loom_amdgpu_descriptor_immediate_row(
+      descriptor_set, descriptor, descriptor_immediate_index)];
+}
+
+static loom_string_id_t loom_amdgpu_descriptor_immediate_name_id(
+    const loom_amdgpu_encode_state_t* state, uint32_t immediate_row) {
+  IREE_ASSERT(state->immediate_name_ids != NULL);
+  IREE_ASSERT_LT(immediate_row, state->immediate_name_id_count);
+  return state->immediate_name_ids[immediate_row];
+}
+
 static iree_status_t loom_amdgpu_read_immediate_field_value(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
     int64_t* out_value) {
   *out_value = 0;
-  if (descriptor_immediate_index >= packet->descriptor->immediate_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding descriptor immediate index %" PRIu16
-        " is out of range",
-        descriptor_immediate_index);
-  }
-  const uint32_t immediate_row =
-      packet->descriptor->immediate_start + descriptor_immediate_index;
-  if (immediate_row >=
-      state->schedule->target.descriptor_set->immediate_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding descriptor immediate row %" PRIu32
-        " is out of range",
-        immediate_row);
-  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->schedule->target.descriptor_set;
+  const uint32_t immediate_row = loom_amdgpu_descriptor_immediate_row(
+      descriptor_set, packet->descriptor, descriptor_immediate_index);
   const loom_low_immediate_t* immediate =
-      &state->schedule->target.descriptor_set->immediates[immediate_row];
+      &descriptor_set->immediates[immediate_row];
   const loom_string_id_t field_name_id =
-      immediate_row < state->immediate_name_id_count
-          ? state->immediate_name_ids[immediate_row]
-          : LOOM_STRING_ID_INVALID;
+      loom_amdgpu_descriptor_immediate_name_id(state, immediate_row);
   const loom_named_attr_t* attr = loom_amdgpu_find_packet_attr_by_name_id(
       loom_amdgpu_packet_attrs(packet), field_name_id);
   if (attr != NULL && attr->value.kind == LOOM_ATTR_I64) {
@@ -854,8 +867,7 @@ static iree_status_t loom_amdgpu_read_immediate_field_value(
 
   iree_string_view_t field_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_string(
-      state->schedule->target.descriptor_set,
-      immediate->field_name_string_offset, &field_name));
+      descriptor_set, immediate->field_name_string_offset, &field_name));
   if (attr == NULL) {
     if (iree_any_bit_set(immediate->flags,
                          LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
@@ -878,13 +890,12 @@ static iree_status_t loom_amdgpu_read_immediate_field_name(
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
     iree_string_view_t* out_field_name) {
   *out_field_name = iree_string_view_empty();
-  const uint32_t immediate_row =
-      packet->descriptor->immediate_start + descriptor_immediate_index;
-  const loom_low_immediate_t* immediate =
-      &state->schedule->target.descriptor_set->immediates[immediate_row];
-  return loom_amdgpu_descriptor_string(state->schedule->target.descriptor_set,
-                                       immediate->field_name_string_offset,
-                                       out_field_name);
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->schedule->target.descriptor_set;
+  const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
+      descriptor_set, packet->descriptor, descriptor_immediate_index);
+  return loom_amdgpu_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset, out_field_name);
 }
 
 static iree_status_t loom_amdgpu_read_immediate_u32(
@@ -982,25 +993,17 @@ static iree_status_t loom_amdgpu_read_immediate_symbol(
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
     iree_string_view_t* out_symbol_name) {
   *out_symbol_name = iree_string_view_empty();
-  if (descriptor_immediate_index >= packet->descriptor->immediate_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding descriptor immediate index %" PRIu16
-        " is out of range",
-        descriptor_immediate_index);
-  }
-  const uint32_t immediate_row =
-      packet->descriptor->immediate_start + descriptor_immediate_index;
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->schedule->target.descriptor_set;
+  const uint32_t immediate_row = loom_amdgpu_descriptor_immediate_row(
+      descriptor_set, packet->descriptor, descriptor_immediate_index);
   const loom_low_immediate_t* immediate =
-      &state->schedule->target.descriptor_set->immediates[immediate_row];
+      &descriptor_set->immediates[immediate_row];
   iree_string_view_t field_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_string(
-      state->schedule->target.descriptor_set,
-      immediate->field_name_string_offset, &field_name));
+      descriptor_set, immediate->field_name_string_offset, &field_name));
   const loom_string_id_t field_name_id =
-      immediate_row < state->immediate_name_id_count
-          ? state->immediate_name_ids[immediate_row]
-          : LOOM_STRING_ID_INVALID;
+      loom_amdgpu_descriptor_immediate_name_id(state, immediate_row);
   const loom_named_attr_t* attr = loom_amdgpu_find_packet_attr_by_name_id(
       loom_amdgpu_packet_attrs(packet), field_name_id);
   return loom_amdgpu_symbol_name_from_attr(state, attr, field_name,
@@ -1059,9 +1062,8 @@ static iree_status_t loom_amdgpu_find_rel32_text_fixup_immediates(
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < packet->descriptor->immediate_count; ++i) {
-    const uint32_t immediate_row = packet->descriptor->immediate_start + i;
     const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[immediate_row];
+        loom_amdgpu_descriptor_immediate(descriptor_set, packet->descriptor, i);
     if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ORDINAL &&
         iree_all_bits_set(immediate->flags,
                           LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC |
@@ -1158,10 +1160,10 @@ static iree_status_t loom_amdgpu_read_immediate_encoding_field_value(
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_field_value(
       state, packet, descriptor_immediate_index, &value));
-  const uint32_t immediate_row =
-      packet->descriptor->immediate_start + descriptor_immediate_index;
-  const loom_low_immediate_t* immediate =
-      &state->schedule->target.descriptor_set->immediates[immediate_row];
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->schedule->target.descriptor_set;
+  const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
+      descriptor_set, packet->descriptor, descriptor_immediate_index);
   if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_SIGNED) {
     const int64_t maximum = immediate->unsigned_max > INT64_MAX
                                 ? INT64_MAX
@@ -1169,8 +1171,7 @@ static iree_status_t loom_amdgpu_read_immediate_encoding_field_value(
     if (value < immediate->signed_min || value > maximum) {
       iree_string_view_t field_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_string(
-          state->schedule->target.descriptor_set,
-          immediate->field_name_string_offset, &field_name));
+          descriptor_set, immediate->field_name_string_offset, &field_name));
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AMDGPU native encoding signed immediate '%.*s' "
                               "value %" PRId64 " is out of range",
@@ -1179,8 +1180,7 @@ static iree_status_t loom_amdgpu_read_immediate_encoding_field_value(
     if (immediate->bit_width == 0 || immediate->bit_width > 64) {
       iree_string_view_t field_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_string(
-          state->schedule->target.descriptor_set,
-          immediate->field_name_string_offset, &field_name));
+          descriptor_set, immediate->field_name_string_offset, &field_name));
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "AMDGPU native encoding signed immediate '%.*s' has invalid bit "
@@ -1194,8 +1194,7 @@ static iree_status_t loom_amdgpu_read_immediate_encoding_field_value(
   if (value < 0) {
     iree_string_view_t field_name = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_string(
-        state->schedule->target.descriptor_set,
-        immediate->field_name_string_offset, &field_name));
+        descriptor_set, immediate->field_name_string_offset, &field_name));
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU native encoding immediate '%.*s' value "
                             "%" PRId64 " is negative",
@@ -1705,7 +1704,7 @@ static iree_status_t loom_amdgpu_descriptor_literal_immediate_u32(
       state->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < packet->descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[packet->descriptor->immediate_start + i];
+        loom_amdgpu_descriptor_immediate(descriptor_set, packet->descriptor, i);
     if (!loom_amdgpu_encoding_field_is_literal(immediate->encoding_field_id) ||
         immediate->encoding_slice_count != 0) {
       continue;
@@ -1882,7 +1881,7 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
 
   for (uint16_t i = 0; i < packet->descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[packet->descriptor->immediate_start + i];
+        loom_amdgpu_descriptor_immediate(descriptor_set, packet->descriptor, i);
     if (immediate->encoding_field_id == 0 &&
         immediate->encoding_slice_count == 0) {
       continue;
@@ -2598,26 +2597,14 @@ static iree_status_t loom_amdgpu_encode_generic_wait_packet(
     const iree_host_size_t immediate_index = wait_packet->immediate_start + i;
     const loom_amdgpu_wait_packet_immediate_t* packet_immediate =
         &state->wait_packets->immediates[immediate_index];
-    if (packet_immediate->descriptor_immediate_index >=
-        descriptor->immediate_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU wait packet immediate index %" PRIu16
-                              " is out of range",
-                              packet_immediate->descriptor_immediate_index);
-    }
+    (void)loom_amdgpu_descriptor_immediate(
+        descriptor_set, descriptor,
+        packet_immediate->descriptor_immediate_index);
   }
 
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
-    const uint32_t descriptor_immediate_row = descriptor->immediate_start + i;
-    if (descriptor_immediate_row >= descriptor_set->immediate_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU wait packet descriptor immediate row %" PRIu32
-          " is out of range",
-          descriptor_immediate_row);
-    }
     const loom_low_immediate_t* descriptor_immediate =
-        &descriptor_set->immediates[descriptor_immediate_row];
+        loom_amdgpu_descriptor_immediate(descriptor_set, descriptor, i);
     if (descriptor_immediate->encoding_field_id == 0) {
       continue;
     }
