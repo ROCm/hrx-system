@@ -612,61 +612,78 @@ typedef iree_status_t (*loom_vector_to_scalar_op_lowerer_t)(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled);
 
-typedef struct loom_vector_to_scalar_op_lowerer_def_t {
-  // Op kind owned by this semantic lowerer.
-  loom_op_kind_t kind;
-  // Lowers or deliberately skips the matched op.
-  loom_vector_to_scalar_op_lowerer_t lower;
-} loom_vector_to_scalar_op_lowerer_def_t;
+#define LOOM_VECTOR_TO_SCALAR_VECTOR_OP_INDEX(op_kind) \
+  ((uint8_t)((op_kind) & 0xFFu))
+#define LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(op, lowerer) \
+  [LOOM_VECTOR_TO_SCALAR_VECTOR_OP_INDEX(LOOM_OP_VECTOR_##op)] = lowerer
 
-static const loom_vector_to_scalar_op_lowerer_def_t
-    kVectorToScalarOpLowerers[] = {
-        {LOOM_OP_VECTOR_DEINTERLEAVE, loom_vector_to_scalar_lower_deinterleave},
-        {LOOM_OP_VECTOR_STORE, loom_vector_to_scalar_lower_memory_store_op},
-        {LOOM_OP_VECTOR_STORE_MASK,
-         loom_vector_to_scalar_lower_memory_store_op},
-        {LOOM_OP_VECTOR_FRAGMENT_STORE,
-         loom_vector_to_scalar_lower_fragment_store_op},
-        {LOOM_OP_VECTOR_SCATTER, loom_vector_to_scalar_lower_memory_store_op},
-        {LOOM_OP_VECTOR_SCATTER_MASK,
-         loom_vector_to_scalar_lower_memory_store_op},
-        {LOOM_OP_VECTOR_STORE_COMPRESS,
-         loom_vector_to_scalar_lower_store_compress_op},
-        {LOOM_OP_VECTOR_ATOMIC_REDUCE,
-         loom_vector_to_scalar_lower_atomic_reduce_op},
-        {LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK,
-         loom_vector_to_scalar_lower_atomic_reduce_op},
-        {LOOM_OP_VECTOR_ATOMIC_RMW, loom_vector_to_scalar_lower_atomic_rmw_op},
-        {LOOM_OP_VECTOR_ATOMIC_RMW_MASK,
-         loom_vector_to_scalar_lower_atomic_rmw_op},
-        {LOOM_OP_VECTOR_ATOMIC_CMPXCHG,
-         loom_vector_to_scalar_lower_atomic_cmpxchg_op},
-        {LOOM_OP_VECTOR_CONSTANT, loom_vector_to_scalar_lower_static_constant},
-        {LOOM_OP_VECTOR_POISON, loom_vector_to_scalar_lower_static_poison},
-        {LOOM_OP_VECTOR_EMPTY, loom_vector_to_scalar_skip_op},
-        {LOOM_OP_VECTOR_EXTRACT, loom_vector_to_scalar_lower_scalar_extract},
-        {LOOM_OP_VECTOR_INSERT, loom_vector_to_scalar_gate_insert_op},
-        {LOOM_OP_VECTOR_SPLAT, loom_vector_to_scalar_lower_splat_op},
-        {LOOM_OP_VECTOR_REDUCE, loom_vector_to_scalar_lower_reduce_op},
-        {LOOM_OP_VECTOR_REDUCE_AXES,
-         loom_vector_to_scalar_lower_reduce_axes_op},
-        {LOOM_OP_VECTOR_DOTF, loom_vector_to_scalar_lower_dotf_op},
-        {LOOM_OP_VECTOR_MMA, loom_vector_to_scalar_lower_mma_op},
+static_assert(LOOM_OP_VECTOR_COUNT_ <= UINT8_MAX,
+              "vector op indexes must fit in the lowerer lookup key");
+
+static const loom_vector_to_scalar_op_lowerer_t
+    kVectorToScalarOpLowerers[LOOM_OP_VECTOR_COUNT_] = {
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            DEINTERLEAVE, loom_vector_to_scalar_lower_deinterleave),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            STORE, loom_vector_to_scalar_lower_memory_store_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            STORE_MASK, loom_vector_to_scalar_lower_memory_store_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            FRAGMENT_STORE, loom_vector_to_scalar_lower_fragment_store_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            SCATTER, loom_vector_to_scalar_lower_memory_store_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            SCATTER_MASK, loom_vector_to_scalar_lower_memory_store_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            STORE_COMPRESS, loom_vector_to_scalar_lower_store_compress_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            ATOMIC_REDUCE, loom_vector_to_scalar_lower_atomic_reduce_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            ATOMIC_REDUCE_MASK, loom_vector_to_scalar_lower_atomic_reduce_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            ATOMIC_RMW, loom_vector_to_scalar_lower_atomic_rmw_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            ATOMIC_RMW_MASK, loom_vector_to_scalar_lower_atomic_rmw_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            ATOMIC_CMPXCHG, loom_vector_to_scalar_lower_atomic_cmpxchg_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            CONSTANT, loom_vector_to_scalar_lower_static_constant),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            POISON, loom_vector_to_scalar_lower_static_poison),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(EMPTY,
+                                             loom_vector_to_scalar_skip_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            EXTRACT, loom_vector_to_scalar_lower_scalar_extract),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            INSERT, loom_vector_to_scalar_gate_insert_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            SPLAT, loom_vector_to_scalar_lower_splat_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            REDUCE, loom_vector_to_scalar_lower_reduce_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            REDUCE_AXES, loom_vector_to_scalar_lower_reduce_axes_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            DOTF, loom_vector_to_scalar_lower_dotf_op),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            MMA, loom_vector_to_scalar_lower_mma_op),
 };
+
+#undef LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW
+#undef LOOM_VECTOR_TO_SCALAR_VECTOR_OP_INDEX
 
 static iree_status_t loom_vector_to_scalar_try_direct_lowerer(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
   *out_handled = false;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVectorToScalarOpLowerers);
-       ++i) {
-    const loom_vector_to_scalar_op_lowerer_def_t* lowerer =
-        &kVectorToScalarOpLowerers[i];
-    if (lowerer->kind == op->kind) {
-      return lowerer->lower(pass, rewriter, op, out_handled);
-    }
+  if (loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR)
+    return iree_ok_status();
+  const uint8_t op_index = loom_op_dialect_index(op->kind);
+  if (op_index >= IREE_ARRAYSIZE(kVectorToScalarOpLowerers)) {
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  const loom_vector_to_scalar_op_lowerer_t lowerer =
+      kVectorToScalarOpLowerers[op_index];
+  return lowerer ? lowerer(pass, rewriter, op, out_handled) : iree_ok_status();
 }
 
 static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
