@@ -596,6 +596,117 @@ static void loom_amdgpu_reset_packed_ternary_plan(
   };
 }
 
+typedef enum loom_amdgpu_packed_ternary_type_kind_e {
+  LOOM_AMDGPU_PACKED_TERNARY_TYPE_F16 = 0,
+  LOOM_AMDGPU_PACKED_TERNARY_TYPE_F32 = 1,
+  LOOM_AMDGPU_PACKED_TERNARY_TYPE_I16 = 2,
+} loom_amdgpu_packed_ternary_type_kind_t;
+
+typedef struct loom_amdgpu_packed_ternary_selection_row_t {
+  // Source op kind using the packed ternary descriptor candidates.
+  loom_op_kind_t op_kind;
+  // Result/source type family accepted by this row.
+  loom_amdgpu_packed_ternary_type_kind_t type_kind;
+  // Required vector integer-overflow flags for this row.
+  uint8_t required_overflow_flags;
+  // Overflow flags that make this row inapplicable.
+  uint8_t rejected_overflow_flags;
+  // Descriptor candidates in preference order.
+  const loom_amdgpu_packed_ternary_descriptor_candidate_t* candidates;
+  // Number of descriptor candidates.
+  uint32_t candidate_count;
+} loom_amdgpu_packed_ternary_selection_row_t;
+
+static const loom_amdgpu_packed_ternary_selection_row_t
+    kAmdgpuPackedTernarySelectionRows[] = {
+        {
+            .op_kind = LOOM_OP_VECTOR_FMAF,
+            .type_kind = LOOM_AMDGPU_PACKED_TERNARY_TYPE_F16,
+            .candidates = kLoomAmdgpuPackedFmafF16DescriptorCandidates,
+            .candidate_count = kLoomAmdgpuPackedFmafF16DescriptorCandidateCount,
+        },
+        {
+            .op_kind = LOOM_OP_VECTOR_FMAF,
+            .type_kind = LOOM_AMDGPU_PACKED_TERNARY_TYPE_F32,
+            .candidates = kLoomAmdgpuPackedFmafF32DescriptorCandidates,
+            .candidate_count = kLoomAmdgpuPackedFmafF32DescriptorCandidateCount,
+        },
+        {
+            .op_kind = LOOM_OP_VECTOR_FMAI,
+            .type_kind = LOOM_AMDGPU_PACKED_TERNARY_TYPE_I16,
+            .required_overflow_flags = LOOM_VECTOR_INTOVERFLOWFLAGS_NUW,
+            .candidates =
+                kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidates,
+            .candidate_count =
+                kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidateCount,
+        },
+        {
+            .op_kind = LOOM_OP_VECTOR_FMAI,
+            .type_kind = LOOM_AMDGPU_PACKED_TERNARY_TYPE_I16,
+            .rejected_overflow_flags = LOOM_VECTOR_INTOVERFLOWFLAGS_NUW,
+            .candidates =
+                kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidates,
+            .candidate_count =
+                kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidateCount,
+        },
+};
+
+enum {
+  LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_OFFSET = 0u,
+  LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_COUNT = 2u,
+  LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_OFFSET =
+      LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_OFFSET +
+      LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_COUNT,
+  LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_COUNT = 2u,
+};
+
+static_assert(IREE_ARRAYSIZE(kAmdgpuPackedTernarySelectionRows) ==
+                  LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_OFFSET +
+                      LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_COUNT,
+              "AMDGPU packed ternary row spans must cover all rows");
+
+static bool loom_amdgpu_packed_ternary_type_register_count(
+    loom_amdgpu_packed_ternary_type_kind_t type_kind, loom_type_t type,
+    uint32_t* out_register_count) {
+  switch (type_kind) {
+    case LOOM_AMDGPU_PACKED_TERNARY_TYPE_F16:
+      return loom_amdgpu_type_is_even_packed_f16_vector(type,
+                                                        out_register_count);
+    case LOOM_AMDGPU_PACKED_TERNARY_TYPE_F32:
+      return loom_amdgpu_type_is_even_packed_f32_vector(type,
+                                                        out_register_count);
+    case LOOM_AMDGPU_PACKED_TERNARY_TYPE_I16:
+      return loom_amdgpu_type_is_even_packed_i16_vector(type,
+                                                        out_register_count);
+  }
+  IREE_ASSERT_UNREACHABLE("unknown AMDGPU packed ternary type kind");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+static uint8_t loom_amdgpu_packed_ternary_overflow_flags(
+    const loom_op_t* source_op) {
+  return source_op->kind == LOOM_OP_VECTOR_FMAI
+             ? loom_vector_fmai_overflow(source_op)
+             : 0;
+}
+
+static bool loom_amdgpu_packed_ternary_row_matches(
+    const loom_amdgpu_packed_ternary_selection_row_t* row,
+    const loom_op_t* source_op, loom_type_t result_type,
+    uint32_t* out_register_count) {
+  if (source_op->kind != row->op_kind) {
+    return false;
+  }
+  const uint8_t overflow_flags =
+      loom_amdgpu_packed_ternary_overflow_flags(source_op);
+  if (!iree_all_bits_set(overflow_flags, row->required_overflow_flags) ||
+      iree_any_bit_set(overflow_flags, row->rejected_overflow_flags)) {
+    return false;
+  }
+  return loom_amdgpu_packed_ternary_type_register_count(
+      row->type_kind, result_type, out_register_count);
+}
+
 static bool loom_amdgpu_select_packed_ternary_candidate_plan(
     loom_low_lower_context_t* context,
     const loom_amdgpu_packed_ternary_descriptor_candidate_t* candidates,
@@ -639,98 +750,82 @@ static bool loom_amdgpu_select_packed_ternary_candidate_plan(
   return true;
 }
 
-iree_status_t loom_amdgpu_select_vector_packed_fmaf_plan(
+static bool loom_amdgpu_packed_ternary_op_layout(
+    const loom_module_t* module, const loom_op_t* source_op,
+    const loom_value_id_t** out_sources, loom_value_id_t* out_result,
+    loom_type_t* out_result_type) {
+  *out_sources = NULL;
+  *out_result = LOOM_VALUE_ID_INVALID;
+  *out_result_type = loom_type_none();
+  if (source_op->operand_count != LOOM_AMDGPU_PACKED_TERNARY_SOURCE_COUNT ||
+      source_op->result_count != 1) {
+    return false;
+  }
+  const loom_value_id_t* sources = loom_op_const_operands(source_op);
+  const loom_value_id_t result = loom_op_const_results(source_op)[0];
+  const loom_type_t result_type = loom_module_value_type(module, result);
+  for (uint32_t i = 0; i < LOOM_AMDGPU_PACKED_TERNARY_SOURCE_COUNT; ++i) {
+    const loom_type_t source_type = loom_module_value_type(module, sources[i]);
+    if (!loom_type_equal(source_type, result_type)) {
+      return false;
+    }
+  }
+  *out_sources = sources;
+  *out_result = result;
+  *out_result_type = result_type;
+  return true;
+}
+
+static iree_status_t loom_amdgpu_select_vector_packed_ternary_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_packed_ternary_selection_row_t* rows, uint32_t row_count,
     loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
   loom_amdgpu_reset_packed_ternary_plan(out_plan);
   *out_selected = false;
-  if (!loom_vector_fmaf_isa(source_op)) {
+  loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_value_id_t* sources = NULL;
+  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+  loom_type_t result_type = loom_type_none();
+  if (!loom_amdgpu_packed_ternary_op_layout(module, source_op, &sources,
+                                            &result, &result_type)) {
     return iree_ok_status();
   }
 
-  loom_module_t* module = loom_low_lower_context_module(context);
-  const loom_value_id_t sources[LOOM_AMDGPU_PACKED_TERNARY_SOURCE_COUNT] = {
-      loom_vector_fmaf_a(source_op),
-      loom_vector_fmaf_b(source_op),
-      loom_vector_fmaf_c(source_op),
-  };
-  const loom_value_id_t result = loom_vector_fmaf_result(source_op);
-  const loom_type_t result_type = loom_module_value_type(module, result);
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(sources); ++i) {
-    const loom_type_t source_type = loom_module_value_type(module, sources[i]);
-    if (!loom_type_equal(source_type, result_type)) {
+  for (uint32_t i = 0; i < row_count; ++i) {
+    const loom_amdgpu_packed_ternary_selection_row_t* row = &rows[i];
+    uint32_t register_count = 0;
+    if (!loom_amdgpu_packed_ternary_row_matches(row, source_op, result_type,
+                                                &register_count)) {
+      continue;
+    }
+    if (loom_amdgpu_select_packed_ternary_candidate_plan(
+            context, row->candidates, row->candidate_count, sources, result,
+            register_count, out_plan)) {
+      *out_selected = true;
       return iree_ok_status();
     }
   }
-
-  uint32_t register_count = 0;
-  bool selected = false;
-  if (loom_amdgpu_type_is_even_packed_f16_vector(result_type,
-                                                 &register_count)) {
-    selected = loom_amdgpu_select_packed_ternary_candidate_plan(
-        context, kLoomAmdgpuPackedFmafF16DescriptorCandidates,
-        kLoomAmdgpuPackedFmafF16DescriptorCandidateCount, sources, result,
-        register_count, out_plan);
-  } else if (loom_amdgpu_type_is_even_packed_f32_vector(result_type,
-                                                        &register_count)) {
-    selected = loom_amdgpu_select_packed_ternary_candidate_plan(
-        context, kLoomAmdgpuPackedFmafF32DescriptorCandidates,
-        kLoomAmdgpuPackedFmafF32DescriptorCandidateCount, sources, result,
-        register_count, out_plan);
-  } else {
-    return iree_ok_status();
-  }
-  if (!selected) {
-    return iree_ok_status();
-  }
-  *out_selected = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_select_vector_packed_fmaf_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
+  return loom_amdgpu_select_vector_packed_ternary_plan(
+      context, source_op,
+      &kAmdgpuPackedTernarySelectionRows
+          [LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_OFFSET],
+      LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_COUNT, out_plan, out_selected);
 }
 
 iree_status_t loom_amdgpu_select_vector_packed_fmai_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
-  loom_amdgpu_reset_packed_ternary_plan(out_plan);
-  *out_selected = false;
-  if (!loom_vector_fmai_isa(source_op)) {
-    return iree_ok_status();
-  }
-
-  loom_module_t* module = loom_low_lower_context_module(context);
-  const loom_value_id_t sources[LOOM_AMDGPU_PACKED_TERNARY_SOURCE_COUNT] = {
-      loom_vector_fmai_a(source_op),
-      loom_vector_fmai_b(source_op),
-      loom_vector_fmai_c(source_op),
-  };
-  const loom_value_id_t result = loom_vector_fmai_result(source_op);
-  const loom_type_t result_type = loom_module_value_type(module, result);
-  uint32_t register_count = 0;
-  if (!loom_amdgpu_type_is_even_packed_i16_vector(result_type,
-                                                  &register_count)) {
-    return iree_ok_status();
-  }
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(sources); ++i) {
-    const loom_type_t source_type = loom_module_value_type(module, sources[i]);
-    if (!loom_type_equal(source_type, result_type)) {
-      return iree_ok_status();
-    }
-  }
-
-  const bool prefer_unsigned = iree_any_bit_set(
-      loom_vector_fmai_overflow(source_op), LOOM_VECTOR_INTOVERFLOWFLAGS_NUW);
-  if (!loom_amdgpu_select_packed_ternary_candidate_plan(
-          context,
-          prefer_unsigned
-              ? kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidates
-              : kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidates,
-          prefer_unsigned
-              ? kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidateCount
-              : kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidateCount,
-          sources, result, register_count, out_plan)) {
-    return iree_ok_status();
-  }
-  *out_selected = true;
-  return iree_ok_status();
+  return loom_amdgpu_select_vector_packed_ternary_plan(
+      context, source_op,
+      &kAmdgpuPackedTernarySelectionRows
+          [LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_OFFSET],
+      LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_COUNT, out_plan, out_selected);
 }
 
 iree_status_t loom_amdgpu_select_scalar_fmaf_mix_plan(
