@@ -1328,53 +1328,6 @@ static iree_status_t loom_amdgpu_append_buffer_atomic_packet(
   return loom_amdgpu_append_memory_immediate_suffixes(context);
 }
 
-static bool loom_amdgpu_descriptor_uses_global_pointer_format(
-    const loom_low_descriptor_t* descriptor) {
-  switch (descriptor->encoding_format_id) {
-    case LOOM_AMDGPU_ENCODING_FORMAT_FLAT:
-    case LOOM_AMDGPU_ENCODING_FORMAT_FLAT_GLBL:
-    case LOOM_AMDGPU_ENCODING_FORMAT_FLAT_GLOBAL:
-    case LOOM_AMDGPU_ENCODING_FORMAT_VFLAT:
-    case LOOM_AMDGPU_ENCODING_FORMAT_VGLOBAL:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool loom_amdgpu_descriptor_uses_scratch_format(
-    const loom_low_descriptor_t* descriptor) {
-  switch (descriptor->encoding_format_id) {
-    case LOOM_AMDGPU_ENCODING_FORMAT_FLAT_SCRATCH:
-    case LOOM_AMDGPU_ENCODING_FORMAT_VSCRATCH:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool loom_amdgpu_descriptor_uses_data_share_format(
-    const loom_low_descriptor_t* descriptor) {
-  switch (descriptor->encoding_format_id) {
-    case LOOM_AMDGPU_ENCODING_FORMAT_DS:
-    case LOOM_AMDGPU_ENCODING_FORMAT_VDS:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool loom_amdgpu_descriptor_uses_buffer_format(
-    const loom_low_descriptor_t* descriptor) {
-  switch (descriptor->encoding_format_id) {
-    case LOOM_AMDGPU_ENCODING_FORMAT_MUBUF:
-    case LOOM_AMDGPU_ENCODING_FORMAT_VBUFFER:
-      return true;
-    default:
-      return false;
-  }
-}
-
 static iree_host_size_t loom_amdgpu_explicit_packet_operand_count(
     const loom_native_assembly_packet_context_t* context) {
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
@@ -1688,16 +1641,23 @@ loom_amdgpu_descriptor_packet_route_flags(
       loom_amdgpu_descriptor_is_global_to_lds(descriptor_set, descriptor)) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_TO_LDS;
   }
-  if (loom_amdgpu_descriptor_uses_buffer_format(descriptor)) {
+  const loom_amdgpu_encoding_format_flags_t encoding_flags =
+      loom_amdgpu_encoding_format_flags(descriptor->encoding_format_id);
+  if (iree_any_bit_set(encoding_flags,
+                       LOOM_AMDGPU_ENCODING_FORMAT_FLAG_BUFFER_ADDRESS)) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_BUFFER_FORMAT;
   }
-  if (loom_amdgpu_descriptor_uses_global_pointer_format(descriptor)) {
+  if (iree_any_bit_set(
+          encoding_flags,
+          LOOM_AMDGPU_ENCODING_FORMAT_FLAG_GLOBAL_POINTER_ADDRESS)) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_POINTER_FORMAT;
   }
-  if (loom_amdgpu_descriptor_uses_scratch_format(descriptor)) {
+  if (iree_any_bit_set(encoding_flags,
+                       LOOM_AMDGPU_ENCODING_FORMAT_FLAG_SCRATCH_ADDRESS)) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_SCRATCH_FORMAT;
   }
-  if (loom_amdgpu_descriptor_uses_data_share_format(descriptor)) {
+  if (iree_any_bit_set(encoding_flags,
+                       LOOM_AMDGPU_ENCODING_FORMAT_FLAG_DATA_SHARE_ADDRESS)) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_DATA_SHARE_FORMAT;
   }
   if (descriptor->immediate_count == 2) {
