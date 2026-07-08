@@ -113,23 +113,15 @@ static uint32_t loom_amdgpu_occupancy_next_model_cliff_units(
   return 0;
 }
 
-static iree_status_t loom_amdgpu_occupancy_select_model(
-    uint16_t descriptor_set_ordinal, iree_string_view_t descriptor_set_key,
-    const loom_amdgpu_occupancy_model_t** out_model) {
-  *out_model = NULL;
+static const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_select_model(
+    uint16_t descriptor_set_ordinal) {
   const loom_amdgpu_occupancy_model_t* model =
       loom_amdgpu_occupancy_model_for_descriptor_set_ordinal(
           descriptor_set_ordinal);
-  if (model != NULL) {
-    *out_model = model;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "AMDGPU occupancy model is not defined for descriptor set '%.*s' "
-      "(ordinal %" PRIu16 ")",
-      (int)descriptor_set_key.size, descriptor_set_key.data,
-      descriptor_set_ordinal);
+  IREE_ASSERT(model != NULL,
+              "generated AMDGPU occupancy tables must cover all descriptor "
+              "sets");
+  return model;
 }
 
 static bool loom_amdgpu_occupancy_assignment_contributes_register_resources(
@@ -153,11 +145,9 @@ iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
     loom_low_schedule_pressure_cliff_list_t* out_pressure_cliffs) {
   *out_pressure_cliffs = loom_low_schedule_pressure_cliff_list_empty();
 
-  iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
-  const loom_amdgpu_occupancy_model_t* model = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_select_model(
-      descriptor_set->descriptor_set_ordinal, descriptor_set_key, &model));
+  const loom_amdgpu_occupancy_model_t* model =
+      loom_amdgpu_occupancy_select_model(
+          descriptor_set->descriptor_set_ordinal);
   if (model->pressure_cliff_count == 0) {
     return iree_ok_status();
   }
@@ -485,10 +475,8 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
         (int)processor->name.size, processor->name.data, wave_size);
   }
 
-  const loom_amdgpu_occupancy_model_t* model = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_select_model(
-      processor->descriptor_set.ordinal, processor->descriptor_set.key,
-      &model));
+  const loom_amdgpu_occupancy_model_t* model =
+      loom_amdgpu_occupancy_select_model(processor->descriptor_set.ordinal);
 
   loom_amdgpu_occupancy_register_class_t* register_classes = NULL;
   if (model->register_class_count > 0) {
@@ -634,10 +622,9 @@ iree_status_t loom_amdgpu_occupancy_build(
     iree_arena_allocator_t* arena, loom_amdgpu_occupancy_table_t* out_table) {
   *out_table = (loom_amdgpu_occupancy_table_t){0};
 
-  const loom_amdgpu_occupancy_model_t* model = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_select_model(
-      allocation->target.descriptor_set->descriptor_set_ordinal,
-      allocation->target.descriptor_set_key, &model));
+  const loom_amdgpu_occupancy_model_t* model =
+      loom_amdgpu_occupancy_select_model(
+          allocation->target.descriptor_set->descriptor_set_ordinal);
 
   loom_amdgpu_occupancy_register_class_t* register_classes = NULL;
   if (model->register_class_count > 0) {
