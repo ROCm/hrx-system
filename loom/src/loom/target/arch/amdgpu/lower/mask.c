@@ -670,55 +670,28 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
   return iree_ok_status();
 }
 
-typedef struct loom_amdgpu_clampf_ordered_predicates_t {
-  // Predicate used to detect values below the lower clamp bound.
-  uint8_t lower;
-  // Predicate used to detect values above the upper clamp bound.
-  uint8_t upper;
-} loom_amdgpu_clampf_ordered_predicates_t;
-
-static bool loom_amdgpu_clampf_ordered_predicates(
-    loom_op_kind_t compare_op_kind,
-    loom_amdgpu_clampf_ordered_predicates_t* out_predicates) {
-  *out_predicates = (loom_amdgpu_clampf_ordered_predicates_t){0};
-  switch (compare_op_kind) {
-    case LOOM_OP_SCALAR_CMPF:
-      *out_predicates = (loom_amdgpu_clampf_ordered_predicates_t){
-          .lower = LOOM_SCALAR_CMPF_PREDICATE_OLT,
-          .upper = LOOM_SCALAR_CMPF_PREDICATE_OGT,
-      };
-      return true;
-    case LOOM_OP_VECTOR_CMPF:
-      *out_predicates = (loom_amdgpu_clampf_ordered_predicates_t){
-          .lower = LOOM_VECTOR_CMPF_PREDICATE_OLT,
-          .upper = LOOM_VECTOR_CMPF_PREDICATE_OGT,
-      };
-      return true;
-    default:
-      IREE_ASSERT_UNREACHABLE("unsupported AMDGPU ordered clamp compare op");
-      return false;
-  }
-}
+static_assert((uint8_t)LOOM_SCALAR_CMPF_PREDICATE_OLT ==
+                  (uint8_t)LOOM_VECTOR_CMPF_PREDICATE_OLT,
+              "scalar and vector cmpf ordered-lt predicates must align");
+static_assert((uint8_t)LOOM_SCALAR_CMPF_PREDICATE_OGT ==
+                  (uint8_t)LOOM_VECTOR_CMPF_PREDICATE_OGT,
+              "scalar and vector cmpf ordered-gt predicates must align");
 
 static iree_status_t loom_amdgpu_select_clampf_ordered_descriptors(
     loom_low_lower_context_t* context, loom_op_kind_t compare_op_kind,
     loom_amdgpu_clampf_plan_t* out_plan, bool* out_present) {
   *out_present = false;
-  loom_amdgpu_clampf_ordered_predicates_t predicates = {0};
-  if (!loom_amdgpu_clampf_ordered_predicates(compare_op_kind, &predicates)) {
-    return iree_ok_status();
-  }
 
   bool lower_compare_present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_compare_descriptor_if_present(
-      context, compare_op_kind, predicates.lower,
+      context, compare_op_kind, LOOM_SCALAR_CMPF_PREDICATE_OLT,
       &out_plan->lower_compare_descriptor, &lower_compare_present));
   if (!lower_compare_present) {
     return iree_ok_status();
   }
   bool upper_compare_present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_compare_descriptor_if_present(
-      context, compare_op_kind, predicates.upper,
+      context, compare_op_kind, LOOM_SCALAR_CMPF_PREDICATE_OGT,
       &out_plan->upper_compare_descriptor, &upper_compare_present));
   if (!upper_compare_present) {
     return iree_ok_status();
