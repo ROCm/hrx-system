@@ -62,8 +62,6 @@ typedef enum loom_vector_to_scalar_instance_flag_mode_e {
 } loom_vector_to_scalar_instance_flag_mode_t;
 
 typedef struct loom_vector_to_scalar_descriptor_t {
-  // Vector op kind matched by this descriptor.
-  loom_op_kind_t vector_kind;
   // Op kind emitted per lane for generic mechanical lowering.
   loom_op_kind_t lane_op_kind;
   // Lane program family.
