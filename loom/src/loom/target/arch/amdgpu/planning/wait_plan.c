@@ -39,8 +39,14 @@ typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_WRITE = 1u << 5,
   // Node has a workgroup write effect using the target's default write counter.
   LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_WORKGROUP_WRITE = 1u << 6,
+  // Node issues on the vector ALU.
+  LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU = 1u << 7,
+  // Node issues on the scalar ALU.
+  LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU = 1u << 8,
+  // Node is a transcendental VALU packet.
+  LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL = 1u << 9,
 } loom_amdgpu_wait_node_state_flag_bits_t;
-typedef uint8_t loom_amdgpu_wait_node_state_flags_t;
+typedef uint16_t loom_amdgpu_wait_node_state_flags_t;
 
 typedef struct loom_amdgpu_wait_node_state_t {
   // Classification flags for this schedule node.
@@ -1426,6 +1432,21 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[i];
+    const loom_low_schedule_node_t* node = &schedule->nodes[i];
+    const loom_amdgpu_descriptor_traits_t descriptor_traits =
+        loom_amdgpu_descriptor_traits(descriptor_set, node->descriptor);
+    if (iree_any_bit_set(descriptor_traits,
+                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU)) {
+      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU;
+    }
+    if (iree_any_bit_set(descriptor_traits,
+                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU)) {
+      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU;
+    }
+    if (iree_any_bit_set(descriptor_traits,
+                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
+      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL;
+    }
     const loom_amdgpu_wait_node_state_flags_t flags = node_state->flags;
     const bool has_generic_counter_effect = iree_any_bit_set(
         flags, LOOM_AMDGPU_WAIT_NODE_STATE_GENERIC_COUNTER_EFFECT);
@@ -1434,7 +1455,6 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     }
     if (node_state->explicit_wait_counter_mask != 0 ||
         has_generic_counter_effect) {
-      const loom_low_schedule_node_t* node = &schedule->nodes[i];
       IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_explicit_counter_mask(
           descriptor_set, node->descriptor, schedule->module, node->op,
           &node_state->explicit_wait_counter_mask));
@@ -1490,7 +1510,6 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
                               "a wait-counter hazard row",
                               i);
     }
-    const loom_low_schedule_node_t* node = &schedule->nodes[i];
     bool forwards_dependencies = false;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_wait_plan_compute_node_forwards_dependencies(
@@ -1498,8 +1517,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     if (forwards_dependencies) {
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_FORWARDS_DEPENDENCIES;
     }
-    if (has_valu_trans_use_depctr && loom_amdgpu_descriptor_is_transcendental(
-                                         descriptor_set, node->descriptor)) {
+    if (has_valu_trans_use_depctr &&
+        iree_any_bit_set(flags, LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL)) {
       node_state->trans_result_counter_mask |=
           LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU;
     }
@@ -2032,9 +2051,8 @@ static bool loom_amdgpu_wait_plan_node_is_trans_result_consumer(
   if (!loom_amdgpu_wait_plan_has_trans_result_state(builder)) {
     return false;
   }
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
-  return loom_amdgpu_descriptor_uses_vector_alu(
-      builder->schedule->target.descriptor_set, node->descriptor);
+  return iree_any_bit_set(builder->node_states[node_index].flags,
+                          LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_handle_trans_result_use(
@@ -2067,16 +2085,14 @@ static iree_status_t loom_amdgpu_wait_plan_handle_trans_result_use(
 
 static bool loom_amdgpu_wait_plan_node_uses_scalar_alu(
     const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
-  return loom_amdgpu_descriptor_uses_scalar_alu(
-      builder->schedule->target.descriptor_set, node->descriptor);
+  return iree_any_bit_set(builder->node_states[node_index].flags,
+                          LOOM_AMDGPU_WAIT_NODE_STATE_USES_SCALAR_ALU);
 }
 
 static bool loom_amdgpu_wait_plan_node_uses_vector_alu(
     const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
-  return loom_amdgpu_descriptor_uses_vector_alu(
-      builder->schedule->target.descriptor_set, node->descriptor);
+  return iree_any_bit_set(builder->node_states[node_index].flags,
+                          LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_handle_sgpr_read_hazard(
@@ -2262,13 +2278,12 @@ static void loom_amdgpu_wait_plan_apply_trans_result_interval(
   if (!loom_amdgpu_wait_plan_has_trans_result_state(builder)) {
     return;
   }
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
-  const loom_low_descriptor_set_t* descriptor_set =
-      builder->schedule->target.descriptor_set;
-  const bool is_vector_alu =
-      loom_amdgpu_descriptor_uses_vector_alu(descriptor_set, node->descriptor);
-  const bool is_transcendental = loom_amdgpu_descriptor_is_transcendental(
-      descriptor_set, node->descriptor);
+  const loom_amdgpu_wait_node_state_t* node_state =
+      &builder->node_states[node_index];
+  const bool is_vector_alu = iree_any_bit_set(
+      node_state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU);
+  const bool is_transcendental = iree_any_bit_set(
+      node_state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL);
   loom_amdgpu_wait_plan_increment_trans_result_intervals(builder, is_vector_alu,
                                                          is_transcendental);
 }
