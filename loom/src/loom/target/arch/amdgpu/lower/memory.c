@@ -2403,7 +2403,8 @@ static bool loom_amdgpu_memory_low16_float_use_is_supported(
   if (loom_memory_access_isa(store_access) &&
       loom_memory_access_operation_kind(store_access) ==
           LOOM_MEMORY_ACCESS_OPERATION_STORE &&
-      loom_memory_access_value(store_access) == value_id) {
+      loom_memory_access_operand_index_is_payload(store_access,
+                                                  operand_index)) {
     return true;
   }
   if (operand_role == LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT) {
