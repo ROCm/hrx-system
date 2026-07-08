@@ -1040,17 +1040,14 @@ static bool loom_amdgpu_atomic_append_explicit_packet_template(
       packet_capacity, inout_packet_count);
 }
 
-static iree_status_t loom_amdgpu_atomic_append_wait_counter_mask(
+static bool loom_amdgpu_atomic_append_wait_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t counter_mask,
     loom_amdgpu_atomic_explicit_packet_selection_t* waits,
-    iree_host_size_t wait_capacity, iree_host_size_t* inout_wait_count,
-    bool* out_selected) {
-  *out_selected = false;
+    iree_host_size_t wait_capacity, iree_host_size_t* inout_wait_count) {
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  const bool selected = loom_amdgpu_wait_packet_try_select_counter_mask(
-      descriptor_set, counter_mask, /*target_count=*/0, &selection);
-  if (!selected) {
-    return iree_ok_status();
+  if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+          descriptor_set, counter_mask, /*target_count=*/0, &selection)) {
+    return false;
   }
   if (*inout_wait_count >= wait_capacity) {
     IREE_ASSERT_UNREACHABLE(
@@ -1075,46 +1072,41 @@ static iree_status_t loom_amdgpu_atomic_append_wait_counter_mask(
         .value = selection.immediates[i].value,
     };
   }
-  *out_selected = true;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_amdgpu_atomic_select_global_release_waits(
+static bool loom_amdgpu_atomic_select_global_release_waits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_atomic_global_ordering_rule_t* rule,
-    loom_amdgpu_atomic_ordering_selection_t* ordering, bool* out_selected) {
-  *out_selected = false;
+    loom_amdgpu_atomic_ordering_selection_t* ordering) {
   for (iree_host_size_t i = 0; i < rule->release_wait_count; ++i) {
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_append_wait_counter_mask(
-        descriptor_set, rule->release_wait_masks[i], ordering->pre_atomic_waits,
-        IREE_ARRAYSIZE(ordering->pre_atomic_waits),
-        &ordering->pre_atomic_wait_count, &selected));
-    if (!selected) {
-      return iree_ok_status();
+    if (!loom_amdgpu_atomic_append_wait_counter_mask(
+            descriptor_set, rule->release_wait_masks[i],
+            ordering->pre_atomic_waits,
+            IREE_ARRAYSIZE(ordering->pre_atomic_waits),
+            &ordering->pre_atomic_wait_count)) {
+      return false;
     }
   }
-  *out_selected = true;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_amdgpu_atomic_select_global_acquire_waits(
+static bool loom_amdgpu_atomic_select_global_acquire_waits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_atomic_global_ordering_rule_t* rule,
     loom_amdgpu_atomic_ordering_selection_t* ordering,
-    loom_amdgpu_atomic_operation_kind_t operation_kind, bool* out_selected) {
-  *out_selected = false;
+    loom_amdgpu_atomic_operation_kind_t operation_kind) {
   if (operation_kind >= LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_) {
-    return iree_ok_status();
+    return false;
   }
   const uint32_t counter_mask = rule->acquire_wait_masks[operation_kind];
   if (counter_mask == 0) {
-    return iree_ok_status();
+    return false;
   }
   return loom_amdgpu_atomic_append_wait_counter_mask(
       descriptor_set, counter_mask, ordering->post_atomic_waits,
       IREE_ARRAYSIZE(ordering->post_atomic_waits),
-      &ordering->post_atomic_wait_count, out_selected);
+      &ordering->post_atomic_wait_count);
 }
 
 static bool loom_amdgpu_atomic_select_global_acquire_cache_controls(
@@ -1133,12 +1125,11 @@ static bool loom_amdgpu_atomic_select_global_acquire_cache_controls(
   return true;
 }
 
-static iree_status_t loom_amdgpu_atomic_select_global_ordering(
+static bool loom_amdgpu_atomic_select_global_ordering(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_atomic_selection_t* selection,
     const loom_amdgpu_atomic_source_t* atomic_source,
-    loom_amdgpu_atomic_diagnostic_t* diagnostic, bool* out_selected) {
-  *out_selected = false;
+    loom_amdgpu_atomic_diagnostic_t* diagnostic) {
   selection->ordering = (loom_amdgpu_atomic_ordering_selection_t){0};
   const loom_amdgpu_vector_memory_cache_policy_encoding_t encoding =
       loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set);
@@ -1148,42 +1139,36 @@ static iree_status_t loom_amdgpu_atomic_select_global_ordering(
           selection->source.memory_space) ||
       (!loom_amdgpu_atomic_source_has_release_ordering(atomic_source) &&
        !loom_amdgpu_atomic_source_has_acquire_ordering(atomic_source))) {
-    *out_selected = true;
-    return iree_ok_status();
+    return true;
   }
   if (rule == NULL) {
-    return iree_ok_status();
+    return false;
   }
 
   if (loom_amdgpu_atomic_source_has_release_ordering(atomic_source)) {
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select_global_release_waits(
-        descriptor_set, rule, &selection->ordering, &selected));
-    if (!selected) {
+    if (!loom_amdgpu_atomic_select_global_release_waits(descriptor_set, rule,
+                                                        &selection->ordering)) {
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_ATOMIC_REJECTION_DESCRIPTOR_MISSING;
-      return iree_ok_status();
+      return false;
     }
   }
   if (loom_amdgpu_atomic_source_has_acquire_ordering(atomic_source)) {
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select_global_acquire_waits(
-        descriptor_set, rule, &selection->ordering, selection->operation_kind,
-        &selected));
-    if (!selected) {
+    if (!loom_amdgpu_atomic_select_global_acquire_waits(
+            descriptor_set, rule, &selection->ordering,
+            selection->operation_kind)) {
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_ATOMIC_REJECTION_DESCRIPTOR_MISSING;
-      return iree_ok_status();
+      return false;
     }
     if (!loom_amdgpu_atomic_select_global_acquire_cache_controls(
             descriptor_set, rule, &selection->ordering)) {
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_ATOMIC_REJECTION_DESCRIPTOR_MISSING;
-      return iree_ok_status();
+      return false;
     }
   }
-  *out_selected = true;
-  return iree_ok_status();
+  return true;
 }
 
 static void loom_amdgpu_atomic_select_packet_attrs(
@@ -1322,11 +1307,8 @@ static iree_status_t loom_amdgpu_atomic_select(
     return iree_ok_status();
   }
   loom_amdgpu_atomic_select_packet_attrs(descriptor_set, out_selection);
-  bool global_ordering_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select_global_ordering(
-      descriptor_set, out_selection, atomic_source, diagnostic,
-      &global_ordering_selected));
-  if (!global_ordering_selected) {
+  if (!loom_amdgpu_atomic_select_global_ordering(descriptor_set, out_selection,
+                                                 atomic_source, diagnostic)) {
     return iree_ok_status();
   }
   if (!loom_amdgpu_atomic_select_offset(descriptor_set,
