@@ -2474,8 +2474,12 @@ static bool loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
     const loom_module_t* module, loom_value_id_t source_value_id,
     const loom_op_t* user_op) {
   loom_memory_access_t access = loom_memory_access_cast(module, user_op);
-  if (!loom_memory_access_isa(access) ||
-      !loom_traits_may_write(loom_op_effective_traits(module, user_op))) {
+  const loom_memory_access_operation_kind_t operation_kind =
+      loom_memory_access_operation_kind(access);
+  if (operation_kind != LOOM_MEMORY_ACCESS_OPERATION_STORE &&
+      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE &&
+      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW &&
+      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG) {
     return false;
   }
   return loom_memory_access_value(access) == source_value_id ||
