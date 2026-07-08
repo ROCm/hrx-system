@@ -20,7 +20,6 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_table.h"
@@ -1365,6 +1364,43 @@ static bool loom_vector_memory_footprint_access_empty(
   return loom_type_has_static_zero_extent(access->vector_type);
 }
 
+static bool loom_vector_memory_footprint_value_is_scalar_element(
+    const loom_vector_memory_footprint_state_t* state, loom_value_id_t value_id,
+    loom_scalar_type_t element_type) {
+  if (value_id >= state->module->values.count) return false;
+  const loom_type_t value_type =
+      loom_module_value_type(state->module, value_id);
+  return loom_type_equal(value_type, loom_type_scalar(element_type));
+}
+
+static bool loom_vector_memory_footprint_access_is_scalar_element(
+    const loom_vector_memory_footprint_state_t* state, const loom_op_t* op,
+    loom_memory_access_t memory_access, loom_type_t view_type) {
+  const loom_scalar_type_t element_type = loom_type_element_type(view_type);
+  switch (loom_memory_access_operation_kind(memory_access)) {
+    case LOOM_MEMORY_ACCESS_OPERATION_LOAD:
+      if (op->result_count != 1) return false;
+      return loom_vector_memory_footprint_value_is_scalar_element(
+          state, loom_op_const_results(op)[0], element_type);
+    case LOOM_MEMORY_ACCESS_OPERATION_STORE:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW:
+      return loom_vector_memory_footprint_value_is_scalar_element(
+          state, loom_memory_access_value(memory_access), element_type);
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG:
+      return loom_vector_memory_footprint_value_is_scalar_element(
+                 state, loom_memory_access_expected(memory_access),
+                 element_type) &&
+             loom_vector_memory_footprint_value_is_scalar_element(
+                 state, loom_memory_access_replacement(memory_access),
+                 element_type);
+    case LOOM_MEMORY_ACCESS_OPERATION_PREFETCH:
+    case LOOM_MEMORY_ACCESS_OPERATION_COUNT_:
+      return false;
+  }
+  return false;
+}
+
 static iree_status_t loom_vector_memory_footprint_check_access(
     loom_vector_memory_footprint_state_t* state,
     const loom_vector_memory_footprint_access_t* access) {
@@ -1385,20 +1421,9 @@ static iree_status_t loom_vector_memory_footprint_check_access(
   return loom_vector_memory_footprint_check_direct(state, access);
 }
 
-static bool loom_vector_memory_footprint_describe_view_op(
+static bool loom_vector_memory_footprint_describe_scalar_access_op(
     loom_vector_memory_footprint_state_t* state, const loom_op_t* op,
     loom_vector_memory_footprint_access_t* out_access) {
-  switch (op->kind) {
-    case LOOM_OP_VIEW_LOAD:
-    case LOOM_OP_VIEW_STORE:
-    case LOOM_OP_VIEW_ATOMIC_REDUCE:
-    case LOOM_OP_VIEW_ATOMIC_RMW:
-    case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
-      break;
-    default:
-      return false;
-  }
-
   loom_memory_access_t memory_access =
       loom_memory_access_cast(state->module, op);
   if (!loom_memory_access_isa(memory_access)) {
@@ -1410,6 +1435,10 @@ static bool loom_vector_memory_footprint_describe_view_op(
   }
   const loom_type_t view_type = loom_module_value_type(state->module, view);
   if (!loom_type_is_view(view_type) || loom_type_rank(view_type) == 0) {
+    return false;
+  }
+  if (!loom_vector_memory_footprint_access_is_scalar_element(
+          state, op, memory_access, view_type)) {
     return false;
   }
 
@@ -1462,7 +1491,8 @@ static bool loom_vector_memory_footprint_describe_op(
     }
     return true;
   }
-  return loom_vector_memory_footprint_describe_view_op(state, op, out_access);
+  return loom_vector_memory_footprint_describe_scalar_access_op(state, op,
+                                                                out_access);
 }
 
 static iree_status_t loom_vector_memory_footprint_ensure_dominance(
