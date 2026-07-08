@@ -106,6 +106,15 @@ typedef struct loom_cfg_graph_t {
   bool malformed;
 } loom_cfg_graph_t;
 
+// Returns the argument payload that |terminator| forwards to |successor| when
+// it can be represented generically. Today this is intentionally limited to
+// single-successor terminators whose operands map 1:1 onto successor block
+// arguments.
+bool loom_cfg_terminator_payload_for_successor(const loom_op_t* terminator,
+                                               const loom_block_t* successor,
+                                               const loom_value_id_t** out_args,
+                                               uint16_t* out_arg_count);
+
 // Builds a dense CFG graph for |region| and stores all result memory in
 // |arena|. Passing NULL arguments is an API error. Malformed IR is represented
 // by graph->malformed rather than a failing status so callers can stay
