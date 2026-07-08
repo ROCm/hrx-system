@@ -516,15 +516,10 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
       register_classes[i].allocated_units = vector_register_count;
     }
   }
-  if (iree_string_view_is_empty(scalar_register_class) ||
-      iree_string_view_is_empty(vector_register_class)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU occupancy model for descriptor set '%.*s' must define SGPR "
-        "and VGPR register classes",
-        (int)processor->descriptor_set.key.size,
-        processor->descriptor_set.key.data);
-  }
+  IREE_ASSERT(!iree_string_view_is_empty(scalar_register_class),
+              "generated AMDGPU occupancy models must define SGPR rows");
+  IREE_ASSERT(!iree_string_view_is_empty(vector_register_class),
+              "generated AMDGPU occupancy models must define VGPR rows");
 
   for (iree_host_size_t i = 0; i < model->resource_count; ++i) {
     pressure_resources[i] = (loom_amdgpu_occupancy_pressure_resource_t){
