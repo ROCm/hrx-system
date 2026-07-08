@@ -27,6 +27,80 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
+typedef enum loom_amdgpu_structural_value_source_kind_e {
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE = 0,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_IOTA = 1,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS = 2,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_SPLAT = 3,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT = 4,
+} loom_amdgpu_structural_value_source_kind_t;
+
+typedef enum loom_amdgpu_structural_value_source_flags_e {
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_NONE = 0u,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_ATOMIC_OFFSET_FACT_ONLY = 1u << 0,
+  LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_PRESELECT_FMA_MIX = 1u << 1,
+} loom_amdgpu_structural_value_source_flags_t;
+
+typedef struct loom_amdgpu_structural_value_source_row_t {
+  // Source operation family routed by this row.
+  loom_amdgpu_structural_value_source_kind_t kind;
+  // Row behavior flags used by selection and preselection.
+  loom_amdgpu_structural_value_source_flags_t flags;
+} loom_amdgpu_structural_value_source_row_t;
+
+#define LOOM_AMDGPU_VECTOR_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
+#define LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW(op, kind_, flags_) \
+  [LOOM_AMDGPU_VECTOR_OP_INDEX(LOOM_OP_VECTOR_##op)] = {           \
+      .kind = LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_##kind_,    \
+      .flags = flags_,                                             \
+  }
+
+static const loom_amdgpu_structural_value_source_row_t
+    kAmdgpuStructuralValueSourceRows[LOOM_OP_VECTOR_COUNT_] = {
+        LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW(
+            IOTA, VECTOR_IOTA,
+            LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_ATOMIC_OFFSET_FACT_ONLY),
+        LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW(
+            FROM_ELEMENTS, VECTOR_FROM_ELEMENTS,
+            LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_ATOMIC_OFFSET_FACT_ONLY |
+                LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_PRESELECT_FMA_MIX),
+        LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW(
+            SPLAT, VECTOR_SPLAT,
+            LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_PRESELECT_FMA_MIX),
+        LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW(
+            INSERT, VECTOR_INSERT,
+            LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_PRESELECT_FMA_MIX),
+};
+
+#undef LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_ROW
+#undef LOOM_AMDGPU_VECTOR_OP_INDEX
+
+static const loom_amdgpu_structural_value_source_row_t*
+loom_amdgpu_structural_value_source_row(loom_op_kind_t op_kind) {
+  if (loom_op_dialect_id(op_kind) != LOOM_DIALECT_VECTOR) {
+    return NULL;
+  }
+  const uint8_t op_index = loom_op_dialect_index(op_kind);
+  if (op_index >= IREE_ARRAYSIZE(kAmdgpuStructuralValueSourceRows)) {
+    return NULL;
+  }
+  const loom_amdgpu_structural_value_source_row_t* row =
+      &kAmdgpuStructuralValueSourceRows[op_index];
+  return row->kind == LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE ? NULL
+                                                                    : row;
+}
+
+static bool loom_amdgpu_structural_value_source_row_has_flag(
+    const loom_amdgpu_structural_value_source_row_t* row,
+    loom_amdgpu_structural_value_source_flags_t flag) {
+  return row != NULL && iree_any_bit_set(row->flags, flag);
+}
+
+typedef struct loom_amdgpu_structural_value_plan_header_t {
+  // Structural value family selected by the planner.
+  loom_amdgpu_structural_value_source_kind_t kind;
+} loom_amdgpu_structural_value_plan_header_t;
+
 typedef uint32_t loom_amdgpu_vector_iota_plan_flags_t;
 
 enum {
@@ -35,6 +109,8 @@ enum {
 };
 
 typedef struct loom_amdgpu_vector_iota_plan_t {
+  // Common structural value plan header.
+  loom_amdgpu_structural_value_plan_header_t header;
   // Descriptor row selected for each lane constant packet.
   loom_low_lower_resolved_descriptor_t descriptor;
   // Module string ID for the descriptor's imm32 attribute.
@@ -80,6 +156,8 @@ typedef enum loom_amdgpu_vector_from_elements_materialization_kind_e {
 } loom_amdgpu_vector_from_elements_materialization_kind_t;
 
 typedef struct loom_amdgpu_vector_from_elements_plan_t {
+  // Common structural value plan header.
+  loom_amdgpu_structural_value_plan_header_t header;
   // Result vector assembled from the selected source elements.
   loom_value_id_t result;
   // Physical storage selected for the result vector.
@@ -121,6 +199,8 @@ typedef enum loom_amdgpu_vector_insert_select_flags_e {
 } loom_amdgpu_vector_insert_select_flags_t;
 
 typedef struct loom_amdgpu_vector_insert_plan_t {
+  // Common structural value plan header.
+  loom_amdgpu_structural_value_plan_header_t header;
   // Scalar value inserted into the destination vector.
   loom_value_id_t value;
   // Destination vector whose lanes are copied except at the selected index.
@@ -1411,6 +1491,7 @@ static iree_status_t loom_amdgpu_select_vector_iota_plan(
       loom_amdgpu_value_as_i32_constant(context, base_id, &base);
   const bool has_static_step =
       loom_amdgpu_value_as_i32_constant(context, step_id, &step);
+  out_plan->header.kind = LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_IOTA;
   out_plan->base = base_id;
   out_plan->step = step_id;
   out_plan->result = result;
@@ -1769,6 +1850,8 @@ static iree_status_t loom_amdgpu_select_vector_from_elements_plan(
     }
     out_plan->payload.elements[i] = element;
   }
+  out_plan->header.kind =
+      LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS;
   out_plan->result = result;
   out_plan->element_count = elements.count;
   out_plan->storage_kind = storage.kind;
@@ -1811,6 +1894,7 @@ static iree_status_t loom_amdgpu_select_vector_splat_plan(
   for (uint32_t i = 0; i < storage.element_count; ++i) {
     out_plan->payload.elements[i] = scalar;
   }
+  out_plan->header.kind = LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_SPLAT;
   out_plan->result = result;
   out_plan->storage_kind = storage.kind;
   out_plan->element_count = storage.element_count;
@@ -2119,6 +2203,10 @@ loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
   inout_plan->fma_mix_half_result_lane_mask = 0;
   for (uint32_t i = 0; i < inout_plan->element_count; ++i) {
     loom_amdgpu_vector_insert_plan_t lane_plan = {
+        .header =
+            {
+                .kind = LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT,
+            },
         .value = inout_plan->payload.elements[i],
         .dest = LOOM_VALUE_ID_INVALID,
         .dynamic_index = LOOM_VALUE_ID_INVALID,
@@ -2221,6 +2309,10 @@ static iree_status_t loom_amdgpu_select_vector_insert_plan(
   }
 
   *out_plan = (loom_amdgpu_vector_insert_plan_t){
+      .header =
+          {
+              .kind = LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT,
+          },
       .value = value,
       .dest = dest,
       .dynamic_index = dynamic_index,
@@ -4230,16 +4322,13 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_conversion(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_select_structural_value_plan(
+static iree_status_t loom_amdgpu_select_structural_value_plan_from_row(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_structural_value_source_row_t* row,
+    loom_amdgpu_vector_insert_select_flags_t flags, bool require_fma_mix,
     loom_low_lower_plan_t* out_plan) {
-  *out_plan = loom_low_lower_plan_empty();
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_IOTA: {
-      if (loom_amdgpu_select_fact_only_vector_atomic_offset_plan(
-              context, source_op, out_plan)) {
-        return iree_ok_status();
-      }
+  switch (row->kind) {
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_IOTA: {
       loom_amdgpu_vector_iota_plan_t local_plan = {0};
       bool selected = false;
       IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_iota_plan(
@@ -4250,117 +4339,86 @@ iree_status_t loom_amdgpu_select_structural_value_plan(
       return loom_amdgpu_bind_selected_value_plan(
           context, source_op, &local_plan, sizeof(local_plan), out_plan);
     }
-    case LOOM_OP_VECTOR_FROM_ELEMENTS: {
-      if (loom_amdgpu_select_fact_only_vector_atomic_offset_plan(
-              context, source_op, out_plan)) {
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS:
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_SPLAT: {
+      loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
+      bool selected = false;
+      if (row->kind ==
+          LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_from_elements_plan(
+            context, source_op, &local_plan, &selected));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_splat_plan(
+            context, source_op, &local_plan, &selected));
+      }
+      if (!selected) {
         return iree_ok_status();
       }
-      loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-      bool selected = false;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_from_elements_plan(
-          context, source_op, &local_plan, &selected));
-      if (selected) {
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
-                context, source_op, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
-                &local_plan));
-        return loom_amdgpu_bind_selected_value_plan(
-            context, source_op, &local_plan, sizeof(local_plan), out_plan);
-      }
-      return iree_ok_status();
-    }
-    case LOOM_OP_VECTOR_SPLAT: {
-      loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-      bool selected = false;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_splat_plan(
-          context, source_op, &local_plan, &selected));
-      if (selected) {
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
-                context, source_op, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
-                &local_plan));
-        return loom_amdgpu_bind_selected_value_plan(
-            context, source_op, &local_plan, sizeof(local_plan), out_plan);
-      }
-      return iree_ok_status();
-    }
-    case LOOM_OP_VECTOR_INSERT: {
-      loom_amdgpu_vector_insert_plan_t local_plan = {0};
-      bool selected = false;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_insert_plan(
-          context, source_op, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
-          &local_plan, &selected));
-      if (!selected) {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
+              context, source_op, flags, &local_plan));
+      if (require_fma_mix && local_plan.fma_mix_half_result_lane_mask == 0) {
         return iree_ok_status();
       }
       return loom_amdgpu_bind_selected_value_plan(
           context, source_op, &local_plan, sizeof(local_plan), out_plan);
     }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT: {
+      loom_amdgpu_vector_insert_plan_t local_plan = {0};
+      bool selected = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_insert_plan(
+          context, source_op, flags, &local_plan, &selected));
+      if (!selected ||
+          (require_fma_mix &&
+           local_plan.value_kind !=
+               LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_FMA_MIX_HALF_RESULT)) {
+        return iree_ok_status();
+      }
+      return loom_amdgpu_bind_selected_value_plan(
+          context, source_op, &local_plan, sizeof(local_plan), out_plan);
+    }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE:
     default:
-      return iree_ok_status();
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU structural value source kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
+}
+
+iree_status_t loom_amdgpu_select_structural_value_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t* out_plan) {
+  *out_plan = loom_low_lower_plan_empty();
+  const loom_amdgpu_structural_value_source_row_t* row =
+      loom_amdgpu_structural_value_source_row(source_op->kind);
+  if (row == NULL) {
+    return iree_ok_status();
+  }
+  if (loom_amdgpu_structural_value_source_row_has_flag(
+          row,
+          LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_ATOMIC_OFFSET_FACT_ONLY) &&
+      loom_amdgpu_select_fact_only_vector_atomic_offset_plan(context, source_op,
+                                                             out_plan)) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_select_structural_value_plan_from_row(
+      context, source_op, row, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
+      /*require_fma_mix=*/false, out_plan);
 }
 
 iree_status_t loom_amdgpu_preselect_structural_value_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
   *out_plan = loom_low_lower_plan_empty();
-  if (loom_vector_from_elements_isa(source_op)) {
-    loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_from_elements_plan(
-        context, source_op, &local_plan, &selected));
-    if (!selected) {
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
-            context, source_op,
-            LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_EMIT_DIAGNOSTICS,
-            &local_plan));
-    if (local_plan.fma_mix_half_result_lane_mask == 0) {
-      return iree_ok_status();
-    }
-    return loom_amdgpu_bind_selected_value_plan(context, source_op, &local_plan,
-                                                sizeof(local_plan), out_plan);
-  }
-  if (loom_vector_splat_isa(source_op)) {
-    loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_splat_plan(
-        context, source_op, &local_plan, &selected));
-    if (!selected) {
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
-            context, source_op,
-            LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_EMIT_DIAGNOSTICS,
-            &local_plan));
-    if (local_plan.fma_mix_half_result_lane_mask == 0) {
-      return iree_ok_status();
-    }
-    return loom_amdgpu_bind_selected_value_plan(context, source_op, &local_plan,
-                                                sizeof(local_plan), out_plan);
-  }
-  if (!loom_vector_insert_isa(source_op)) {
+  const loom_amdgpu_structural_value_source_row_t* row =
+      loom_amdgpu_structural_value_source_row(source_op->kind);
+  if (!loom_amdgpu_structural_value_source_row_has_flag(
+          row, LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_FLAG_PRESELECT_FMA_MIX)) {
     return iree_ok_status();
   }
-
-  loom_amdgpu_vector_insert_plan_t local_plan = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_insert_plan(
-      context, source_op,
-      LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_EMIT_DIAGNOSTICS, &local_plan,
-      &selected));
-  if (!selected ||
-      local_plan.value_kind !=
-          LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_FMA_MIX_HALF_RESULT) {
-    return iree_ok_status();
-  }
-
-  return loom_amdgpu_bind_selected_value_plan(context, source_op, &local_plan,
-                                              sizeof(local_plan), out_plan);
+  return loom_amdgpu_select_structural_value_plan_from_row(
+      context, source_op, row,
+      LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_EMIT_DIAGNOSTICS,
+      /*require_fma_mix=*/true, out_plan);
 }
 
 static iree_status_t loom_amdgpu_bind_register_u32_lane_constants(
@@ -5479,9 +5537,82 @@ static void loom_amdgpu_require_fma_mix_plan_sources_storage(
   }
 }
 
+static void loom_amdgpu_mark_structural_vector_value_plan_storage_demands(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan) {
+  if (plan.target_data == NULL) {
+    return;
+  }
+  const loom_amdgpu_structural_value_plan_header_t* header =
+      (const loom_amdgpu_structural_value_plan_header_t*)plan.target_data;
+  switch (header->kind) {
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_IOTA: {
+      const loom_amdgpu_vector_iota_plan_t* iota_plan =
+          (const loom_amdgpu_vector_iota_plan_t*)plan.target_data;
+      if (!loom_amdgpu_vector_iota_plan_is_dynamic(iota_plan)) {
+        return;
+      }
+      if (!loom_amdgpu_vector_iota_plan_has_exact_base(iota_plan)) {
+        loom_low_lower_require_source_value_storage(context, iota_plan->base);
+      }
+      if (!loom_amdgpu_vector_iota_plan_has_exact_step(iota_plan)) {
+        loom_low_lower_require_source_value_storage(context, iota_plan->step);
+      }
+      return;
+    }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS:
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_SPLAT: {
+      const loom_amdgpu_vector_from_elements_plan_t* vector_plan =
+          (const loom_amdgpu_vector_from_elements_plan_t*)plan.target_data;
+      if (vector_plan->materialization_kind ==
+          LOOM_AMDGPU_VECTOR_FROM_ELEMENTS_MATERIALIZATION_EXACT_PACKED_INTEGER) {
+        return;
+      }
+      if (vector_plan->fma_mix_half_result_lane_mask != 0) {
+        for (uint32_t i = 0; i < vector_plan->element_count; ++i) {
+          if (loom_amdgpu_vector_from_elements_uses_fma_mix_half_result(
+                  vector_plan, i)) {
+            loom_amdgpu_require_fma_mix_plan_sources_storage(
+                context, &vector_plan->fma_mix_half_results[i]);
+          } else {
+            loom_low_lower_require_source_value_storage(
+                context, vector_plan->payload.elements[i]);
+          }
+        }
+        return;
+      }
+      loom_low_lower_require_source_operands_storage(context, source_op);
+      return;
+    }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT: {
+      const loom_amdgpu_vector_insert_plan_t* insert_plan =
+          (const loom_amdgpu_vector_insert_plan_t*)plan.target_data;
+      if (insert_plan->value_kind !=
+          LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_FMA_MIX_HALF_RESULT) {
+        loom_low_lower_require_source_operands_storage(context, source_op);
+        return;
+      }
+      loom_low_lower_require_source_value_storage(context, insert_plan->dest);
+      loom_amdgpu_require_fma_mix_plan_sources_storage(context,
+                                                       &insert_plan->fma_mix);
+      return;
+    }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE:
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU structural value plan kind");
+      return;
+  }
+}
+
 void loom_amdgpu_mark_structural_value_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t plan) {
+  if (loom_amdgpu_structural_value_source_row(source_op->kind) != NULL) {
+    loom_amdgpu_mark_structural_vector_value_plan_storage_demands(
+        context, source_op, plan);
+    return;
+  }
+
   switch (plan.id) {
     case LOOM_OP_INDEX_CAST: {
       const loom_amdgpu_index_cast_plan_t* index_cast_plan =
@@ -5523,63 +5654,6 @@ void loom_amdgpu_mark_structural_value_plan_storage_demands(
         loom_low_lower_require_source_value_storage(
             context, conversion_plan->scale_source);
       }
-      return;
-    }
-    case LOOM_OP_VECTOR_IOTA: {
-      if (plan.target_data == NULL) {
-        return;
-      }
-      const loom_amdgpu_vector_iota_plan_t* iota_plan =
-          (const loom_amdgpu_vector_iota_plan_t*)plan.target_data;
-      if (!loom_amdgpu_vector_iota_plan_is_dynamic(iota_plan)) {
-        return;
-      }
-      if (!loom_amdgpu_vector_iota_plan_has_exact_base(iota_plan)) {
-        loom_low_lower_require_source_value_storage(context, iota_plan->base);
-      }
-      if (!loom_amdgpu_vector_iota_plan_has_exact_step(iota_plan)) {
-        loom_low_lower_require_source_value_storage(context, iota_plan->step);
-      }
-      return;
-    }
-    case LOOM_OP_VECTOR_FROM_ELEMENTS:
-    case LOOM_OP_VECTOR_SPLAT: {
-      if (plan.target_data == NULL) {
-        return;
-      }
-      const loom_amdgpu_vector_from_elements_plan_t* vector_plan =
-          (const loom_amdgpu_vector_from_elements_plan_t*)plan.target_data;
-      if (vector_plan->materialization_kind ==
-          LOOM_AMDGPU_VECTOR_FROM_ELEMENTS_MATERIALIZATION_EXACT_PACKED_INTEGER) {
-        return;
-      }
-      if (vector_plan->fma_mix_half_result_lane_mask != 0) {
-        for (uint32_t i = 0; i < vector_plan->element_count; ++i) {
-          if (loom_amdgpu_vector_from_elements_uses_fma_mix_half_result(
-                  vector_plan, i)) {
-            loom_amdgpu_require_fma_mix_plan_sources_storage(
-                context, &vector_plan->fma_mix_half_results[i]);
-          } else {
-            loom_low_lower_require_source_value_storage(
-                context, vector_plan->payload.elements[i]);
-          }
-        }
-        return;
-      }
-      loom_low_lower_require_source_operands_storage(context, source_op);
-      return;
-    }
-    case LOOM_OP_VECTOR_INSERT: {
-      const loom_amdgpu_vector_insert_plan_t* insert_plan =
-          (const loom_amdgpu_vector_insert_plan_t*)plan.target_data;
-      if (insert_plan->value_kind !=
-          LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_FMA_MIX_HALF_RESULT) {
-        loom_low_lower_require_source_operands_storage(context, source_op);
-        return;
-      }
-      loom_low_lower_require_source_value_storage(context, insert_plan->dest);
-      loom_amdgpu_require_fma_mix_plan_sources_storage(context,
-                                                       &insert_plan->fma_mix);
       return;
     }
     default:
@@ -8954,32 +9028,31 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
 iree_status_t loom_amdgpu_lower_structural_value_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t plan) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_IOTA:
-      if (plan.target_data == NULL) {
-        IREE_ASSERT_UNREACHABLE(
-            "AMDGPU fact-only vector atomic offset reached emission");
-        IREE_BUILTIN_UNREACHABLE();
-      }
+  if (plan.target_data == NULL) {
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU fact-only vector atomic offset reached emission");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  const loom_amdgpu_structural_value_plan_header_t* header =
+      (const loom_amdgpu_structural_value_plan_header_t*)plan.target_data;
+  switch (header->kind) {
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_IOTA:
       return loom_amdgpu_lower_vector_iota(
           context, source_op,
           (const loom_amdgpu_vector_iota_plan_t*)plan.target_data);
-    case LOOM_OP_VECTOR_FROM_ELEMENTS:
-    case LOOM_OP_VECTOR_SPLAT:
-      if (plan.target_data == NULL) {
-        IREE_ASSERT_UNREACHABLE(
-            "AMDGPU fact-only vector atomic offset reached emission");
-        IREE_BUILTIN_UNREACHABLE();
-      }
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_FROM_ELEMENTS:
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_SPLAT:
       return loom_amdgpu_lower_vector_from_elements(
           context, source_op,
           (const loom_amdgpu_vector_from_elements_plan_t*)plan.target_data);
-    case LOOM_OP_VECTOR_INSERT:
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_VECTOR_INSERT:
       return loom_amdgpu_lower_vector_insert(
           context, source_op,
           (const loom_amdgpu_vector_insert_plan_t*)plan.target_data);
+    case LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE:
     default:
-      IREE_ASSERT_UNREACHABLE("AMDGPU value plan selected unknown op kind");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU value plan selected unknown structural value kind");
       IREE_BUILTIN_UNREACHABLE();
   }
 }
