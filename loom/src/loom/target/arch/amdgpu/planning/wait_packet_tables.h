@@ -54,6 +54,10 @@ typedef struct loom_amdgpu_wait_packet_target_t {
   const loom_amdgpu_wait_packet_descriptor_template_t* descriptors;
   // Number of descriptor template rows available on this target.
   iree_host_size_t descriptor_count;
+  // Dense lookup from descriptor ordinal to local descriptor-template index+1.
+  const uint16_t* descriptor_lookup;
+  // Number of descriptor ordinals addressable by descriptor_lookup.
+  iree_host_size_t descriptor_lookup_count;
   // Generated best descriptor-template rows indexed by logical counter mask.
   const loom_amdgpu_wait_packet_selection_template_t* selections;
   // Number of generated counter-mask selection rows.
