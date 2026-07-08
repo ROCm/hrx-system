@@ -24,6 +24,13 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #define LOOM_AMDGPU_MAX_SUBGROUP_TREE_STEPS 6u
+
+static const loom_amdgpu_collective_combine_dpp_form_t
+    kLoomAmdgpuSubgroupReduceDppCombineForms[] = {
+        LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16,
+        LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY,
+};
+
 static uint32_t loom_amdgpu_subgroup_u32_log2(uint32_t value) {
   uint32_t log2 = 0;
   while (value > 1) {
@@ -208,15 +215,13 @@ static iree_status_t loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
     loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_present) {
   *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
   *out_present = false;
-  const loom_amdgpu_collective_combine_dpp_form_t dpp_forms[] = {
-      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16,
-      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY,
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dpp_forms); ++i) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuSubgroupReduceDppCombineForms); ++i) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
     if (!loom_amdgpu_collective_combine_dpp_descriptor_ref(
-            kind, payload_kind, dpp_forms[i], &descriptor_ref)) {
+            kind, payload_kind, kLoomAmdgpuSubgroupReduceDppCombineForms[i],
+            &descriptor_ref)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
@@ -691,15 +696,13 @@ iree_string_view_t loom_amdgpu_workgroup_reduce_publication_report_key(
 static bool loom_amdgpu_subgroup_reduce_dpp_row_descriptor_is_present(
     const loom_low_descriptor_set_t* descriptor_set, loom_combining_kind_t kind,
     loom_amdgpu_subgroup_payload_kind_t payload_kind) {
-  const loom_amdgpu_collective_combine_dpp_form_t dpp_forms[] = {
-      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16,
-      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY,
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dpp_forms); ++i) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuSubgroupReduceDppCombineForms); ++i) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
     if (loom_amdgpu_collective_combine_dpp_descriptor_ref(
-            kind, payload_kind, dpp_forms[i], &descriptor_ref) &&
+            kind, payload_kind, kLoomAmdgpuSubgroupReduceDppCombineForms[i],
+            &descriptor_ref) &&
         loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
       return true;
     }
