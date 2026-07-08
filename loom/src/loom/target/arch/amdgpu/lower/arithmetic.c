@@ -776,19 +776,18 @@ static bool loom_amdgpu_packed_ternary_op_layout(
   return true;
 }
 
-static iree_status_t loom_amdgpu_select_vector_packed_ternary_plan(
+static bool loom_amdgpu_select_vector_packed_ternary_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_packed_ternary_selection_row_t* rows, uint32_t row_count,
-    loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
+    loom_amdgpu_packed_ternary_plan_t* out_plan) {
   loom_amdgpu_reset_packed_ternary_plan(out_plan);
-  *out_selected = false;
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_id_t* sources = NULL;
   loom_value_id_t result = LOOM_VALUE_ID_INVALID;
   loom_type_t result_type = loom_type_none();
   if (!loom_amdgpu_packed_ternary_op_layout(module, source_op, &sources,
                                             &result, &result_type)) {
-    return iree_ok_status();
+    return false;
   }
 
   for (uint32_t i = 0; i < row_count; ++i) {
@@ -801,31 +800,32 @@ static iree_status_t loom_amdgpu_select_vector_packed_ternary_plan(
     if (loom_amdgpu_select_packed_ternary_candidate_plan(
             context, row->candidates, row->candidate_count, sources, result,
             register_count, out_plan)) {
-      *out_selected = true;
-      return iree_ok_status();
+      return true;
     }
   }
-  return iree_ok_status();
+  return false;
 }
 
 iree_status_t loom_amdgpu_select_vector_packed_fmaf_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
-  return loom_amdgpu_select_vector_packed_ternary_plan(
+  *out_selected = loom_amdgpu_select_vector_packed_ternary_plan(
       context, source_op,
       &kAmdgpuPackedTernarySelectionRows
           [LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_OFFSET],
-      LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_COUNT, out_plan, out_selected);
+      LOOM_AMDGPU_PACKED_TERNARY_FMAF_ROW_COUNT, out_plan);
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_select_vector_packed_fmai_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_packed_ternary_plan_t* out_plan, bool* out_selected) {
-  return loom_amdgpu_select_vector_packed_ternary_plan(
+  *out_selected = loom_amdgpu_select_vector_packed_ternary_plan(
       context, source_op,
       &kAmdgpuPackedTernarySelectionRows
           [LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_OFFSET],
-      LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_COUNT, out_plan, out_selected);
+      LOOM_AMDGPU_PACKED_TERNARY_FMAI_ROW_COUNT, out_plan);
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_select_scalar_fmaf_mix_plan(
