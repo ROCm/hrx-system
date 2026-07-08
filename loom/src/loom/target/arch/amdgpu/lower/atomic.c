@@ -211,6 +211,33 @@ static uint8_t loom_amdgpu_atomic_u8_attr(loom_attribute_t attr) {
   return (uint8_t)loom_attr_as_i64(attr);
 }
 
+static bool loom_amdgpu_atomic_value_is_vector(const loom_module_t* module,
+                                               loom_value_id_t value) {
+  if (value == LOOM_VALUE_ID_INVALID || value >= module->values.count) {
+    return false;
+  }
+  return loom_type_is_vector(loom_module_value_type(module, value));
+}
+
+static bool loom_amdgpu_atomic_operation_kind_from_source_memory(
+    loom_low_source_memory_operation_kind_t source_kind,
+    loom_amdgpu_atomic_operation_kind_t* out_kind) {
+  *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
+  switch (source_kind) {
+    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE:
+      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE;
+      return true;
+    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW:
+      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_RMW;
+      return true;
+    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG:
+      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG;
+      return true;
+    default:
+      return false;
+  }
+}
+
 static void loom_amdgpu_atomic_source_describe_update(
     loom_memory_access_t access,
     loom_amdgpu_atomic_operation_kind_t operation_kind,
@@ -243,43 +270,42 @@ static bool loom_amdgpu_atomic_source_describe(
   loom_memory_access_t access = loom_memory_access_cast(module, op);
   if (!loom_memory_access_isa(access)) return false;
   out_source->access = access;
-  switch (op->kind) {
-    case LOOM_OP_VIEW_ATOMIC_REDUCE:
-      loom_amdgpu_atomic_source_describe_update(
-          access, LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE, /*flags=*/0,
-          LOOM_VALUE_ID_INVALID, out_source);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-      loom_amdgpu_atomic_source_describe_update(
-          access, LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE,
-          LOOM_AMDGPU_ATOMIC_SOURCE_VECTOR, LOOM_VALUE_ID_INVALID, out_source);
-      return true;
-    case LOOM_OP_VIEW_ATOMIC_RMW:
-      loom_amdgpu_atomic_source_describe_update(
-          access, LOOM_AMDGPU_ATOMIC_OPERATION_RMW, /*flags=*/0,
-          loom_view_atomic_rmw_result(op), out_source);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_RMW:
-      loom_amdgpu_atomic_source_describe_update(
-          access, LOOM_AMDGPU_ATOMIC_OPERATION_RMW,
-          LOOM_AMDGPU_ATOMIC_SOURCE_VECTOR, loom_vector_atomic_rmw_result(op),
-          out_source);
-      return true;
-    case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
-      out_source->operation_kind = LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG;
-      out_source->ordering = loom_amdgpu_atomic_u8_attr(
-          loom_memory_access_atomic_success_ordering(access));
-      out_source->failure_ordering = loom_amdgpu_atomic_u8_attr(
-          loom_memory_access_atomic_failure_ordering(access));
-      out_source->scope =
-          loom_amdgpu_atomic_u8_attr(loom_memory_access_atomic_scope(access));
-      out_source->expected = loom_memory_access_expected(access);
-      out_source->replacement = loom_memory_access_replacement(access);
-      out_source->result = loom_view_atomic_cmpxchg_old(op);
-      return true;
-    default:
-      return false;
+
+  loom_low_source_memory_operation_kind_t source_operation_kind =
+      LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  if (!loom_low_source_memory_operation_kind_from_access(
+          module, op, access, &source_operation_kind) ||
+      !loom_amdgpu_atomic_operation_kind_from_source_memory(
+          source_operation_kind, &out_source->operation_kind)) {
+    return false;
   }
+
+  const loom_value_id_t result = op->result_count == 1
+                                     ? loom_op_const_results(op)[0]
+                                     : LOOM_VALUE_ID_INVALID;
+  if (out_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
+    if (result == LOOM_VALUE_ID_INVALID) return false;
+    out_source->ordering = loom_amdgpu_atomic_u8_attr(
+        loom_memory_access_atomic_success_ordering(access));
+    out_source->failure_ordering = loom_amdgpu_atomic_u8_attr(
+        loom_memory_access_atomic_failure_ordering(access));
+    out_source->scope =
+        loom_amdgpu_atomic_u8_attr(loom_memory_access_atomic_scope(access));
+    out_source->expected = loom_memory_access_expected(access);
+    out_source->replacement = loom_memory_access_replacement(access);
+    out_source->result = result;
+    return out_source->expected != LOOM_VALUE_ID_INVALID &&
+           out_source->replacement != LOOM_VALUE_ID_INVALID;
+  }
+
+  loom_amdgpu_atomic_source_flags_t flags = 0;
+  if (loom_amdgpu_atomic_value_is_vector(module,
+                                         loom_memory_access_value(access))) {
+    flags |= LOOM_AMDGPU_ATOMIC_SOURCE_VECTOR;
+  }
+  loom_amdgpu_atomic_source_describe_update(access, out_source->operation_kind,
+                                            flags, result, out_source);
+  return true;
 }
 
 static bool loom_amdgpu_atomic_source_is_vector(
@@ -348,25 +374,6 @@ static bool loom_amdgpu_atomic_memory_space_is_device_visible(
     loom_value_fact_memory_space_t memory_space) {
   return memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
          memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC;
-}
-
-static bool loom_amdgpu_atomic_operation_kind_from_source_memory(
-    loom_low_source_memory_operation_kind_t source_kind,
-    loom_amdgpu_atomic_operation_kind_t* out_kind) {
-  *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_COUNT_;
-  switch (source_kind) {
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE;
-      return true;
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_RMW;
-      return true;
-    case LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG:
-      *out_kind = LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG;
-      return true;
-    default:
-      return false;
-  }
 }
 
 static bool loom_amdgpu_atomic_ordering_supported(
