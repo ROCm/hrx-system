@@ -14,6 +14,11 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 
+enum {
+  // Register-part mask for the low half of a 32-bit register.
+  LOOM_AMDGPU_REGISTER_PART_MASK_LOW16 = 0x1u,
+};
+
 iree_status_t loom_amdgpu_intern(loom_low_lower_context_t* context,
                                  iree_string_view_t string,
                                  loom_string_id_t* out_string_id) {
@@ -1161,10 +1166,8 @@ bool loom_amdgpu_low_value_defines_vgpr_low16(loom_low_lower_context_t* context,
   }
   const loom_low_register_part_t* register_part =
       &descriptor_set->register_parts[result_operand->register_part_id];
-  const iree_string_view_t register_part_name = loom_low_descriptor_set_string(
-      descriptor_set, register_part->name_string_offset);
-  return iree_string_view_equal(register_part_name,
-                                IREE_SV("amdgpu.vgpr.low16"));
+  return register_part->reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
+         register_part->mask == LOOM_AMDGPU_REGISTER_PART_MASK_LOW16;
 }
 
 iree_status_t loom_amdgpu_materialize_low_vgpr_b32(
