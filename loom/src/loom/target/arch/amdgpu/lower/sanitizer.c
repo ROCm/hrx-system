@@ -918,12 +918,12 @@ static loom_value_id_t loom_amdgpu_sanitizer_access_view_value(
   return LOOM_VALUE_ID_INVALID;
 }
 
-static iree_status_t loom_amdgpu_sanitizer_access_plan_for_repeat(
+static void loom_amdgpu_sanitizer_access_plan_for_repeat(
     const loom_amdgpu_sanitizer_access_plan_t* plan, uint16_t repeat_ordinal,
     loom_amdgpu_memory_access_t* out_access) {
   *out_access = plan->address;
   if (repeat_ordinal == 0) {
-    return iree_ok_status();
+    return;
   }
   const uint64_t byte_stride = plan->static_repeat_byte_stride;
   IREE_ASSERT(byte_stride == 0 || repeat_ordinal <= UINT64_MAX / byte_stride,
@@ -933,7 +933,6 @@ static iree_status_t loom_amdgpu_sanitizer_access_plan_for_repeat(
       repeat_byte_offset <= UINT64_MAX - out_access->vaddr_static_byte_offset,
       "AMDGPU sanitizer repeated access static offset overflow");
   out_access->vaddr_static_byte_offset += repeat_byte_offset;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_sanitizer_emit_repeat_fault_address(
@@ -943,8 +942,7 @@ static iree_status_t loom_amdgpu_sanitizer_emit_repeat_fault_address(
     loom_value_id_t* out_fault_address) {
   *out_fault_address = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_memory_access_t access = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_access_plan_for_repeat(
-      plan, repeat_ordinal, &access));
+  loom_amdgpu_sanitizer_access_plan_for_repeat(plan, repeat_ordinal, &access);
   return loom_amdgpu_emit_memory_flat_vaddr(context, source_op, &access,
                                             low_resource, out_fault_address);
 }
