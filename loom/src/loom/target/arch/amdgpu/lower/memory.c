@@ -2486,11 +2486,6 @@ static bool loom_amdgpu_memory_access_select_packet(
           access->source.static_byte_offset, out_diagnostic)) {
     return false;
   }
-  if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          selection_context->fact_table, selection_context->source_function,
-          access, out_diagnostic)) {
-    return false;
-  }
 
   if (!loom_amdgpu_memory_access_select_dynamic_term_kinds_from_plan(
           selection_context->materialization_plan, access, out_diagnostic)) {
@@ -2721,6 +2716,17 @@ bool loom_amdgpu_memory_access_plan_select(
                                                     out_diagnostic)) {
     return false;
   }
+  if (!loom_amdgpu_memory_access_static_byte_offset_is_usable(
+          access.source.static_byte_offset, out_diagnostic)) {
+    return false;
+  }
+  // Fold the target-assigned alloca base once before packet splitting. Each
+  // chunk inherits this adjusted source offset instead of rediscovering the
+  // same source allocation layout per packet.
+  if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
+          fact_table, source_function, &access, out_diagnostic)) {
+    return false;
+  }
   if (access.source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
       loom_amdgpu_memory_access_selects_low16_float_descriptor(
           module, source_op, kind, vector_type)) {
@@ -2772,8 +2778,8 @@ bool loom_amdgpu_memory_access_plan_select(
       const uint32_t packet_register_count =
           iree_min(full_register_count, LOOM_AMDGPU_MAX_MEMORY_32BIT_LANES);
       if (!loom_amdgpu_memory_access_plan_push_chunk_packet(
-              &selection_context, kind, /*allow_global_smem=*/false, out_source,
-              source_register_offset, packet_register_count,
+              &selection_context, kind, /*allow_global_smem=*/false,
+              &access.source, source_register_offset, packet_register_count,
               packet_register_count * 4u, out_plan, out_diagnostic)) {
         return false;
       }
@@ -2783,9 +2789,9 @@ bool loom_amdgpu_memory_access_plan_select(
     const uint32_t tail_byte_count = access.packet_byte_count % 4u;
     if (tail_byte_count != 0 &&
         !loom_amdgpu_memory_access_plan_push_chunk_packet(
-            &selection_context, kind, /*allow_global_smem=*/false, out_source,
-            source_register_offset, 1u, tail_byte_count, out_plan,
-            out_diagnostic)) {
+            &selection_context, kind, /*allow_global_smem=*/false,
+            &access.source, source_register_offset, 1u, tail_byte_count,
+            out_plan, out_diagnostic)) {
       return false;
     }
     return true;
@@ -2799,7 +2805,7 @@ bool loom_amdgpu_memory_access_plan_select(
         iree_min(remaining, LOOM_AMDGPU_MAX_MEMORY_32BIT_LANES);
     loom_low_source_memory_access_plan_t chunk_source = {0};
     if (!loom_amdgpu_memory_access_make_32bit_chunk_source(
-            out_source, source_register_offset, packet_register_count,
+            &access.source, source_register_offset, packet_register_count,
             &chunk_source, out_diagnostic)) {
       return false;
     }

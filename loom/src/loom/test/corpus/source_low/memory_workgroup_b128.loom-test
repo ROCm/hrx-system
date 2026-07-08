@@ -88,3 +88,29 @@ kernel.def @lds_b128_large_static_offset_roundtrip() {
   vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
   kernel.return
 }
+
+// ====
+
+kernel.def @lds_b128_split_second_alloca_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %first_bytes = index.constant 64 : offset
+  %second_bytes = index.constant 2048 : offset
+  %first = buffer.alloca %first_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second = buffer.alloca %second_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_view = buffer.view %first[%zero] : buffer -> view<16xi32, #dense>
+  %second_view = buffer.view %second[%zero] : buffer -> view<64x8xi32, #dense>
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x8xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x8xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xi32, #dense> -> vector<8xi32>
+  vector.store %loaded, %second_view[%lane, 0] : vector<8xi32>, view<64x8xi32, #dense>
+  %roundtrip = vector.load %second_view[%lane, 0] : view<64x8xi32, #dense> -> vector<8xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xi32>, view<64x8xi32, #dense>
+  %sentinel = view.load %first_view[0] : view<16xi32, #dense> -> i32
+  view.store %sentinel, %first_view[1] : i32, view<16xi32, #dense>
+  kernel.return
+}
