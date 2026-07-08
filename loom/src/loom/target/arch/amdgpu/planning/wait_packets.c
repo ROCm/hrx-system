@@ -182,15 +182,13 @@ loom_amdgpu_wait_packet_select_descriptor(
   return &builder->target.descriptors[selection->descriptor_index];
 }
 
-iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
+bool loom_amdgpu_wait_packet_try_select_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t counter_mask,
-    uint16_t target_count, loom_amdgpu_wait_packet_selection_t* out_selection,
-    bool* out_selected) {
+    uint16_t target_count, loom_amdgpu_wait_packet_selection_t* out_selection) {
   *out_selection = (loom_amdgpu_wait_packet_selection_t){0};
-  *out_selected = false;
   if (counter_mask == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU wait packet selection requires a counter");
+    IREE_ASSERT_UNREACHABLE("AMDGPU wait packet selection requires a counter");
+    return false;
   }
 
   loom_amdgpu_wait_packet_builder_t builder = {
@@ -203,7 +201,7 @@ iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
       loom_amdgpu_wait_packet_select_descriptor(&builder, counter_mask,
                                                 &covered_counter_mask);
   if (packet_descriptor == NULL || covered_counter_mask != counter_mask) {
-    return iree_ok_status();
+    return false;
   }
   IREE_ASSERT_LE(packet_descriptor->immediate_count,
                  LOOM_AMDGPU_WAIT_PACKET_SELECTION_IMMEDIATE_CAPACITY);
@@ -231,17 +229,14 @@ iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(
         .value = value,
     };
   }
-  *out_selected = true;
-  return iree_ok_status();
+  return true;
 }
 
 iree_status_t loom_amdgpu_wait_packet_select_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t counter_mask,
     uint16_t target_count, loom_amdgpu_wait_packet_selection_t* out_selection) {
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_try_select_counter_mask(
-      descriptor_set, counter_mask, target_count, out_selection, &selected));
-  if (!selected) {
+  if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+          descriptor_set, counter_mask, target_count, out_selection)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU target cannot materialize wait packet for counter mask 0x%x",
