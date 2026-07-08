@@ -47,7 +47,15 @@ typedef enum loom_amdgpu_subgroup_vote_kind_e {
   LOOM_AMDGPU_SUBGROUP_VOTE_COUNT_,
 } loom_amdgpu_subgroup_vote_kind_t;
 
+typedef uint8_t loom_amdgpu_subgroup_vote_rule_flags_t;
+
+enum loom_amdgpu_subgroup_vote_rule_flag_bits_e {
+  LOOM_AMDGPU_SUBGROUP_VOTE_RULE_WAVE32_REQUIRES_PEER_MASK = 1u << 0,
+};
+
 typedef struct loom_amdgpu_subgroup_vote_rule_t {
+  // Width-specific descriptor requirements.
+  loom_amdgpu_subgroup_vote_rule_flags_t flags;
   // Descriptor row selected for the predicate comparison.
   loom_amdgpu_descriptor_ref_t compare_descriptor_ref;
   // Descriptor row selected for wave32 predicate comparisons.
@@ -93,6 +101,8 @@ static const loom_amdgpu_subgroup_vote_rule_t
             },
         [LOOM_AMDGPU_SUBGROUP_VOTE_ALL] =
             {
+                .flags =
+                    LOOM_AMDGPU_SUBGROUP_VOTE_RULE_WAVE32_REQUIRES_PEER_MASK,
                 .compare_descriptor_ref =
                     LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_EQ_U64,
                 .wave32_compare_descriptor_ref =
@@ -139,29 +149,29 @@ static iree_status_t loom_amdgpu_select_subgroup_vote_plan(
     return iree_ok_status();
   }
 
-  const loom_amdgpu_descriptor_resolution_t resolutions[] = {
-      {
-          .descriptor_ref = rule->compare_descriptor_ref,
-          .out_descriptor = out_compare_descriptor,
-      },
-      {
-          .descriptor_ref = rule->peer_mask_descriptor_ref,
-          .out_descriptor = out_peer_mask_descriptor,
-      },
+  const bool is_wave32 = *out_wavefront_size == 32;
+  const bool peer_mask_required =
+      !is_wave32 ||
+      iree_all_bits_set(
+          rule->flags,
+          LOOM_AMDGPU_SUBGROUP_VOTE_RULE_WAVE32_REQUIRES_PEER_MASK);
+  loom_amdgpu_descriptor_resolution_t resolutions[2] = {
+      {.descriptor_ref = is_wave32 ? rule->wave32_compare_descriptor_ref
+                                   : rule->compare_descriptor_ref,
+       .out_descriptor = out_compare_descriptor},
   };
+  iree_host_size_t resolution_count = 1;
+  if (peer_mask_required) {
+    resolutions[resolution_count++] = (loom_amdgpu_descriptor_resolution_t){
+        .descriptor_ref = rule->peer_mask_descriptor_ref,
+        .out_descriptor = out_peer_mask_descriptor,
+    };
+  }
   bool descriptors_present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_refs_if_present(
-      context, resolutions, IREE_ARRAYSIZE(resolutions), &descriptors_present));
+      context, resolutions, resolution_count, &descriptors_present));
   if (!descriptors_present) {
     return iree_ok_status();
-  }
-
-  if (*out_wavefront_size == 32) {
-    if (!loom_amdgpu_descriptor_set_has_ref(
-            loom_low_lower_context_descriptor_set(context),
-            rule->wave32_compare_descriptor_ref)) {
-      return iree_ok_status();
-    }
   }
 
   *out_selected = true;
@@ -547,13 +557,21 @@ static iree_status_t loom_amdgpu_low_legality_verify_subgroup_vote(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_low_legality_verify_subgroup_native_predicate(
           context, op, predicate, rule->native_predicate_constraint_key));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_descriptor_requirement(
-      context, op, rule->compare_descriptor_ref,
-      rule->compare_descriptor_constraint_key));
-  if (unused_wavefront_size == 32) {
+  const bool is_wave32 = unused_wavefront_size == 32;
+  if (is_wave32) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_descriptor_requirement(
         context, op, rule->wave32_compare_descriptor_ref,
         rule->wave32_compare_descriptor_constraint_key));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_descriptor_requirement(
+        context, op, rule->compare_descriptor_ref,
+        rule->compare_descriptor_constraint_key));
+  }
+  if (is_wave32 &&
+      !iree_all_bits_set(
+          rule->flags,
+          LOOM_AMDGPU_SUBGROUP_VOTE_RULE_WAVE32_REQUIRES_PEER_MASK)) {
+    return iree_ok_status();
   }
   return loom_amdgpu_low_legality_verify_descriptor_requirement(
       context, op, rule->peer_mask_descriptor_ref,
