@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/descriptors.h"
 
 namespace loom {
 namespace {
@@ -306,6 +307,88 @@ TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {
   EXPECT_EQ(
       loom_low_packet_hazard_gap_packet_index(&state.schedule, &hazard_gap, 2),
       12u);
+}
+
+TEST(LowDescriptorTest, DistinguishesPacketAndExplicitPacketOperands) {
+  loom_low_operand_t operands[5] = {};
+  operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
+  operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
+  operands[2].role = LOOM_LOW_OPERAND_ROLE_RESOURCE;
+  operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  operands[3].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
+  operands[4].role = LOOM_LOW_OPERAND_ROLE_RESOURCE;
+
+  loom_low_constraint_t constraints[2] = {};
+  constraints[0].kind = LOOM_LOW_CONSTRAINT_KIND_TIED;
+  constraints[0].lhs_operand_index = 0;
+  constraints[0].rhs_operand_index = 2;
+  constraints[1].kind = LOOM_LOW_CONSTRAINT_KIND_TIED;
+  constraints[1].lhs_operand_index = 0;
+  constraints[1].rhs_operand_index = 3;
+
+  loom_low_descriptor_t descriptor = {};
+  descriptor.operand_start = 0;
+  descriptor.result_count = 1;
+  descriptor.operand_count = IREE_ARRAYSIZE(operands);
+  descriptor.constraint_start = 0;
+  descriptor.constraint_count = IREE_ARRAYSIZE(constraints);
+
+  loom_low_descriptor_set_t descriptor_set = {};
+  descriptor_set.operands = operands;
+  descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
+  descriptor_set.constraints = constraints;
+  descriptor_set.constraint_count = IREE_ARRAYSIZE(constraints);
+
+  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 0));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 1));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 2));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 3));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 4));
+
+  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+      &descriptor_set, &descriptor, 0));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+      &descriptor_set, &descriptor, 1));
+  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+      &descriptor_set, &descriptor, 2));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+      &descriptor_set, &descriptor, 3));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+      &descriptor_set, &descriptor, 4));
+
+  EXPECT_EQ(
+      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 1),
+      0u);
+  EXPECT_EQ(
+      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 2),
+      1u);
+  EXPECT_EQ(
+      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 3),
+      2u);
+  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
+                                                                &descriptor, 0),
+            1u);
+  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
+                                                                &descriptor, 1),
+            2u);
+  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
+                                                                &descriptor, 2),
+            3u);
+  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
+                                                                &descriptor, 3),
+            4u);
+
+  EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
+                                                    &descriptor, 0, 2));
+  EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
+                                                    &descriptor, 0, 3));
+  EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
+                                                    &descriptor, 3, 0));
 }
 
 }  // namespace

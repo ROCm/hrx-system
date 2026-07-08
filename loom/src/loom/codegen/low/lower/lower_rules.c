@@ -397,9 +397,10 @@ static uint16_t loom_low_lower_rule_materializer_packet_operand_index(
   uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
+    if (!loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
+                                                            descriptor, i)) {
+      continue;
+    }
     if (i == descriptor_operand_index) return packet_operand_index;
     ++packet_operand_index;
   }
@@ -3181,13 +3182,12 @@ static const loom_low_operand_t* loom_low_lower_rule_descriptor_packet_operand(
   uint16_t packet_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) {
+    if (!loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
+                                                            descriptor, i)) {
       continue;
     }
     if (packet_index == packet_operand_index) {
-      return operand;
+      return &descriptor_set->operands[descriptor->operand_start + i];
     }
     ++packet_index;
   }

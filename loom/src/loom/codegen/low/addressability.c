@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/error/error_catalog.h"
@@ -25,17 +26,6 @@ static bool loom_low_addressability_location_is_register_like(
     loom_low_allocation_location_kind_t location_kind) {
   return location_kind == LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
          location_kind == LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
-}
-
-static bool loom_low_addressability_descriptor_operand_is_explicit_value(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index) {
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  return loom_low_operand_role_is_packet_operand(operand->role) &&
-         !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT);
 }
 
 static iree_status_t loom_low_addressability_packet_field_for_operand(
@@ -71,14 +61,14 @@ static iree_status_t loom_low_addressability_packet_field_for_operand(
     };
     return iree_ok_status();
   }
-  if (!loom_low_addressability_descriptor_operand_is_explicit_value(
+  if (!loom_low_descriptor_operand_maps_to_explicit_packet_operand(
           descriptor_set, descriptor, descriptor_operand_index)) {
     return iree_ok_status();
   }
   uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
        ++i) {
-    if (loom_low_addressability_descriptor_operand_is_explicit_value(
+    if (loom_low_descriptor_operand_maps_to_explicit_packet_operand(
             descriptor_set, descriptor, i)) {
       ++packet_operand_index;
     }
