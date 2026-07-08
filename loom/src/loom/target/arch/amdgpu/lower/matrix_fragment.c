@@ -178,6 +178,23 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
             },
 };
 
+static const loom_contract_operand_role_t kFragmentMemoryContractRoles[] = {
+    [LOOM_VECTOR_ROLE_LHS] = LOOM_CONTRACT_OPERAND_ROLE_LHS,
+    [LOOM_VECTOR_ROLE_RHS] = LOOM_CONTRACT_OPERAND_ROLE_RHS,
+    [LOOM_VECTOR_ROLE_INIT] = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+    [LOOM_VECTOR_ROLE_RESULT] = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+};
+
+static_assert(IREE_ARRAYSIZE(kFragmentMemoryContractRoles) ==
+                  LOOM_VECTOR_ROLE_COUNT_,
+              "fragment memory contract roles cover vector roles");
+static_assert((int)LOOM_AMDGPU_MEMORY_OPERATION_LOAD ==
+                  (int)LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+              "AMDGPU load operation kind matches source memory planning");
+static_assert((int)LOOM_AMDGPU_MEMORY_OPERATION_STORE ==
+                  (int)LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+              "AMDGPU store operation kind matches source memory planning");
+
 typedef struct loom_amdgpu_fragment_memory_contract_candidate_list_t {
   // Descriptor set used to filter descriptors in this list.
   const loom_low_descriptor_set_t* descriptor_set;
@@ -348,40 +365,24 @@ static bool loom_amdgpu_fragment_memory_reject(
 static bool loom_amdgpu_fragment_memory_role_from_vector_role(
     loom_vector_role_t role, loom_contract_operand_role_t* out_role) {
   *out_role = LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN;
-  switch (role) {
-    case LOOM_VECTOR_ROLE_LHS:
-      *out_role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
-      return true;
-    case LOOM_VECTOR_ROLE_RHS:
-      *out_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-      return true;
-    case LOOM_VECTOR_ROLE_INIT:
-      *out_role = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR;
-      return true;
-    case LOOM_VECTOR_ROLE_RESULT:
-      *out_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
-      return true;
-    case LOOM_VECTOR_ROLE_COUNT_:
-    default:
-      return false;
+  if (role >= IREE_ARRAYSIZE(kFragmentMemoryContractRoles) ||
+      kFragmentMemoryContractRoles[role] ==
+          LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN) {
+    return false;
   }
+  *out_role = kFragmentMemoryContractRoles[role];
+  return true;
 }
 
 static bool loom_amdgpu_fragment_memory_source_operation_kind(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_low_source_memory_operation_kind_t* out_operation_kind) {
   *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  switch (operation_kind) {
-    case LOOM_AMDGPU_MEMORY_OPERATION_LOAD:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-      return true;
-    case LOOM_AMDGPU_MEMORY_OPERATION_STORE:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-      return true;
-    case LOOM_AMDGPU_MEMORY_OPERATION_COUNT_:
-      return false;
+  if (operation_kind >= LOOM_AMDGPU_MEMORY_OPERATION_COUNT_) {
+    return false;
   }
-  return false;
+  *out_operation_kind = (loom_low_source_memory_operation_kind_t)operation_kind;
+  return true;
 }
 
 static bool loom_amdgpu_fragment_memory_exact_nonnegative_i64(
