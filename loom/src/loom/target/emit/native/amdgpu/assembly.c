@@ -653,120 +653,88 @@ static iree_status_t loom_amdgpu_find_packet_immediate(
                           (int)field_name.size, field_name.data);
 }
 
-static iree_status_t loom_amdgpu_descriptor_has_effect(
+static bool loom_amdgpu_descriptor_has_effect(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_low_effect_kind_t kind,
-    bool* out_has_effect) {
-  *out_has_effect = false;
+    const loom_low_descriptor_t* descriptor, loom_low_effect_kind_t kind) {
   if (descriptor->effect_count == 0) {
-    return iree_ok_status();
+    return false;
   }
-  if (descriptor->effect_start > descriptor_set->effect_count ||
-      descriptor->effect_count >
-          descriptor_set->effect_count - descriptor->effect_start) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU descriptor effect range is out of range");
-  }
-  if (descriptor_set->effects == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU descriptor effects table is missing");
-  }
+  IREE_ASSERT(descriptor_set->effects != NULL);
+  IREE_ASSERT_LE(descriptor->effect_start, descriptor_set->effect_count);
+  IREE_ASSERT_LE(descriptor->effect_count,
+                 descriptor_set->effect_count - descriptor->effect_start);
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const loom_low_effect_t* effect =
         &descriptor_set->effects[descriptor->effect_start + i];
     if (effect->kind == kind) {
-      *out_has_effect = true;
-      return iree_ok_status();
+      return true;
     }
   }
-  return iree_ok_status();
+  return false;
 }
 
-static iree_status_t loom_amdgpu_descriptor_has_memory_effect(
+static bool loom_amdgpu_descriptor_has_memory_effect(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_low_effect_kind_t kind,
-    loom_low_memory_space_t memory_space, bool* out_has_effect) {
-  *out_has_effect = false;
+    loom_low_memory_space_t memory_space) {
   if (descriptor->effect_count == 0) {
-    return iree_ok_status();
+    return false;
   }
-  if (descriptor->effect_start > descriptor_set->effect_count ||
-      descriptor->effect_count >
-          descriptor_set->effect_count - descriptor->effect_start) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU descriptor effect range is out of range");
-  }
-  if (descriptor_set->effects == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU descriptor effects table is missing");
-  }
+  IREE_ASSERT(descriptor_set->effects != NULL);
+  IREE_ASSERT_LE(descriptor->effect_start, descriptor_set->effect_count);
+  IREE_ASSERT_LE(descriptor->effect_count,
+                 descriptor_set->effect_count - descriptor->effect_start);
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const loom_low_effect_t* effect =
         &descriptor_set->effects[descriptor->effect_start + i];
     if (effect->kind == kind && effect->memory_space == memory_space) {
-      *out_has_effect = true;
-      return iree_ok_status();
+      return true;
     }
   }
-  return iree_ok_status();
+  return false;
 }
 
-static iree_status_t loom_amdgpu_descriptor_is_global_to_lds(
+static bool loom_amdgpu_descriptor_is_global_to_lds(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, bool* out_is_global_to_lds) {
-  bool has_global_read = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_has_memory_effect(
+    const loom_low_descriptor_t* descriptor) {
+  const bool has_global_read = loom_amdgpu_descriptor_has_memory_effect(
       descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_READ,
-      LOOM_LOW_MEMORY_SPACE_GLOBAL, &has_global_read));
-  bool has_workgroup_write = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_has_memory_effect(
+      LOOM_LOW_MEMORY_SPACE_GLOBAL);
+  const bool has_workgroup_write = loom_amdgpu_descriptor_has_memory_effect(
       descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_WRITE,
-      LOOM_LOW_MEMORY_SPACE_WORKGROUP, &has_workgroup_write));
-  *out_is_global_to_lds = has_global_read && has_workgroup_write;
-  return iree_ok_status();
+      LOOM_LOW_MEMORY_SPACE_WORKGROUP);
+  return has_global_read && has_workgroup_write;
 }
 
-static iree_status_t loom_amdgpu_descriptor_uses_resource_kind(
+static bool loom_amdgpu_descriptor_uses_resource_kind(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_low_resource_kind_t kind,
-    bool* out_uses_resource_kind) {
-  *out_uses_resource_kind = false;
-  if (descriptor->schedule_class_id >= descriptor_set->schedule_class_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU descriptor schedule class is out of range");
-  }
+    const loom_low_descriptor_t* descriptor, loom_low_resource_kind_t kind) {
+  IREE_ASSERT_LT(descriptor->schedule_class_id,
+                 descriptor_set->schedule_class_count);
+  IREE_ASSERT(descriptor_set->schedule_classes != NULL);
   const loom_low_schedule_class_t* schedule_class =
       &descriptor_set->schedule_classes[descriptor->schedule_class_id];
   if (schedule_class->issue_use_count == 0) {
-    return iree_ok_status();
+    return false;
   }
-  if (schedule_class->issue_use_start > descriptor_set->issue_use_count ||
-      schedule_class->issue_use_count >
-          descriptor_set->issue_use_count - schedule_class->issue_use_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU descriptor schedule-class issue-use range is out of range");
-  }
-  if (descriptor_set->issue_uses == NULL || descriptor_set->resources == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU descriptor schedule resources are missing");
-  }
+  IREE_ASSERT(descriptor_set->issue_uses != NULL);
+  IREE_ASSERT(descriptor_set->resources != NULL);
+  IREE_ASSERT_LE(schedule_class->issue_use_start,
+                 descriptor_set->issue_use_count);
+  IREE_ASSERT_LE(
+      schedule_class->issue_use_count,
+      descriptor_set->issue_use_count - schedule_class->issue_use_start);
   for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
     const loom_low_issue_use_t* issue_use =
         &descriptor_set->issue_uses[schedule_class->issue_use_start + i];
-    if (issue_use->resource_id >= descriptor_set->resource_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU descriptor issue-use resource is out of "
-                              "range");
-    }
+    IREE_ASSERT_LT(issue_use->resource_id, descriptor_set->resource_count);
     const loom_low_resource_t* resource =
         &descriptor_set->resources[issue_use->resource_id];
     if (resource->kind == kind) {
-      *out_uses_resource_kind = true;
-      return iree_ok_status();
+      return true;
     }
   }
-  return iree_ok_status();
+  return false;
 }
 
 static iree_status_t loom_amdgpu_append_comma(
@@ -1736,59 +1704,49 @@ static bool loom_amdgpu_descriptor_packet_route_matches(
          !iree_any_bit_set(flags, route->forbidden_flags);
 }
 
-static iree_status_t loom_amdgpu_read_descriptor_packet_route_flags(
-    const loom_native_assembly_packet_context_t* context,
-    loom_amdgpu_descriptor_packet_route_flags_t* out_flags) {
-  *out_flags = 0;
+static loom_amdgpu_descriptor_packet_route_flags_t
+loom_amdgpu_descriptor_packet_route_flags(
+    const loom_native_assembly_packet_context_t* context) {
+  loom_amdgpu_descriptor_packet_route_flags_t flags = 0;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
 
-  bool has_read_effect = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_has_effect(
-      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_READ, &has_read_effect));
+  const bool has_read_effect = loom_amdgpu_descriptor_has_effect(
+      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_READ);
   if (has_read_effect) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_READ_EFFECT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_READ_EFFECT;
   }
-  bool has_write_effect = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_has_effect(
-      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_WRITE,
-      &has_write_effect));
+  const bool has_write_effect = loom_amdgpu_descriptor_has_effect(
+      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_WRITE);
   if (has_write_effect) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_WRITE_EFFECT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_WRITE_EFFECT;
   }
-  bool has_counter_effect = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_has_effect(
-      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_COUNTER,
-      &has_counter_effect));
+  const bool has_counter_effect = loom_amdgpu_descriptor_has_effect(
+      descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_COUNTER);
   if (has_counter_effect) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_COUNTER_EFFECT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_COUNTER_EFFECT;
   }
-  if (has_read_effect && has_write_effect) {
-    bool is_global_to_lds = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_is_global_to_lds(
-        descriptor_set, descriptor, &is_global_to_lds));
-    if (is_global_to_lds) {
-      *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_TO_LDS;
-    }
+  if (has_read_effect && has_write_effect &&
+      loom_amdgpu_descriptor_is_global_to_lds(descriptor_set, descriptor)) {
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_TO_LDS;
   }
   if (loom_amdgpu_descriptor_uses_buffer_format(descriptor)) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_BUFFER_FORMAT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_BUFFER_FORMAT;
   }
   if (loom_amdgpu_descriptor_uses_global_pointer_format(descriptor)) {
-    *out_flags |=
-        LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_POINTER_FORMAT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_GLOBAL_POINTER_FORMAT;
   }
   if (loom_amdgpu_descriptor_uses_scratch_format(descriptor)) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_SCRATCH_FORMAT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_SCRATCH_FORMAT;
   }
   if (loom_amdgpu_descriptor_uses_data_share_format(descriptor)) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_DATA_SHARE_FORMAT;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_DATA_SHARE_FORMAT;
   }
   if (descriptor->immediate_count == 2) {
-    *out_flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_TWO_IMMEDIATES;
+    flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_TWO_IMMEDIATES;
   }
-  return iree_ok_status();
+  return flags;
 }
 
 static iree_status_t loom_amdgpu_append_unsupported_read_write_packet(
@@ -3376,21 +3334,16 @@ static iree_status_t loom_amdgpu_try_append_canonical_asm_form_dispatch_packet(
 
 static iree_status_t loom_amdgpu_try_append_effect_route_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
-  loom_amdgpu_descriptor_packet_route_flags_t route_flags = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_descriptor_packet_route_flags(context, &route_flags));
-  return loom_amdgpu_try_append_descriptor_packet_route(context, route_flags,
-                                                        out_matched);
+  return loom_amdgpu_try_append_descriptor_packet_route(
+      context, loom_amdgpu_descriptor_packet_route_flags(context), out_matched);
 }
 
 static iree_status_t loom_amdgpu_try_append_matrix_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
   *out_matched = false;
-  bool uses_matrix_resource = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_uses_resource_kind(
-      context->schedule->target.descriptor_set, context->packet->descriptor,
-      LOOM_LOW_RESOURCE_KIND_MATRIX, &uses_matrix_resource));
-  if (!uses_matrix_resource) {
+  if (!loom_amdgpu_descriptor_uses_resource_kind(
+          context->schedule->target.descriptor_set, context->packet->descriptor,
+          LOOM_LOW_RESOURCE_KIND_MATRIX)) {
     return iree_ok_status();
   }
   *out_matched = true;
