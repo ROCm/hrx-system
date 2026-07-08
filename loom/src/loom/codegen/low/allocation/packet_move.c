@@ -159,20 +159,22 @@ static iree_status_t loom_low_allocation_packet_moves_for_op(
     const loom_low_allocation_packet_move_context_t* context,
     const loom_op_t* op, loom_low_allocation_packet_unit_move_t* moves,
     iree_host_size_t move_capacity, iree_host_size_t* out_move_count) {
-  if (loom_low_copy_isa(op)) {
-    return loom_low_allocation_packet_moves_for_copy(
-        context, op, moves, move_capacity, out_move_count);
+  switch (loom_low_allocation_move_topology_packet_move_op_kind(op)) {
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
+      return loom_low_allocation_packet_moves_for_copy(
+          context, op, moves, move_capacity, out_move_count);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE:
+      return loom_low_allocation_packet_moves_for_slice(
+          context, op, moves, move_capacity, out_move_count);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT:
+      return loom_low_allocation_packet_moves_for_concat(
+          context, op, moves, move_capacity, out_move_count);
+    case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
+      *out_move_count = 0;
+      return iree_ok_status();
   }
-  if (loom_low_slice_isa(op)) {
-    return loom_low_allocation_packet_moves_for_slice(
-        context, op, moves, move_capacity, out_move_count);
-  }
-  if (loom_low_concat_isa(op)) {
-    return loom_low_allocation_packet_moves_for_concat(
-        context, op, moves, move_capacity, out_move_count);
-  }
-  *out_move_count = 0;
-  return iree_ok_status();
+  IREE_ASSERT_UNREACHABLE("unknown low packet move op kind");
+  return iree_status_from_code(IREE_STATUS_INTERNAL);
 }
 
 static iree_status_t loom_low_allocation_packet_move_count_region_capacity(
