@@ -283,40 +283,15 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 
 iree_status_t loom_amdgpu_wait_counter_mask(uint16_t counter_id,
                                             uint32_t* out_mask) {
-  switch (counter_id) {
-    case LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD:
-      *out_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD;
-      return iree_ok_status();
-    case LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE:
-      *out_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE;
-      return iree_ok_status();
-    case LOOM_AMDGPU_WAIT_COUNTER_LDS:
-      *out_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS;
-      return iree_ok_status();
-    case LOOM_AMDGPU_WAIT_COUNTER_SMEM:
-      *out_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM;
-      return iree_ok_status();
-    case LOOM_AMDGPU_WAIT_COUNTER_ALU:
-      *out_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU;
-      return iree_ok_status();
-    default:
-      *out_mask = 0;
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown AMDGPU wait counter id %" PRIu16,
-                              counter_id);
+  if (!loom_amdgpu_wait_counter_id_is_valid(counter_id)) {
+    *out_mask = 0;
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown AMDGPU wait counter id %" PRIu16,
+                            counter_id);
   }
-}
-
-static uint16_t loom_amdgpu_wait_counter_id_from_slot(uint32_t slot) {
-  return (uint16_t)(slot + 1);
-}
-
-static uint32_t loom_amdgpu_wait_counter_mask_from_slot(uint32_t slot) {
-  return 1u << slot;
-}
-
-static uint32_t loom_amdgpu_wait_counter_slot(uint16_t counter_id) {
-  return counter_id - 1;
+  const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
+  *out_mask = loom_amdgpu_wait_counter_mask_from_slot(slot);
+  return iree_ok_status();
 }
 
 static bool loom_amdgpu_wait_effect_is_dependency_memory(
@@ -1034,7 +1009,7 @@ static void loom_amdgpu_wait_plan_clear_trans_result_assignment(
                          LOOM_AMDGPU_WAIT_TRANS_RESULT_VGPR_FLAG_VALID) &&
         vgpr->block_epoch == builder->block_epoch &&
         vgpr->counter_epoch ==
-            builder->counter_epochs[loom_amdgpu_wait_counter_slot(
+            builder->counter_epochs[loom_amdgpu_wait_counter_slot_from_id(
                 LOOM_AMDGPU_WAIT_COUNTER_ALU)] &&
         builder->active_trans_result_vgpr_count != 0) {
       --builder->active_trans_result_vgpr_count;
@@ -1057,7 +1032,7 @@ static void loom_amdgpu_wait_plan_record_trans_result_assignment(
     return;
   }
   const uint32_t alu_slot =
-      loom_amdgpu_wait_counter_slot(LOOM_AMDGPU_WAIT_COUNTER_ALU);
+      loom_amdgpu_wait_counter_slot_from_id(LOOM_AMDGPU_WAIT_COUNTER_ALU);
   for (uint32_t i = 0; i < assignment->location_count; ++i) {
     loom_amdgpu_wait_trans_result_vgpr_t* vgpr =
         &builder->trans_result_vgprs[assignment->location_base + i];
@@ -1087,7 +1062,7 @@ static bool loom_amdgpu_wait_plan_trans_result_vgpr_is_active(
     return false;
   }
   if (vgpr->counter_epoch !=
-      builder->counter_epochs[loom_amdgpu_wait_counter_slot(
+      builder->counter_epochs[loom_amdgpu_wait_counter_slot_from_id(
           LOOM_AMDGPU_WAIT_COUNTER_ALU)]) {
     return false;
   }
@@ -1262,7 +1237,7 @@ static void loom_amdgpu_wait_plan_expire_trans_results(
     return;
   }
   const uint32_t alu_slot =
-      loom_amdgpu_wait_counter_slot(LOOM_AMDGPU_WAIT_COUNTER_ALU);
+      loom_amdgpu_wait_counter_slot_from_id(LOOM_AMDGPU_WAIT_COUNTER_ALU);
   ++builder->counter_epochs[alu_slot];
   builder->completed_position_counts[alu_slot] = 0;
   builder->outstanding_counts[alu_slot] = 0;
@@ -1698,7 +1673,7 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
                             "unknown AMDGPU wait counter id %" PRIu16,
                             counter_id);
   }
-  const uint32_t slot = loom_amdgpu_wait_counter_slot(counter_id);
+  const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
   const uint32_t counter_mask = loom_amdgpu_wait_counter_mask_from_slot(slot);
   const uint32_t outstanding_before = builder->outstanding_counts[slot];
   if (target_count > outstanding_before) {
@@ -1845,7 +1820,8 @@ static iree_status_t loom_amdgpu_wait_plan_storage_release_is_satisfied(
   uint32_t counter_mask = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_counter_mask(action->release_class_id, &counter_mask));
-  const uint32_t slot = loom_amdgpu_wait_counter_slot(action->release_class_id);
+  const uint32_t slot =
+      loom_amdgpu_wait_counter_slot_from_id(action->release_class_id);
   if (lease_record->node_index >= builder->schedule->node_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU storage lease producer node %" PRIu32
@@ -1916,7 +1892,7 @@ static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_action(
       builder->schedule->nodes[lease_record->node_index].block_index;
   if (producer_block == action->block_index) {
     const uint32_t slot =
-        loom_amdgpu_wait_counter_slot(action->release_class_id);
+        loom_amdgpu_wait_counter_slot_from_id(action->release_class_id);
     if (!loom_amdgpu_wait_plan_producer_target_count(
             builder, lease_record->node_index, slot, &target_count)) {
       target_count = 0;
