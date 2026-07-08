@@ -26,7 +26,7 @@ typedef struct loom_amdgpu_matrix_target_facts_t {
   uint32_t wave_size;
 } loom_amdgpu_matrix_target_facts_t;
 
-static iree_status_t loom_amdgpu_matrix_target_facts_from_environment(
+static void loom_amdgpu_matrix_target_facts_from_environment(
     const loom_target_contract_query_environment_t* environment,
     loom_amdgpu_matrix_target_facts_t* out_facts) {
   *out_facts = (loom_amdgpu_matrix_target_facts_t){0};
@@ -63,7 +63,6 @@ static iree_status_t loom_amdgpu_matrix_target_facts_from_environment(
       .feature_bits = feature_bits,
       .wave_size = wavefront_size,
   };
-  return iree_ok_status();
 }
 
 static bool loom_amdgpu_matrix_select_contract(
@@ -395,8 +394,7 @@ iree_status_t loom_amdgpu_descriptor_matrix_options(
   (void)rule;
   *out_options = (loom_contract_vector_mma_options_t){0};
   loom_amdgpu_matrix_target_facts_t target_facts = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_target_facts_from_environment(
-      environment, &target_facts));
+  loom_amdgpu_matrix_target_facts_from_environment(environment, &target_facts);
   *out_options = target_facts.options;
   return iree_ok_status();
 }
@@ -412,8 +410,7 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   *out_result = loom_target_contract_query_result_empty();
 
   loom_amdgpu_matrix_target_facts_t target_facts = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_target_facts_from_environment(
-      environment, &target_facts));
+  loom_amdgpu_matrix_target_facts_from_environment(environment, &target_facts);
   loom_contract_diagnostic_t contract_diagnostic = {0};
   loom_amdgpu_matrix_contract_match_diagnostic_t match_diagnostic = {0};
   const loom_amdgpu_matrix_contract_descriptor_t* contract_descriptor = NULL;

@@ -449,18 +449,15 @@ static const loom_amdgpu_memory_access_rejection_key_t
         },
 };
 
-static iree_status_t loom_amdgpu_memory_access_descriptor_key(
+static iree_string_view_t loom_amdgpu_memory_access_descriptor_key(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_memory_access_t* access,
-    iree_string_view_t* out_packet_key) {
-  *out_packet_key = IREE_SV("<missing>");
+    const loom_amdgpu_memory_access_t* access) {
   if (access->descriptor == NULL) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU memory access descriptor");
     IREE_BUILTIN_UNREACHABLE();
   }
-  *out_packet_key = loom_low_descriptor_set_string(
-      descriptor_set, access->descriptor->key_string_offset);
-  return iree_ok_status();
+  return loom_low_descriptor_set_string(descriptor_set,
+                                        access->descriptor->key_string_offset);
 }
 
 iree_status_t loom_amdgpu_record_memory_access_diagnostic(
@@ -474,9 +471,8 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
     return iree_ok_status();
   }
 
-  iree_string_view_t packet_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_access_descriptor_key(
-      descriptor_set, access, &packet_key));
+  const iree_string_view_t packet_key =
+      loom_amdgpu_memory_access_descriptor_key(descriptor_set, access);
   const loom_amdgpu_memory_bank_conflict_summary_t bank_summary =
       loom_amdgpu_memory_access_bank_conflict_summary(
           access, loom_amdgpu_memory_bank_default_lds_geometry());
