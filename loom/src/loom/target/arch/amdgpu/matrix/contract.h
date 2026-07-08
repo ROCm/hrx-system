@@ -90,6 +90,13 @@ iree_host_size_t loom_amdgpu_matrix_contract_descriptor_count(void);
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index);
 
+// Returns a built-in descriptor with the same wait-state behavior as
+// |low_descriptor_ref|, or NULL when the descriptor ref is not a matrix
+// contract.
+const loom_amdgpu_matrix_contract_descriptor_t*
+loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+    loom_amdgpu_descriptor_ref_t low_descriptor_ref);
+
 // Returns whether a descriptor is legal for a processor feature set and wave
 // size. Pass wave_size=0 to ignore wave-size filtering.
 bool loom_amdgpu_matrix_contract_is_available(

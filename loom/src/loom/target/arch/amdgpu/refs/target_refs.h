@@ -63,6 +63,12 @@ const loom_low_descriptor_t* loom_amdgpu_descriptor_ref_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
 
+// Returns the generated stable descriptor ref for |descriptor|, or NONE when
+// |descriptor| is not in the selected AMDGPU descriptor-ref domain.
+loom_amdgpu_descriptor_ref_t loom_amdgpu_descriptor_ref_for_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
 // Returns generated target-owned semantic trait bits for |descriptor|.
 loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(
     const loom_low_descriptor_set_t* descriptor_set,

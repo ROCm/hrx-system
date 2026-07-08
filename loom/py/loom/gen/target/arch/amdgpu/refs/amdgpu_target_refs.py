@@ -117,6 +117,7 @@ class _DescriptorSetRefTable:
     descriptor_set_ordinal: int
     descriptor_set_key: str
     descriptor_ordinals: list[int | None]
+    descriptor_refs: list[str | None]
     descriptor_traits: list[tuple[str, ...]]
     sdwa_dst_sel_immediate_slots: list[int | None]
     literal_immediate_slots: list[int | None]
@@ -180,6 +181,12 @@ def _descriptor_set_table_name(key: str) -> str:
     suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
     c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
     return f"kAmdgpu{c_suffix}DescriptorRefOrdinals"
+
+
+def _descriptor_ref_table_name(key: str) -> str:
+    suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
+    c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
+    return f"kAmdgpu{c_suffix}DescriptorRefsByOrdinal"
 
 
 def _descriptor_set_trait_table_name(key: str) -> str:
@@ -348,6 +355,7 @@ def _materialize_descriptor_ref_tables(
         raise ValueError("AMDGPU target-ref source generation requires at least one --descriptor-set")
     _validate_descriptor_trait_keys()
     descriptor_ref_keys = amdgpu_descriptor_ref_keys()
+    descriptor_ref_key_set = frozenset(descriptor_ref_keys)
     descriptor_set_infos_by_key = {info.key: info for info in sorted_descriptor_set_infos()}
     descriptor_set_tables: list[_DescriptorSetRefTable] = []
     for descriptor_set_key in descriptor_set_keys:
@@ -367,6 +375,7 @@ def _materialize_descriptor_ref_tables(
             raise ValueError(f"AMDGPU descriptor-set builder '{descriptor_set_info.generator_target}' produced '{descriptor_set.key}', expected '{descriptor_set_info.key}'")
         _validate_lowering_descriptor_contracts(descriptor_set)
         descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
+        descriptor_refs = [_descriptor_ref_constant_name(descriptor.key) if descriptor.key in descriptor_ref_key_set else None for descriptor in descriptor_set.descriptors]
         trait_context = _descriptor_trait_context(descriptor_set)
         descriptor_traits = [_descriptor_trait_names(trait_context, descriptor) for descriptor in descriptor_set.descriptors]
         sdwa_dst_sel_immediate_slots = [
@@ -387,6 +396,7 @@ def _materialize_descriptor_ref_tables(
                 descriptor_set_ordinal=amdgpu_descriptor_set_ordinal(descriptor_set_info.key),
                 descriptor_set_key=descriptor_set_info.key,
                 descriptor_ordinals=[descriptor_ordinals.get(key) for key in descriptor_ref_keys],
+                descriptor_refs=descriptor_refs,
                 descriptor_traits=descriptor_traits,
                 sdwa_dst_sel_immediate_slots=sdwa_dst_sel_immediate_slots,
                 literal_immediate_slots=literal_immediate_slots,
@@ -461,6 +471,15 @@ def _emit_source(
                 lines.append(f"    {descriptor_ordinal}u,")
         lines.append("};")
         lines.append("")
+        descriptor_ref_table_name = _descriptor_ref_table_name(descriptor_set_table.descriptor_set_key)
+        lines.append(f"static const uint16_t {descriptor_ref_table_name}[] = {{")
+        for descriptor_ref in descriptor_set_table.descriptor_refs:
+            if descriptor_ref is None:
+                lines.append("    LOOM_AMDGPU_DESCRIPTOR_REF_NONE,")
+            else:
+                lines.append(f"    {descriptor_ref},")
+        lines.append("};")
+        lines.append("")
         trait_table_name = _descriptor_set_trait_table_name(descriptor_set_table.descriptor_set_key)
         lines.append(f"static const loom_amdgpu_descriptor_traits_t {trait_table_name}[] = {{")
         for trait_names in descriptor_set_table.descriptor_traits:
@@ -496,6 +515,12 @@ def _emit_source(
     lines.append("const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
     for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
         table_expr = _descriptor_set_table_name(descriptor_set_key)
+        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    lines.append("};")
+    lines.append("")
+    lines.append("const uint16_t* const kLoomAmdgpuDescriptorRefByOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
+    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
+        table_expr = _descriptor_ref_table_name(descriptor_set_key)
         lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
     lines.append("};")
     lines.append("")

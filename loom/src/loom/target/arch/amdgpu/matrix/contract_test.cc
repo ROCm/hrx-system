@@ -741,6 +741,31 @@ TEST(MatrixContractTest, MatrixSemanticTagsDeriveTargetLowIds) {
   }
 }
 
+TEST(MatrixContractTest, WaitStateDescriptorsAreFixedWaitFamilies) {
+  const loom_amdgpu_matrix_contract_descriptor_t* mfma =
+      loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_F32_16X16X32_BF8_BF8);
+  ASSERT_NE(mfma, nullptr);
+  EXPECT_EQ(mfma->family, LOOM_AMDGPU_MATRIX_FAMILY_MFMA);
+  EXPECT_EQ(mfma->result_payload.register_count, 4);
+
+  const loom_amdgpu_matrix_contract_descriptor_t* smfmac =
+      loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_SMFMAC_F32_16X16X64_BF8_BF8);
+  ASSERT_NE(smfmac, nullptr);
+  EXPECT_EQ(smfmac->family, LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC);
+  EXPECT_EQ(smfmac->result_payload.register_count, 4);
+
+  EXPECT_EQ(
+      loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X16_F16),
+      nullptr);
+  EXPECT_EQ(
+      loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X32_F16),
+      nullptr);
+}
+
 TEST(MatrixContractTest, WmmaDescriptorsExposeTargetLowIds) {
   const loom_amdgpu_matrix_contract_descriptor_t* f32_f16 =
       FindDescriptor("wmma.f32.16x16x16.f16");
