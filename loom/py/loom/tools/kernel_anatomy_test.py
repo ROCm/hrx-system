@@ -334,6 +334,42 @@ def _write_benchmark_jsonl(path: Path) -> None:
     )
 
 
+def _write_single_benchmark_jsonl(
+    path: Path, benchmark_name: str, compile_report: dict, p50_ns: int
+) -> None:
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "benchmark",
+                        "candidate_id": "c0",
+                        "benchmark_result": {
+                            "benchmark": benchmark_name,
+                            "case": f"{benchmark_name}_case",
+                            "state": "ok",
+                            "correctness": {
+                                "sample_count": 1,
+                                "failed_sample_count": 0,
+                            },
+                            "measurement": {
+                                "operation_timing_ns": {
+                                    "count": 5,
+                                    "p50": p50_ns,
+                                },
+                            },
+                            "compile_report": compile_report,
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
 def _write_resource_violation_benchmark_jsonl(path: Path) -> None:
     compile_report = _compile_report_payload()
     compile_report["entries"]["rows"][0]["local_memory_bytes"] = 8192
@@ -632,6 +668,50 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
     assert "ratio_p50=0.900324x" in text_report
     assert "benchmark repetitions:" in text_report
     assert "B0: bench_kernel_candidate" in text_report
+
+
+def test_benchmark_embedded_compile_reports_participate_in_comparisons(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.jsonl"
+    candidate_path = tmp_path / "candidate.jsonl"
+    baseline_payload = _compile_report_payload()
+    candidate_payload = _compile_report_payload()
+    candidate_entry = candidate_payload["entries"]["rows"][0]
+    candidate_entry["local_memory_bytes"] = 4096
+    candidate_entry["dynamic_instruction_mix"]["local_memory_count"] = 198
+    candidate_payload["economics"]["memory"]["source_low"]["dynamic_packet_count"] = (
+        156928
+    )
+    _write_single_benchmark_jsonl(
+        baseline_path, "baseline_kernel", baseline_payload, 1_000_000
+    )
+    _write_single_benchmark_jsonl(
+        candidate_path, "candidate_kernel", candidate_payload, 2_000_000
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[
+            NamedPath("baseline", baseline_path),
+            NamedPath("candidate", candidate_path),
+        ],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report, [ComparisonSpec(baseline="baseline", candidate="candidate")]
+    )
+
+    comparison = comparisons["baseline=candidate"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["operation_time_ns"]["ratio"] == 2
+    assert deltas_by_metric["local_memory_bytes"]["ratio"] == 2
+    assert deltas_by_metric["dynamic_local_memory_count"]["ratio"] == 2
+    assert deltas_by_metric["source_low_dynamic_packet_count"]["ratio"] == 2
+    assert (
+        deltas_by_metric["local_memory_bytes"]["candidate_source"]
+        == "benchmark_compile_report"
+    )
 
 
 def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(

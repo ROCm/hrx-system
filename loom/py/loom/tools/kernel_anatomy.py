@@ -1742,168 +1742,174 @@ def _collect_compile_report_metric_groups(
     compile_reports = _as_mapping(report.get("loom_compile_reports"))
     for name, compile_report_value in compile_reports.items():
         compile_report = _as_mapping(compile_report_value)
+        _record_compile_summary_metric_group(
+            groups, name, compile_report, "compile_report"
+        )
+
+
+def _record_compile_summary_metric_group(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    name: str,
+    compile_report: Mapping[str, Any],
+    source_prefix: str,
+) -> None:
+    _record_metric(
+        groups,
+        name,
+        "instruction_count",
+        compile_report.get("instruction_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "code_byte_count",
+        compile_report.get("code_byte_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "local_memory_bytes",
+        compile_report.get("local_memory_bytes"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "private_memory_bytes",
+        compile_report.get("private_memory_bytes"),
+        source_prefix,
+    )
+    static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
+    _record_metric(
+        groups,
+        name,
+        "wmma_count",
+        static_mix.get("wmma_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "mfma_count",
+        static_mix.get("mfma_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "matrix_instruction_count",
+        static_mix.get("matrix_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "vector_alu_count",
+        static_mix.get("vector_alu_count"),
+        source_prefix,
+    )
+    dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
+    _record_metric(
+        groups,
+        name,
+        "dynamic_local_memory_count",
+        dynamic_mix.get("local_memory_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "local_memory_instruction_count",
+        static_mix.get("local_memory_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "dynamic_local_memory_instruction_count",
+        dynamic_mix.get("local_memory_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "dynamic_local_memory_read_bytes",
+        dynamic_mix.get("local_read_byte_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "dynamic_local_memory_write_bytes",
+        dynamic_mix.get("local_write_byte_count"),
+        source_prefix,
+    )
+    dynamic_local_read_bytes = _as_number(dynamic_mix.get("local_read_byte_count"))
+    dynamic_local_write_bytes = _as_number(dynamic_mix.get("local_write_byte_count"))
+    if dynamic_local_read_bytes is not None and dynamic_local_write_bytes is not None:
         _record_metric(
             groups,
             name,
-            "instruction_count",
-            compile_report.get("instruction_count"),
-            "compile_report",
+            "dynamic_local_memory_access_bytes",
+            dynamic_local_read_bytes + dynamic_local_write_bytes,
+            source_prefix,
         )
+    static_local_read_bytes = _as_number(static_mix.get("local_read_byte_count"))
+    static_local_write_bytes = _as_number(static_mix.get("local_write_byte_count"))
+    if static_local_read_bytes is not None and static_local_write_bytes is not None:
         _record_metric(
             groups,
             name,
-            "code_byte_count",
-            compile_report.get("code_byte_count"),
-            "compile_report",
+            "local_memory_access_bytes",
+            static_local_read_bytes + static_local_write_bytes,
+            source_prefix,
         )
+    resources = _as_mapping(compile_report.get("target_resources"))
+    vector = _as_mapping(resources.get("vector"))
+    vector_final = _as_mapping(vector.get("final"))
+    _record_metric(
+        groups,
+        name,
+        "vgpr_count",
+        vector_final.get("register_count"),
+        source_prefix,
+    )
+    _record_metric(
+        groups,
+        name,
+        "occupancy_percent",
+        resources.get("occupancy_percent"),
+        source_prefix,
+    )
+    wait_plan = _as_mapping(compile_report.get("wait_plan"))
+    for metric in _WAIT_REASON_SUMMARY_METRICS:
         _record_metric(
             groups,
             name,
-            "local_memory_bytes",
-            compile_report.get("local_memory_bytes"),
-            "compile_report",
+            f"wait_{metric}",
+            wait_plan.get(metric),
+            f"{source_prefix}_wait_plan",
         )
-        _record_metric(
-            groups,
-            name,
-            "private_memory_bytes",
-            compile_report.get("private_memory_bytes"),
-            "compile_report",
-        )
-        static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
-        _record_metric(
-            groups,
-            name,
-            "wmma_count",
-            static_mix.get("wmma_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "mfma_count",
-            static_mix.get("mfma_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "matrix_instruction_count",
-            static_mix.get("matrix_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "vector_alu_count",
-            static_mix.get("vector_alu_count"),
-            "compile_report",
-        )
-        dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
-        _record_metric(
-            groups,
-            name,
-            "dynamic_local_memory_count",
-            dynamic_mix.get("local_memory_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "local_memory_instruction_count",
-            static_mix.get("local_memory_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "dynamic_local_memory_instruction_count",
-            dynamic_mix.get("local_memory_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "dynamic_local_memory_read_bytes",
-            dynamic_mix.get("local_read_byte_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "dynamic_local_memory_write_bytes",
-            dynamic_mix.get("local_write_byte_count"),
-            "compile_report",
-        )
-        dynamic_local_read_bytes = _as_number(dynamic_mix.get("local_read_byte_count"))
-        dynamic_local_write_bytes = _as_number(
-            dynamic_mix.get("local_write_byte_count")
-        )
-        if (
-            dynamic_local_read_bytes is not None
-            and dynamic_local_write_bytes is not None
-        ):
-            _record_metric(
-                groups,
-                name,
-                "dynamic_local_memory_access_bytes",
-                dynamic_local_read_bytes + dynamic_local_write_bytes,
-                "compile_report",
-            )
-        static_local_read_bytes = _as_number(static_mix.get("local_read_byte_count"))
-        static_local_write_bytes = _as_number(static_mix.get("local_write_byte_count"))
-        if static_local_read_bytes is not None and static_local_write_bytes is not None:
-            _record_metric(
-                groups,
-                name,
-                "local_memory_access_bytes",
-                static_local_read_bytes + static_local_write_bytes,
-                "compile_report",
-            )
-        resources = _as_mapping(compile_report.get("target_resources"))
-        vector = _as_mapping(resources.get("vector"))
-        vector_final = _as_mapping(vector.get("final"))
-        _record_metric(
-            groups,
-            name,
-            "vgpr_count",
-            vector_final.get("register_count"),
-            "compile_report",
-        )
-        _record_metric(
-            groups,
-            name,
-            "occupancy_percent",
-            resources.get("occupancy_percent"),
-            "compile_report",
-        )
-        wait_plan = _as_mapping(compile_report.get("wait_plan"))
-        for metric in _WAIT_REASON_SUMMARY_METRICS:
-            _record_metric(
-                groups,
-                name,
-                f"wait_{metric}",
-                wait_plan.get(metric),
-                "compile_report_wait_plan",
-            )
-        _record_source_low_metrics(
-            groups,
-            name,
-            _as_mapping(compile_report.get("source_low")),
-            "compile_report_source_low",
-        )
-        _record_wait_reason_metrics(
-            groups,
-            name,
-            compile_report.get("wait_reasons"),
-            "compile_report_wait_reason",
-        )
-        _record_compile_instruction_mix_metrics(
-            groups,
-            f"{name}/dynamic",
-            dynamic_mix,
-            "compile_report_dynamic",
-        )
+    _record_source_low_metrics(
+        groups,
+        name,
+        _as_mapping(compile_report.get("source_low")),
+        f"{source_prefix}_source_low",
+    )
+    _record_wait_reason_metrics(
+        groups,
+        name,
+        compile_report.get("wait_reasons"),
+        f"{source_prefix}_wait_reason",
+    )
+    _record_compile_instruction_mix_metrics(
+        groups,
+        f"{name}/dynamic",
+        dynamic_mix,
+        f"{source_prefix}_dynamic",
+    )
 
 
 def _record_wait_reason_metrics(
@@ -2110,6 +2116,11 @@ def _collect_benchmark_metric_groups(
             correctness.get("failed_sample_count"),
             "benchmark",
         )
+        compile_report = _as_mapping(benchmark.get("compile_report"))
+        if compile_report:
+            _record_compile_summary_metric_group(
+                groups, name, compile_report, "benchmark_compile_report"
+            )
 
 
 def _collect_iree_dispatch_profile_metric_groups(
