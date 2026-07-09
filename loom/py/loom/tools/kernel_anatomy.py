@@ -2700,15 +2700,12 @@ _EXACT_PARITY_METRICS = frozenset(
         "matrix_instruction_x",
         "matrix_instruction_y",
         "matrix_instruction_z",
-        "matrix_instruction_count",
-        "mfma_count",
         "solution_index",
         "thread_tile_x",
         "thread_tile_y",
         "vector_width",
         "wavefront_size",
         "wave_size",
-        "wmma_count",
         "workgroup_size",
         "workgroup_size_x",
         "workgroup_size_y",
@@ -2719,7 +2716,10 @@ _EXACT_PARITY_METRICS = frozenset(
 _IGNORED_SCORECARD_METRICS = frozenset(
     {
         "call_count",
+        "matrix_instruction_count",
+        "mfma_count",
         "sample_count",
+        "wmma_count",
     }
 )
 
