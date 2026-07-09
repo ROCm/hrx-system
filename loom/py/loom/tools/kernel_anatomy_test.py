@@ -1373,11 +1373,18 @@ def test_benchmark_target_listings_attach_selected_entry_disassembly(
     assert disassembly["top_symbols"][0]["symbol"] == "selected_kernel"
     assert disassembly["matrix_symbols"][0]["matrix_instruction_count"] == 1
     assert disassembly["matrix_symbols"][0]["local_memory_instruction_count"] == 1
+    assert disassembly["matrix_symbols"][0]["top_local_memory_mnemonics"] == [
+        {"mnemonic": "ds_read_b128", "count": 1}
+    ]
+    assert disassembly["matrix_symbols"][0]["top_device_memory_mnemonics"] == [
+        {"mnemonic": "global_load_b128", "count": 1}
+    ]
 
     summary = format_summary_report(report)
     assert "Matrix-heavy disassembly blocks:" in summary
     assert "bench/c0/selected_benchmark/selected_kernel" in summary
     assert "instructions=3 matrix=1 local=1 device=1" in summary
+    assert "local_ops=ds_read_b128:1 device_ops=global_load_b128:1" in summary
 
 
 def test_build_kernel_anatomy_report_extracts_rocblas_log(

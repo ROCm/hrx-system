@@ -24,6 +24,7 @@ from typing import Any
 
 from loom.tools.amdgpu_asm import (
     AmdgpuDisassemblyBlock,
+    classify_amdgpu_instruction_family,
     summarize_amdgpu_disassembly,
     summarize_amdgpu_disassembly_blocks,
 )
@@ -4970,6 +4971,28 @@ def _matrix_block_metadata(block: AmdgpuDisassemblyBlock) -> dict[str, Any]:
         "device_memory_instructions_per_matrix_instruction": _ratio_or_none(
             device_memory_instruction_count, matrix_instruction_count
         ),
+        "top_local_memory_mnemonics": _top_mnemonic_rows(
+            summary.mnemonic_counts,
+            {"ds_read", "ds_write", "ds_other"},
+            4,
+        ),
+        "top_device_memory_mnemonics": _top_mnemonic_rows(
+            summary.mnemonic_counts,
+            {
+                "buffer_load",
+                "buffer_store",
+                "flat_load",
+                "flat_store",
+                "global_load",
+                "global_store",
+            },
+            4,
+        ),
+        "top_matrix_mnemonics": _top_mnemonic_rows(
+            summary.matrix_mnemonic_counts,
+            None,
+            4,
+        ),
     }
 
 
@@ -5000,6 +5023,23 @@ def _ratio_or_none(
     if numerator is None or denominator is None or denominator == 0:
         return None
     return float(numerator) / float(denominator)
+
+
+def _top_mnemonic_rows(
+    mnemonic_counts: Mapping[str, int],
+    families: set[str] | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = [
+        {"mnemonic": mnemonic, "count": count}
+        for mnemonic, count in mnemonic_counts.items()
+        if families is None or classify_amdgpu_instruction_family(mnemonic) in families
+    ]
+    return sorted(
+        rows,
+        key=lambda row: (int(row["count"]), str(row["mnemonic"])),
+        reverse=True,
+    )[:limit]
 
 
 def _summarize_weighted_symbols(
@@ -5465,6 +5505,19 @@ def _format_scalar(value: Any) -> str:
     return "?"
 
 
+def _format_mnemonic_rows(rows_value: Any) -> str:
+    if not isinstance(rows_value, list):
+        return ""
+    fragments = []
+    for row_value in rows_value[:4]:
+        row = _as_mapping(row_value)
+        mnemonic = row.get("mnemonic")
+        count = row.get("count")
+        if isinstance(mnemonic, str) and isinstance(count, (int, float)):
+            fragments.append(f"{mnemonic}:{_format_scalar(count)}")
+    return ",".join(fragments)
+
+
 def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     rocblas_logs = report.get("rocblas_logs", {})
     if not isinstance(rocblas_logs, Mapping) or not rocblas_logs:
@@ -5733,6 +5786,12 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 local_ratio = _format_scalar(
                     symbol.get("local_memory_instructions_per_matrix_instruction")
                 )
+                local_ops = _format_mnemonic_rows(
+                    symbol.get("top_local_memory_mnemonics")
+                )
+                device_ops = _format_mnemonic_rows(
+                    symbol.get("top_device_memory_mnemonics")
+                )
                 matrix_block_lines.append(
                     "  "
                     f"{name}/{_shorten_text(str(symbol.get('symbol') or ''), 72)}: "
@@ -5741,7 +5800,9 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                     f"local={symbol.get('local_memory_instruction_count')} "
                     f"device={symbol.get('device_memory_instruction_count')} "
                     f"instr/matrix={instruction_ratio} "
-                    f"local/matrix={local_ratio}"
+                    f"local/matrix={local_ratio} "
+                    f"local_ops={local_ops or '-'} "
+                    f"device_ops={device_ops or '-'}"
                 )
         if matrix_block_lines:
             lines.append("")

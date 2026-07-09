@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from loom.tools.amdgpu_asm import (
+    classify_amdgpu_instruction_family,
     parse_amdgpu_mnemonic,
     summarize_amdgpu_disassembly,
     summarize_amdgpu_disassembly_blocks,
@@ -26,6 +27,14 @@ def test_parse_amdgpu_mnemonic_accepts_objdump_address_forms() -> None:
         parse_amdgpu_mnemonic("  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1100'") is None
     )
     assert parse_amdgpu_mnemonic("      s_code_end") is None
+
+
+def test_classify_amdgpu_instruction_family_groups_mnemonics() -> None:
+    assert classify_amdgpu_instruction_family("v_wmma_f32_16x16x16_bf16") == "v_wmma"
+    assert classify_amdgpu_instruction_family("ds_read_b128") == "ds_read"
+    assert classify_amdgpu_instruction_family("global_store_b32") == "global_store"
+    assert classify_amdgpu_instruction_family("s_waitcnt") == "s_waitcnt"
+    assert classify_amdgpu_instruction_family("unknown_instruction") == "other"
 
 
 def test_summarize_amdgpu_disassembly_reports_families_and_mnemonics() -> None:

@@ -196,6 +196,12 @@ def parse_amdgpu_mnemonic(line: str) -> str | None:
 
 
 def _instruction_family(mnemonic: str) -> str:
+    return classify_amdgpu_instruction_family(mnemonic)
+
+
+def classify_amdgpu_instruction_family(mnemonic: str) -> str:
+    """Classifies an AMDGPU instruction mnemonic into a stable family name."""
+
     for prefix, family in _FAMILY_PREFIXES:
         if mnemonic.startswith(prefix):
             return family
