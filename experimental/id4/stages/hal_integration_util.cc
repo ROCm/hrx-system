@@ -13,6 +13,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <utility>
 
 #include "experimental/id4/kernels/embedded_loom_sources.h"
@@ -1215,9 +1216,19 @@ static iree_status_t RequireSingleDeviceFlag() {
       devices.count);
 }
 
-iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
-  IREE_ASSERT_ARGUMENT(out_context);
-  IREE_RETURN_IF_ERROR(RequireSingleDeviceFlag());
+static void ResetLiveStageContext(LiveStageContext* context) {
+  context->kernel_cache.reset();
+  context->executable_cache.reset();
+  context->device.reset();
+  context->device_group.reset();
+  context->frontier_tracker.reset();
+  context->proactor_pool.reset();
+  context->command_buffer_mode = IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+}
+
+static iree_status_t InitializeLiveStageContextFromFlags(
+    LiveStageContext* out_context) {
+  ResetLiveStageContext(out_context);
 
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   iree_status_t status = iree_async_proactor_pool_create(
@@ -1290,6 +1301,45 @@ iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
     status = CommandBufferModeFromFlags(&out_context->command_buffer_mode);
   }
   return status;
+}
+
+static void RetainLiveStageContext(const LiveStageContext& source,
+                                   LiveStageContext* out_context) {
+  ResetLiveStageContext(out_context);
+  iree_async_proactor_pool_retain(source.proactor_pool.get());
+  out_context->proactor_pool.reset(source.proactor_pool.get());
+  iree_async_frontier_tracker_retain(source.frontier_tracker.get());
+  out_context->frontier_tracker.reset(source.frontier_tracker.get());
+  iree_hal_device_group_retain(source.device_group.get());
+  out_context->device_group.reset(source.device_group.get());
+  iree_hal_device_retain(source.device.get());
+  out_context->device.reset(source.device.get());
+  iree_hal_executable_cache_retain(source.executable_cache.get());
+  out_context->executable_cache.reset(source.executable_cache.get());
+  id4_pipeline_kernel_cache_retain(source.kernel_cache.get());
+  out_context->kernel_cache.reset(source.kernel_cache.get());
+  out_context->command_buffer_mode = source.command_buffer_mode;
+}
+
+iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  IREE_RETURN_IF_ERROR(RequireSingleDeviceFlag());
+
+  static std::mutex shared_context_mutex;
+  static bool shared_context_initialized = false;
+  static LiveStageContext shared_context;
+
+  std::lock_guard<std::mutex> lock(shared_context_mutex);
+  if (!shared_context_initialized) {
+    iree_status_t status = InitializeLiveStageContextFromFlags(&shared_context);
+    if (!iree_status_is_ok(status)) {
+      ResetLiveStageContext(&shared_context);
+      return status;
+    }
+    shared_context_initialized = true;
+  }
+  RetainLiveStageContext(shared_context, out_context);
+  return iree_ok_status();
 }
 
 iree_status_t CreateEmbeddedKernelLibrary(
