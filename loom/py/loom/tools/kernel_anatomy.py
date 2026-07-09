@@ -1503,6 +1503,44 @@ def _collect_rocblas_metric_groups(
             )
             for metric in ("M", "N", "K", "lda", "ldb", "ldc", "ldd"):
                 _record_metric(groups, name, metric, timing.get(metric), "rocblas_log")
+        timing_rows = rocblas_log.get("timing_rows", [])
+        if isinstance(timing_rows, list):
+            for timing_value in timing_rows:
+                timing_row = _as_mapping(timing_value)
+                group_name = _rocblas_timing_group_name(name, timing_row)
+                _record_metric(
+                    groups,
+                    group_name,
+                    "operation_time_ns",
+                    _microseconds_to_nanoseconds(timing_row.get("us")),
+                    "rocblas_log_timing",
+                )
+                _record_metric(
+                    groups,
+                    group_name,
+                    "gflops",
+                    timing_row.get("rocblas-Gflops"),
+                    "rocblas_log_timing",
+                )
+                for metric in (
+                    "M",
+                    "N",
+                    "K",
+                    "lda",
+                    "ldb",
+                    "ldc",
+                    "ldd",
+                    "batch_count",
+                    "cold_iters",
+                    "hot_iters",
+                ):
+                    _record_metric(
+                        groups,
+                        group_name,
+                        metric,
+                        timing_row.get(metric),
+                        "rocblas_log_timing",
+                    )
         trace_rows = rocblas_log.get("trace_rows", [])
         if not isinstance(trace_rows, list):
             continue
@@ -1535,6 +1573,14 @@ def _rocblas_trace_group_name(name: str, trace_row: Mapping[str, Any]) -> str:
     n = trace_row.get("N", "?")
     k = trace_row.get("K", "?")
     beta = trace_row.get("beta", "?")
+    return f"{name}/gemm_M{m}_N{n}_K{k}_beta{beta}"
+
+
+def _rocblas_timing_group_name(name: str, timing_row: Mapping[str, Any]) -> str:
+    m = timing_row.get("M", "?")
+    n = timing_row.get("N", "?")
+    k = timing_row.get("K", "?")
+    beta = timing_row.get("beta", "?")
     return f"{name}/gemm_M{m}_N{n}_K{k}_beta{beta}"
 
 

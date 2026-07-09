@@ -930,6 +930,40 @@ def test_rocblas_trace_rows_participate_in_comparisons(tmp_path: Path) -> None:
     assert deltas_by_metric["M"]["candidate"] == 12288
 
 
+def test_rocblas_timing_rows_participate_in_comparisons(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[
+            NamedPath("baseline", rocblas_log_path),
+            NamedPath("candidate", rocblas_log_path),
+        ],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="baseline/gemm_M13824_N4547_K4608_beta0",
+                candidate="candidate/gemm_M13824_N4547_K4608_beta0",
+            )
+        ],
+    )
+
+    comparison = comparisons[
+        "baseline/gemm_M13824_N4547_K4608_beta0=candidate/gemm_M13824_N4547_K4608_beta0"
+    ]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["operation_time_ns"]["baseline"] == 8503930.0
+    assert deltas_by_metric["operation_time_ns"]["candidate"] == 8503930.0
+    assert deltas_by_metric["M"]["baseline"] == 13824
+    assert deltas_by_metric["N"]["baseline"] == 4547
+    assert deltas_by_metric["K"]["baseline"] == 4608
+    assert deltas_by_metric["hot_iters"]["candidate"] == 20
+
+
 def test_text_report_contains_comparison_summary(tmp_path: Path) -> None:
     compile_report_path = tmp_path / "report.json"
     _write_compile_report(compile_report_path)
