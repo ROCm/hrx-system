@@ -147,6 +147,7 @@ def summarize_disassembly_path(
     named_path: NamedPath,
     symbol_regex: re.Pattern[str] | None,
     top_symbol_count: int,
+    ordered_symbol_count: int,
 ) -> dict[str, Any]:
     """Builds a JSON-serializable disassembly summary for one artifact."""
 
@@ -162,6 +163,9 @@ def summarize_disassembly_path(
         "whole_file": whole_file.metadata(),
         "symbol_count": len(blocks),
         "top_symbols": [block.metadata() for block in top_blocks],
+        "ordered_symbols": [
+            block.metadata() for block in _ordered_blocks(blocks, ordered_symbol_count)
+        ],
     }
 
 
@@ -172,6 +176,7 @@ def build_kernel_anatomy_report(
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
     top_symbol_count: int = 16,
+    ordered_symbol_count: int = 0,
 ) -> dict[str, Any]:
     """Builds a stable anatomy report for dumped target artifacts."""
 
@@ -191,7 +196,10 @@ def build_kernel_anatomy_report(
     }
     disassemblies = {
         named_path.name: summarize_disassembly_path(
-            named_path, compiled_symbol_regex, top_symbol_count
+            named_path,
+            compiled_symbol_regex,
+            top_symbol_count,
+            ordered_symbol_count,
         )
         for named_path in disassembly_paths
     }
@@ -261,6 +269,22 @@ def _top_blocks(
             ),
             reverse=True,
         )[:top_symbol_count]
+    )
+
+
+def _ordered_blocks(
+    blocks: Sequence[AmdgpuDisassemblyBlock], ordered_symbol_count: int
+) -> tuple[AmdgpuDisassemblyBlock, ...]:
+    if ordered_symbol_count <= 0:
+        return ()
+    return tuple(
+        sorted(
+            blocks,
+            key=lambda block: (
+                block.address is None,
+                block.address if block.address is not None else block.start_line,
+            ),
+        )[:ordered_symbol_count]
     )
 
 
@@ -359,6 +383,35 @@ def format_text_report(report: Mapping[str, Any]) -> str:
                         f"ds_read={symbol_families.get('ds_read', 0)} "
                         f"ds_write={symbol_families.get('ds_write', 0)}"
                     )
+            ordered_symbols = disassembly.get("ordered_symbols", [])
+            if isinstance(ordered_symbols, list) and ordered_symbols:
+                lines.append("    ordered symbols:")
+                for symbol in ordered_symbols:
+                    if not isinstance(symbol, Mapping):
+                        continue
+                    summary = symbol.get("summary", {})
+                    if not isinstance(summary, Mapping):
+                        continue
+                    symbol_families = summary.get("family_counts", {})
+                    if not isinstance(symbol_families, Mapping):
+                        symbol_families = {}
+                    address = symbol.get("address")
+                    if isinstance(address, int):
+                        address_text = f"0x{address:x}"
+                    else:
+                        address_text = "?"
+                    lines.append(
+                        "      "
+                        f"{address_text} {symbol.get('symbol')}: "
+                        f"instructions={summary.get('instruction_count')} "
+                        f"wmma={symbol_families.get('v_wmma', 0)} "
+                        f"mfma={symbol_families.get('v_mfma', 0)} "
+                        f"buffer_load={symbol_families.get('buffer_load', 0)} "
+                        f"buffer_store={symbol_families.get('buffer_store', 0)} "
+                        f"ds_read={symbol_families.get('ds_read', 0)} "
+                        f"ds_write={symbol_families.get('ds_write', 0)} "
+                        f"branch={symbol_families.get('s_branch', 0)}"
+                    )
     amdhsa_metadata = report.get("amdhsa_metadata", {})
     if isinstance(amdhsa_metadata, Mapping) and amdhsa_metadata:
         lines.append("")
@@ -430,6 +483,15 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="Number of top symbol summaries to include per disassembly.",
     )
     parser.add_argument(
+        "--ordered-symbols",
+        type=int,
+        default=0,
+        help=(
+            "Number of address-ordered symbol and label summaries to include "
+            "per disassembly."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "text"),
         default="json",
@@ -447,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,
         top_symbol_count=args.top_symbols,
+        ordered_symbol_count=args.ordered_symbols,
     )
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

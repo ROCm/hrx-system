@@ -17,6 +17,7 @@ from types import MappingProxyType
 _ADDRESS_PREFIX_PATTERN = re.compile(r"^\s*(?:[0-9a-fA-F]+:|[0-9a-fA-F]+\s+)?\s*")
 _MNEMONIC_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$]*")
 _SYMBOL_PATTERN = re.compile(r"^\s*[0-9a-fA-F]+\s+<([^>]+)>:\s*$")
+_ASSEMBLY_LABEL_PATTERN = re.compile(r"^([A-Za-z_$][A-Za-z0-9_.$]*):\s*$")
 _BIT_WIDTH_PATTERN = re.compile(r"_b(8|16|32|64|128|256)(?:$|_)")
 _DWORDX_WIDTH_PATTERN = re.compile(r"_dwordx([0-9]+)(?:$|_)")
 
@@ -78,6 +79,7 @@ class AmdgpuDisassemblyBlock:
     """Instruction summary for one symbol block in AMDGPU disassembly."""
 
     symbol: str
+    address: int | None
     start_line: int
     summary: AmdgpuDisassemblySummary
 
@@ -86,6 +88,7 @@ class AmdgpuDisassemblyBlock:
 
         return {
             "symbol": self.symbol,
+            "address": self.address,
             "start_line": self.start_line,
             "summary": self.summary.metadata(),
         }
@@ -117,31 +120,52 @@ def summarize_amdgpu_disassembly_blocks(
 ) -> tuple[AmdgpuDisassemblyBlock, ...]:
     """Summarizes each symbol block in `llvm-objdump -d` AMDGPU output."""
 
-    blocks: list[tuple[str, int, list[str]]] = []
+    blocks: list[tuple[str, int | None, int, list[str]]] = []
     current_symbol: str | None = None
+    current_address: int | None = None
     current_start_line = 0
     current_lines: list[str] = []
     for line_number, line in enumerate(disassembly.splitlines(), start=1):
-        match = _SYMBOL_PATTERN.match(line)
-        if match is not None:
+        next_symbol = _match_disassembly_symbol(line)
+        if next_symbol is not None:
             if current_symbol is not None:
-                blocks.append((current_symbol, current_start_line, current_lines))
-            current_symbol = match.group(1)
+                blocks.append(
+                    (
+                        current_symbol,
+                        current_address,
+                        current_start_line,
+                        current_lines,
+                    )
+                )
+            current_symbol, current_address = next_symbol
             current_start_line = line_number
             current_lines = []
             continue
         if current_symbol is not None:
             current_lines.append(line)
     if current_symbol is not None:
-        blocks.append((current_symbol, current_start_line, current_lines))
+        blocks.append(
+            (current_symbol, current_address, current_start_line, current_lines)
+        )
     return tuple(
         AmdgpuDisassemblyBlock(
             symbol=symbol,
+            address=address,
             start_line=start_line,
             summary=summarize_amdgpu_disassembly("\n".join(lines)),
         )
-        for symbol, start_line, lines in blocks
+        for symbol, address, start_line, lines in blocks
     )
+
+
+def _match_disassembly_symbol(line: str) -> tuple[str, int | None] | None:
+    match = _SYMBOL_PATTERN.match(line)
+    if match is not None:
+        return match.group(1), int(line.strip().split(maxsplit=1)[0], 16)
+    match = _ASSEMBLY_LABEL_PATTERN.match(line)
+    if match is not None:
+        return match.group(1), None
+    return None
 
 
 def iter_amdgpu_mnemonics(lines: Iterable[str]) -> Iterable[str]:
@@ -165,6 +189,8 @@ def parse_amdgpu_mnemonic(line: str) -> str | None:
         return None
     mnemonic = match.group(0)
     if mnemonic in {"Disassembly", "file", "format", "s_code_end"}:
+        return None
+    if mnemonic.startswith("amdhsa."):
         return None
     return mnemonic
 

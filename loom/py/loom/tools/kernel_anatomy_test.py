@@ -88,6 +88,7 @@ def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
         disassembly_paths=[NamedPath("asm", disassembly_path)],
         compile_report_paths=[NamedPath("loom", compile_report_path)],
         top_symbol_count=1,
+        ordered_symbol_count=2,
     )
 
     assert report["schema"] == "loom.kernel_anatomy"
@@ -96,6 +97,9 @@ def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     assert report["loom_compile_reports"]["loom"]["local_memory_bytes"] == 2048
     assert report["disassemblies"]["asm"]["whole_file"]["family_counts"]["v_wmma"] == 2
     assert report["disassemblies"]["asm"]["top_symbols"][0]["symbol"] == "big"
+    ordered_symbols = report["disassemblies"]["asm"]["ordered_symbols"]
+    assert [symbol["symbol"] for symbol in ordered_symbols] == ["small", "big"]
+    assert [symbol["address"] for symbol in ordered_symbols] == [0, 0x100]
 
 
 def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
@@ -119,6 +123,31 @@ def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
 
     symbols = report["disassemblies"]["asm"]["top_symbols"]
     assert [symbol["symbol"] for symbol in symbols] == ["keep_me"]
+
+
+def test_ordered_symbols_preserve_disassembly_address_order(tmp_path: Path) -> None:
+    disassembly_path = tmp_path / "kernel.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000100 <middle>:
+      ds_read_b64 v[0:1], v0
+0000000000000000 <first>:
+      global_load_b128 v[0:3], v0
+0000000000000200 <last>:
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("asm", disassembly_path)],
+        compile_report_paths=[],
+        ordered_symbol_count=2,
+    )
+
+    ordered_symbols = report["disassemblies"]["asm"]["ordered_symbols"]
+    assert [symbol["symbol"] for symbol in ordered_symbols] == ["first", "middle"]
+    assert [symbol["address"] for symbol in ordered_symbols] == [0, 0x100]
 
 
 def test_amdhsa_metadata_extracts_kernel_resources(tmp_path: Path) -> None:
@@ -209,6 +238,7 @@ amdhsa.kernels:
         disassembly_paths=[NamedPath("asm", disassembly_path)],
         compile_report_paths=[NamedPath("loom", compile_report_path)],
         amdhsa_metadata_paths=[NamedPath("hsaco", metadata_path)],
+        ordered_symbol_count=1,
     )
     text = format_text_report(report)
 
@@ -217,6 +247,8 @@ amdhsa.kernels:
     assert "asm: symbols=1 instructions=6" in text
     assert "global_load=1 global_store=1 buffer_load=1 buffer_store=1" in text
     assert "wait=1 barrier=1 read_bytes=24 write_bytes=24" in text
+    assert "ordered symbols:" in text
+    assert "0x0 kernel: instructions=6" in text
     assert "hsaco: kernels=1" in text
     assert "kernel.kd: lds=25600 private=0 vgpr=256 sgpr=66" in text
 

@@ -22,6 +22,9 @@ def test_parse_amdgpu_mnemonic_accepts_objdump_address_forms() -> None:
     )
     assert parse_amdgpu_mnemonic("0000000000000000 <kernel>:") is None
     assert parse_amdgpu_mnemonic("Disassembly of section .text:") is None
+    assert (
+        parse_amdgpu_mnemonic("  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1100'") is None
+    )
     assert parse_amdgpu_mnemonic("      s_code_end") is None
 
 
@@ -85,6 +88,7 @@ def test_summarize_amdgpu_disassembly_blocks_splits_symbols() -> None:
     )
 
     assert [block.symbol for block in blocks] == ["first_kernel", "second_kernel"]
+    assert [block.address for block in blocks] == [0, 0x100]
     assert blocks[0].summary.family_counts["v_wmma"] == 1
     assert blocks[0].summary.memory_byte_counts["global_load_bytes"] == 16
     assert blocks[1].summary.memory_byte_counts == {
@@ -93,3 +97,19 @@ def test_summarize_amdgpu_disassembly_blocks_splits_symbols() -> None:
         "read_bytes": 8,
         "write_bytes": 4,
     }
+
+
+def test_summarize_amdgpu_disassembly_blocks_accepts_assembly_labels() -> None:
+    blocks = summarize_amdgpu_disassembly_blocks(
+        """
+.globl plain_kernel
+plain_kernel:
+      global_load_b128 v[0:3], v0
+      amdhsa.target: 'amdgcn-amd-amdhsa--gfx1100'
+"""
+    )
+
+    assert [block.symbol for block in blocks] == ["plain_kernel"]
+    assert blocks[0].address is None
+    assert blocks[0].summary.instruction_count == 1
+    assert blocks[0].summary.family_counts["global_load"] == 1
