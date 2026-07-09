@@ -139,6 +139,44 @@ T,N,13824,4547,4608,1,4608,0,4608,13824,13824,1,5,20,68121,8503.93
     )
 
 
+def _write_iree_dispatch_profile(path: Path) -> None:
+    _write(
+        path,
+        json.dumps(
+            {
+                "by_kernel": [
+                    {
+                        "count": 3,
+                        "function_name": "cold_kernel",
+                        "invalid_count": 0,
+                        "max_duration_ns": 3000,
+                        "min_duration_ns": 1000,
+                        "module_path": "model/cold",
+                        "p50_duration_ns": 2000,
+                        "p90_duration_ns": 3000,
+                        "p99_duration_ns": 3000,
+                        "total_duration_ns": 6000,
+                        "valid_count": 3,
+                    },
+                    {
+                        "count": 2,
+                        "function_name": "hot_kernel",
+                        "invalid_count": 0,
+                        "max_duration_ns": 11000,
+                        "min_duration_ns": 9000,
+                        "module_path": "model/hot",
+                        "p50_duration_ns": 10000,
+                        "p90_duration_ns": 11000,
+                        "p99_duration_ns": 11000,
+                        "total_duration_ns": 20000,
+                        "valid_count": 2,
+                    },
+                ],
+            }
+        ),
+    )
+
+
 def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     tmp_path: Path,
 ) -> None:
@@ -220,6 +258,25 @@ def test_build_kernel_anatomy_report_extracts_rocblas_log(
     assert rocblas_log["kernel_parameters"]["macroTile"] == "(128, 128, 1)"
     assert rocblas_log["timing_rows"][0]["M"] == 13824
     assert rocblas_log["timing_rows"][0]["us"] == 8503.93
+
+
+def test_build_kernel_anatomy_report_extracts_iree_dispatch_profile(
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "dispatch_profile.json"
+    _write_iree_dispatch_profile(profile_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        iree_dispatch_profile_paths=[NamedPath("stage", profile_path)],
+    )
+
+    profile = report["iree_dispatch_profiles"]["stage"]
+    assert profile["kernel_count"] == 2
+    assert profile["kernels"][0]["function_name"] == "hot_kernel"
+    assert profile["kernels"][0]["total_duration_ns"] == 20000
+    assert profile["kernels"][1]["function_name"] == "cold_kernel"
 
 
 def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
@@ -409,6 +466,25 @@ def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:
     assert "MatrixInstruction: (16, 16, 16, 1)" in text
 
 
+def test_text_report_contains_iree_dispatch_profile_summary(
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "dispatch_profile.json"
+    _write_iree_dispatch_profile(profile_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        iree_dispatch_profile_paths=[NamedPath("stage", profile_path)],
+    )
+    text = format_text_report(report)
+
+    assert "IREE dispatch profiles:" in text
+    assert "stage: kernels=2" in text
+    assert "hot_kernel: count=2 total_ms=0.02 p50_ms=0.01" in text
+    assert "cold_kernel: count=3 total_ms=0.006 p50_ms=0.002" in text
+
+
 def test_build_kernel_anatomy_comparisons_ranks_mixed_artifact_metrics(
     tmp_path: Path,
 ) -> None:
@@ -512,6 +588,26 @@ def test_main_emits_json(tmp_path: Path, capsys) -> None:
     report = json.loads(output)
     assert report["schema"] == "loom.kernel_anatomy"
     assert report["disassemblies"]["asm"]["symbol_count"] == 1
+
+
+def test_main_emits_iree_dispatch_profile(tmp_path: Path, capsys) -> None:
+    profile_path = tmp_path / "dispatch_profile.json"
+    _write_iree_dispatch_profile(profile_path)
+
+    assert (
+        main(
+            [
+                "--iree-dispatch-profile",
+                f"stage={profile_path}",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert report["iree_dispatch_profiles"]["stage"]["kernel_count"] == 2
 
 
 def test_main_emits_comparisons(tmp_path: Path, capsys) -> None:

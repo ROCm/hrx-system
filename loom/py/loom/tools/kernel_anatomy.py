@@ -324,6 +324,51 @@ def _parse_numeric_scalar(value: Any) -> Any:
         return stripped
 
 
+def summarize_iree_dispatch_profile_path(
+    named_path: NamedPath, top_kernel_count: int
+) -> dict[str, Any]:
+    """Extracts top kernel timing rows from an IREE dispatch profile JSON."""
+
+    data = _read_json(named_path.path)
+    if not isinstance(data, Mapping):
+        raise ValueError("IREE dispatch profile root must be a JSON object")
+    by_kernel = data.get("by_kernel")
+    if not isinstance(by_kernel, list):
+        raise ValueError("IREE dispatch profile must contain a by_kernel list")
+    kernels = [
+        _summarize_iree_dispatch_profile_kernel(row)
+        for row in by_kernel
+        if isinstance(row, Mapping)
+    ]
+    sorted_kernels = sorted(
+        kernels,
+        key=lambda row: _as_number(row.get("total_duration_ns")) or 0,
+        reverse=True,
+    )
+    return {
+        "name": named_path.name,
+        "path": named_path.path.as_posix(),
+        "kernel_count": len(kernels),
+        "kernels": sorted_kernels[: max(top_kernel_count, 0)],
+    }
+
+
+def _summarize_iree_dispatch_profile_kernel(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "function_name": row.get("function_name"),
+        "module_path": row.get("module_path"),
+        "count": row.get("count"),
+        "valid_count": row.get("valid_count"),
+        "invalid_count": row.get("invalid_count"),
+        "total_duration_ns": row.get("total_duration_ns"),
+        "p50_duration_ns": row.get("p50_duration_ns"),
+        "p90_duration_ns": row.get("p90_duration_ns"),
+        "p99_duration_ns": row.get("p99_duration_ns"),
+        "min_duration_ns": row.get("min_duration_ns"),
+        "max_duration_ns": row.get("max_duration_ns"),
+    }
+
+
 _KERNEL_BLOCK_PATTERN = re.compile(r"^\s+- \.args:\s*$")
 _KERNEL_FIELD_PATTERN = re.compile(r"^    \.(\w+):\s*(.*)$")
 _INTEGER_FIELDS = frozenset(
@@ -392,6 +437,7 @@ def build_kernel_anatomy_report(
     disassembly_paths: Sequence[NamedPath],
     compile_report_paths: Sequence[NamedPath],
     benchmark_jsonl_paths: Sequence[NamedPath] = (),
+    iree_dispatch_profile_paths: Sequence[NamedPath] = (),
     rocblas_log_paths: Sequence[NamedPath] = (),
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
@@ -412,6 +458,12 @@ def build_kernel_anatomy_report(
     benchmark_jsonl = {
         named_path.name: summarize_loom_benchmark_jsonl(named_path.path)
         for named_path in benchmark_jsonl_paths
+    }
+    iree_dispatch_profiles = {
+        named_path.name: summarize_iree_dispatch_profile_path(
+            named_path, top_symbol_count
+        )
+        for named_path in iree_dispatch_profile_paths
     }
     rocblas_logs: dict[str, Any] = {}
     for named_path in rocblas_log_paths:
@@ -441,6 +493,7 @@ def build_kernel_anatomy_report(
         "schema_version": SCHEMA_VERSION,
         "amdhsa_metadata": amdhsa_metadata,
         "disassemblies": disassemblies,
+        "iree_dispatch_profiles": iree_dispatch_profiles,
         "loom_benchmarks": benchmark_jsonl,
         "loom_compile_reports": compile_reports,
         "rocblas_logs": rocblas_logs,
@@ -490,6 +543,7 @@ def _collect_comparison_metric_groups(
     groups: dict[str, dict[str, dict[str, Any]]] = {}
     _collect_compile_report_metric_groups(groups, report)
     _collect_benchmark_metric_groups(groups, report)
+    _collect_iree_dispatch_profile_metric_groups(groups, report)
     _collect_rocblas_metric_groups(groups, report)
     _collect_disassembly_metric_groups(groups, report)
     _collect_metadata_metric_groups(groups, report)
@@ -651,6 +705,48 @@ def _collect_benchmark_metric_groups(
             correctness.get("failed_sample_count"),
             "benchmark",
         )
+
+
+def _collect_iree_dispatch_profile_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    iree_dispatch_profiles = _as_mapping(report.get("iree_dispatch_profiles"))
+    for name, profile_value in iree_dispatch_profiles.items():
+        profile = _as_mapping(profile_value)
+        kernels = profile.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            function_name = kernel.get("function_name")
+            if not isinstance(function_name, str):
+                continue
+            group_name = f"{name}/{function_name}"
+            _record_metric(
+                groups,
+                group_name,
+                "operation_time_ns",
+                kernel.get("p50_duration_ns"),
+                "iree_dispatch_profile",
+            )
+            for metric in (
+                "count",
+                "valid_count",
+                "invalid_count",
+                "total_duration_ns",
+                "p50_duration_ns",
+                "p90_duration_ns",
+                "p99_duration_ns",
+                "min_duration_ns",
+                "max_duration_ns",
+            ):
+                _record_metric(
+                    groups,
+                    group_name,
+                    metric,
+                    kernel.get(metric),
+                    "iree_dispatch_profile",
+                )
 
 
 def _collect_rocblas_metric_groups(
@@ -990,6 +1086,37 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
             )
 
 
+def _append_iree_dispatch_profile_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    iree_dispatch_profiles = report.get("iree_dispatch_profiles", {})
+    if not isinstance(iree_dispatch_profiles, Mapping) or not iree_dispatch_profiles:
+        return
+    lines.append("")
+    lines.append("IREE dispatch profiles:")
+    for name, profile_value in iree_dispatch_profiles.items():
+        profile = _as_mapping(profile_value)
+        lines.append(f"  {name}: kernels={profile.get('kernel_count')}")
+        kernels = profile.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            lines.append(
+                "    "
+                f"{kernel.get('function_name')}: "
+                f"count={kernel.get('count')} "
+                f"total_ms={_format_ns_as_ms(kernel.get('total_duration_ns'))} "
+                f"p50_ms={_format_ns_as_ms(kernel.get('p50_duration_ns'))} "
+                f"p90_ms={_format_ns_as_ms(kernel.get('p90_duration_ns'))}"
+            )
+
+
+def _format_ns_as_ms(value: Any) -> str:
+    numeric_value = _as_number(value)
+    return f"{numeric_value / 1_000_000:.6g}" if numeric_value is not None else "?"
+
+
 def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     rocblas_logs = report.get("rocblas_logs", {})
     if not isinstance(rocblas_logs, Mapping) or not rocblas_logs:
@@ -1195,6 +1322,7 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     lines = ["Kernel anatomy report"]
     _append_compile_report_lines(lines, report)
     _append_benchmark_report_lines(lines, report)
+    _append_iree_dispatch_profile_lines(lines, report)
     _append_rocblas_log_lines(lines, report)
     _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
@@ -1224,6 +1352,13 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         type=_parse_named_path,
         help=("iree-benchmark-loom JSONL as NAME=PATH, or PATH to use the stem."),
+    )
+    parser.add_argument(
+        "--iree-dispatch-profile",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help=("IREE dispatch profile JSON as NAME=PATH, or PATH to use the stem."),
     )
     parser.add_argument(
         "--rocblas-log",
@@ -1290,6 +1425,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         disassembly_paths=args.disassembly,
         compile_report_paths=args.compile_report,
         benchmark_jsonl_paths=args.benchmark_jsonl,
+        iree_dispatch_profile_paths=args.iree_dispatch_profile,
         rocblas_log_paths=args.rocblas_log,
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
