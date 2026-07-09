@@ -2054,6 +2054,129 @@ def build_kernel_anatomy_comparison_scorecard(
     return sorted(scorecard, key=_scorecard_entry_rank, reverse=True)
 
 
+def build_kernel_anatomy_comparison_verdicts(
+    comparisons: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Builds one compact structural verdict for each metric comparison."""
+
+    verdicts = [
+        _build_kernel_anatomy_comparison_verdict(name, _as_mapping(comparison_value))
+        for name, comparison_value in comparisons.items()
+    ]
+    return sorted(verdicts, key=_comparison_verdict_rank, reverse=True)
+
+
+def _build_kernel_anatomy_comparison_verdict(
+    name: str, comparison: Mapping[str, Any]
+) -> dict[str, Any]:
+    deltas = _as_sequence(comparison.get("deltas"))
+    scorecard = _as_sequence(comparison.get("scorecard"))
+    findings = _as_sequence(comparison.get("gap_findings"))
+    time_delta = _select_time_delta([_as_mapping(delta) for delta in deltas])
+    time_ratio = _as_number(_as_mapping(time_delta).get("ratio"))
+    parity_mismatches = [
+        _as_mapping(finding)
+        for finding in findings
+        if _as_mapping(finding).get("kind") == "parity_mismatch"
+    ]
+    costs = [
+        _as_mapping(finding)
+        for finding in findings
+        if _as_mapping(finding).get("kind") == "candidate_cost"
+    ]
+    advantages = [
+        _as_mapping(finding)
+        for finding in findings
+        if _as_mapping(finding).get("kind") == "candidate_advantage"
+    ]
+    primary_cost = costs[0] if costs else _primary_cost_from_scorecard(scorecard)
+    primary_advantage = advantages[0] if advantages else {}
+    status = _comparison_verdict_status(
+        time_ratio,
+        bool(parity_mismatches),
+        bool(primary_cost),
+        bool(primary_advantage),
+    )
+    return {
+        "comparison": name,
+        "baseline": comparison.get("baseline"),
+        "candidate": comparison.get("candidate"),
+        "status": status,
+        "time_ratio": time_ratio,
+        "parity_mismatch_count": len(parity_mismatches),
+        "cost_count": len(costs),
+        "advantage_count": len(advantages),
+        "primary_cost": _verdict_signal(primary_cost),
+        "primary_advantage": _verdict_signal(primary_advantage),
+    }
+
+
+def _primary_cost_from_scorecard(scorecard: Sequence[Any]) -> Mapping[str, Any]:
+    for entry_value in scorecard:
+        entry = _as_mapping(entry_value)
+        metric = entry.get("metric")
+        if (
+            entry.get("finding") == "candidate_higher"
+            and metric not in _TIME_METRICS
+            and entry.get("category") != "time"
+        ):
+            return entry
+    return {}
+
+
+def _comparison_verdict_status(
+    time_ratio: float | int | None,
+    has_parity_mismatch: bool,
+    has_primary_cost: bool,
+    has_primary_advantage: bool,
+) -> str:
+    if time_ratio is not None:
+        if time_ratio > 1.05:
+            if has_parity_mismatch:
+                return "slower_not_apples_to_apples"
+            if has_primary_cost:
+                return "slower_with_structural_cost"
+            if has_primary_advantage:
+                return "slower_despite_structural_advantage"
+            return "slower_unexplained"
+        if time_ratio < 0.95:
+            return "candidate_faster"
+        if has_parity_mismatch:
+            return "time_parity_not_apples_to_apples"
+        return "time_parity"
+    if has_parity_mismatch:
+        return "structural_mismatch"
+    if has_primary_cost:
+        return "structural_cost"
+    if has_primary_advantage:
+        return "structural_advantage"
+    return "metric_parity"
+
+
+def _verdict_signal(signal: Mapping[str, Any]) -> dict[str, Any]:
+    if not signal:
+        return {}
+    return {
+        "metric": signal.get("metric"),
+        "category": signal.get("category"),
+        "role": signal.get("role"),
+        "baseline": signal.get("baseline"),
+        "candidate": signal.get("candidate"),
+        "ratio": signal.get("ratio"),
+    }
+
+
+def _comparison_verdict_rank(verdict: Mapping[str, Any]) -> float:
+    time_ratio = _as_number(verdict.get("time_ratio"))
+    if time_ratio is not None:
+        return time_ratio if time_ratio >= 1 else 1 / time_ratio
+    primary_cost = _as_mapping(verdict.get("primary_cost"))
+    cost_ratio = _as_number(primary_cost.get("ratio"))
+    if cost_ratio is not None and cost_ratio > 0:
+        return cost_ratio
+    return float(_as_number(verdict.get("parity_mismatch_count")) or 0)
+
+
 def _collect_comparison_metric_groups(
     report: Mapping[str, Any],
 ) -> dict[str, dict[str, dict[str, Any]]]:
@@ -3496,8 +3619,11 @@ def _scorecard_metric_goal(metric: str) -> str:
 def _scorecard_metric_category(metric: str) -> str:
     if metric in {
         "operation_time_ns",
+        "p50_ns",
         "p50_duration_ns",
+        "p90_ns",
         "p90_duration_ns",
+        "p99_ns",
         "p99_duration_ns",
         "min_duration_ns",
         "max_duration_ns",
@@ -3555,8 +3681,13 @@ def _metric_delta_rank(delta: Mapping[str, Any]) -> float:
 _TIME_METRICS = (
     "operation_time_ns",
     "p50_ns",
+    "p90_ns",
+    "p99_ns",
     "p50_duration_ns",
     "p90_duration_ns",
+    "p99_duration_ns",
+    "min_duration_ns",
+    "max_duration_ns",
     "total_duration_ns",
 )
 
@@ -4502,6 +4633,52 @@ def _append_gap_finding_lines(lines: list[str], report: Mapping[str, Any]) -> No
             )
 
 
+def _append_comparison_verdict_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    verdicts = report.get("comparison_verdicts")
+    if verdicts is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            verdicts = build_kernel_anatomy_comparison_verdicts(comparisons)
+    if not isinstance(verdicts, list) or not verdicts:
+        return
+    lines.append("")
+    lines.append("Comparison verdicts:")
+    for verdict_value in verdicts[:16]:
+        verdict = _as_mapping(verdict_value)
+        lines.append(
+            "  "
+            f"{verdict.get('comparison')}: "
+            f"{verdict.get('status')} "
+            f"time_ratio={_format_ratio(verdict.get('time_ratio'))} "
+            f"parity_mismatches={verdict.get('parity_mismatch_count')} "
+            f"costs={verdict.get('cost_count')} "
+            f"advantages={verdict.get('advantage_count')}"
+        )
+        primary_cost = _as_mapping(verdict.get("primary_cost"))
+        if primary_cost:
+            lines.append(
+                "    "
+                f"primary cost: "
+                f"{primary_cost.get('metric')} [{primary_cost.get('category')}] "
+                f"baseline={primary_cost.get('baseline')} "
+                f"candidate={primary_cost.get('candidate')} "
+                f"ratio={_format_ratio(primary_cost.get('ratio'))}"
+            )
+        primary_advantage = _as_mapping(verdict.get("primary_advantage"))
+        if primary_advantage:
+            lines.append(
+                "    "
+                f"primary advantage: "
+                f"{primary_advantage.get('metric')} "
+                f"[{primary_advantage.get('category')}] "
+                f"baseline={primary_advantage.get('baseline')} "
+                f"candidate={primary_advantage.get('candidate')} "
+                f"ratio={_format_ratio(primary_advantage.get('ratio'))}"
+            )
+
+
 def _append_comparison_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     comparisons = report.get("comparisons", {})
     if not isinstance(comparisons, Mapping) or not comparisons:
@@ -4746,6 +4923,7 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     _append_tensile_catalog_lines(lines, report)
     _append_comparison_scorecard_lines(lines, report)
     _append_gap_finding_lines(lines, report)
+    _append_comparison_verdict_lines(lines, report)
     _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
     _append_amdhsa_metadata_lines(lines, report)
@@ -5060,6 +5238,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.compare:
         report["comparisons"] = build_kernel_anatomy_comparisons(report, args.compare)
         report["comparison_scorecard"] = build_kernel_anatomy_comparison_scorecard(
+            report["comparisons"]
+        )
+        report["comparison_verdicts"] = build_kernel_anatomy_comparison_verdicts(
             report["comparisons"]
         )
     if args.format == "json":

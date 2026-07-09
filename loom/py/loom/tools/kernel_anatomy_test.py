@@ -16,6 +16,7 @@ from loom.tools.kernel_anatomy import (
     SymbolWeightSpec,
     WeightedSymbolGroupSpec,
     build_kernel_anatomy_comparison_scorecard,
+    build_kernel_anatomy_comparison_verdicts,
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
     format_rocblas_replay_script,
@@ -1883,10 +1884,13 @@ amdhsa.kernels:
     assert "Comparisons:" in text
     assert "Comparison scorecard:" in text
     assert "Gap findings:" in text
+    assert "Comparison verdicts:" in text
     assert "baseline=loom: shared=2 baseline_metrics=2" in text
     assert "scorecard:" in text
     assert "local_memory_bytes [local_memory]: candidate_higher" in text
     assert "candidate_cost/candidate_higher: local_memory_bytes" in text
+    assert "baseline=loom: structural_cost" in text
+    assert "primary cost: local_memory_bytes [local_memory]" in text
     assert "baseline=loom :: local_memory_bytes [local_memory]" in text
     assert "local_memory_bytes: baseline=1024 candidate=2048" in text
     assert "ratio=2x sources=amdhsa_metadata/compile_report" in text
@@ -2048,6 +2052,12 @@ def test_weighted_symbol_metrics_participate_in_comparisons(
         "tensile/weighted_symbols=loom/dynamic"
     )
     assert aggregate_scorecard[0]["metric"] == "local_memory_instruction_count"
+
+    verdicts = build_kernel_anatomy_comparison_verdicts(comparisons)
+    assert verdicts[0]["comparison"] == ("tensile/weighted_symbols=loom/dynamic")
+    assert verdicts[0]["status"] == "structural_cost"
+    assert verdicts[0]["primary_cost"]["metric"] == "local_memory_instruction_count"
+    assert verdicts[0]["primary_cost"]["category"] == "local_memory"
 
 
 def test_weighted_symbol_group_metrics_participate_in_comparisons(
@@ -2293,6 +2303,8 @@ amdhsa.kernels:
         delta["metric"] == "local_memory_bytes" for delta in comparison["deltas"]
     )
     assert report["comparison_scorecard"][0]["comparison"] == "baseline=loom"
+    assert report["comparison_verdicts"][0]["comparison"] == "baseline=loom"
+    assert report["comparison_verdicts"][0]["status"] == "candidate_faster"
 
 
 def test_main_emits_weighted_symbols(tmp_path: Path, capsys) -> None:
