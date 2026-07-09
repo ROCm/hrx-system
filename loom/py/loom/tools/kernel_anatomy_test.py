@@ -177,6 +177,32 @@ def _write_iree_dispatch_profile(path: Path) -> None:
     )
 
 
+def _write_rocprof_kernel_trace(path: Path) -> None:
+    _write(
+        path,
+        """"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 5",1,0,10,1,9,"hot_kernel",1,1000,1100,2048,0,64,0,80,64,2,1,16,8,1
+"KERNEL_DISPATCH","Agent 5",1,0,10,2,9,"hot_kernel",2,2000,2200,2048,0,64,0,80,64,2,1,16,8,1
+"KERNEL_DISPATCH","Agent 5",1,0,10,3,9,"hot_kernel",3,3000,3300,2048,0,64,0,80,64,2,1,16,8,1
+"KERNEL_DISPATCH","Agent 5",1,0,10,4,8,"cold_kernel",4,4000,4050,0,0,16,0,48,32,1,1,8,1,1
+""",
+    )
+
+
+def _write_rocprof_counter_collection(path: Path) -> None:
+    _write(
+        path,
+        """"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
+1,1,"Agent 5",1,20,20,128,9,"hot_kernel",128,2048,0,64,0,80,"SQ_INSTS_LDS",10,1000,1100
+1,1,"Agent 5",1,20,20,128,9,"hot_kernel",128,2048,0,64,0,80,"LDSBankConflict",2,1000,1100
+2,2,"Agent 5",1,20,20,128,9,"hot_kernel",128,2048,0,64,0,80,"SQ_INSTS_LDS",30,2000,2200
+2,2,"Agent 5",1,20,20,128,9,"hot_kernel",128,2048,0,64,0,80,"LDSBankConflict",4,2000,2200
+3,3,"Agent 5",1,20,20,8,8,"cold_kernel",32,0,0,16,0,48,"SQ_INSTS_LDS",1,3000,3050
+3,3,"Agent 5",1,20,20,8,8,"cold_kernel",32,0,0,16,0,48,"LDSBankConflict",0,3000,3050
+""",
+    )
+
+
 def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     tmp_path: Path,
 ) -> None:
@@ -277,6 +303,92 @@ def test_build_kernel_anatomy_report_extracts_iree_dispatch_profile(
     assert profile["kernels"][0]["function_name"] == "hot_kernel"
     assert profile["kernels"][0]["total_duration_ns"] == 20000
     assert profile["kernels"][1]["function_name"] == "cold_kernel"
+
+
+def test_build_kernel_anatomy_report_extracts_rocprof_kernel_trace(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "kernel_trace.csv"
+    _write_rocprof_kernel_trace(trace_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_kernel_trace_paths=[NamedPath("profile", trace_path)],
+    )
+
+    trace = report["rocprof_kernel_traces"]["profile"]
+    assert trace["dispatch_count"] == 4
+    assert trace["kernel_count"] == 2
+    hot_kernel = trace["kernels"][0]
+    assert hot_kernel["kernel_name"] == "hot_kernel"
+    assert hot_kernel["count"] == 3
+    assert hot_kernel["total_duration_ns"] == 600
+    assert hot_kernel["p50_duration_ns"] == 200
+    assert hot_kernel["local_memory_bytes"] == 2048
+    assert hot_kernel["workgroup_size"] == 128
+    assert hot_kernel["grid_size"] == 128
+
+
+def test_build_kernel_anatomy_report_extracts_rocprof_counters(
+    tmp_path: Path,
+) -> None:
+    counter_path = tmp_path / "counter_collection.csv"
+    _write_rocprof_counter_collection(counter_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_counter_collection_paths=[NamedPath("profile", counter_path)],
+    )
+
+    collection = report["rocprof_counter_collections"]["profile"]
+    assert collection["row_count"] == 6
+    assert collection["dispatch_count"] == 3
+    assert collection["counter_count"] == 2
+    hot_kernel = collection["kernels"][0]
+    assert hot_kernel["kernel_name"] == "hot_kernel"
+    assert hot_kernel["count"] == 2
+    assert hot_kernel["total_duration_ns"] == 300
+    assert hot_kernel["counters"]["SQ_INSTS_LDS"]["sum"] == 40
+    assert hot_kernel["counters"]["SQ_INSTS_LDS"]["mean"] == 20
+    assert hot_kernel["counters"]["LDSBankConflict"]["max"] == 4
+
+
+def test_rocprof_inputs_with_matching_names_merge_as_passes(tmp_path: Path) -> None:
+    trace_path_0 = tmp_path / "pass_0" / "kernel_trace.csv"
+    trace_path_1 = tmp_path / "pass_1" / "kernel_trace.csv"
+    counter_path_0 = tmp_path / "pass_0" / "counter_collection.csv"
+    counter_path_1 = tmp_path / "pass_1" / "counter_collection.csv"
+    _write_rocprof_kernel_trace(trace_path_0)
+    _write_rocprof_kernel_trace(trace_path_1)
+    _write_rocprof_counter_collection(counter_path_0)
+    _write_rocprof_counter_collection(counter_path_1)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_kernel_trace_paths=[
+            NamedPath("profile", trace_path_0),
+            NamedPath("profile", trace_path_1),
+        ],
+        rocprof_counter_collection_paths=[
+            NamedPath("profile", counter_path_0),
+            NamedPath("profile", counter_path_1),
+        ],
+    )
+
+    trace = report["rocprof_kernel_traces"]["profile"]
+    assert trace["path"] is None
+    assert trace["dispatch_count"] == 8
+    assert trace["kernels"][0]["count"] == 6
+    collection = report["rocprof_counter_collections"]["profile"]
+    assert collection["path"] is None
+    assert collection["row_count"] == 12
+    assert collection["dispatch_count"] == 6
+    hot_kernel = collection["kernels"][0]
+    assert hot_kernel["count"] == 4
+    assert hot_kernel["counters"]["SQ_INSTS_LDS"]["sum"] == 80
 
 
 def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
@@ -485,6 +597,45 @@ def test_text_report_contains_iree_dispatch_profile_summary(
     assert "cold_kernel: count=3 total_ms=0.006 p50_ms=0.002" in text
 
 
+def test_text_report_contains_rocprof_kernel_trace_summary(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "kernel_trace.csv"
+    _write_rocprof_kernel_trace(trace_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_kernel_trace_paths=[NamedPath("profile", trace_path)],
+    )
+    text = format_text_report(report)
+
+    assert "rocprof kernel traces:" in text
+    assert "profile: dispatches=4 kernels=2" in text
+    assert "hot_kernel: count=3 total_ms=0.0006 p50_ms=0.0002" in text
+    assert "lds=2048 vgpr=64 sgpr=80 workgroup=128 grid=128" in text
+
+
+def test_text_report_contains_rocprof_counter_collection_summary(
+    tmp_path: Path,
+) -> None:
+    counter_path = tmp_path / "counter_collection.csv"
+    _write_rocprof_counter_collection(counter_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_counter_collection_paths=[NamedPath("profile", counter_path)],
+    )
+    text = format_text_report(report)
+
+    assert "rocprof counter collections:" in text
+    assert "profile: rows=6 dispatches=3 counters=2 kernels=2" in text
+    assert "hot_kernel: count=2 total_ms=0.0003 p50_ms=0.0001" in text
+    assert "SQ_INSTS_LDS_mean=20 SQ_INSTS_LDS_max=30" in text
+    assert "LDSBankConflict_mean=3 LDSBankConflict_max=4" in text
+
+
 def test_build_kernel_anatomy_comparisons_ranks_mixed_artifact_metrics(
     tmp_path: Path,
 ) -> None:
@@ -573,6 +724,37 @@ amdhsa.kernels:
     assert "ratio=2x sources=amdhsa_metadata/compile_report" in text
 
 
+def test_rocprof_metrics_participate_in_comparisons(tmp_path: Path) -> None:
+    trace_path = tmp_path / "kernel_trace.csv"
+    counter_path = tmp_path / "counter_collection.csv"
+    _write_rocprof_kernel_trace(trace_path)
+    _write_rocprof_counter_collection(counter_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocprof_kernel_trace_paths=[NamedPath("trace", trace_path)],
+        rocprof_counter_collection_paths=[NamedPath("counters", counter_path)],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="trace/hot_kernel",
+                candidate="counters/hot_kernel",
+            )
+        ],
+    )
+
+    comparison = comparisons["trace/hot_kernel=counters/hot_kernel"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["local_memory_bytes"]["baseline"] == 2048
+    assert deltas_by_metric["local_memory_bytes"]["candidate"] == 2048
+    assert deltas_by_metric["operation_time_ns"]["baseline"] == 200
+    assert deltas_by_metric["operation_time_ns"]["candidate"] == 100
+    assert "SQ_INSTS_LDS_mean" in comparison["missing_baseline_metrics"]
+
+
 def test_main_emits_json(tmp_path: Path, capsys) -> None:
     disassembly_path = tmp_path / "kernel.s"
     _write(
@@ -608,6 +790,31 @@ def test_main_emits_iree_dispatch_profile(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["iree_dispatch_profiles"]["stage"]["kernel_count"] == 2
+
+
+def test_main_emits_rocprof_summaries(tmp_path: Path, capsys) -> None:
+    trace_path = tmp_path / "kernel_trace.csv"
+    counter_path = tmp_path / "counter_collection.csv"
+    _write_rocprof_kernel_trace(trace_path)
+    _write_rocprof_counter_collection(counter_path)
+
+    assert (
+        main(
+            [
+                "--rocprof-kernel-trace",
+                f"profile={trace_path}",
+                "--rocprof-counter-collection",
+                f"profile={counter_path}",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert report["rocprof_kernel_traces"]["profile"]["dispatch_count"] == 4
+    assert report["rocprof_counter_collections"]["profile"]["counter_count"] == 2
 
 
 def test_main_emits_comparisons(tmp_path: Path, capsys) -> None:

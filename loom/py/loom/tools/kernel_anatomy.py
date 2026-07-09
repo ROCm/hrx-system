@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -369,6 +370,286 @@ def _summarize_iree_dispatch_profile_kernel(row: Mapping[str, Any]) -> dict[str,
     }
 
 
+def summarize_rocprof_kernel_trace_path(
+    named_path: NamedPath, top_kernel_count: int
+) -> dict[str, Any]:
+    """Extracts per-kernel timing and resource rows from rocprof CSV output."""
+
+    return summarize_rocprof_kernel_trace_paths(
+        named_path.name, [named_path.path], top_kernel_count
+    )
+
+
+def summarize_rocprof_kernel_trace_paths(
+    name: str, paths: Sequence[Path], top_kernel_count: int
+) -> dict[str, Any]:
+    """Extracts merged per-kernel timing rows from rocprof CSV outputs."""
+
+    dispatches = [
+        _summarize_rocprof_kernel_trace_row(row)
+        for path in paths
+        for row in _read_csv_dict_rows(path)
+        if row.get("Kind") == "KERNEL_DISPATCH"
+    ]
+    kernels = _summarize_rocprof_dispatches_by_kernel(dispatches)
+    return {
+        "name": name,
+        "path": paths[0].as_posix() if len(paths) == 1 else None,
+        "paths": [path.as_posix() for path in paths],
+        "dispatch_count": len(dispatches),
+        "kernel_count": len(kernels),
+        "kernels": kernels[: max(top_kernel_count, 0)],
+    }
+
+
+def _read_csv_dict_rows(path: Path) -> list[dict[str, str]]:
+    return list(csv.DictReader(_read_text(path).splitlines()))
+
+
+def _summarize_rocprof_kernel_trace_row(row: Mapping[str, str]) -> dict[str, Any]:
+    start_timestamp = _parse_numeric_scalar(row.get("Start_Timestamp"))
+    end_timestamp = _parse_numeric_scalar(row.get("End_Timestamp"))
+    duration_ns = None
+    if isinstance(start_timestamp, int) and isinstance(end_timestamp, int):
+        duration_ns = end_timestamp - start_timestamp
+    return {
+        "correlation_id": _parse_numeric_scalar(row.get("Correlation_Id")),
+        "dispatch_id": _parse_numeric_scalar(row.get("Dispatch_Id")),
+        "kernel_id": _parse_numeric_scalar(row.get("Kernel_Id")),
+        "kernel_name": row.get("Kernel_Name"),
+        "duration_ns": duration_ns,
+        "start_timestamp": start_timestamp,
+        "end_timestamp": end_timestamp,
+        "local_memory_bytes": _parse_numeric_scalar(row.get("LDS_Block_Size")),
+        "scratch_bytes": _parse_numeric_scalar(row.get("Scratch_Size")),
+        "vgpr_count": _parse_numeric_scalar(row.get("VGPR_Count")),
+        "accum_vgpr_count": _parse_numeric_scalar(row.get("Accum_VGPR_Count")),
+        "sgpr_count": _parse_numeric_scalar(row.get("SGPR_Count")),
+        "workgroup_size": _parse_extent_product(
+            row.get("Workgroup_Size_X"),
+            row.get("Workgroup_Size_Y"),
+            row.get("Workgroup_Size_Z"),
+        ),
+        "grid_size": _parse_extent_product(
+            row.get("Grid_Size_X"), row.get("Grid_Size_Y"), row.get("Grid_Size_Z")
+        ),
+    }
+
+
+def _parse_extent_product(*values: Any) -> int | None:
+    product = 1
+    for value in values:
+        numeric_value = _parse_numeric_scalar(value)
+        if not isinstance(numeric_value, int):
+            return None
+        product *= numeric_value
+    return product
+
+
+def _summarize_rocprof_dispatches_by_kernel(
+    dispatches: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for dispatch in dispatches:
+        kernel_name = dispatch.get("kernel_name")
+        if not isinstance(kernel_name, str) or not kernel_name:
+            continue
+        grouped.setdefault(kernel_name, []).append(dispatch)
+    summaries = [
+        _summarize_rocprof_kernel_group(kernel_name, rows)
+        for kernel_name, rows in grouped.items()
+    ]
+    return sorted(
+        summaries,
+        key=lambda row: _as_number(row.get("total_duration_ns")) or 0,
+        reverse=True,
+    )
+
+
+def _summarize_rocprof_kernel_group(
+    kernel_name: str, dispatches: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    durations = [
+        duration
+        for dispatch in dispatches
+        if isinstance((duration := dispatch.get("duration_ns")), (int, float))
+    ]
+    return {
+        "kernel_name": kernel_name,
+        "count": len(dispatches),
+        "total_duration_ns": sum(durations),
+        "p50_duration_ns": _percentile(durations, 0.50),
+        "p90_duration_ns": _percentile(durations, 0.90),
+        "min_duration_ns": min(durations) if durations else None,
+        "max_duration_ns": max(durations) if durations else None,
+        "local_memory_bytes": _max_numeric_field(dispatches, "local_memory_bytes"),
+        "scratch_bytes": _max_numeric_field(dispatches, "scratch_bytes"),
+        "vgpr_count": _max_numeric_field(dispatches, "vgpr_count"),
+        "accum_vgpr_count": _max_numeric_field(dispatches, "accum_vgpr_count"),
+        "sgpr_count": _max_numeric_field(dispatches, "sgpr_count"),
+        "workgroup_size": _max_numeric_field(dispatches, "workgroup_size"),
+        "grid_size": _max_numeric_field(dispatches, "grid_size"),
+    }
+
+
+def summarize_rocprof_counter_collection_path(
+    named_path: NamedPath, top_kernel_count: int
+) -> dict[str, Any]:
+    """Extracts per-kernel hardware counter summaries from rocprof CSV output."""
+
+    return summarize_rocprof_counter_collection_paths(
+        named_path.name, [named_path.path], top_kernel_count
+    )
+
+
+def summarize_rocprof_counter_collection_paths(
+    name: str, paths: Sequence[Path], top_kernel_count: int
+) -> dict[str, Any]:
+    """Extracts merged hardware counter summaries from rocprof CSV outputs."""
+
+    rows = []
+    for path in paths:
+        for row in _read_csv_dict_rows(path):
+            counter_row = _summarize_rocprof_counter_collection_row(row)
+            counter_row["path"] = path.as_posix()
+            rows.append(counter_row)
+    kernels = _summarize_rocprof_counter_rows_by_kernel(rows)
+    return {
+        "name": name,
+        "path": paths[0].as_posix() if len(paths) == 1 else None,
+        "paths": [path.as_posix() for path in paths],
+        "row_count": len(rows),
+        "dispatch_count": len(
+            {(row.get("path"), row.get("correlation_id")) for row in rows}
+        ),
+        "counter_count": len(
+            {
+                row.get("counter_name")
+                for row in rows
+                if isinstance(row.get("counter_name"), str)
+            }
+        ),
+        "kernel_count": len(kernels),
+        "kernels": kernels[: max(top_kernel_count, 0)],
+    }
+
+
+def _summarize_rocprof_counter_collection_row(
+    row: Mapping[str, str],
+) -> dict[str, Any]:
+    start_timestamp = _parse_numeric_scalar(row.get("Start_Timestamp"))
+    end_timestamp = _parse_numeric_scalar(row.get("End_Timestamp"))
+    duration_ns = None
+    if isinstance(start_timestamp, int) and isinstance(end_timestamp, int):
+        duration_ns = end_timestamp - start_timestamp
+    return {
+        "correlation_id": _parse_numeric_scalar(row.get("Correlation_Id")),
+        "dispatch_id": _parse_numeric_scalar(row.get("Dispatch_Id")),
+        "kernel_id": _parse_numeric_scalar(row.get("Kernel_Id")),
+        "kernel_name": row.get("Kernel_Name"),
+        "duration_ns": duration_ns,
+        "local_memory_bytes": _parse_numeric_scalar(row.get("LDS_Block_Size")),
+        "scratch_bytes": _parse_numeric_scalar(row.get("Scratch_Size")),
+        "vgpr_count": _parse_numeric_scalar(row.get("VGPR_Count")),
+        "accum_vgpr_count": _parse_numeric_scalar(row.get("Accum_VGPR_Count")),
+        "sgpr_count": _parse_numeric_scalar(row.get("SGPR_Count")),
+        "workgroup_size": _parse_numeric_scalar(row.get("Workgroup_Size")),
+        "grid_size": _parse_numeric_scalar(row.get("Grid_Size")),
+        "counter_name": row.get("Counter_Name"),
+        "counter_value": _parse_numeric_scalar(row.get("Counter_Value")),
+    }
+
+
+def _summarize_rocprof_counter_rows_by_kernel(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        kernel_name = row.get("kernel_name")
+        if not isinstance(kernel_name, str) or not kernel_name:
+            continue
+        grouped.setdefault(kernel_name, []).append(row)
+    summaries = [
+        _summarize_rocprof_counter_kernel_group(kernel_name, kernel_rows)
+        for kernel_name, kernel_rows in grouped.items()
+    ]
+    return sorted(
+        summaries,
+        key=lambda row: _as_number(row.get("total_duration_ns")) or 0,
+        reverse=True,
+    )
+
+
+def _summarize_rocprof_counter_kernel_group(
+    kernel_name: str, rows: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    dispatches: dict[Any, Mapping[str, Any]] = {}
+    counters: dict[str, list[float | int]] = {}
+    for row in rows:
+        dispatch_key = (row.get("path"), row.get("correlation_id"))
+        if dispatch_key[1] is not None:
+            dispatches.setdefault(dispatch_key, row)
+        counter_name = row.get("counter_name")
+        counter_value = row.get("counter_value")
+        if isinstance(counter_name, str) and isinstance(counter_value, (int, float)):
+            counters.setdefault(counter_name, []).append(counter_value)
+    dispatch_rows = list(dispatches.values())
+    durations = [
+        duration
+        for dispatch in dispatch_rows
+        if isinstance((duration := dispatch.get("duration_ns")), (int, float))
+    ]
+    return {
+        "kernel_name": kernel_name,
+        "count": len(dispatch_rows),
+        "total_duration_ns": sum(durations),
+        "p50_duration_ns": _percentile(durations, 0.50),
+        "p90_duration_ns": _percentile(durations, 0.90),
+        "min_duration_ns": min(durations) if durations else None,
+        "max_duration_ns": max(durations) if durations else None,
+        "local_memory_bytes": _max_numeric_field(dispatch_rows, "local_memory_bytes"),
+        "scratch_bytes": _max_numeric_field(dispatch_rows, "scratch_bytes"),
+        "vgpr_count": _max_numeric_field(dispatch_rows, "vgpr_count"),
+        "accum_vgpr_count": _max_numeric_field(dispatch_rows, "accum_vgpr_count"),
+        "sgpr_count": _max_numeric_field(dispatch_rows, "sgpr_count"),
+        "workgroup_size": _max_numeric_field(dispatch_rows, "workgroup_size"),
+        "grid_size": _max_numeric_field(dispatch_rows, "grid_size"),
+        "counters": {
+            counter_name: _summarize_numeric_values(values)
+            for counter_name, values in sorted(counters.items())
+        },
+    }
+
+
+def _max_numeric_field(
+    rows: Sequence[Mapping[str, Any]], field: str
+) -> float | int | None:
+    values = [
+        value for row in rows if isinstance((value := row.get(field)), (int, float))
+    ]
+    return max(values) if values else None
+
+
+def _summarize_numeric_values(values: Sequence[float | int]) -> dict[str, Any]:
+    return {
+        "count": len(values),
+        "sum": sum(values),
+        "mean": sum(values) / len(values) if values else None,
+        "p50": _percentile(values, 0.50),
+        "p90": _percentile(values, 0.90),
+        "min": min(values) if values else None,
+        "max": max(values) if values else None,
+    }
+
+
+def _percentile(values: Sequence[float | int], percentile: float) -> float | int | None:
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    index = max(0, min(len(sorted_values) - 1, math.ceil(percentile * len(values)) - 1))
+    return sorted_values[index]
+
+
 _KERNEL_BLOCK_PATTERN = re.compile(r"^\s+- \.args:\s*$")
 _KERNEL_FIELD_PATTERN = re.compile(r"^    \.(\w+):\s*(.*)$")
 _INTEGER_FIELDS = frozenset(
@@ -438,6 +719,8 @@ def build_kernel_anatomy_report(
     compile_report_paths: Sequence[NamedPath],
     benchmark_jsonl_paths: Sequence[NamedPath] = (),
     iree_dispatch_profile_paths: Sequence[NamedPath] = (),
+    rocprof_kernel_trace_paths: Sequence[NamedPath] = (),
+    rocprof_counter_collection_paths: Sequence[NamedPath] = (),
     rocblas_log_paths: Sequence[NamedPath] = (),
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
@@ -464,6 +747,14 @@ def build_kernel_anatomy_report(
             named_path, top_symbol_count
         )
         for named_path in iree_dispatch_profile_paths
+    }
+    rocprof_kernel_traces = {
+        name: summarize_rocprof_kernel_trace_paths(name, paths, top_symbol_count)
+        for name, paths in _group_named_paths(rocprof_kernel_trace_paths).items()
+    }
+    rocprof_counter_collections = {
+        name: summarize_rocprof_counter_collection_paths(name, paths, top_symbol_count)
+        for name, paths in _group_named_paths(rocprof_counter_collection_paths).items()
     }
     rocblas_logs: dict[str, Any] = {}
     for named_path in rocblas_log_paths:
@@ -497,7 +788,16 @@ def build_kernel_anatomy_report(
         "loom_benchmarks": benchmark_jsonl,
         "loom_compile_reports": compile_reports,
         "rocblas_logs": rocblas_logs,
+        "rocprof_counter_collections": rocprof_counter_collections,
+        "rocprof_kernel_traces": rocprof_kernel_traces,
     }
+
+
+def _group_named_paths(named_paths: Sequence[NamedPath]) -> dict[str, list[Path]]:
+    grouped_paths: dict[str, list[Path]] = {}
+    for named_path in named_paths:
+        grouped_paths.setdefault(named_path.name, []).append(named_path.path)
+    return grouped_paths
 
 
 def build_kernel_anatomy_comparisons(
@@ -544,6 +844,8 @@ def _collect_comparison_metric_groups(
     _collect_compile_report_metric_groups(groups, report)
     _collect_benchmark_metric_groups(groups, report)
     _collect_iree_dispatch_profile_metric_groups(groups, report)
+    _collect_rocprof_kernel_trace_metric_groups(groups, report)
+    _collect_rocprof_counter_collection_metric_groups(groups, report)
     _collect_rocblas_metric_groups(groups, report)
     _collect_disassembly_metric_groups(groups, report)
     _collect_metadata_metric_groups(groups, report)
@@ -747,6 +1049,109 @@ def _collect_iree_dispatch_profile_metric_groups(
                     kernel.get(metric),
                     "iree_dispatch_profile",
                 )
+
+
+def _collect_rocprof_kernel_trace_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    rocprof_kernel_traces = _as_mapping(report.get("rocprof_kernel_traces"))
+    for name, trace_value in rocprof_kernel_traces.items():
+        trace = _as_mapping(trace_value)
+        kernels = trace.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            kernel_name = kernel.get("kernel_name")
+            if not isinstance(kernel_name, str):
+                continue
+            group_name = f"{name}/{kernel_name}"
+            _record_metric(
+                groups,
+                group_name,
+                "operation_time_ns",
+                kernel.get("p50_duration_ns"),
+                "rocprof_kernel_trace",
+            )
+            for metric in (
+                "count",
+                "total_duration_ns",
+                "p50_duration_ns",
+                "p90_duration_ns",
+                "min_duration_ns",
+                "max_duration_ns",
+                "local_memory_bytes",
+                "scratch_bytes",
+                "vgpr_count",
+                "accum_vgpr_count",
+                "sgpr_count",
+                "workgroup_size",
+                "grid_size",
+            ):
+                _record_metric(
+                    groups,
+                    group_name,
+                    metric,
+                    kernel.get(metric),
+                    "rocprof_kernel_trace",
+                )
+
+
+def _collect_rocprof_counter_collection_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    counter_collections = _as_mapping(report.get("rocprof_counter_collections"))
+    for name, collection_value in counter_collections.items():
+        collection = _as_mapping(collection_value)
+        kernels = collection.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            kernel_name = kernel.get("kernel_name")
+            if not isinstance(kernel_name, str):
+                continue
+            group_name = f"{name}/{kernel_name}"
+            _record_metric(
+                groups,
+                group_name,
+                "operation_time_ns",
+                kernel.get("p50_duration_ns"),
+                "rocprof_counter_collection",
+            )
+            for metric in (
+                "count",
+                "total_duration_ns",
+                "p50_duration_ns",
+                "p90_duration_ns",
+                "min_duration_ns",
+                "max_duration_ns",
+                "local_memory_bytes",
+                "scratch_bytes",
+                "vgpr_count",
+                "accum_vgpr_count",
+                "sgpr_count",
+                "workgroup_size",
+                "grid_size",
+            ):
+                _record_metric(
+                    groups,
+                    group_name,
+                    metric,
+                    kernel.get(metric),
+                    "rocprof_counter_collection",
+                )
+            counters = _as_mapping(kernel.get("counters"))
+            for counter_name, counter_value in counters.items():
+                counter = _as_mapping(counter_value)
+                for statistic in ("sum", "mean", "p50", "p90", "min", "max"):
+                    _record_metric(
+                        groups,
+                        group_name,
+                        f"{counter_name}_{statistic}",
+                        counter.get(statistic),
+                        "rocprof_counter_collection",
+                    )
 
 
 def _collect_rocblas_metric_groups(
@@ -1117,6 +1522,111 @@ def _format_ns_as_ms(value: Any) -> str:
     return f"{numeric_value / 1_000_000:.6g}" if numeric_value is not None else "?"
 
 
+def _append_rocprof_kernel_trace_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    rocprof_kernel_traces = report.get("rocprof_kernel_traces", {})
+    if not isinstance(rocprof_kernel_traces, Mapping) or not rocprof_kernel_traces:
+        return
+    lines.append("")
+    lines.append("rocprof kernel traces:")
+    for name, trace_value in rocprof_kernel_traces.items():
+        trace = _as_mapping(trace_value)
+        lines.append(
+            "  "
+            f"{name}: dispatches={trace.get('dispatch_count')} "
+            f"kernels={trace.get('kernel_count')}"
+        )
+        kernels = trace.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            lines.append(
+                "    "
+                f"{kernel.get('kernel_name')}: "
+                f"count={kernel.get('count')} "
+                f"total_ms={_format_ns_as_ms(kernel.get('total_duration_ns'))} "
+                f"p50_ms={_format_ns_as_ms(kernel.get('p50_duration_ns'))} "
+                f"p90_ms={_format_ns_as_ms(kernel.get('p90_duration_ns'))} "
+                f"lds={kernel.get('local_memory_bytes')} "
+                f"vgpr={kernel.get('vgpr_count')} "
+                f"sgpr={kernel.get('sgpr_count')} "
+                f"workgroup={kernel.get('workgroup_size')} "
+                f"grid={kernel.get('grid_size')}"
+            )
+
+
+_ROCPROF_COUNTER_DISPLAY_ORDER = (
+    "SQ_INSTS_LDS",
+    "SQ_WAIT_INST_LDS",
+    "LDSBankConflict",
+    "ALUStalledByLDS",
+    "SQ_INSTS_VALU",
+    "VALUInsts",
+    "MeanOccupancyPerCU",
+    "OccupancyPercent",
+)
+
+
+def _append_rocprof_counter_collection_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    counter_collections = report.get("rocprof_counter_collections", {})
+    if not isinstance(counter_collections, Mapping) or not counter_collections:
+        return
+    lines.append("")
+    lines.append("rocprof counter collections:")
+    for name, collection_value in counter_collections.items():
+        collection = _as_mapping(collection_value)
+        lines.append(
+            "  "
+            f"{name}: rows={collection.get('row_count')} "
+            f"dispatches={collection.get('dispatch_count')} "
+            f"counters={collection.get('counter_count')} "
+            f"kernels={collection.get('kernel_count')}"
+        )
+        kernels = collection.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels:
+            kernel = _as_mapping(kernel_value)
+            lines.append(
+                "    "
+                f"{kernel.get('kernel_name')}: "
+                f"count={kernel.get('count')} "
+                f"total_ms={_format_ns_as_ms(kernel.get('total_duration_ns'))} "
+                f"p50_ms={_format_ns_as_ms(kernel.get('p50_duration_ns'))} "
+                f"{_format_rocprof_counter_line(kernel.get('counters'))}"
+            )
+
+
+def _format_rocprof_counter_line(counters_value: Any) -> str:
+    counters = _as_mapping(counters_value)
+    ordered_names = [
+        name for name in _ROCPROF_COUNTER_DISPLAY_ORDER if name in counters
+    ] + sorted(set(counters) - set(_ROCPROF_COUNTER_DISPLAY_ORDER))
+    fragments: list[str] = []
+    for counter_name in ordered_names[:8]:
+        counter = _as_mapping(counters.get(counter_name))
+        mean = counter.get("mean")
+        maximum = counter.get("max")
+        fragments.append(
+            f"{counter_name}_mean={_format_scalar(mean)} "
+            f"{counter_name}_max={_format_scalar(maximum)}"
+        )
+    return " ".join(fragments)
+
+
+def _format_scalar(value: Any) -> str:
+    numeric_value = _as_number(value)
+    if isinstance(numeric_value, int):
+        return str(numeric_value)
+    if isinstance(numeric_value, float):
+        return f"{numeric_value:.6g}"
+    return "?"
+
+
 def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     rocblas_logs = report.get("rocblas_logs", {})
     if not isinstance(rocblas_logs, Mapping) or not rocblas_logs:
@@ -1323,6 +1833,8 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     _append_compile_report_lines(lines, report)
     _append_benchmark_report_lines(lines, report)
     _append_iree_dispatch_profile_lines(lines, report)
+    _append_rocprof_kernel_trace_lines(lines, report)
+    _append_rocprof_counter_collection_lines(lines, report)
     _append_rocblas_log_lines(lines, report)
     _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
@@ -1359,6 +1871,20 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         type=_parse_named_path,
         help=("IREE dispatch profile JSON as NAME=PATH, or PATH to use the stem."),
+    )
+    parser.add_argument(
+        "--rocprof-kernel-trace",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help=("rocprof kernel trace CSV as NAME=PATH, or PATH to use the stem."),
+    )
+    parser.add_argument(
+        "--rocprof-counter-collection",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help=("rocprof counter collection CSV as NAME=PATH, or PATH to use the stem."),
     )
     parser.add_argument(
         "--rocblas-log",
@@ -1426,6 +1952,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         compile_report_paths=args.compile_report,
         benchmark_jsonl_paths=args.benchmark_jsonl,
         iree_dispatch_profile_paths=args.iree_dispatch_profile,
+        rocprof_kernel_trace_paths=args.rocprof_kernel_trace,
+        rocprof_counter_collection_paths=args.rocprof_counter_collection,
         rocblas_log_paths=args.rocblas_log,
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
