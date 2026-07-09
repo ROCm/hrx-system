@@ -6,6 +6,7 @@
 
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
     "hrx_cc_shared_library",
     "hrx_cc_test",
 )
@@ -19,6 +20,28 @@ package(
 # The current shim implementation is ELF-specific. A Windows port must replace
 # its loader and symbol-export mechanisms before relaxing this constraint.
 _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
+
+hrx_cc_library(
+    name = "launch_params",
+    srcs = ["launch_params.c"],
+    hdrs = [
+        "api.h",
+        "launch_params.h",
+    ],
+    copts = [
+        "-Wno-attributes",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
 
 hrx_cc_shared_library(
     name = "amdhip64",
@@ -47,6 +70,7 @@ hrx_cc_shared_library(
     ],
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
+        ":launch_params",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
@@ -69,6 +93,19 @@ hrx_cc_test(
         # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
         # executable resolves them (glibc that ships dl separately, ld.lld).
         "//build_tools:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "launch_params_test",
+    srcs = ["launch_params_test.cc"],
+    copts = [
+        "-Wno-attributes",
+    ],
+    deps = [
+        ":launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

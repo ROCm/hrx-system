@@ -72,12 +72,9 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         layout,
     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
     size_t custom_kernarg_length, void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  const size_t explicit_bytes = layout->explicit_kernarg_size
-                                    ? layout->explicit_kernarg_size
-                                    : custom_kernarg_length;
-  const size_t copy_bytes = custom_kernarg_length < explicit_bytes
-                                ? custom_kernarg_length
-                                : explicit_bytes;
+  const size_t copy_bytes =
+      iree_hal_amdgpu_device_dispatch_custom_kernarg_copy_length(
+          layout, custom_kernarg_length);
   if (copy_bytes > 0) {
     iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr, copy_bytes);
   }

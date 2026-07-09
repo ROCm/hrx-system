@@ -12,6 +12,31 @@ iree_add_all_subdirs()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    launch_params
+  COPTS
+    "-Wno-attributes"
+  HDRS
+    "api.h"
+    "launch_params.h"
+  SRCS
+    "launch_params.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
@@ -24,6 +49,7 @@ iree_cc_library(
     "abi_stubs.c"
     "api.c"
   DEPS
+    ::launch_params
     iree::base
     iree::base::threading
     iree::hal
@@ -50,8 +76,26 @@ iree_cc_test(
     hip_get_proc_address_test
   SRCS
     "hip_get_proc_address_test.cc"
+  DATA
+    ::amdhip64
   DEPS
     ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+)
+
+iree_cc_test(
+  NAME
+    launch_params_test
+  SRCS
+    "launch_params_test.cc"
+  COPTS
+    "-Wno-attributes"
+  DEPS
+    ::launch_params
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs

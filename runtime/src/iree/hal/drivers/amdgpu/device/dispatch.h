@@ -40,6 +40,23 @@ typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
   bool has_implicit_args;
 } iree_hal_amdgpu_device_dispatch_kernarg_layout_t;
 
+// Returns the number of caller-provided custom kernarg bytes to copy into the
+// explicit argument prefix.
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE size_t
+iree_hal_amdgpu_device_dispatch_custom_kernarg_copy_length(
+    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    size_t custom_kernarg_length) {
+  const size_t explicit_kernarg_size = layout->explicit_kernarg_size
+                                           ? layout->explicit_kernarg_size
+                                           : custom_kernarg_length;
+  size_t copy_length =
+      IREE_AMDGPU_MIN(custom_kernarg_length, explicit_kernarg_size);
+  if (layout->total_kernarg_size) {
+    copy_length = IREE_AMDGPU_MIN(copy_length, layout->total_kernarg_size);
+  }
+  return copy_length;
+}
+
 //===----------------------------------------------------------------------===//
 // Dispatch Packet/Kernarg Emission
 //===----------------------------------------------------------------------===//
@@ -119,9 +136,12 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
 
 // Populates custom direct explicit kernargs in already-reserved storage.
 //
-// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
-// final kernel ABI shape expected by the target kernel. Missing trailing
-// padding bytes remain zeroed.
+// |custom_kernarg_ptr| provides caller-supplied bytes in the final kernel ABI
+// shape expected by the target kernel. Fixed layouts copy at most
+// |layout->explicit_kernarg_size| bytes, bounded by
+// |layout->total_kernarg_size| when it is known. Dynamic layouts use
+// |custom_kernarg_length| as both the explicit and total reservation size.
+// Missing bytes before an implicit-args suffix remain zeroed.
 //
 // Preconditions:
 //   - |layout| and |kernarg_ptr| are non-NULL.
