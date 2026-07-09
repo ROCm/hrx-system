@@ -24,12 +24,14 @@ typedef enum id4_ideogram4_dit_program_linear_weight_layout_e {
 typedef struct id4_ideogram4_dit_program_linear_parameter_t {
   // Physical storage format used for the logical weight parameter.
   id4_ideogram4_dit_parameter_storage_t storage;
-  // Physical execution layout used inside the resident weight tensor.
+  // Physical execution layout used by the consumer weight tensor.
   id4_ideogram4_dit_program_linear_weight_layout_t layout;
   // Weight tensor loaded from the selected parameter source.
   id4_pipeline_program_tensor_t weight;
   // Row-scale tensor for scaled FP8 weights; invalid for BF16 weights.
   id4_pipeline_program_tensor_t scale;
+  // True when a program dispatch materializes the weight before use.
+  bool requires_ready_barrier;
 } id4_ideogram4_dit_program_linear_parameter_t;
 
 static id4_ideogram4_dit_weight_execution_format_t
@@ -41,6 +43,8 @@ id4_ideogram4_dit_program_generic_linear_weight_execution_format(
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
     default:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
   }
@@ -55,6 +59,8 @@ id4_ideogram4_dit_program_feed_forward_weight_execution_format(
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
     default:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
   }
@@ -103,6 +109,7 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
       ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_INVALID;
   out_parameter->weight = id4_pipeline_program_tensor_invalid();
   out_parameter->scale = id4_pipeline_program_tensor_invalid();
+  out_parameter->requires_ready_barrier = false;
   switch (bf16_resident_layout) {
     case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE:
     case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE:
@@ -201,6 +208,33 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
           out_parameter->layout = bf16_resident_layout;
           break;
         }
+        case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS: {
+          if (bf16_resident_layout !=
+              ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE) {
+            return iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "Ideogram4 DiT streaming compact RHS parameter `%.*s` "
+                "requires compact RHS execution layout",
+                (int)weight_key.size, weight_key.data);
+          }
+          id4_pipeline_program_tensor_t source_weight =
+              id4_pipeline_program_tensor_invalid();
+          id4_pipeline_program_tensor_t source_scale =
+              id4_pipeline_program_tensor_invalid();
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
+                  builder, source.source_scope, weight_key, input_size,
+                  output_size, &source_weight, &source_scale));
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_encode_fp8_e4m3_scaled_linear_rhs_tile(
+                  builder, weight_key, input_size, output_size, source_weight,
+                  source_scale, &out_parameter->weight));
+          out_parameter->storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16;
+          out_parameter->layout =
+              ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE;
+          out_parameter->requires_ready_barrier = true;
+          break;
+        }
         default:
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
@@ -225,6 +259,20 @@ static iree_status_t id4_ideogram4_dit_program_format_child_name(
   return id4_ideogram4_dit_program_format(
       buffer, buffer_capacity, out_string, "%.*s.%.*s", (int)parent.size,
       parent.data, (int)suffix.size, suffix.data);
+}
+
+static iree_status_t
+id4_ideogram4_dit_program_barrier_after_materialized_weight(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t branch_name,
+    uint32_t layer_ordinal, iree_string_view_t suffix,
+    id4_ideogram4_dit_program_linear_parameter_t parameter) {
+  if (!parameter.requires_ready_barrier) return iree_ok_status();
+  char barrier_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t barrier_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+      branch_name, layer_ordinal, suffix, barrier_name_buffer,
+      IREE_ARRAYSIZE(barrier_name_buffer), &barrier_name));
+  return id4_ideogram4_dit_program_barrier(builder, barrier_name);
 }
 
 iree_status_t id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
@@ -1058,6 +1106,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       id4_ideogram4_dit_program_select_compact_linear_weight_layout(
           activation_format, bf16_token_capacity, hidden_size, qkv_size),
       generic_linear_weight_execution_format, &qkv_parameter));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier_after_materialized_weight(
+          builder, branch_name, layer_ordinal,
+          IREE_SV("after_attention_qkv_weight"), qkv_parameter));
   id4_pipeline_program_tensor_t qkv = id4_pipeline_program_tensor_invalid();
   const id4_pipeline_program_dtype_t qkv_dtype =
       f32_canonical_activations ? ID4_PIPELINE_PROGRAM_DTYPE_F32
@@ -1372,6 +1424,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       id4_ideogram4_dit_program_select_compact_linear_weight_layout(
           activation_format, bf16_token_capacity, hidden_size, hidden_size),
       generic_linear_weight_execution_format, &attention_output_parameter));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier_after_materialized_weight(
+          builder, branch_name, layer_ordinal,
+          IREE_SV("after_attention_output_weight"),
+          attention_output_parameter));
   id4_pipeline_program_tensor_t attention_output =
       id4_pipeline_program_tensor_invalid();
   const bool tap_attention_output =
@@ -1605,12 +1662,17 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool fp8_direct_feed_forward_weight_execution =
       feed_forward_weight_execution_format ==
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+  const bool streaming_feed_forward_weight_execution =
+      feed_forward_weight_execution_format ==
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
   const bool compact_feed_forward_w1_w3_layout =
       bf16_resident_feed_forward_weight_execution ||
-      fp8_direct_feed_forward_weight_execution;
+      fp8_direct_feed_forward_weight_execution ||
+      streaming_feed_forward_weight_execution;
   const bool compact_feed_forward_w2_layout =
       bf16_resident_feed_forward_weight_execution ||
-      fp8_direct_feed_forward_weight_execution;
+      fp8_direct_feed_forward_weight_execution ||
+      streaming_feed_forward_weight_execution;
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w1_w3_weight_layout =
           compact_feed_forward_w1_w3_layout
@@ -1627,7 +1689,6 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               : ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE;
   id4_ideogram4_dit_program_linear_parameter_t feed_forward_w1_parameter;
   id4_ideogram4_dit_program_linear_parameter_t feed_forward_w3_parameter;
-  id4_ideogram4_dit_program_linear_parameter_t feed_forward_w2_parameter;
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter(
       builder, parameter_sources, layer_ordinal,
       IREE_SV("feed_forward.w1.weight"), hidden_size, intermediate_size,
@@ -1638,11 +1699,19 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       IREE_SV("feed_forward.w3.weight"), hidden_size, intermediate_size,
       feed_forward_w1_w3_weight_layout, feed_forward_weight_execution_format,
       &feed_forward_w3_parameter));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter(
-      builder, parameter_sources, layer_ordinal,
-      IREE_SV("feed_forward.w2.weight"), intermediate_size, hidden_size,
-      feed_forward_w2_weight_layout, feed_forward_weight_execution_format,
-      &feed_forward_w2_parameter));
+  if (feed_forward_w1_parameter.requires_ready_barrier ||
+      feed_forward_w3_parameter.requires_ready_barrier) {
+    char after_w1_w3_weight_name_buffer
+        [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t after_w1_w3_weight_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+        branch_name, layer_ordinal, IREE_SV("after_ffn_w1_w3_weight"),
+        after_w1_w3_weight_name_buffer,
+        IREE_ARRAYSIZE(after_w1_w3_weight_name_buffer),
+        &after_w1_w3_weight_name));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_barrier(builder, after_w1_w3_weight_name));
+  }
 
   id4_pipeline_program_tensor_t mlp_hidden =
       id4_pipeline_program_tensor_invalid();
@@ -1883,6 +1952,16 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, mlp_output_name, mlp_output_dtype, mlp_output_shape,
       &mlp_output));
+  id4_ideogram4_dit_program_linear_parameter_t feed_forward_w2_parameter;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter(
+      builder, parameter_sources, layer_ordinal,
+      IREE_SV("feed_forward.w2.weight"), intermediate_size, hidden_size,
+      feed_forward_w2_weight_layout, feed_forward_weight_execution_format,
+      &feed_forward_w2_parameter));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier_after_materialized_weight(
+          builder, branch_name, layer_ordinal, IREE_SV("after_ffn_w2_weight"),
+          feed_forward_w2_parameter));
   if (mlp_output_as_f32) {
     if (capture_mlp_hidden_as_f32) {
       IREE_RETURN_IF_ERROR(

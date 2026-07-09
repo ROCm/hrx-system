@@ -192,6 +192,7 @@ static iree_status_t id4_ideogram4_dit_stage_validate_weight_execution_format(
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

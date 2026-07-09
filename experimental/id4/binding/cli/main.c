@@ -55,8 +55,8 @@ IREE_FLAG(string, qwen_parameter_format, "bf16",
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
-          "DiT weight execution format: bf16_resident, fp8_direct, or "
-          "fp8_direct_feed_forward_bf16_resident.");
+          "DiT weight execution format: bf16_resident, fp8_direct, "
+          "fp8_direct_feed_forward_bf16_resident, or streaming_compact_rhs.");
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs, or streaming_compact_rhs.");

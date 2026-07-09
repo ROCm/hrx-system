@@ -106,10 +106,15 @@ iree_status_t id4_ideogram4_dit_weight_execution_format_parse(
         ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("streaming_compact_rhs"))) {
+    *out_format =
+        ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
+    return iree_ok_status();
+  }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "DiT weight execution format must be bf16_resident, fp8_direct, or "
-      "fp8_direct_feed_forward_bf16_resident");
+      "DiT weight execution format must be bf16_resident, fp8_direct, "
+      "fp8_direct_feed_forward_bf16_resident, or streaming_compact_rhs");
 }
 
 iree_string_view_t id4_ideogram4_dit_weight_execution_format_name(
@@ -121,6 +126,8 @@ iree_string_view_t id4_ideogram4_dit_weight_execution_format_name(
       return IREE_SV("fp8_direct");
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
       return IREE_SV("fp8_direct_feed_forward_bf16_resident");
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
+      return IREE_SV("streaming_compact_rhs");
     default:
       return IREE_SV("invalid");
   }
@@ -134,6 +141,7 @@ id4_ideogram4_dit_program_generic_linear_weight_execution_format(
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
     default:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
@@ -460,6 +468,7 @@ static iree_status_t id4_ideogram4_dit_program_validate_weight_execution_format(
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1137,6 +1146,57 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_loom(
       .bindings = bindings,
   };
   return id4_pipeline_program_dispatch_loom(builder, &options);
+}
+
+iree_status_t id4_ideogram4_dit_program_encode_fp8_e4m3_scaled_linear_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t weight_key,
+    uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t source_weight,
+    id4_pipeline_program_tensor_t source_scale,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  char compact_name_buffer[ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t compact_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      compact_name_buffer, IREE_ARRAYSIZE(compact_name_buffer), &compact_name,
+      "%.*s.compact_rhs_bf16", (int)weight_key.size, weight_key.data));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, compact_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(output_size, input_size),
+      out_tensor));
+
+  char dispatch_name_buffer[ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t dispatch_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      dispatch_name_buffer, IREE_ARRAYSIZE(dispatch_name_buffer),
+      &dispatch_name, "%.*s.encode", (int)compact_name.size,
+      compact_name.data));
+
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile."
+               "output_size"),
+       output_size},
+      {IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile."
+               "input_size"),
+       input_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(source_weight),
+      id4_pipeline_program_read(source_scale),
+      id4_pipeline_program_write(*out_tensor),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, dispatch_name,
+      IREE_SV("parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile"),
+      IREE_SV("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_zero_tail_bf16(

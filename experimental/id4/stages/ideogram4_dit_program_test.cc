@@ -459,6 +459,31 @@ static iree_host_size_t ProgramCountDispatchesByFunction(
   return dispatch_count;
 }
 
+static bool ProgramHasLoomDispatch(const id4_pipeline_program_t* program,
+                                   iree_string_view_t module_path,
+                                   iree_string_view_t function_name) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      continue;
+    }
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
+        &operation->payload.dispatch_loom;
+    if (!iree_string_view_equal(dispatch->kernel.module_path, module_path)) {
+      continue;
+    }
+    if (!iree_string_view_equal(dispatch->kernel.function_name,
+                                function_name)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 static bool ProgramHasOnlineAttentionDispatch(
     const id4_pipeline_program_t* program, iree_string_view_t valid_token_count,
     iree_string_view_t padded_token_count,
@@ -890,6 +915,55 @@ TEST(Ideogram4DitProgram,
       id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
                                             options.model.intermediate_size),
       id4_pipeline_program_make_shape_rank1(options.model.hidden_size)));
+
+  id4_pipeline_program_release(program);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &rules, iree_allocator_system());
+}
+
+TEST(Ideogram4DitProgram, AuthorsStreamingCompactRhsParameterContract) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
+  options.model.hidden_size = 128;
+  options.model.intermediate_size = 128;
+  options.model.attention_head_count = 2;
+  id4_ideogram4_dit_parameter_source_rule_list_t rules;
+  IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3, options.model,
+      IREE_SV("fp8"), iree_allocator_system(), &rules));
+  options.parameter_sources.rule_count = rules.count;
+  options.parameter_sources.rules = rules.values;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t qkv_size = options.model.hidden_size * 3;
+  EXPECT_TRUE(
+      ProgramHasParameter(program, IREE_SV("layers.0.attention.qkv.weight"),
+                          IREE_SV("fp8"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+                          id4_pipeline_program_make_shape_rank2(
+                              qkv_size, options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasParameter(
+      program, IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(qkv_size)));
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("layers.0.attention.qkv.weight.compact_rhs_bf16"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(qkv_size,
+                                            options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("layers.0.feed_forward.w2.weight.compact_rhs_bf16"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
+                                            options.model.intermediate_size)));
+  EXPECT_TRUE(ProgramHasLoomDispatch(
+      program, IREE_SV("parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile"),
+      IREE_SV("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile")));
 
   id4_pipeline_program_release(program);
   id4_ideogram4_dit_parameter_source_rule_list_deinitialize(

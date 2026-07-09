@@ -95,6 +95,9 @@ typedef enum id4_ideogram4_dit_weight_execution_format_e {
   // feed-forward weights into persistent BF16 execution tensors.
   ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT =
       3,
+  // Keep FP8 source weights resident and stream BF16 compact RHS tiles through
+  // transient program storage before each linear consumer.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS = 4,
 } id4_ideogram4_dit_weight_execution_format_t;
 
 // Parses a DiT linear weight execution format name.

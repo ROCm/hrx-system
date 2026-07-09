@@ -88,8 +88,12 @@ static iree_status_t AccumulateProgramDispatchBindingBytes(
 static bool IsStreamingRhsEncodeDispatch(
     const id4_pipeline_program_dispatch_loom_op_t* dispatch) {
   return iree_string_view_equal(
-      dispatch->kernel.module_path,
-      IREE_SV("parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile"));
+             dispatch->kernel.module_path,
+             IREE_SV(
+                 "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile")) ||
+         iree_string_view_equal(
+             dispatch->kernel.module_path,
+             IREE_SV("parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile"));
 }
 
 iree_status_t AccumulateProgramStreamingRhsEncodeStatistics(
