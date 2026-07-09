@@ -1941,6 +1941,10 @@ def summarize_disassembly_path(
         "whole_file": whole_file.metadata(),
         "symbol_count": len(blocks),
         "top_symbols": [block.metadata() for block in top_blocks],
+        "matrix_symbols": [
+            _matrix_block_metadata(block)
+            for block in _top_matrix_blocks(blocks, top_symbol_count)
+        ],
         "ordered_symbols": [
             block.metadata() for block in _ordered_blocks(blocks, ordered_symbol_count)
         ],
@@ -4860,6 +4864,89 @@ def _ordered_blocks(
     )
 
 
+def _top_matrix_blocks(
+    blocks: Sequence[AmdgpuDisassemblyBlock], top_symbol_count: int
+) -> tuple[AmdgpuDisassemblyBlock, ...]:
+    if top_symbol_count <= 0:
+        return ()
+    return tuple(
+        sorted(
+            (block for block in blocks if _matrix_count(block) > 0),
+            key=lambda block: (
+                _matrix_count(block),
+                _local_memory_instruction_count(block),
+                block.summary.instruction_count,
+            ),
+            reverse=True,
+        )[:top_symbol_count]
+    )
+
+
+def _matrix_block_metadata(block: AmdgpuDisassemblyBlock) -> dict[str, Any]:
+    summary = block.summary
+    family_counts = summary.family_counts
+    instruction_count = summary.instruction_count
+    matrix_instruction_count = _matrix_count(block)
+    local_memory_instruction_count = _local_memory_instruction_count(block)
+    device_memory_instruction_count = _device_memory_instruction_count(block)
+    return {
+        "symbol": block.symbol,
+        "address": block.address,
+        "start_line": block.start_line,
+        "instruction_count": instruction_count,
+        "matrix_instruction_count": matrix_instruction_count,
+        "wmma_count": family_counts.get("v_wmma", 0),
+        "mfma_count": family_counts.get("v_mfma", 0),
+        "smfmac_count": family_counts.get("v_smfmac", 0),
+        "local_memory_instruction_count": local_memory_instruction_count,
+        "device_memory_instruction_count": device_memory_instruction_count,
+        "buffer_load_count": family_counts.get("buffer_load", 0),
+        "buffer_store_count": family_counts.get("buffer_store", 0),
+        "global_load_count": family_counts.get("global_load", 0),
+        "global_store_count": family_counts.get("global_store", 0),
+        "ds_read_count": family_counts.get("ds_read", 0),
+        "ds_write_count": family_counts.get("ds_write", 0),
+        "instructions_per_matrix_instruction": _ratio_or_none(
+            instruction_count, matrix_instruction_count
+        ),
+        "local_memory_instructions_per_matrix_instruction": _ratio_or_none(
+            local_memory_instruction_count, matrix_instruction_count
+        ),
+        "device_memory_instructions_per_matrix_instruction": _ratio_or_none(
+            device_memory_instruction_count, matrix_instruction_count
+        ),
+    }
+
+
+def _local_memory_instruction_count(block: AmdgpuDisassemblyBlock) -> int:
+    family_counts = block.summary.family_counts
+    return (
+        int(family_counts.get("ds_read", 0))
+        + int(family_counts.get("ds_write", 0))
+        + int(family_counts.get("ds_other", 0))
+    )
+
+
+def _device_memory_instruction_count(block: AmdgpuDisassemblyBlock) -> int:
+    family_counts = block.summary.family_counts
+    return (
+        int(family_counts.get("global_load", 0))
+        + int(family_counts.get("global_store", 0))
+        + int(family_counts.get("buffer_load", 0))
+        + int(family_counts.get("buffer_store", 0))
+        + int(family_counts.get("flat_load", 0))
+        + int(family_counts.get("flat_store", 0))
+    )
+
+
+def _ratio_or_none(
+    numerator: float | int | None, denominator: float | int | None
+) -> float | None:
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return float(numerator) / float(denominator)
+
+
 def _summarize_weighted_symbols(
     blocks: Sequence[AmdgpuDisassemblyBlock],
     symbol_weight_specs: Sequence[SymbolWeightSpec],
@@ -5575,6 +5662,36 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"compiles={benchmark_report.get('compile_count')} "
                 f"repetitions={benchmark_report.get('repetition_count')}"
             )
+    disassemblies = report.get("disassemblies", {})
+    if isinstance(disassemblies, Mapping) and disassemblies:
+        matrix_block_lines = []
+        for name, disassembly_value in disassemblies.items():
+            disassembly = _as_mapping(disassembly_value)
+            matrix_symbols = disassembly.get("matrix_symbols")
+            if not isinstance(matrix_symbols, list):
+                continue
+            for symbol_value in matrix_symbols[:4]:
+                symbol = _as_mapping(symbol_value)
+                instruction_ratio = _format_scalar(
+                    symbol.get("instructions_per_matrix_instruction")
+                )
+                local_ratio = _format_scalar(
+                    symbol.get("local_memory_instructions_per_matrix_instruction")
+                )
+                matrix_block_lines.append(
+                    "  "
+                    f"{name}/{_shorten_text(str(symbol.get('symbol') or ''), 72)}: "
+                    f"instructions={symbol.get('instruction_count')} "
+                    f"matrix={symbol.get('matrix_instruction_count')} "
+                    f"local={symbol.get('local_memory_instruction_count')} "
+                    f"device={symbol.get('device_memory_instruction_count')} "
+                    f"instr/matrix={instruction_ratio} "
+                    f"local/matrix={local_ratio}"
+                )
+        if matrix_block_lines:
+            lines.append("")
+            lines.append("Matrix-heavy disassembly blocks:")
+            lines.extend(matrix_block_lines[:12])
     verdicts = report.get("comparison_verdicts")
     if verdicts is None:
         comparisons = report.get("comparisons", {})

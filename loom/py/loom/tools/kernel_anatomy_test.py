@@ -988,9 +988,17 @@ def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     )
     assert report["disassemblies"]["asm"]["whole_file"]["family_counts"]["v_wmma"] == 2
     assert report["disassemblies"]["asm"]["top_symbols"][0]["symbol"] == "big"
+    matrix_symbol = report["disassemblies"]["asm"]["matrix_symbols"][0]
+    assert matrix_symbol["symbol"] == "big"
+    assert matrix_symbol["matrix_instruction_count"] == 2
+    assert matrix_symbol["instruction_count"] == 3
+    assert matrix_symbol["instructions_per_matrix_instruction"] == 1.5
     ordered_symbols = report["disassemblies"]["asm"]["ordered_symbols"]
     assert [symbol["symbol"] for symbol in ordered_symbols] == ["small", "big"]
     assert [symbol["address"] for symbol in ordered_symbols] == [0, 0x100]
+    summary = format_summary_report(report)
+    assert "Matrix-heavy disassembly blocks:" in summary
+    assert "asm/big: instructions=3 matrix=2" in summary
 
 
 def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
