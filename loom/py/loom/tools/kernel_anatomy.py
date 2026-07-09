@@ -170,13 +170,23 @@ def _extract_compile_report(data: Any) -> Mapping[str, Any]:
     return report
 
 
-def _first_entry(report: Mapping[str, Any]) -> Mapping[str, Any]:
+def _first_entry(
+    report: Mapping[str, Any], preferred_function: str | None = None
+) -> Mapping[str, Any]:
     entries = report.get("entries")
     if not isinstance(entries, Mapping):
         return report
     rows = entries.get("rows")
     if not isinstance(rows, list) or not rows:
         return report
+    if preferred_function:
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            if row.get("function") == preferred_function:
+                return row
+            if row.get("source_function") == preferred_function:
+                return row
     entry = rows[0]
     if not isinstance(entry, Mapping):
         return report
@@ -184,11 +194,13 @@ def _first_entry(report: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _summarize_loom_compile_report(
-    report: Mapping[str, Any], path: Path | None = None
+    report: Mapping[str, Any],
+    path: Path | None = None,
+    preferred_function: str | None = None,
 ) -> dict[str, Any]:
     """Extracts kernel-economics fields from a Loom compile-report object."""
 
-    entry = _first_entry(report)
+    entry = _first_entry(report, preferred_function)
     report_economics = report.get("economics")
     if not isinstance(report_economics, Mapping):
         report_economics = {}
@@ -214,7 +226,7 @@ def _summarize_loom_compile_report(
     if not isinstance(wait_plan, Mapping):
         wait_plan = {}
     summary = {
-        "function": report.get("function") or entry.get("function"),
+        "function": entry.get("function") or report.get("function"),
         "target_key": report.get("target_key"),
         "executable_format": report.get("executable_format"),
         "workload": workload,
@@ -400,8 +412,11 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
     """Extracts timing and compile summaries from benchmark JSONL events."""
 
     benchmark_rows: list[dict[str, Any]] = []
+    repetition_rows: list[dict[str, Any]] = []
+    comparison_rows: list[dict[str, Any]] = []
     compile_rows: list[dict[str, Any]] = []
     device_rows: list[dict[str, Any]] = []
+    benchmark_entries: dict[tuple[Any, Any, Any], str] = {}
     for line_number, line in enumerate(_read_text(path).splitlines(), start=1):
         line = line.strip()
         if not line:
@@ -416,55 +431,160 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
         if row_kind == "device":
             device_rows.append(_summarize_loom_benchmark_device_row(event))
             continue
+        if row_kind == "plan":
+            actual_entry = event.get("actual_entry")
+            if isinstance(actual_entry, str) and actual_entry:
+                benchmark_entries[
+                    (
+                        event.get("candidate_id"),
+                        event.get("benchmark"),
+                        event.get("case"),
+                    )
+                ] = actual_entry
+            continue
         if row_kind == "compile":
             compile_rows.append(_summarize_loom_benchmark_compile_row(event))
+            continue
+        if row_kind == "comparison":
+            comparison_rows.append(_summarize_loom_benchmark_comparison_row(event))
+            continue
+        if row_kind == "benchmark.repetition":
+            benchmark_result = event.get("benchmark_result")
+            if isinstance(benchmark_result, Mapping):
+                preferred_entry = _lookup_loom_benchmark_entry(
+                    benchmark_entries, event, benchmark_result
+                )
+                repetition_rows.append(
+                    _summarize_loom_benchmark_repetition_row(
+                        event, benchmark_result, preferred_entry
+                    )
+                )
             continue
         if row_kind != "benchmark":
             continue
         benchmark_result = event.get("benchmark_result")
         if not isinstance(benchmark_result, Mapping):
             continue
-        measurement = benchmark_result.get("measurement")
-        if not isinstance(measurement, Mapping):
-            measurement = {}
-        operation_timing = measurement.get("operation_timing_ns")
-        if not isinstance(operation_timing, Mapping):
-            operation_timing = {}
-        timing_interpretation = measurement.get("timing_interpretation")
-        if not isinstance(timing_interpretation, Mapping):
-            timing_interpretation = {}
-        correctness = benchmark_result.get("correctness")
-        if not isinstance(correctness, Mapping):
-            correctness = {}
-        compile_report = benchmark_result.get("compile_report")
-        compile_summary = None
-        if isinstance(compile_report, Mapping):
-            compile_summary = _summarize_loom_compile_report(compile_report)
+        preferred_entry = _lookup_loom_benchmark_entry(
+            benchmark_entries, event, benchmark_result
+        )
         benchmark_rows.append(
-            {
-                "benchmark": benchmark_result.get("benchmark"),
-                "case": benchmark_result.get("case"),
-                "state": benchmark_result.get("state"),
-                "candidate_id": event.get("candidate_id"),
-                "candidate_index": event.get("candidate_index"),
-                "sample_compilation": benchmark_result.get("sample_compilation"),
-                "timing_ns": operation_timing,
-                "timing_interpretation": timing_interpretation,
-                "correctness": correctness,
-                "compile_report": compile_summary,
-            }
+            _summarize_loom_benchmark_result(event, benchmark_result, preferred_entry)
         )
     return {
         "path": path.as_posix(),
         "benchmark_count": len(benchmark_rows),
+        "comparison_count": len(comparison_rows),
         "compile_count": len(compile_rows),
         "device_count": len(device_rows),
+        "repetition_count": len(repetition_rows),
         "benchmarks": benchmark_rows,
+        "comparisons": comparison_rows,
         "compiles": compile_rows,
         "devices": device_rows,
+        "repetitions": repetition_rows,
         "resource_findings": _build_loom_benchmark_resource_findings(
             device_rows, compile_rows
         ),
+    }
+
+
+def _summarize_loom_benchmark_result(
+    event: Mapping[str, Any],
+    benchmark_result: Mapping[str, Any],
+    preferred_entry: str | None = None,
+) -> dict[str, Any]:
+    measurement = benchmark_result.get("measurement")
+    if not isinstance(measurement, Mapping):
+        measurement = {}
+    operation_timing = measurement.get("operation_timing_ns")
+    if not isinstance(operation_timing, Mapping):
+        operation_timing = {}
+    timing_interpretation = measurement.get("timing_interpretation")
+    if not isinstance(timing_interpretation, Mapping):
+        timing_interpretation = {}
+    correctness = benchmark_result.get("correctness")
+    if not isinstance(correctness, Mapping):
+        correctness = {}
+    compile_report = benchmark_result.get("compile_report")
+    compile_summary = None
+    if isinstance(compile_report, Mapping):
+        compile_summary = _summarize_loom_compile_report(
+            compile_report, preferred_function=preferred_entry
+        )
+    return {
+        "benchmark": benchmark_result.get("benchmark"),
+        "case": benchmark_result.get("case"),
+        "state": benchmark_result.get("state"),
+        "candidate_id": event.get("candidate_id"),
+        "candidate_index": event.get("candidate_index"),
+        "sample_compilation": benchmark_result.get("sample_compilation"),
+        "timing_ns": operation_timing,
+        "timing_interpretation": timing_interpretation,
+        "correctness": correctness,
+        "compile_report": compile_summary,
+    }
+
+
+def _summarize_loom_benchmark_repetition_row(
+    event: Mapping[str, Any],
+    benchmark_result: Mapping[str, Any],
+    preferred_entry: str | None = None,
+) -> dict[str, Any]:
+    summary = _summarize_loom_benchmark_result(event, benchmark_result, preferred_entry)
+    summary.update(
+        {
+            "baseline_candidate_id": event.get("baseline_candidate_id"),
+            "comparison_group": event.get("comparison_group"),
+            "method": event.get("method"),
+            "order_index": event.get("order_index"),
+            "repetition_index": event.get("repetition_index"),
+            "schedule_token": event.get("schedule_token"),
+        }
+    )
+    return summary
+
+
+def _lookup_loom_benchmark_entry(
+    benchmark_entries: Mapping[tuple[Any, Any, Any], str],
+    event: Mapping[str, Any],
+    benchmark_result: Mapping[str, Any],
+) -> str | None:
+    direct_entry = event.get("entry") or benchmark_result.get("entry")
+    if isinstance(direct_entry, str) and direct_entry:
+        return direct_entry
+    return benchmark_entries.get(
+        (
+            event.get("candidate_id"),
+            benchmark_result.get("benchmark"),
+            benchmark_result.get("case"),
+        )
+    )
+
+
+def _summarize_loom_benchmark_comparison_row(
+    event: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "run_id": event.get("run_id"),
+        "comparison_group": event.get("comparison_group"),
+        "method": event.get("method"),
+        "baseline_candidate_id": event.get("baseline_candidate_id"),
+        "candidate_id": event.get("candidate_id"),
+        "baseline_repetition_count": event.get("baseline_repetition_count"),
+        "candidate_repetition_count": event.get("candidate_repetition_count"),
+        "baseline_p50_ns": event.get("baseline_p50_ns"),
+        "candidate_p50_ns": event.get("candidate_p50_ns"),
+        "baseline_p90_ns": event.get("baseline_p90_ns"),
+        "candidate_p90_ns": event.get("candidate_p90_ns"),
+        "baseline_p50_spread_ppm": event.get("baseline_p50_spread_ppm"),
+        "candidate_p50_spread_ppm": event.get("candidate_p50_spread_ppm"),
+        "baseline_p90_spread_ppm": event.get("baseline_p90_spread_ppm"),
+        "candidate_p90_spread_ppm": event.get("candidate_p90_spread_ppm"),
+        "ratio_p50": event.get("ratio_p50"),
+        "ratio_p90": event.get("ratio_p90"),
+        "speedup_p50": event.get("speedup_p50"),
+        "speedup_p90": event.get("speedup_p90"),
     }
 
 
@@ -497,7 +617,11 @@ def _summarize_loom_benchmark_compile_row(event: Mapping[str, Any]) -> dict[str,
     compile_report = event.get("compile_report")
     compile_summary = None
     if isinstance(compile_report, Mapping):
-        compile_summary = _summarize_loom_compile_report(compile_report)
+        entry = event.get("entry")
+        compile_summary = _summarize_loom_compile_report(
+            compile_report,
+            preferred_function=entry if isinstance(entry, str) else None,
+        )
     return {
         "run_id": event.get("run_id"),
         "candidate_id": event.get("candidate_id"),
@@ -3003,6 +3127,8 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
         benchmark_report = _as_mapping(benchmark_report_value)
         lines.append(
             f"  {name}: benchmarks={benchmark_report.get('benchmark_count')} "
+            f"repetitions={benchmark_report.get('repetition_count')} "
+            f"comparisons={benchmark_report.get('comparison_count')} "
             f"compiles={benchmark_report.get('compile_count')} "
             f"devices={benchmark_report.get('device_count')}"
         )
@@ -3039,7 +3165,7 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
                 f"{benchmark.get('benchmark')}: "
                 f"state={benchmark.get('state')} "
                 f"p50_ms={_format_p50_ms(timing)} "
-                f"correctness={correctness.get('failed_sample_count')}/"
+                f"failed_samples={correctness.get('failed_sample_count')}/"
                 f"{correctness.get('sample_count')} "
                 f"instructions={compile_report.get('instruction_count')} "
                 f"code_bytes={compile_report.get('code_byte_count')} "
@@ -3050,6 +3176,45 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
                 f"valu={static_mix.get('vector_alu_count')} "
                 f"dynamic_local={dynamic_mix.get('local_memory_count')}"
             )
+        comparisons = benchmark_report.get("comparisons", [])
+        if isinstance(comparisons, list) and comparisons:
+            lines.append("    benchmark comparisons:")
+            for comparison_value in comparisons[:8]:
+                comparison = _as_mapping(comparison_value)
+                lines.append(
+                    "      "
+                    f"{comparison.get('comparison_group')}: "
+                    f"{comparison.get('method')} "
+                    f"{comparison.get('baseline_candidate_id')}->"
+                    f"{comparison.get('candidate_id')} "
+                    f"base_p50_ms="
+                    f"{_format_ns_as_ms(comparison.get('baseline_p50_ns'))} "
+                    f"cand_p50_ms="
+                    f"{_format_ns_as_ms(comparison.get('candidate_p50_ns'))} "
+                    f"ratio_p50={_format_ratio(comparison.get('ratio_p50'))} "
+                    f"speedup_p50={_format_ratio(comparison.get('speedup_p50'))} "
+                    f"base_reps={comparison.get('baseline_repetition_count')} "
+                    f"cand_reps={comparison.get('candidate_repetition_count')} "
+                    f"base_spread_ppm="
+                    f"{comparison.get('baseline_p50_spread_ppm')} "
+                    f"cand_spread_ppm="
+                    f"{comparison.get('candidate_p50_spread_ppm')}"
+                )
+        repetitions = benchmark_report.get("repetitions", [])
+        if isinstance(repetitions, list) and repetitions:
+            lines.append("    benchmark repetitions:")
+            for repetition_value in repetitions[:8]:
+                repetition = _as_mapping(repetition_value)
+                timing = _as_mapping(repetition.get("timing_ns"))
+                lines.append(
+                    "      "
+                    f"{repetition.get('schedule_token')}"
+                    f"{repetition.get('repetition_index')}: "
+                    f"{repetition.get('benchmark')} "
+                    f"state={repetition.get('state')} "
+                    f"p50_ms={_format_p50_ms(timing)} "
+                    f"p90_ms={_format_ns_as_ms(timing.get('p90'))}"
+                )
 
 
 def _append_iree_dispatch_profile_lines(

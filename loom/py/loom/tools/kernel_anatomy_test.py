@@ -184,6 +184,18 @@ def _compile_report_payload() -> dict:
     }
 
 
+def _multi_entry_compile_report_payload() -> dict:
+    report = _compile_report_payload()
+    first_entry = dict(report["entries"]["rows"][0])
+    first_entry["function"] = "wrong_kernel"
+    first_entry["instruction_count"] = 999
+    second_entry = dict(report["entries"]["rows"][0])
+    second_entry["function"] = "selected_kernel"
+    second_entry["instruction_count"] = 321
+    report["entries"]["rows"] = [first_entry, second_entry]
+    return report
+
+
 def _write_benchmark_jsonl(path: Path) -> None:
     _write(
         path,
@@ -258,6 +270,64 @@ def _write_benchmark_jsonl(path: Path) -> None:
                         },
                     }
                 ),
+                json.dumps(
+                    {
+                        "row": "benchmark.repetition",
+                        "candidate_id": "c1",
+                        "candidate_index": 1,
+                        "comparison_group": "bench_kernel",
+                        "baseline_candidate_id": "c0",
+                        "method": "ABABA",
+                        "order_index": 1,
+                        "repetition_index": 0,
+                        "schedule_token": "B",
+                        "benchmark_result": {
+                            "benchmark": "bench_kernel_candidate",
+                            "case": "case_kernel_candidate",
+                            "state": "ok",
+                            "sample_compilation": "once",
+                            "correctness": {
+                                "sample_count": 1,
+                                "failed_sample_count": 0,
+                            },
+                            "measurement": {
+                                "operation_timing_ns": {
+                                    "count": 5,
+                                    "p50": 1111000,
+                                    "p90": 1125000,
+                                },
+                                "timing_interpretation": {
+                                    "warnings": [],
+                                },
+                            },
+                            "compile_report": _compile_report_payload(),
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "comparison",
+                        "run_id": "r0",
+                        "comparison_group": "bench_kernel",
+                        "method": "ABABA",
+                        "baseline_candidate_id": "c0",
+                        "candidate_id": "c1",
+                        "baseline_repetition_count": 4,
+                        "candidate_repetition_count": 3,
+                        "baseline_p50_ns": 1234000,
+                        "candidate_p50_ns": 1111000,
+                        "baseline_p90_ns": 1250000,
+                        "candidate_p90_ns": 1125000,
+                        "baseline_p50_spread_ppm": 5000,
+                        "candidate_p50_spread_ppm": 6000,
+                        "baseline_p90_spread_ppm": 7000,
+                        "candidate_p90_spread_ppm": 8000,
+                        "ratio_p50": 0.900324,
+                        "speedup_p50": 1.110711,
+                        "ratio_p90": 0.9,
+                        "speedup_p90": 1.111111,
+                    }
+                ),
             ]
         )
         + "\n",
@@ -301,6 +371,62 @@ def _write_resource_violation_benchmark_jsonl(path: Path) -> None:
                         "entry": "oversized_entry",
                         "state": "ok",
                         "compile_report": compile_report,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
+def _write_multi_entry_benchmark_jsonl(path: Path) -> None:
+    compile_report = _multi_entry_compile_report_payload()
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "plan",
+                        "candidate_id": "c0",
+                        "benchmark": "selected_benchmark",
+                        "case": "selected_case",
+                        "actual_entry": "selected_kernel",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "benchmark": "selected_benchmark",
+                        "case": "selected_case",
+                        "entry": "selected_kernel",
+                        "state": "ok",
+                        "compile_report": compile_report,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "benchmark",
+                        "candidate_id": "c0",
+                        "benchmark_result": {
+                            "benchmark": "selected_benchmark",
+                            "case": "selected_case",
+                            "state": "ok",
+                            "correctness": {
+                                "sample_count": 1,
+                                "failed_sample_count": 0,
+                            },
+                            "measurement": {
+                                "operation_timing_ns": {
+                                    "p50": 1234000,
+                                    "p90": 1250000,
+                                },
+                            },
+                            "compile_report": compile_report,
+                        },
                     }
                 ),
             ]
@@ -474,8 +600,10 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
 
     benchmark_report = report["loom_benchmarks"]["bench"]
     assert benchmark_report["benchmark_count"] == 1
+    assert benchmark_report["comparison_count"] == 1
     assert benchmark_report["compile_count"] == 1
     assert benchmark_report["device_count"] == 1
+    assert benchmark_report["repetition_count"] == 1
     assert not benchmark_report["resource_findings"]
     assert benchmark_report["devices"][0]["maximum_workgroup_local_memory_size"] == 4096
     assert benchmark_report["compiles"][0]["diagnostic_warning_count"] == 2
@@ -488,6 +616,22 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
         benchmark["compile_report"]["dynamic_instruction_mix"]["local_memory_count"]
         == 99
     )
+    repetition = benchmark_report["repetitions"][0]
+    assert repetition["comparison_group"] == "bench_kernel"
+    assert repetition["schedule_token"] == "B"
+    assert repetition["timing_ns"]["p50"] == 1111000
+    comparison = benchmark_report["comparisons"][0]
+    assert comparison["method"] == "ABABA"
+    assert comparison["baseline_repetition_count"] == 4
+    assert comparison["candidate_repetition_count"] == 3
+    assert comparison["ratio_p50"] == 0.900324
+
+    text_report = format_text_report(report)
+    assert "repetitions=1 comparisons=1" in text_report
+    assert "benchmark comparisons:" in text_report
+    assert "ratio_p50=0.900324x" in text_report
+    assert "benchmark repetitions:" in text_report
+    assert "B0: bench_kernel_candidate" in text_report
 
 
 def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
@@ -516,6 +660,27 @@ def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
     text_report = format_text_report(report)
     assert "resource error: workgroup_local_memory" in text_report
     assert "required=8192 limit=4096 overage=4096" in text_report
+
+
+def test_build_kernel_anatomy_report_selects_benchmark_compile_entry(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_multi_entry_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+
+    benchmark_report = report["loom_benchmarks"]["bench"]
+    benchmark = benchmark_report["benchmarks"][0]
+    compile_row = benchmark_report["compiles"][0]
+    assert benchmark["compile_report"]["function"] == "selected_kernel"
+    assert benchmark["compile_report"]["instruction_count"] == 321
+    assert compile_row["compile_report"]["function"] == "selected_kernel"
+    assert compile_row["compile_report"]["instruction_count"] == 321
 
 
 def test_build_kernel_anatomy_report_extracts_rocblas_log(
@@ -1046,7 +1211,7 @@ def test_text_report_contains_benchmark_jsonl_summary(tmp_path: Path) -> None:
     assert "Loom benchmark JSONL:" in text
     assert "bench: benchmarks=1" in text
     assert "bench_kernel: state=ok p50_ms=1.234" in text
-    assert "correctness=0/1 instructions=123 code_bytes=456" in text
+    assert "failed_samples=0/1 instructions=123 code_bytes=456" in text
     assert "local_bytes=2048 vgpr=64 occupancy=50%" in text
     assert "wmma=2 valu=17 dynamic_local=99" in text
 
