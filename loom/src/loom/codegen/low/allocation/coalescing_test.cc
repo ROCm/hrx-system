@@ -89,8 +89,10 @@ static iree_status_t AppendAssignment(
 }
 
 static iree_status_t UnexpectedConsumptionQuery(
-    void* user_data, loom_consumption_region_query_t** out_query) {
+    void* user_data, const loom_region_t* region,
+    loom_consumption_region_query_t** out_query) {
   (void)user_data;
+  (void)region;
   *out_query = nullptr;
   return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                           "test did not expect a consumption query");

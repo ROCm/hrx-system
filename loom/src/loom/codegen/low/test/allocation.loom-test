@@ -79,6 +79,54 @@ low.func.def target(@test_target) @loop_backedge_concat_destination_layout(
 
 // ====
 
+// RUN: emit low-allocation-json @loop_backedge_update_precedes_old_read
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @loop_backedge_update_precedes_old_read(
+    %condition: reg<test.i32>, %seed: reg<test.i32>,
+    %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %next = test.add.i32 %state, %rhs
+  %late_read = test.mul.i32 %state, %next
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  return %state
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"loop_backedge_update_precedes_old_read","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":6,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":1,"name":"seed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":8,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":2,"value":{"id":2,"name":"rhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":8,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":3,"value":{"id":4,"name":"state","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":2,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":4,"value":{"id":5,"name":"next","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":5,"end_point":7,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}},{"index":5,"value":{"id":6,"name":"late_read","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":6,"end_point":7,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @loop_backedge_concat_preserves_late_old_read
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @loop_backedge_concat_preserves_late_old_read(
+    %condition: reg<test.i32>, %seed: reg<test.i32 x2>,
+    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm<test.low.core> {
+  low.br ^loop(%seed: reg<test.i32 x2>)
+^loop(%state: reg<test.i32 x2>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %next0 = test.add.i32 %lhs, %rhs
+  %old0 = slice %state[0] : reg<test.i32 x2> -> reg<test.i32>
+  %next1 = test.add.i32 %old0, %rhs
+  %next = concat(%next0, %next1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.br ^loop(%next: reg<test.i32 x2>)
+^exit:
+  return %state
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"loop_backedge_concat_preserves_late_old_read","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":9,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":1,"name":"seed","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":1,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":2,"value":{"id":2,"name":"lhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}},{"index":3,"value":{"id":3,"name":"rhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}},{"index":4,"value":{"id":5,"name":"state","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":2,"end_point":11,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":5,"value":{"id":9,"name":"next","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":8,"end_point":9,"unit_count":2,"location":{"kind":"target_id","base":6,"count":2}},{"index":6,"value":{"id":6,"name":"next0","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":5,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":7,"value":{"id":7,"name":"old0","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":6,"end_point":7,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":8,"value":{"id":8,"name":"next1","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":7,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":7,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @edge_copy_tail_enters_cycle fixed=%source_b:physical_register:1:1 fixed=%source_c:physical_register:2:1 fixed=%dst_a:physical_register:0:1 fixed=%dst_b:physical_register:1:1 fixed=%dst_c:physical_register:2:1 output=none
 
 test.target<low_core> @test_target

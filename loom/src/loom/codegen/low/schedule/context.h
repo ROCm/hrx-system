@@ -97,6 +97,10 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE = 1u << 0,
   // Value ordinal is present in storage_read_touched_ordinals.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TOUCHED = 1u << 1,
+  // Reads must be tracked because storage can be overwritten in-place.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED = 1u << 2,
+  // Value is present in the current edge-source traversal worklist.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_EDGE_SOURCE_VISITED = 1u << 3,
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
@@ -215,6 +219,8 @@ typedef struct loom_low_schedule_build_state_t {
     loom_low_schedule_storage_read_record_t* records;
     // Value ordinals whose heads were touched in the current block.
     loom_value_ordinal_t* touched_ordinals;
+    // Reusable worklist for edge sources composed from structural aliases.
+    loom_value_ordinal_t* edge_source_worklist;
     // Number of populated read records.
     iree_host_size_t record_count;
     // Allocated read record capacity.

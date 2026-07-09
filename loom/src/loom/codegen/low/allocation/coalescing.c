@@ -115,12 +115,57 @@ static bool loom_low_allocation_coalescing_edge_destination_has_distinct_source(
 }
 
 static iree_status_t
+loom_low_allocation_coalescing_edge_destination_used_after_candidate_definition(
+    loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* interval,
+    const loom_low_placement_relation_t* relation,
+    const loom_low_allocation_assignment_t* counterpart, bool* out_used_after) {
+  *out_used_after = false;
+  const loom_value_id_t destination_value_id =
+      loom_low_placement_value_id(context->placement, relation->result_ordinal);
+  const loom_value_t* destination_value =
+      loom_module_value(context->placement->module, destination_value_id);
+  if (!loom_value_is_block_arg(destination_value)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t candidate_value_id =
+      interval->value_id == destination_value_id ? counterpart->value_id
+                                                 : interval->value_id;
+  const loom_value_t* candidate_value =
+      loom_module_value(context->placement->module, candidate_value_id);
+  if (loom_value_is_block_arg(candidate_value)) {
+    return iree_ok_status();
+  }
+  const loom_op_t* candidate_op = loom_value_def_op(candidate_value);
+  if (candidate_op == NULL || candidate_op->parent_block == NULL) {
+    return iree_ok_status();
+  }
+  loom_consumption_region_query_t* query = NULL;
+  IREE_RETURN_IF_ERROR(context->consumption_query(
+      context->user_data, candidate_op->parent_block->parent_region, &query));
+  loom_consumption_use_t use = {0};
+  return loom_consumption_find_use_after(
+      query, candidate_op, destination_value_id, &use, out_used_after);
+}
+
+static iree_status_t
 loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
     loom_low_allocation_coalescing_context_t* context,
-    const loom_low_placement_relation_t* relation, bool* out_allows_overlap) {
+    const loom_liveness_interval_t* interval,
+    const loom_low_placement_relation_t* relation,
+    const loom_low_allocation_assignment_t* counterpart,
+    bool* out_allows_overlap) {
   *out_allows_overlap = false;
   if (relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
       !loom_low_placement_cause_is_edge(relation->cause)) {
+    return iree_ok_status();
+  }
+  bool destination_used_after_candidate_definition = false;
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_coalescing_edge_destination_used_after_candidate_definition(
+          context, interval, relation, counterpart,
+          &destination_used_after_candidate_definition));
+  if (destination_used_after_candidate_definition) {
     return iree_ok_status();
   }
   switch (relation->cause) {
@@ -135,8 +180,9 @@ loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
         return iree_ok_status();
       }
       loom_consumption_region_query_t* query = NULL;
-      IREE_RETURN_IF_ERROR(
-          context->consumption_query(context->user_data, &query));
+      IREE_RETURN_IF_ERROR(context->consumption_query(
+          context->user_data, relation->op->parent_block->parent_region,
+          &query));
       loom_consumption_use_t use = {0};
       bool used_after = false;
       const loom_value_id_t source_value_id = loom_low_placement_value_id(
@@ -171,7 +217,7 @@ loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
   bool edge_allows_overlap = false;
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
-          context, relation, &edge_allows_overlap));
+          context, interval, relation, counterpart, &edge_allows_overlap));
   if (edge_allows_overlap) {
     *out_can_ignore = true;
     return iree_ok_status();
@@ -237,7 +283,9 @@ loom_low_allocation_coalescing_copy_source_used_after_tied_consume(
       context->placement, copy_relation->source_ordinal);
 
   loom_consumption_region_query_t* query = NULL;
-  IREE_RETURN_IF_ERROR(context->consumption_query(context->user_data, &query));
+  IREE_RETURN_IF_ERROR(context->consumption_query(
+      context->user_data, tied_relation->op->parent_block->parent_region,
+      &query));
   loom_consumption_use_t use = {0};
   return loom_consumption_find_use_after(
       query, tied_relation->op, *out_copy_source_id, &use, out_used_after);
@@ -353,7 +401,8 @@ loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
     return iree_ok_status();
   }
   if (*query == NULL) {
-    IREE_RETURN_IF_ERROR(context->consumption_query(context->user_data, query));
+    IREE_RETURN_IF_ERROR(context->consumption_query(
+        context->user_data, anchor_op->parent_block->parent_region, query));
   }
   loom_consumption_use_t use = {0};
   bool used_after = false;
@@ -438,8 +487,9 @@ loom_low_allocation_coalescing_collect_tied_storage_aliases(
     const loom_value_id_t source_value_id = loom_low_placement_value_id(
         context->placement, relation->source_ordinal);
     if (query == NULL) {
-      IREE_RETURN_IF_ERROR(
-          context->consumption_query(context->user_data, &query));
+      IREE_RETURN_IF_ERROR(context->consumption_query(
+          context->user_data, tied_relation->op->parent_block->parent_region,
+          &query));
     }
     loom_consumption_use_t use = {0};
     bool used_after = false;

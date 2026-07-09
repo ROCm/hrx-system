@@ -256,14 +256,39 @@ static iree_status_t loom_low_schedule_initialize_storage(
 
 static iree_status_t loom_low_schedule_initialize_storage_read_tables(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
-  bool has_tied_results = false;
+  bool needs_storage_read_tracking = false;
+  bool needs_edge_source_worklist = false;
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
-    if (state->nodes[node_index].op->tied_result_count != 0) {
-      has_tied_results = true;
-      break;
+    const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    const loom_op_t* op = node->op;
+    const loom_tied_result_t* tied_results = loom_op_tied_results(op);
+    const loom_value_ordinal_t* operand_ordinals =
+        loom_low_schedule_node_const_operand_ordinals(node);
+    for (uint16_t i = 0; i < op->tied_result_count; ++i) {
+      const loom_tied_result_t tied = tied_results[i];
+      IREE_ASSERT_LT(tied.operand_index, node->operand_count);
+      state->values[operand_ordinals[tied.operand_index]].flags |=
+          LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
+      needs_storage_read_tracking = true;
+    }
+    const uint16_t relation_count =
+        loom_low_storage_relation_count(state->module, op);
+    for (uint16_t i = 0; i < relation_count; ++i) {
+      loom_low_storage_relation_t relation = {0};
+      loom_low_storage_relation_get(state->module, op, i, &relation);
+      if (relation.cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH ||
+          relation.cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD) {
+        const loom_value_ordinal_t destination_ordinal =
+            loom_local_value_domain_ordinal(state->value_domain,
+                                            relation.destination_value_id);
+        state->values[destination_ordinal].flags |=
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
+        needs_storage_read_tracking = true;
+        needs_edge_source_worklist = true;
+      }
     }
   }
-  if (!has_tied_results || state->value_domain->value_count == 0) {
+  if (!needs_storage_read_tracking || state->value_domain->value_count == 0) {
     return iree_ok_status();
   }
   const loom_value_ordinal_t value_count = state->value_domain->value_count;
@@ -272,9 +297,16 @@ static iree_status_t loom_low_schedule_initialize_storage_read_tables(
       (void**)&state->storage_reads.heads));
   memset(state->storage_reads.heads, 0xFF,
          value_count * sizeof(*state->storage_reads.heads));
-  return iree_arena_allocate_array(
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->arena, value_count, sizeof(*state->storage_reads.touched_ordinals),
-      (void**)&state->storage_reads.touched_ordinals);
+      (void**)&state->storage_reads.touched_ordinals));
+  if (needs_edge_source_worklist) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, value_count,
+        sizeof(*state->storage_reads.edge_source_worklist),
+        (void**)&state->storage_reads.edge_source_worklist));
+  }
+  return iree_ok_status();
 }
 
 static uint32_t loom_low_schedule_descriptor_ordinal(
