@@ -20,6 +20,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
     build_kernel_anatomy_comparisons,
+    build_kernel_anatomy_compile_diagnostic_rows,
     build_kernel_anatomy_duplicate_candidate_rows,
     build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
@@ -607,6 +608,53 @@ def _write_skipped_benchmark_compile_jsonl(path: Path) -> None:
                         "diagnostic_error_count": 0,
                         "diagnostic_warning_count": 41,
                         "diagnostic_remark_count": 0,
+                        "diagnostics": [
+                            {
+                                "severity": "warning",
+                                "error_id": "ERR_BACKEND_009",
+                                "summary": "Spill and reload operations inserted.",
+                                "source_location": {"start_line": 12},
+                                "params": {
+                                    "origin_operation_name": "low.copy",
+                                    "value_class": "amdgpu.vgpr",
+                                    "storage_bytes": 32,
+                                    "store_count": 1,
+                                    "store_bytes": 32,
+                                    "reload_count": 1,
+                                    "reload_bytes": 32,
+                                },
+                            },
+                            {
+                                "severity": "warning",
+                                "error_id": "ERR_BACKEND_009",
+                                "summary": "Spill and reload operations inserted.",
+                                "source_location": {"start_line": 14},
+                                "params": {
+                                    "origin_operation_name": "low.copy",
+                                    "value_class": "amdgpu.vgpr",
+                                    "storage_bytes": 32,
+                                    "store_count": 1,
+                                    "store_bytes": 32,
+                                    "reload_count": 1,
+                                    "reload_bytes": 32,
+                                },
+                            },
+                            {
+                                "severity": "warning",
+                                "error_id": "ERR_BACKEND_009",
+                                "summary": "Spill and reload operations inserted.",
+                                "source_location": {"start_line": 20},
+                                "params": {
+                                    "origin_operation_name": "low.op",
+                                    "value_class": "amdgpu.vgpr",
+                                    "storage_bytes": 4,
+                                    "store_count": 1,
+                                    "store_bytes": 4,
+                                    "reload_count": 2,
+                                    "reload_bytes": 8,
+                                },
+                            },
+                        ],
                         "compile_report": _compile_report_payload(),
                     }
                 ),
@@ -2057,6 +2105,18 @@ def test_text_report_uses_compile_row_for_skipped_benchmark(tmp_path: Path) -> N
     assert "skipped_kernel: state=skipped p50_ms=?" in text
     assert "failed_samples=1/1 instructions=123 code_bytes=456" in text
     assert "dynamic_local=99 dynamic_private=7 warnings=41" in text
+    diagnostic_rows = build_kernel_anatomy_compile_diagnostic_rows(report)
+    assert diagnostic_rows[0]["error_id"] == "ERR_BACKEND_009"
+    assert diagnostic_rows[0]["origin_operation_name"] == "low.copy"
+    assert diagnostic_rows[0]["count"] == 2
+    assert diagnostic_rows[0]["store_bytes"] == 64
+    assert diagnostic_rows[0]["reload_bytes"] == 64
+    assert diagnostic_rows[0]["source_lines"] == [12, 14]
+    summary = format_summary_report(report)
+    assert "Compile diagnostics:" in summary
+    assert "bench/c0 skipped_kernel" in summary
+    assert "ERR_BACKEND_009 count=2 op=low.copy" in summary
+    assert "store_bytes=64 reload_bytes=64 lines=12,14" in summary
 
 
 def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:

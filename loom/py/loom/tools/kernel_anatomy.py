@@ -660,6 +660,7 @@ def _attach_benchmark_compile_reports(
             "diagnostic_remark_count",
         ):
             compile_report[field] = compile_row.get(field)
+        compile_report["diagnostics"] = compile_row.get("diagnostics", [])
         benchmark_row["compile_report"] = compile_report
 
 
@@ -807,11 +808,75 @@ def _summarize_loom_benchmark_compile_row(event: Mapping[str, Any]) -> dict[str,
         "diagnostic_error_count": event.get("diagnostic_error_count"),
         "diagnostic_warning_count": event.get("diagnostic_warning_count"),
         "diagnostic_remark_count": event.get("diagnostic_remark_count"),
+        "diagnostics": _summarize_loom_diagnostics(event.get("diagnostics")),
         "hal_executable_path": event.get("hal_executable_path"),
         "target_artifact_path": event.get("target_artifact_path"),
         "target_listing_path": event.get("target_listing_path"),
         "compile_report": compile_summary,
     }
+
+
+def _summarize_loom_diagnostics(diagnostics_value: Any) -> list[dict[str, Any]]:
+    diagnostics = _as_sequence(diagnostics_value)
+    if not diagnostics:
+        return []
+    groups: dict[tuple[Any, Any, Any, Any, Any], dict[str, Any]] = {}
+    for diagnostic_value in diagnostics:
+        diagnostic = _as_mapping(diagnostic_value)
+        params = _as_mapping(diagnostic.get("params"))
+        key = (
+            diagnostic.get("severity"),
+            diagnostic.get("error_id"),
+            diagnostic.get("summary"),
+            params.get("origin_operation_name"),
+            params.get("value_class"),
+        )
+        group = groups.setdefault(
+            key,
+            {
+                "severity": diagnostic.get("severity"),
+                "error_id": diagnostic.get("error_id"),
+                "summary": diagnostic.get("summary"),
+                "origin_operation_name": params.get("origin_operation_name"),
+                "value_class": params.get("value_class"),
+                "count": 0,
+                "storage_bytes": 0,
+                "store_count": 0,
+                "store_bytes": 0,
+                "reload_count": 0,
+                "reload_bytes": 0,
+                "source_lines": [],
+            },
+        )
+        group["count"] += 1
+        for field in (
+            "storage_bytes",
+            "store_count",
+            "store_bytes",
+            "reload_count",
+            "reload_bytes",
+        ):
+            value = _as_number(params.get(field))
+            if value is not None:
+                group[field] += value
+        source_location = _as_mapping(
+            diagnostic.get("source_location") or diagnostic.get("origin")
+        )
+        source_line = source_location.get("start_line")
+        if source_line is not None and source_line not in group["source_lines"]:
+            group["source_lines"].append(source_line)
+    for group in groups.values():
+        group["source_lines"] = sorted(group["source_lines"])[:8]
+    return sorted(
+        groups.values(),
+        key=lambda group: (
+            _as_number(group.get("count")) or 0,
+            _as_number(group.get("reload_bytes")) or 0,
+            _as_number(group.get("store_bytes")) or 0,
+            str(group.get("error_id")),
+        ),
+        reverse=True,
+    )
 
 
 def _build_loom_benchmark_resource_findings(
@@ -2060,6 +2125,9 @@ def build_kernel_anatomy_report(
     report["benchmark_duplicate_candidates"] = (
         build_kernel_anatomy_duplicate_candidate_rows(report)
     )
+    report["benchmark_compile_diagnostics"] = (
+        build_kernel_anatomy_compile_diagnostic_rows(report)
+    )
     return report
 
 
@@ -2471,6 +2539,53 @@ def build_kernel_anatomy_duplicate_candidate_rows(
             str(row.get("candidate_id")),
         ),
     )
+
+
+def build_kernel_anatomy_compile_diagnostic_rows(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Extracts compact compiler diagnostic rows from benchmark compile events."""
+
+    rows: list[dict[str, Any]] = []
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    for report_name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        compile_rows_value = benchmark_report.get("compiles")
+        if not isinstance(compile_rows_value, list):
+            continue
+        for compile_row_value in compile_rows_value:
+            compile_row = _as_mapping(compile_row_value)
+            diagnostics = compile_row.get("diagnostics")
+            if not isinstance(diagnostics, list):
+                continue
+            for diagnostic_value in diagnostics:
+                diagnostic = _as_mapping(diagnostic_value)
+                rows.append(
+                    {
+                        "report": report_name,
+                        "candidate_id": compile_row.get("candidate_id"),
+                        "benchmark": compile_row.get("benchmark"),
+                        "case": compile_row.get("case"),
+                        "entry": compile_row.get("entry"),
+                        "state": compile_row.get("state"),
+                        **diagnostic,
+                    }
+                )
+    return sorted(rows, key=_compile_diagnostic_row_rank, reverse=True)
+
+
+def _compile_diagnostic_row_rank(row: Mapping[str, Any]) -> tuple[int, float, float]:
+    severity_rank = {
+        "error": 4,
+        "warning": 3,
+        "remark": 2,
+        "note": 1,
+    }.get(str(row.get("severity")), 0)
+    traffic_bytes = (_as_number(row.get("store_bytes")) or 0) + (
+        _as_number(row.get("reload_bytes")) or 0
+    )
+    count = _as_number(row.get("count")) or 0
+    return (severity_rank, count, traffic_bytes)
 
 
 _COMPILE_SIGNATURE_FIELDS = (
@@ -5753,6 +5868,20 @@ def _shorten_text(value: str, max_length: int) -> str:
     return "..." + value[-(max_length - 3) :]
 
 
+def _format_diagnostic_source_lines(lines_value: Any) -> str:
+    lines = _as_sequence(lines_value)
+    if not lines:
+        return "-"
+    return ",".join(str(line) for line in lines[:6])
+
+
+def _format_compile_diagnostic_subject(row: Mapping[str, Any]) -> str:
+    report = row.get("report")
+    candidate_id = row.get("candidate_id")
+    benchmark = _shorten_text(str(row.get("benchmark") or ""), 64)
+    return f"{report}/{candidate_id} {benchmark}"
+
+
 def format_summary_report(report: Mapping[str, Any]) -> str:
     """Formats the anatomy report as a compact optimization-loop summary."""
 
@@ -5769,6 +5898,27 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"comparisons={benchmark_report.get('comparison_count')} "
                 f"compiles={benchmark_report.get('compile_count')} "
                 f"repetitions={benchmark_report.get('repetition_count')}"
+            )
+    compile_diagnostics = report.get("benchmark_compile_diagnostics")
+    if compile_diagnostics is None:
+        compile_diagnostics = build_kernel_anatomy_compile_diagnostic_rows(report)
+    if isinstance(compile_diagnostics, list) and compile_diagnostics:
+        lines.append("")
+        lines.append("Compile diagnostics:")
+        for row_value in compile_diagnostics[:12]:
+            row = _as_mapping(row_value)
+            lines.append(
+                "  "
+                f"{_format_compile_diagnostic_subject(row)}: "
+                f"{row.get('severity')} "
+                f"{row.get('error_id')} "
+                f"count={row.get('count')} "
+                f"op={row.get('origin_operation_name')} "
+                f"class={row.get('value_class')} "
+                f"store_bytes={_format_scalar(row.get('store_bytes'))} "
+                f"reload_bytes={_format_scalar(row.get('reload_bytes'))} "
+                f"lines={_format_diagnostic_source_lines(row.get('source_lines'))} "
+                f"{_shorten_text(str(row.get('summary') or ''), 80)}"
             )
     disassemblies = report.get("disassemblies", {})
     if isinstance(disassemblies, Mapping) and disassemblies:
