@@ -2125,6 +2125,7 @@ def build_kernel_anatomy_report(
     report["benchmark_duplicate_candidates"] = (
         build_kernel_anatomy_duplicate_candidate_rows(report)
     )
+    report["benchmark_timing_rows"] = build_kernel_anatomy_benchmark_timing_rows(report)
     report["benchmark_compile_diagnostics"] = (
         build_kernel_anatomy_compile_diagnostic_rows(report)
     )
@@ -2572,6 +2573,59 @@ def build_kernel_anatomy_compile_diagnostic_rows(
                     }
                 )
     return sorted(rows, key=_compile_diagnostic_row_rank, reverse=True)
+
+
+def build_kernel_anatomy_benchmark_timing_rows(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Extracts compact benchmark timing rows from benchmark JSONL reports."""
+
+    rows: list[dict[str, Any]] = []
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    for report_name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        benchmark_rows_value = benchmark_report.get("benchmarks")
+        if not isinstance(benchmark_rows_value, list):
+            continue
+        for benchmark_row_value in benchmark_rows_value:
+            benchmark_row = _as_mapping(benchmark_row_value)
+            timing = _as_mapping(benchmark_row.get("timing_ns"))
+            correctness = _as_mapping(benchmark_row.get("correctness"))
+            compile_report = _as_mapping(benchmark_row.get("compile_report"))
+            static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
+            dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
+            resources = _as_mapping(compile_report.get("target_resources"))
+            vector = _as_mapping(resources.get("vector"))
+            vector_final = _as_mapping(vector.get("final"))
+            rows.append(
+                {
+                    "report": report_name,
+                    "candidate_id": benchmark_row.get("candidate_id"),
+                    "benchmark": benchmark_row.get("benchmark"),
+                    "state": benchmark_row.get("state"),
+                    "p50_ns": timing.get("p50"),
+                    "p90_ns": timing.get("p90"),
+                    "sample_count": correctness.get("sample_count"),
+                    "failed_sample_count": correctness.get("failed_sample_count"),
+                    "instruction_count": compile_report.get("instruction_count"),
+                    "local_memory_bytes": compile_report.get("local_memory_bytes"),
+                    "vgpr_count": vector_final.get("register_count"),
+                    "occupancy_percent": resources.get("occupancy_percent"),
+                    "wmma_count": static_mix.get("wmma_count"),
+                    "vector_alu_count": static_mix.get("vector_alu_count"),
+                    "dynamic_local_memory_count": dynamic_mix.get("local_memory_count"),
+                    "diagnostic_warning_count": compile_report.get(
+                        "diagnostic_warning_count"
+                    ),
+                }
+            )
+    return sorted(rows, key=_benchmark_timing_row_rank, reverse=True)
+
+
+def _benchmark_timing_row_rank(row: Mapping[str, Any]) -> tuple[int, float, str]:
+    state_rank = 0 if row.get("state") == "ok" else 1
+    p50_ns = _as_number(row.get("p50_ns")) or 0
+    return (state_rank, p50_ns, str(row.get("benchmark")))
 
 
 def _compile_diagnostic_row_rank(row: Mapping[str, Any]) -> tuple[int, float, float]:
@@ -5882,6 +5936,43 @@ def _format_compile_diagnostic_subject(row: Mapping[str, Any]) -> str:
     return f"{report}/{candidate_id} {benchmark}"
 
 
+def _format_benchmark_timing_subject(row: Mapping[str, Any]) -> str:
+    report = row.get("report")
+    candidate_id = row.get("candidate_id")
+    benchmark = _shorten_text(str(row.get("benchmark") or ""), 72)
+    return f"{report}/{candidate_id} {benchmark}"
+
+
+def _append_summary_benchmark_timing_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    benchmark_timing_rows = report.get("benchmark_timing_rows")
+    if benchmark_timing_rows is None:
+        benchmark_timing_rows = build_kernel_anatomy_benchmark_timing_rows(report)
+    if not isinstance(benchmark_timing_rows, list) or not benchmark_timing_rows:
+        return
+    lines.append("")
+    lines.append("Benchmark timings:")
+    for row_value in benchmark_timing_rows[:12]:
+        row = _as_mapping(row_value)
+        lines.append(
+            "  "
+            f"{_format_benchmark_timing_subject(row)}: "
+            f"state={row.get('state')} "
+            f"p50_ms={_format_ns_as_ms(row.get('p50_ns'))} "
+            f"failed={row.get('failed_sample_count')}/"
+            f"{row.get('sample_count')} "
+            f"instructions={row.get('instruction_count')} "
+            f"local_bytes={row.get('local_memory_bytes')} "
+            f"vgpr={row.get('vgpr_count')} "
+            f"occupancy={row.get('occupancy_percent')}% "
+            f"wmma={row.get('wmma_count')} "
+            f"valu={row.get('vector_alu_count')} "
+            f"dynamic_local={row.get('dynamic_local_memory_count')} "
+            f"warnings={row.get('diagnostic_warning_count')}"
+        )
+
+
 def format_summary_report(report: Mapping[str, Any]) -> str:
     """Formats the anatomy report as a compact optimization-loop summary."""
 
@@ -5899,6 +5990,7 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"compiles={benchmark_report.get('compile_count')} "
                 f"repetitions={benchmark_report.get('repetition_count')}"
             )
+    _append_summary_benchmark_timing_lines(lines, report)
     compile_diagnostics = report.get("benchmark_compile_diagnostics")
     if compile_diagnostics is None:
         compile_diagnostics = build_kernel_anatomy_compile_diagnostic_rows(report)

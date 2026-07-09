@@ -16,6 +16,7 @@ from loom.tools.kernel_anatomy import (
     SymbolWeightSpec,
     WeightedSymbolGroupSpec,
     attach_kernel_anatomy_benchmark_target_listings,
+    build_kernel_anatomy_benchmark_timing_rows,
     build_kernel_anatomy_best_candidate_rows,
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
@@ -1115,6 +1116,12 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
     assert comparison["baseline_repetition_count"] == 4
     assert comparison["candidate_repetition_count"] == 3
     assert comparison["ratio_p50"] == 0.900324
+    timing_rows = build_kernel_anatomy_benchmark_timing_rows(report)
+    assert timing_rows[0]["report"] == "bench"
+    assert timing_rows[0]["benchmark"] == "bench_kernel"
+    assert timing_rows[0]["p50_ns"] == 1234000
+    assert timing_rows[0]["failed_sample_count"] == 0
+    assert timing_rows[0]["wmma_count"] == 2
 
     text_report = format_text_report(report)
     assert "repetitions=1 comparisons=1" in text_report
@@ -1122,6 +1129,10 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
     assert "ratio_p50=0.900324x" in text_report
     assert "benchmark repetitions:" in text_report
     assert "B0: bench_kernel_candidate" in text_report
+    summary = format_summary_report(report)
+    assert "Benchmark timings:" in summary
+    assert "bench/c0 bench_kernel: state=ok p50_ms=1.234" in summary
+    assert "failed=0/1 instructions=123" in summary
 
 
 def test_benchmark_embedded_compile_reports_participate_in_comparisons(
