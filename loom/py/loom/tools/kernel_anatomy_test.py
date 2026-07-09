@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 from loom.tools.kernel_anatomy import (
@@ -18,6 +19,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
     format_rocblas_replay_script,
+    format_rocblas_solution_trace_script,
     format_text_report,
     main,
 )
@@ -34,6 +36,62 @@ _TENSILE_SYMBOL = (
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _pack_msgpack(value) -> bytes:
+    if value is None:
+        return b"\xc0"
+    if value is False:
+        return b"\xc2"
+    if value is True:
+        return b"\xc3"
+    if isinstance(value, int):
+        if 0 <= value <= 0x7F:
+            return bytes([value])
+        if -32 <= value < 0:
+            return bytes([value + 0x100])
+        if 0 <= value <= 0xFF:
+            return b"\xcc" + struct.pack(">B", value)
+        if 0 <= value <= 0xFFFF:
+            return b"\xcd" + struct.pack(">H", value)
+        if 0 <= value <= 0xFFFFFFFF:
+            return b"\xce" + struct.pack(">I", value)
+        if -(1 << 31) <= value < 0:
+            return b"\xd2" + struct.pack(">i", value)
+        return b"\xd3" + struct.pack(">q", value)
+    if isinstance(value, float):
+        return b"\xcb" + struct.pack(">d", value)
+    if isinstance(value, str):
+        data = value.encode("utf-8")
+        if len(data) <= 31:
+            return bytes([0xA0 | len(data)]) + data
+        if len(data) <= 0xFF:
+            return b"\xd9" + struct.pack(">B", len(data)) + data
+        if len(data) <= 0xFFFF:
+            return b"\xda" + struct.pack(">H", len(data)) + data
+        return b"\xdb" + struct.pack(">I", len(data)) + data
+    if isinstance(value, list):
+        payload = b"".join(_pack_msgpack(item) for item in value)
+        if len(value) <= 15:
+            return bytes([0x90 | len(value)]) + payload
+        if len(value) <= 0xFFFF:
+            return b"\xdc" + struct.pack(">H", len(value)) + payload
+        return b"\xdd" + struct.pack(">I", len(value)) + payload
+    if isinstance(value, dict):
+        payload = b"".join(
+            _pack_msgpack(key) + _pack_msgpack(item) for key, item in value.items()
+        )
+        if len(value) <= 15:
+            return bytes([0x80 | len(value)]) + payload
+        if len(value) <= 0xFFFF:
+            return b"\xde" + struct.pack(">H", len(value)) + payload
+        return b"\xdf" + struct.pack(">I", len(value)) + payload
+    raise TypeError(type(value).__name__)
 
 
 def _write_compile_report(path: Path) -> None:
@@ -175,8 +233,18 @@ def _compile_report_payload() -> dict:
                     },
                     "workload": {
                         "workgroup_size": {
+                            "x": 128,
+                            "y": 1,
+                            "z": 1,
                             "flat": 128,
                         },
+                        "workgroup_count": {
+                            "x": 36,
+                            "y": 2,
+                            "z": 1,
+                            "flat": 72,
+                        },
+                        "dispatch_workitem_count": 9216,
                     },
                 },
             ],
@@ -506,6 +574,79 @@ def _write_rocblas_trace_log(path: Path) -> None:
     )
 
 
+def _write_tensile_catalog(path: Path) -> None:
+    _write_bytes(
+        path,
+        _pack_msgpack(
+            {
+                "solutions": [
+                    {
+                        "name": _TENSILE_SYMBOL,
+                        "index": 1140853047,
+                        "libraryLogicIndex": 44,
+                        "problemType": {
+                            "operationIdentifier": (
+                                "Contraction_l_Alik_Bljk_Cijk_Dijk"
+                            ),
+                            "aType": "BFloat16",
+                            "bType": "BFloat16",
+                            "cType": "BFloat16",
+                            "dType": "BFloat16",
+                            "useBeta": False,
+                            "highPrecisionAccumulate": True,
+                            "stridedBatched": True,
+                            "f32XdlMathOp": "Float",
+                        },
+                        "sizeMapping": {
+                            "workGroup": [32, 4, 1],
+                            "macroTile": [128, 128, 1],
+                            "threadTile": [4, 64],
+                            "depthU": 16,
+                            "globalSplitU": 1,
+                            "workGroupMapping": 4,
+                        },
+                    },
+                    {
+                        "name": "tiny_kernel",
+                        "index": 123,
+                        "libraryLogicIndex": 0,
+                        "problemType": {},
+                        "sizeMapping": {
+                            "workGroup": [32, 4, 1],
+                            "macroTile": [32, 32, 1],
+                            "threadTile": [1, 16],
+                            "depthU": 16,
+                        },
+                    },
+                ],
+                "library": {
+                    "type": "Problem",
+                    "rows": [
+                        {
+                            "predicate": {"type": "TruePred"},
+                            "library": {
+                                "type": "Matching",
+                                "properties": [
+                                    {"type": "FreeSizeA", "index": 0},
+                                    {"type": "FreeSizeB", "index": 0},
+                                    {"type": "BoundSize", "index": 0},
+                                ],
+                                "table": [
+                                    {
+                                        "key": [6144, 4096, 4096],
+                                        "index": 1140853047,
+                                        "speed": 1.0,
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
+            }
+        ),
+    )
+
+
 def _write_iree_dispatch_profile(path: Path) -> None:
     _write(
         path,
@@ -678,6 +819,7 @@ def test_benchmark_embedded_compile_reports_participate_in_comparisons(
     baseline_payload = _compile_report_payload()
     candidate_payload = _compile_report_payload()
     candidate_entry = candidate_payload["entries"]["rows"][0]
+    candidate_entry["instruction_count"] = 100
     candidate_entry["local_memory_bytes"] = 4096
     candidate_entry["dynamic_instruction_mix"]["local_memory_count"] = 198
     candidate_payload["economics"]["memory"]["source_low"]["dynamic_packet_count"] = (
@@ -687,7 +829,7 @@ def test_benchmark_embedded_compile_reports_participate_in_comparisons(
         baseline_path, "baseline_kernel", baseline_payload, 1_000_000
     )
     _write_single_benchmark_jsonl(
-        candidate_path, "candidate_kernel", candidate_payload, 2_000_000
+        candidate_path, "candidate_kernel", candidate_payload, 4_000_000
     )
 
     report = build_kernel_anatomy_report(
@@ -704,7 +846,7 @@ def test_benchmark_embedded_compile_reports_participate_in_comparisons(
 
     comparison = comparisons["baseline=candidate"]
     deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
-    assert deltas_by_metric["operation_time_ns"]["ratio"] == 2
+    assert deltas_by_metric["operation_time_ns"]["ratio"] == 4
     assert deltas_by_metric["local_memory_bytes"]["ratio"] == 2
     assert deltas_by_metric["dynamic_local_memory_count"]["ratio"] == 2
     assert deltas_by_metric["source_low_dynamic_packet_count"]["ratio"] == 2
@@ -712,6 +854,25 @@ def test_benchmark_embedded_compile_reports_participate_in_comparisons(
         deltas_by_metric["local_memory_bytes"]["candidate_source"]
         == "benchmark_compile_report"
     )
+    findings_by_kind_role = {
+        (finding["kind"], finding["role"], finding["metric"]): finding
+        for finding in comparison["gap_findings"]
+    }
+    assert (
+        "time_gap",
+        "candidate_slower",
+        "operation_time_ns",
+    ) in findings_by_kind_role
+    assert (
+        "candidate_cost",
+        "partial_time_gap",
+        "dynamic_local_memory_count",
+    ) in findings_by_kind_role
+    assert (
+        "candidate_advantage",
+        "counter_improved",
+        "instruction_count",
+    ) in findings_by_kind_role
 
 
 def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
@@ -874,6 +1035,96 @@ def test_build_kernel_anatomy_report_extracts_rocblas_trace_rows(
     assert "--cold_iters" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
     assert "--iters" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
     assert "--device" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
+
+
+def test_build_kernel_anatomy_report_extracts_tensile_catalog(
+    tmp_path: Path,
+) -> None:
+    catalog_path = tmp_path / "TensileLibrary.dat"
+    rocblas_log_path = tmp_path / "rocblas.log"
+    compile_report_path = tmp_path / "compile_report.json"
+    _write_tensile_catalog(catalog_path)
+    _write_rocblas_log(rocblas_log_path)
+    compile_payload = _compile_report_payload()
+    compile_payload["entries"]["rows"][0]["workload"]["workgroup_size"] = {
+        "x": 32,
+        "y": 4,
+        "z": 1,
+        "flat": 128,
+    }
+    _write(
+        compile_report_path,
+        json.dumps({"compile_report": compile_payload}),
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[NamedPath("loom", compile_report_path)],
+        rocblas_log_paths=[NamedPath("tensile", rocblas_log_path)],
+        tensile_catalog_paths=[NamedPath("catalog", catalog_path)],
+    )
+
+    catalog = report["tensile_catalogs"]["catalog"]
+    assert catalog["solution_count"] == 2
+    assert catalog["library"]["type"] == "Problem"
+    assert catalog["library"]["rows"][0]["library_type"] == "Matching"
+    assert catalog["library"]["rows"][0]["table_row_count"] == 1
+    solution = catalog["solutions"][1]
+    assert solution["library_logic_index"] == 44
+    assert solution["index"] == 1140853047
+    assert solution["symbol_parameters"]["macro_tile"] == {
+        "x": 128,
+        "y": 128,
+        "z": 16,
+    }
+    assert solution["size_mapping"]["workGroup"] == [32, 4, 1]
+    shape_match = catalog["rocblas_shape_matches"][0]
+    assert shape_match["shape_key"] == "M13824_N4547_K4608_beta0"
+    assert shape_match["problem_key"] == [13824, 4547, 4608]
+    assert shape_match["matches"][0]["library_logic_index"] == 44
+    assert shape_match["matches"][0]["key"] == [6144, 4096, 4096]
+
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [ComparisonSpec(baseline="catalog/solution44", candidate="tensile")],
+    )
+    comparison = comparisons["catalog/solution44=tensile"]
+    assert comparison["shared_metric_count"] >= 10
+    assert not comparison["scorecard"]
+
+    catalog_to_loom = build_kernel_anatomy_comparisons(
+        report,
+        [ComparisonSpec(baseline="catalog/solution44", candidate="loom")],
+    )["catalog/solution44=loom"]
+    loom_deltas = {delta["metric"]: delta for delta in catalog_to_loom["deltas"]}
+    assert loom_deltas["flat_workgroup_size"]["baseline"] == 128
+    assert loom_deltas["flat_workgroup_size"]["candidate"] == 128
+    assert loom_deltas["workgroup_size_y"]["baseline"] == 4
+    assert loom_deltas["workgroup_size_y"]["candidate"] == 4
+    assert (
+        loom_deltas["workgroup_size_z"]["candidate_source"] == "compile_report_workload"
+    )
+    match_to_loom = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="catalog/match/M13824_N4547_K4608_beta0",
+                candidate="loom",
+            )
+        ],
+    )["catalog/match/M13824_N4547_K4608_beta0=loom"]
+    assert match_to_loom["shared_metric_count"] >= 4
+
+    text = format_text_report(report)
+    assert "Tensile catalogs:" in text
+    assert "catalog: solutions=2 library=Problem rows=1" in text
+    assert "Matching: properties=[FreeSizeA[0], FreeSizeB[0], BoundSize[0]]" in text
+    assert "rocBLAS shape matches:" in text
+    assert "catalog/timing_row M13824_N4547_K4608_beta0" not in text
+    assert "tensile M13824_N4547_K4608_beta0" in text
+    assert "rank 0: solution=44 index=1140853047" in text
+    assert "solution 44: index=1140853047" in text
+    assert "MT=128x128x16" in text
 
 
 def test_build_kernel_anatomy_report_extracts_iree_dispatch_profile(
@@ -1360,6 +1611,40 @@ def test_rocblas_replay_script_contains_profile_commands(tmp_path: Path) -> None
     assert "--atomics_allowed --cold_iters 7 --iters 11" in text
 
 
+def test_rocblas_solution_trace_script_contains_capture_environment(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("pytorch", rocblas_log_path)],
+    )
+    text = format_rocblas_solution_trace_script(
+        report,
+        executable="/opt/rocm/bin/rocblas-bench",
+        extra_arguments=["--iters", "3"],
+    )
+
+    assert text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert "# pytorch M12288_N4547_K4608_beta0.0 calls=136" in text
+    assert "ROCBLAS_LAYER=0 TENSILE_SOLUTION_SELECTION_TRACE=1 TENSILE_DB=1" in text
+    assert "/opt/rocm/bin/rocblas-bench --function gemm_ex" in text
+    assert "--sizem 12288 --sizen 4547 --sizek 4608" in text
+    assert "--solution_index 0" not in text
+    assert "--cold_iters 0 --iters 3" in text
+    assert "--iters 1" not in text
+
+    pinned_text = format_rocblas_solution_trace_script(
+        report,
+        executable="/opt/rocm/bin/rocblas-bench",
+        extra_arguments=["--solution_index", "44"],
+    )
+    assert "--solution_index 44" in pinned_text
+
+
 def test_text_report_contains_iree_dispatch_profile_summary(
     tmp_path: Path,
 ) -> None:
@@ -1597,9 +1882,11 @@ amdhsa.kernels:
 
     assert "Comparisons:" in text
     assert "Comparison scorecard:" in text
+    assert "Gap findings:" in text
     assert "baseline=loom: shared=2 baseline_metrics=2" in text
     assert "scorecard:" in text
     assert "local_memory_bytes [local_memory]: candidate_higher" in text
+    assert "candidate_cost/candidate_higher: local_memory_bytes" in text
     assert "baseline=loom :: local_memory_bytes [local_memory]" in text
     assert "local_memory_bytes: baseline=1024 candidate=2048" in text
     assert "ratio=2x sources=amdhsa_metadata/compile_report" in text
@@ -1891,6 +2178,30 @@ def test_main_emits_rocblas_replay_script(tmp_path: Path, capsys) -> None:
     assert "--atomics_not_allowed --cold_iters 9" in text
 
 
+def test_main_emits_rocblas_solution_trace_script(tmp_path: Path, capsys) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    assert (
+        main(
+            [
+                "--rocblas-log",
+                f"pytorch={rocblas_log_path}",
+                "--rocblas-bench-executable",
+                "/tools/rocblas-bench",
+                "--format",
+                "rocblas-solution-trace",
+            ]
+        )
+        == 0
+    )
+    text = capsys.readouterr().out
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "TENSILE_SOLUTION_SELECTION_TRACE=1" in text
+    assert "/tools/rocblas-bench --function gemm_ex" in text
+    assert "--cold_iters 0 --iters 1" in text
+
+
 def test_main_emits_iree_dispatch_profile(tmp_path: Path, capsys) -> None:
     profile_path = tmp_path / "dispatch_profile.json"
     _write_iree_dispatch_profile(profile_path)
@@ -1977,7 +2288,10 @@ amdhsa.kernels:
     output = capsys.readouterr().out
     report = json.loads(output)
     comparison = report["comparisons"]["baseline=loom"]
-    assert comparison["shared_metric_count"] == 3
+    assert comparison["shared_metric_count"] >= 3
+    assert any(
+        delta["metric"] == "local_memory_bytes" for delta in comparison["deltas"]
+    )
     assert report["comparison_scorecard"][0]["comparison"] == "baseline=loom"
 
 

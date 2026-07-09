@@ -14,6 +14,7 @@ import json
 import math
 import re
 import shlex
+import struct
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -159,6 +160,109 @@ def _read_text(path: Path) -> str:
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_msgpack(path: Path) -> Any:
+    reader = _MessagePackReader(path.read_bytes())
+    value = reader.read()
+    if reader.remaining:
+        raise ValueError(f"{path}: trailing MessagePack bytes")
+    return value
+
+
+class _MessagePackReader:
+    """Small MessagePack reader for library metadata files."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self._offset = 0
+
+    @property
+    def remaining(self) -> int:
+        return len(self._data) - self._offset
+
+    def read(self) -> Any:
+        tag = self._read_u8()
+        if tag <= 0x7F:
+            return tag
+        if tag >= 0xE0:
+            return tag - 0x100
+        if 0x80 <= tag <= 0x8F:
+            return self._read_map(tag & 0x0F)
+        if 0x90 <= tag <= 0x9F:
+            return self._read_array(tag & 0x0F)
+        if 0xA0 <= tag <= 0xBF:
+            return self._read_string(tag & 0x1F)
+        if tag == 0xC0:
+            return None
+        if tag == 0xC2:
+            return False
+        if tag == 0xC3:
+            return True
+        if tag == 0xC4:
+            return self._read_bytes(self._read_u8())
+        if tag == 0xC5:
+            return self._read_bytes(self._read_be(">H"))
+        if tag == 0xC6:
+            return self._read_bytes(self._read_be(">I"))
+        if tag == 0xCA:
+            return self._read_be(">f")
+        if tag == 0xCB:
+            return self._read_be(">d")
+        if tag == 0xCC:
+            return self._read_u8()
+        if tag == 0xCD:
+            return self._read_be(">H")
+        if tag == 0xCE:
+            return self._read_be(">I")
+        if tag == 0xCF:
+            return self._read_be(">Q")
+        if tag == 0xD0:
+            return self._read_be(">b")
+        if tag == 0xD1:
+            return self._read_be(">h")
+        if tag == 0xD2:
+            return self._read_be(">i")
+        if tag == 0xD3:
+            return self._read_be(">q")
+        if tag == 0xD9:
+            return self._read_string(self._read_u8())
+        if tag == 0xDA:
+            return self._read_string(self._read_be(">H"))
+        if tag == 0xDB:
+            return self._read_string(self._read_be(">I"))
+        if tag == 0xDC:
+            return self._read_array(self._read_be(">H"))
+        if tag == 0xDD:
+            return self._read_array(self._read_be(">I"))
+        if tag == 0xDE:
+            return self._read_map(self._read_be(">H"))
+        if tag == 0xDF:
+            return self._read_map(self._read_be(">I"))
+        raise ValueError(f"unsupported MessagePack tag 0x{tag:02X}")
+
+    def _read_array(self, count: int) -> list[Any]:
+        return [self.read() for _ in range(count)]
+
+    def _read_map(self, count: int) -> dict[Any, Any]:
+        return {self.read(): self.read() for _ in range(count)}
+
+    def _read_string(self, length: int) -> str:
+        return self._read_bytes(length).decode("utf-8", errors="replace")
+
+    def _read_u8(self) -> int:
+        return self._read_bytes(1)[0]
+
+    def _read_be(self, fmt: str) -> Any:
+        return struct.unpack(fmt, self._read_bytes(struct.calcsize(fmt)))[0]
+
+    def _read_bytes(self, length: int) -> bytes:
+        end = self._offset + length
+        if end > len(self._data):
+            raise EOFError("truncated MessagePack payload")
+        value = self._data[self._offset : end]
+        self._offset = end
+        return value
 
 
 def _extract_compile_report(data: Any) -> Mapping[str, Any]:
@@ -1039,6 +1143,309 @@ def _parse_tensile_symbol_pair(
         parameters[key] = {"x": int(match.group("x")), "y": int(match.group("y"))}
 
 
+_TENSILE_PROBLEM_TYPE_KEYS = (
+    "operationIdentifier",
+    "aType",
+    "bType",
+    "cType",
+    "dType",
+    "useBeta",
+    "highPrecisionAccumulate",
+    "stridedBatched",
+    "f32XdlMathOp",
+    "stochasticRounding",
+)
+
+_TENSILE_SIZE_MAPPING_KEYS = (
+    "workGroup",
+    "macroTile",
+    "threadTile",
+    "depthU",
+    "staggerU",
+    "globalSplitU",
+    "staggerStrideShift",
+    "workGroupMapping",
+    "packSummationDims",
+    "packBatchDims",
+    "magicDivAlg",
+    "streamK",
+    "streamKAtomic",
+    "persistentKernel",
+    "persistentKernelAlongBatch",
+    "sourceKernel",
+    "globalAccumulation",
+    "workspaceSizePerElemC",
+)
+
+
+def summarize_tensile_catalog_path(named_path: NamedPath) -> dict[str, Any]:
+    """Extracts solution metadata from a Tensile MessagePack catalog."""
+
+    root = _as_mapping(_read_msgpack(named_path.path))
+    solutions = [
+        _summarize_tensile_solution(solution_value)
+        for solution_value in _as_sequence(root.get("solutions"))
+    ]
+    return {
+        "name": named_path.name,
+        "path": named_path.path.as_posix(),
+        "solution_count": len(solutions),
+        "solutions": sorted(
+            solutions,
+            key=lambda solution: (
+                _as_number(solution.get("library_logic_index")) or 0,
+                _as_number(solution.get("index")) or 0,
+            ),
+        ),
+        "library": _summarize_tensile_library(root.get("library")),
+    }
+
+
+def _summarize_tensile_solution(solution_value: Any) -> dict[str, Any]:
+    solution = _as_mapping(solution_value)
+    name = solution.get("name")
+    problem_type = _as_mapping(solution.get("problemType"))
+    size_mapping = _as_mapping(solution.get("sizeMapping"))
+    summary = {
+        "name": name,
+        "index": solution.get("index"),
+        "library_logic_index": solution.get("libraryLogicIndex"),
+        "problem_type": {
+            key: problem_type[key]
+            for key in _TENSILE_PROBLEM_TYPE_KEYS
+            if key in problem_type
+        },
+        "size_mapping": {
+            key: size_mapping[key]
+            for key in _TENSILE_SIZE_MAPPING_KEYS
+            if key in size_mapping
+        },
+    }
+    symbol_parameters = _parse_tensile_kernel_symbol(name)
+    if symbol_parameters:
+        summary["symbol_parameters"] = symbol_parameters
+    return summary
+
+
+def _summarize_tensile_library(library_value: Any) -> dict[str, Any]:
+    library = _as_mapping(library_value)
+    rows = [
+        _summarize_tensile_library_row(row_value)
+        for row_value in _as_sequence(library.get("rows"))
+    ]
+    return {
+        "type": library.get("type"),
+        "row_count": len(rows),
+        "rows": rows,
+    }
+
+
+def _summarize_tensile_library_row(row_value: Any) -> dict[str, Any]:
+    row = _as_mapping(row_value)
+    library = _as_mapping(row.get("library"))
+    properties = [
+        _summarize_tensile_matching_property(property_value)
+        for property_value in _as_sequence(library.get("properties"))
+    ]
+    table = [
+        _summarize_tensile_library_table_entry(entry_value)
+        for entry_value in _as_sequence(library.get("table"))
+    ]
+    return {
+        "library_type": library.get("type"),
+        "property_count": len(properties),
+        "properties": properties,
+        "table_row_count": len(table),
+        "table": table,
+    }
+
+
+def _summarize_tensile_matching_property(property_value: Any) -> dict[str, Any]:
+    property_mapping = _as_mapping(property_value)
+    summary = {
+        "type": property_mapping.get("type"),
+    }
+    if "index" in property_mapping:
+        summary["index"] = property_mapping.get("index")
+    return summary
+
+
+def _summarize_tensile_library_table_entry(entry_value: Any) -> dict[str, Any]:
+    entry = _as_mapping(entry_value)
+    summary = {
+        "key": [
+            value
+            for value in _as_sequence(entry.get("key"))
+            if _as_number(value) is not None
+        ],
+        "index": entry.get("index"),
+    }
+    speed = entry.get("speed")
+    if _as_number(speed) is not None:
+        summary["speed"] = speed
+    return summary
+
+
+def _attach_tensile_catalog_rocblas_matches(
+    tensile_catalogs: Mapping[str, Any],
+    rocblas_logs: Mapping[str, Any],
+    *,
+    top_count: int = 4,
+) -> None:
+    shape_rows = _collect_rocblas_problem_rows(rocblas_logs)
+    if not shape_rows:
+        return
+    for catalog_value in tensile_catalogs.values():
+        catalog = _as_mapping(catalog_value)
+        solution_by_index = {}
+        for solution_value in _as_sequence(catalog.get("solutions")):
+            solution = _as_mapping(solution_value)
+            if _as_number(solution.get("index")) is not None:
+                solution_by_index[solution.get("index")] = solution
+        matches = []
+        for shape_row in shape_rows:
+            problem_key = _as_sequence(shape_row.get("problem_key"))
+            nearest = _find_tensile_catalog_problem_matches(
+                catalog,
+                problem_key,
+                solution_by_index,
+                top_count=top_count,
+            )
+            if nearest:
+                matches.append(
+                    {
+                        **shape_row,
+                        "matches": nearest,
+                    }
+                )
+        if matches:
+            catalog["rocblas_shape_matches"] = matches
+
+
+def _collect_rocblas_problem_rows(
+    rocblas_logs: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for log_name, log_value in rocblas_logs.items():
+        rocblas_log = _as_mapping(log_value)
+        selected_timing_row = _as_mapping(rocblas_log.get("selected_timing_row"))
+        if selected_timing_row:
+            _record_rocblas_problem_row(
+                rows_by_key,
+                log_name,
+                selected_timing_row,
+                "selected_timing_row",
+            )
+        for timing_row_value in _as_sequence(rocblas_log.get("timing_rows")):
+            _record_rocblas_problem_row(
+                rows_by_key,
+                log_name,
+                _as_mapping(timing_row_value),
+                "timing_row",
+            )
+        for trace_row_value in _as_sequence(rocblas_log.get("trace_rows")):
+            _record_rocblas_problem_row(
+                rows_by_key,
+                log_name,
+                _as_mapping(trace_row_value),
+                "trace_row",
+            )
+    return sorted(
+        rows_by_key.values(),
+        key=lambda row: (row.get("rocblas_log", ""), row.get("shape_key", "")),
+    )
+
+
+def _record_rocblas_problem_row(
+    rows_by_key: dict[tuple[str, str], dict[str, Any]],
+    log_name: str,
+    row: Mapping[str, Any],
+    source: str,
+) -> None:
+    problem_key = _rocblas_problem_key(row)
+    if problem_key is None:
+        return
+    shape_key = str(row.get("shape_key") or _rocblas_trace_shape_key(row))
+    rows_by_key.setdefault(
+        (log_name, shape_key),
+        {
+            "rocblas_log": log_name,
+            "shape_key": shape_key,
+            "source": source,
+            "problem_key": problem_key,
+        },
+    )
+
+
+def _rocblas_problem_key(row: Mapping[str, Any]) -> list[float | int] | None:
+    problem_key = []
+    for key in ("M", "N", "K"):
+        value = _as_number(row.get(key))
+        if value is None:
+            return None
+        problem_key.append(value)
+    return problem_key
+
+
+def _find_tensile_catalog_problem_matches(
+    catalog: Mapping[str, Any],
+    problem_key: Sequence[Any],
+    solution_by_index: Mapping[Any, Any],
+    *,
+    top_count: int,
+) -> list[dict[str, Any]]:
+    ranked_matches: list[dict[str, Any]] = []
+    library = _as_mapping(catalog.get("library"))
+    for row_index, row_value in enumerate(_as_sequence(library.get("rows"))):
+        row = _as_mapping(row_value)
+        for table_entry_value in _as_sequence(row.get("table")):
+            table_entry = _as_mapping(table_entry_value)
+            table_key = _as_sequence(table_entry.get("key"))
+            distance = _tensile_catalog_key_distance(problem_key, table_key)
+            if distance is None:
+                continue
+            solution_index = table_entry.get("index")
+            solution = _as_mapping(solution_by_index.get(solution_index))
+            ranked_matches.append(
+                {
+                    "row_index": row_index,
+                    "key": list(table_key),
+                    "index": solution_index,
+                    "library_logic_index": solution.get("library_logic_index"),
+                    "speed": table_entry.get("speed"),
+                    "distance": distance,
+                    "solution": solution,
+                }
+            )
+    ranked_matches.sort(
+        key=lambda match: (
+            _as_number(match.get("distance")) or math.inf,
+            _as_number(match.get("speed")) or math.inf,
+            _as_number(match.get("index")) or math.inf,
+        )
+    )
+    return [
+        {**match, "rank": rank} for rank, match in enumerate(ranked_matches[:top_count])
+    ]
+
+
+def _tensile_catalog_key_distance(
+    problem_key: Sequence[Any],
+    table_key: Sequence[Any],
+) -> float | int | None:
+    if len(table_key) < len(problem_key):
+        return None
+    distance: float | int = 0
+    for problem_value, table_value in zip(problem_key, table_key, strict=False):
+        problem_number = _as_number(problem_value)
+        table_number = _as_number(table_value)
+        if problem_number is None or table_number is None:
+            return None
+        delta = problem_number - table_number
+        distance += delta * delta
+    return distance
+
+
 def _parse_tensile_symbol_triplet(
     parameters: dict[str, Any], symbol: str, pattern: str, key: str
 ) -> None:
@@ -1488,6 +1895,7 @@ def build_kernel_anatomy_report(
     rocprof_kernel_trace_paths: Sequence[NamedPath] = (),
     rocprof_counter_collection_paths: Sequence[NamedPath] = (),
     rocblas_log_paths: Sequence[NamedPath] = (),
+    tensile_catalog_paths: Sequence[NamedPath] = (),
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
@@ -1532,6 +1940,11 @@ def build_kernel_anatomy_report(
             _merge_rocblas_log_summaries(existing_summary, summary)
         else:
             rocblas_logs[named_path.name] = summary
+    tensile_catalogs = {
+        named_path.name: summarize_tensile_catalog_path(named_path)
+        for named_path in tensile_catalog_paths
+    }
+    _attach_tensile_catalog_rocblas_matches(tensile_catalogs, rocblas_logs)
     amdhsa_metadata = {
         named_path.name: summarize_amdhsa_metadata_path(
             named_path, compiled_metadata_regex, top_symbol_count
@@ -1568,6 +1981,7 @@ def build_kernel_anatomy_report(
         "rocblas_logs": rocblas_logs,
         "rocprof_counter_collections": rocprof_counter_collections,
         "rocprof_kernel_traces": rocprof_kernel_traces,
+        "tensile_catalogs": tensile_catalogs,
     }
 
 
@@ -1598,6 +2012,7 @@ def build_kernel_anatomy_comparisons(
             )
             for metric in common_metrics
         ]
+        scorecard = _build_comparison_scorecard(deltas)
         comparisons[name] = {
             "baseline": spec.baseline,
             "candidate": spec.candidate,
@@ -1605,7 +2020,8 @@ def build_kernel_anatomy_comparisons(
             "candidate_metric_count": len(candidate_metrics),
             "shared_metric_count": len(common_metrics),
             "deltas": sorted(deltas, key=_metric_delta_rank, reverse=True),
-            "scorecard": _build_comparison_scorecard(deltas),
+            "scorecard": scorecard,
+            "gap_findings": _build_gap_findings(deltas, scorecard),
             "missing_baseline_metrics": sorted(
                 set(candidate_metrics) - set(baseline_metrics)
             ),
@@ -1648,6 +2064,7 @@ def _collect_comparison_metric_groups(
     _collect_rocprof_kernel_trace_metric_groups(groups, report)
     _collect_rocprof_counter_collection_metric_groups(groups, report)
     _collect_rocblas_metric_groups(groups, report)
+    _collect_tensile_catalog_metric_groups(groups, report)
     _collect_disassembly_metric_groups(groups, report)
     _collect_metadata_metric_groups(groups, report)
     _record_per_matrix_metric_groups(groups)
@@ -1681,6 +2098,57 @@ def _record_metric(
         "value": numeric_value,
         "source": source,
     }
+
+
+def _record_extent_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    metric_prefix: str,
+    extent: Mapping[str, Any],
+    source: str,
+) -> None:
+    for axis in ("x", "y", "z", "w"):
+        _record_metric(
+            groups,
+            group_name,
+            f"{metric_prefix}_{axis}",
+            extent.get(axis),
+            source,
+        )
+
+
+def _extent_flat_size(extent: Mapping[str, Any]) -> float | int | None:
+    flat = _as_number(extent.get("flat"))
+    if flat is not None:
+        return flat
+    product: float | int = 1
+    has_axis = False
+    for axis in ("x", "y", "z", "w"):
+        axis_value = _as_number(extent.get(axis))
+        if axis_value is None:
+            continue
+        product *= axis_value
+        has_axis = True
+    if not has_axis:
+        return None
+    return product
+
+
+def _record_extent_with_flat_metric(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    metric_name: str,
+    extent: Mapping[str, Any],
+    source: str,
+) -> None:
+    _record_metric(
+        groups,
+        group_name,
+        metric_name,
+        _extent_flat_size(extent),
+        source,
+    )
+    _record_extent_metrics(groups, group_name, metric_name, extent, source)
 
 
 _PER_MATRIX_NUMERATOR_METRICS = (
@@ -1866,6 +2334,46 @@ def _record_compile_summary_metric_group(
             static_local_read_bytes + static_local_write_bytes,
             source_prefix,
         )
+    workload = _as_mapping(compile_report.get("workload"))
+    workgroup_size = _as_mapping(workload.get("workgroup_size"))
+    workgroup_size_flat = _extent_flat_size(workgroup_size)
+    _record_extent_with_flat_metric(
+        groups,
+        name,
+        "workgroup_size",
+        workgroup_size,
+        f"{source_prefix}_workload",
+    )
+    _record_metric(
+        groups,
+        name,
+        "flat_workgroup_size",
+        workgroup_size_flat,
+        f"{source_prefix}_workload",
+    )
+    workgroup_count = _as_mapping(workload.get("workgroup_count"))
+    workgroup_count_flat = _extent_flat_size(workgroup_count)
+    _record_extent_with_flat_metric(
+        groups,
+        name,
+        "workgroup_count",
+        workgroup_count,
+        f"{source_prefix}_workload",
+    )
+    dispatch_workitem_count = _as_number(workload.get("dispatch_workitem_count"))
+    if (
+        dispatch_workitem_count is None
+        and workgroup_size_flat is not None
+        and workgroup_count_flat is not None
+    ):
+        dispatch_workitem_count = workgroup_size_flat * workgroup_count_flat
+    _record_metric(
+        groups,
+        name,
+        "dispatch_workitem_count",
+        dispatch_workitem_count,
+        f"{source_prefix}_workload",
+    )
     resources = _as_mapping(compile_report.get("target_resources"))
     vector = _as_mapping(resources.get("vector"))
     vector_final = _as_mapping(vector.get("final"))
@@ -2377,15 +2885,13 @@ def _record_tensile_symbol_parameter_metrics(
     source: str,
 ) -> None:
     for parameter_name in ("macro_tile", "matrix_instruction", "workgroup_size"):
-        parameter = _as_mapping(parameters.get(parameter_name))
-        for axis in ("x", "y", "z", "w"):
-            _record_metric(
-                groups,
-                group_name,
-                f"{parameter_name}_{axis}",
-                parameter.get(axis),
-                source,
-            )
+        _record_extent_metrics(
+            groups,
+            group_name,
+            parameter_name,
+            _as_mapping(parameters.get(parameter_name)),
+            source,
+        )
     thread_tile = _as_mapping(parameters.get("thread_tile"))
     _record_metric(groups, group_name, "thread_tile_x", thread_tile.get("x"), source)
     _record_metric(groups, group_name, "thread_tile_y", thread_tile.get("y"), source)
@@ -2409,6 +2915,188 @@ def _record_tensile_symbol_parameter_metrics(
             parameters.get(parameter_name),
             source,
         )
+
+
+def _collect_tensile_catalog_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    tensile_catalogs = _as_mapping(report.get("tensile_catalogs"))
+    for name, catalog_value in tensile_catalogs.items():
+        catalog = _as_mapping(catalog_value)
+        _record_metric(
+            groups,
+            name,
+            "solution_count",
+            catalog.get("solution_count"),
+            "tensile_catalog",
+        )
+        solutions = catalog.get("solutions", [])
+        if not isinstance(solutions, list):
+            continue
+        logic_index_counts: dict[Any, int] = {}
+        for solution_value in solutions:
+            logic_index = _as_mapping(solution_value).get("library_logic_index")
+            if _as_number(logic_index) is not None:
+                logic_index_counts[logic_index] = (
+                    logic_index_counts.get(logic_index, 0) + 1
+                )
+        for solution_value in solutions:
+            solution = _as_mapping(solution_value)
+            logic_index = solution.get("library_logic_index")
+            if _as_number(logic_index) is None:
+                continue
+            opaque_index = solution.get("index")
+            if _as_number(opaque_index) is not None:
+                _record_tensile_solution_metrics(
+                    groups,
+                    f"{name}/solution{logic_index}/index{opaque_index}",
+                    solution,
+                )
+            if logic_index_counts.get(logic_index) == 1:
+                _record_tensile_solution_metrics(
+                    groups,
+                    f"{name}/solution{logic_index}",
+                    solution,
+                )
+        for match_value in _as_sequence(catalog.get("rocblas_shape_matches")):
+            match = _as_mapping(match_value)
+            shape_key = match.get("shape_key")
+            if not isinstance(shape_key, str):
+                continue
+            for candidate_value in _as_sequence(match.get("matches")):
+                candidate = _as_mapping(candidate_value)
+                rank = _as_number(candidate.get("rank"))
+                if rank is None:
+                    continue
+                group_name = f"{name}/match/{shape_key}/rank{int(rank)}"
+                _record_tensile_catalog_match_metrics(
+                    groups,
+                    group_name,
+                    match,
+                    candidate,
+                )
+                if rank == 0:
+                    _record_tensile_catalog_match_metrics(
+                        groups,
+                        f"{name}/match/{shape_key}",
+                        match,
+                        candidate,
+                    )
+
+
+def _record_tensile_solution_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    solution: Mapping[str, Any],
+) -> None:
+    _record_metric(
+        groups,
+        group_name,
+        "solution_index",
+        solution.get("library_logic_index"),
+        "tensile_catalog",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "opaque_solution_index",
+        solution.get("index"),
+        "tensile_catalog",
+    )
+    _record_tensile_symbol_parameter_metrics(
+        groups,
+        group_name,
+        _as_mapping(solution.get("symbol_parameters")),
+        "tensile_catalog_symbol",
+    )
+    size_mapping = _as_mapping(solution.get("size_mapping"))
+    _record_extent_metrics(
+        groups,
+        group_name,
+        "catalog_workgroup_size",
+        _extent_from_sequence(size_mapping.get("workGroup")),
+        "tensile_catalog_size_mapping",
+    )
+    _record_extent_metrics(
+        groups,
+        group_name,
+        "catalog_macro_tile",
+        _extent_from_sequence(size_mapping.get("macroTile")),
+        "tensile_catalog_size_mapping",
+    )
+    _record_extent_metrics(
+        groups,
+        group_name,
+        "catalog_thread_tile",
+        _extent_from_sequence(size_mapping.get("threadTile")),
+        "tensile_catalog_size_mapping",
+    )
+    for metric, key in (
+        ("catalog_depth_u", "depthU"),
+        ("catalog_global_split_u", "globalSplitU"),
+        ("catalog_workgroup_mapping", "workGroupMapping"),
+    ):
+        _record_metric(
+            groups,
+            group_name,
+            metric,
+            size_mapping.get(key),
+            "tensile_catalog_size_mapping",
+        )
+
+
+def _record_tensile_catalog_match_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    match: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+) -> None:
+    problem_key = _as_sequence(match.get("problem_key"))
+    for metric, index in (("M", 0), ("N", 1), ("K", 2)):
+        _record_metric(
+            groups,
+            group_name,
+            metric,
+            problem_key[index] if index < len(problem_key) else None,
+            "tensile_catalog_match",
+        )
+    table_key = _extent_from_sequence(candidate.get("key"))
+    _record_extent_metrics(
+        groups,
+        group_name,
+        "catalog_key",
+        table_key,
+        "tensile_catalog_match",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "catalog_selection_distance",
+        candidate.get("distance"),
+        "tensile_catalog_match",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "catalog_speed",
+        candidate.get("speed"),
+        "tensile_catalog_match",
+    )
+    _record_tensile_solution_metrics(
+        groups,
+        group_name,
+        _as_mapping(candidate.get("solution")),
+    )
+
+
+def _extent_from_sequence(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Sequence) or isinstance(value, (bytes, str)):
+        return {}
+    return {
+        axis: value[index]
+        for index, axis in enumerate(("x", "y", "z", "w"))
+        if index < len(value)
+    }
 
 
 def _rocblas_trace_group_name(name: str, trace_row: Mapping[str, Any]) -> str:
@@ -2706,6 +3394,12 @@ _EXACT_PARITY_METRICS = frozenset(
         "vector_width",
         "wavefront_size",
         "wave_size",
+        "workgroup_mapping",
+        "dispatch_workitem_count",
+        "workgroup_count",
+        "workgroup_count_x",
+        "workgroup_count_y",
+        "workgroup_count_z",
         "workgroup_size",
         "workgroup_size_x",
         "workgroup_size_y",
@@ -2856,6 +3550,188 @@ def _metric_delta_rank(delta: Mapping[str, Any]) -> float:
     if isinstance(ratio, (int, float)) and ratio > 0:
         return ratio if ratio >= 1 else 1 / ratio
     return float("inf") if delta.get("delta") else 0.0
+
+
+_TIME_METRICS = (
+    "operation_time_ns",
+    "p50_ns",
+    "p50_duration_ns",
+    "p90_duration_ns",
+    "total_duration_ns",
+)
+
+
+def _build_gap_findings(
+    deltas: Sequence[Mapping[str, Any]],
+    scorecard: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Builds structural findings that explain or qualify timing gaps."""
+
+    findings: list[dict[str, Any]] = []
+    time_delta = _select_time_delta(deltas)
+    time_ratio = _as_number(_as_mapping(time_delta).get("ratio"))
+    if time_delta and time_ratio is not None and time_ratio > 1:
+        findings.append(
+            _gap_finding(
+                kind="time_gap",
+                role="candidate_slower",
+                delta=time_delta,
+                time_ratio=time_ratio,
+                priority=100.0 * time_ratio,
+            )
+        )
+    findings.extend(_build_gap_parity_findings(deltas, time_ratio))
+    findings.extend(_build_gap_driver_findings(scorecard, time_ratio))
+    findings.extend(_build_gap_advantage_findings(deltas, time_ratio))
+    return sorted(
+        findings,
+        key=lambda finding: _as_number(finding.get("priority")) or 0,
+        reverse=True,
+    )
+
+
+def _select_time_delta(deltas: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    deltas_by_metric = {
+        delta.get("metric"): delta
+        for delta in deltas
+        if isinstance(delta.get("metric"), str)
+    }
+    for metric in _TIME_METRICS:
+        delta = deltas_by_metric.get(metric)
+        if delta:
+            return delta
+    return {}
+
+
+def _build_gap_parity_findings(
+    deltas: Sequence[Mapping[str, Any]], time_ratio: float | int | None
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for delta in deltas:
+        metric = delta.get("metric")
+        if not isinstance(metric, str) or _scorecard_metric_goal(metric) != "exact":
+            continue
+        baseline = _as_number(delta.get("baseline"))
+        candidate = _as_number(delta.get("candidate"))
+        if baseline is None or candidate is None or _numeric_equal(baseline, candidate):
+            continue
+        severity = _metric_delta_rank(delta)
+        if not math.isfinite(severity):
+            severity = 1.0
+        findings.append(
+            _gap_finding(
+                kind="parity_mismatch",
+                role="comparison_not_apples_to_apples",
+                delta=delta,
+                time_ratio=time_ratio,
+                priority=90.0 * severity,
+            )
+        )
+    return findings
+
+
+def _build_gap_driver_findings(
+    scorecard: Sequence[Mapping[str, Any]], time_ratio: float | int | None
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for entry in scorecard:
+        metric = entry.get("metric")
+        if not isinstance(metric, str) or metric in _TIME_METRICS:
+            continue
+        if entry.get("finding") != "candidate_higher":
+            continue
+        ratio = _as_number(entry.get("ratio"))
+        if ratio is None or ratio <= 1:
+            continue
+        role = _classify_gap_driver_ratio(ratio, time_ratio)
+        findings.append(
+            _gap_finding(
+                kind="candidate_cost",
+                role=role,
+                delta=entry,
+                time_ratio=time_ratio,
+                priority=_gap_driver_priority(ratio, time_ratio),
+            )
+        )
+    return findings
+
+
+def _classify_gap_driver_ratio(
+    ratio: float | int, time_ratio: float | int | None
+) -> str:
+    if time_ratio is None or time_ratio <= 1:
+        return "candidate_higher"
+    if ratio >= time_ratio * 1.25:
+        return "worse_than_time_gap"
+    if ratio >= time_ratio * 0.75:
+        return "matches_time_gap"
+    if ratio >= math.sqrt(time_ratio):
+        return "partial_time_gap"
+    return "secondary_worse"
+
+
+def _gap_driver_priority(ratio: float | int, time_ratio: float | int | None) -> float:
+    if time_ratio is None or time_ratio <= 1:
+        return float(ratio)
+    if ratio >= time_ratio * 0.75:
+        return 60.0 * min(float(ratio), float(time_ratio))
+    if ratio >= math.sqrt(time_ratio):
+        return 40.0 * float(ratio)
+    return 10.0 * float(ratio)
+
+
+def _build_gap_advantage_findings(
+    deltas: Sequence[Mapping[str, Any]], time_ratio: float | int | None
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for delta in deltas:
+        metric = delta.get("metric")
+        if not isinstance(metric, str):
+            continue
+        if (
+            metric in _IGNORED_SCORECARD_METRICS
+            or metric in _TIME_METRICS
+            or _scorecard_metric_goal(metric) != "lower"
+        ):
+            continue
+        ratio = _as_number(delta.get("ratio"))
+        if ratio is None or ratio >= 0.95 or ratio <= 0:
+            continue
+        findings.append(
+            _gap_finding(
+                kind="candidate_advantage",
+                role="counter_improved",
+                delta=delta,
+                time_ratio=time_ratio,
+                priority=5.0 / ratio,
+            )
+        )
+    return findings
+
+
+def _gap_finding(
+    *,
+    kind: str,
+    role: str,
+    delta: Mapping[str, Any],
+    time_ratio: float | int | None,
+    priority: float,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "role": role,
+        "metric": delta.get("metric"),
+        "category": delta.get("category")
+        or _scorecard_metric_category(str(delta.get("metric"))),
+        "baseline": delta.get("baseline"),
+        "candidate": delta.get("candidate"),
+        "delta": delta.get("delta"),
+        "ratio": delta.get("ratio"),
+        "time_ratio": time_ratio,
+        "priority": priority,
+        "baseline_source": delta.get("baseline_source"),
+        "candidate_source": delta.get("candidate_source"),
+    }
 
 
 def _iter_amdhsa_metadata_kernels(text: str) -> Sequence[dict[str, Any]]:
@@ -3038,6 +3914,12 @@ def _matrix_count(block: AmdgpuDisassemblyBlock) -> int:
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _as_sequence(value: Any) -> Sequence[Any]:
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, str)):
+        return value
+    return ()
 
 
 def _append_compile_report_lines(lines: list[str], report: Mapping[str, Any]) -> None:
@@ -3432,6 +4314,87 @@ def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> No
                     lines.append(f"        replay: {replay_command}")
 
 
+def _append_tensile_catalog_lines(
+    lines: list[str], report: Mapping[str, Any], top_solution_count: int = 16
+) -> None:
+    tensile_catalogs = report.get("tensile_catalogs", {})
+    if not isinstance(tensile_catalogs, Mapping) or not tensile_catalogs:
+        return
+    lines.append("")
+    lines.append("Tensile catalogs:")
+    for name, catalog_value in tensile_catalogs.items():
+        catalog = _as_mapping(catalog_value)
+        library = _as_mapping(catalog.get("library"))
+        lines.append(
+            "  "
+            f"{name}: solutions={catalog.get('solution_count')} "
+            f"library={library.get('type')} rows={library.get('row_count')}"
+        )
+        rows = library.get("rows", [])
+        if isinstance(rows, list):
+            for row_value in rows[:2]:
+                row = _as_mapping(row_value)
+                properties = ", ".join(
+                    _format_tensile_matching_property(property_value)
+                    for property_value in _as_sequence(row.get("properties"))
+                )
+                lines.append(
+                    "    "
+                    f"{row.get('library_type')}: "
+                    f"properties=[{properties}] "
+                    f"table_rows={row.get('table_row_count')}"
+                )
+        matches = catalog.get("rocblas_shape_matches", [])
+        if isinstance(matches, list) and matches:
+            lines.append("    rocBLAS shape matches:")
+            for match_value in matches[:8]:
+                match = _as_mapping(match_value)
+                lines.append(
+                    "      "
+                    f"{match.get('rocblas_log')} {match.get('shape_key')}: "
+                    f"problem={_format_tensile_key(match.get('problem_key'))}"
+                )
+                for candidate_value in _as_sequence(match.get("matches"))[:2]:
+                    candidate = _as_mapping(candidate_value)
+                    lines.append(
+                        "        "
+                        f"rank {candidate.get('rank')}: "
+                        f"solution={candidate.get('library_logic_index')} "
+                        f"index={candidate.get('index')} "
+                        f"table_key={_format_tensile_key(candidate.get('key'))} "
+                        f"distance={_format_scalar(candidate.get('distance'))} "
+                        f"speed={_format_scalar(candidate.get('speed'))}"
+                    )
+        solutions = catalog.get("solutions", [])
+        if not isinstance(solutions, list):
+            continue
+        for solution_value in solutions[:top_solution_count]:
+            solution = _as_mapping(solution_value)
+            lines.append(
+                "    "
+                f"solution {solution.get('library_logic_index')}: "
+                f"index={solution.get('index')} "
+                f"kernel={solution.get('name')}"
+            )
+            _append_tensile_symbol_parameter_lines(
+                lines,
+                _as_mapping(solution.get("symbol_parameters")),
+            )
+
+
+def _format_tensile_matching_property(property_value: Any) -> str:
+    property_mapping = _as_mapping(property_value)
+    property_type = property_mapping.get("type", "?")
+    if "index" in property_mapping:
+        return f"{property_type}[{property_mapping.get('index')}]"
+    return str(property_type)
+
+
+def _format_tensile_key(value: Any) -> str:
+    key = _as_sequence(value)
+    return "x".join(str(item) for item in key) if key else "?"
+
+
 def _top_rocblas_trace_rows(trace_rows: Sequence[Any]) -> list[Mapping[str, Any]]:
     return sorted(
         (_as_mapping(trace_value) for trace_value in trace_rows),
@@ -3503,6 +4466,40 @@ def _append_comparison_scorecard_lines(
             f"candidate={entry.get('candidate')} "
             f"ratio={_format_ratio(entry.get('ratio'))}"
         )
+
+
+def _append_gap_finding_lines(lines: list[str], report: Mapping[str, Any]) -> None:
+    comparisons = report.get("comparisons", {})
+    if not isinstance(comparisons, Mapping) or not comparisons:
+        return
+    any_findings = False
+    for comparison_value in comparisons.values():
+        comparison = _as_mapping(comparison_value)
+        findings = comparison.get("gap_findings", [])
+        if isinstance(findings, list) and findings:
+            any_findings = True
+            break
+    if not any_findings:
+        return
+    lines.append("")
+    lines.append("Gap findings:")
+    for name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        findings = comparison.get("gap_findings", [])
+        if not isinstance(findings, list) or not findings:
+            continue
+        lines.append(f"  {name}:")
+        for finding_value in findings[:12]:
+            finding = _as_mapping(finding_value)
+            lines.append(
+                "    "
+                f"{finding.get('kind')}/{finding.get('role')}: "
+                f"{finding.get('metric')} [{finding.get('category')}] "
+                f"baseline={finding.get('baseline')} "
+                f"candidate={finding.get('candidate')} "
+                f"ratio={_format_ratio(finding.get('ratio'))} "
+                f"time_ratio={_format_ratio(finding.get('time_ratio'))}"
+            )
 
 
 def _append_comparison_lines(lines: list[str], report: Mapping[str, Any]) -> None:
@@ -3746,7 +4743,9 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     _append_rocprof_kernel_trace_lines(lines, report)
     _append_rocprof_counter_collection_lines(lines, report)
     _append_rocblas_log_lines(lines, report)
+    _append_tensile_catalog_lines(lines, report)
     _append_comparison_scorecard_lines(lines, report)
+    _append_gap_finding_lines(lines, report)
     _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
     _append_amdhsa_metadata_lines(lines, report)
@@ -3760,10 +4759,99 @@ def format_rocblas_replay_script(
 ) -> str:
     """Formats rocBLAS profile rows as a directly runnable replay script."""
 
+    return _format_rocblas_script(report, executable, (), extra_arguments)
+
+
+_ROCBLAS_SOLUTION_TRACE_ENVIRONMENT = (
+    ("ROCBLAS_LAYER", "0"),
+    ("TENSILE_SOLUTION_SELECTION_TRACE", "1"),
+    ("TENSILE_DB", "1"),
+)
+
+_ROCBLAS_SOLUTION_TRACE_ARGUMENTS = (
+    "--cold_iters",
+    "0",
+    "--iters",
+    "1",
+)
+
+
+def format_rocblas_solution_trace_script(
+    report: Mapping[str, Any],
+    executable: str = "rocblas-bench",
+    extra_arguments: Sequence[str] = (),
+) -> str:
+    """Formats rocBLAS rows as a selected-solution metadata capture script."""
+
+    replay_arguments = _append_missing_flag_arguments(
+        _ROCBLAS_SOLUTION_TRACE_ARGUMENTS,
+        extra_arguments,
+    )
+    return _format_rocblas_script(
+        report,
+        executable,
+        _ROCBLAS_SOLUTION_TRACE_ENVIRONMENT,
+        replay_arguments,
+        drop_trace_flags=("--solution_index",),
+    )
+
+
+def _append_missing_flag_arguments(
+    default_arguments: Sequence[str], extra_arguments: Sequence[str]
+) -> list[str]:
+    extra_flags = {
+        argument for argument in extra_arguments if argument.startswith("--")
+    }
+    arguments: list[str] = []
+    index = 0
+    while index < len(default_arguments):
+        argument = default_arguments[index]
+        if argument.startswith("--") and argument in extra_flags:
+            index += 2 if index + 1 < len(default_arguments) else 1
+            continue
+        arguments.append(argument)
+        if argument.startswith("--") and index + 1 < len(default_arguments):
+            index += 1
+            arguments.append(default_arguments[index])
+        index += 1
+    arguments.extend(extra_arguments)
+    return arguments
+
+
+_ROCBLAS_BENCH_VALUE_FLAGS = {
+    flag for _trace_key, flag in _ROCBLAS_BENCH_FLAG_BY_TRACE_KEY
+}
+
+
+def _drop_flag_arguments(
+    arguments: Sequence[str], drop_flags: Sequence[str]
+) -> list[str]:
+    flags_to_drop = set(drop_flags)
+    filtered_arguments: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in flags_to_drop:
+            index += 2 if argument in _ROCBLAS_BENCH_VALUE_FLAGS else 1
+            continue
+        filtered_arguments.append(argument)
+        index += 1
+    return filtered_arguments
+
+
+def _format_rocblas_script(
+    report: Mapping[str, Any],
+    executable: str,
+    environment: Sequence[tuple[str, str]],
+    extra_arguments: Sequence[str],
+    *,
+    drop_trace_flags: Sequence[str] = (),
+) -> str:
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
     ]
+    environment_arguments = [f"{key}={value}" for key, value in environment]
     rocblas_logs = report.get("rocblas_logs", {})
     if isinstance(rocblas_logs, Mapping):
         for name, rocblas_log_value in rocblas_logs.items():
@@ -3781,12 +4869,23 @@ def format_rocblas_replay_script(
                 ]
                 if len(argument_strings) != len(arguments):
                     continue
+                argument_strings = _drop_flag_arguments(
+                    argument_strings,
+                    drop_trace_flags,
+                )
                 shape_key = trace_row.get("shape_key", "?")
                 call_count = trace_row.get("call_count", "?")
                 lines.append("")
                 lines.append(f"# {name} {shape_key} calls={call_count}")
                 lines.append(
-                    shlex.join([executable, *argument_strings, *extra_arguments])
+                    shlex.join(
+                        [
+                            *environment_arguments,
+                            executable,
+                            *argument_strings,
+                            *extra_arguments,
+                        ]
+                    )
                 )
     return "\n".join(lines) + "\n"
 
@@ -3841,6 +4940,13 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         type=_parse_named_path,
         help="rocBLAS log output as NAME=PATH, or PATH to use the stem.",
+    )
+    parser.add_argument(
+        "--tensile-catalog",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help="Tensile MessagePack catalog as NAME=PATH, or PATH to use the stem.",
     )
     parser.add_argument(
         "--amdhsa-metadata",
@@ -3910,7 +5016,7 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("json", "text", "rocblas-replay"),
+        choices=("json", "text", "rocblas-replay", "rocblas-solution-trace"),
         default="json",
         help="Output format.",
     )
@@ -3942,6 +5048,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rocprof_kernel_trace_paths=args.rocprof_kernel_trace,
         rocprof_counter_collection_paths=args.rocprof_counter_collection,
         rocblas_log_paths=args.rocblas_log,
+        tensile_catalog_paths=args.tensile_catalog,
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,
@@ -3960,9 +5067,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write("\n")
     elif args.format == "text":
         sys.stdout.write(format_text_report(report))
-    else:
+    elif args.format == "rocblas-replay":
         sys.stdout.write(
             format_rocblas_replay_script(
+                report,
+                args.rocblas_bench_executable,
+                args.rocblas_replay_arg,
+            )
+        )
+    else:
+        sys.stdout.write(
+            format_rocblas_solution_trace_script(
                 report,
                 args.rocblas_bench_executable,
                 args.rocblas_replay_arg,
