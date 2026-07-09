@@ -1387,6 +1387,41 @@ def test_benchmark_target_listings_attach_selected_entry_disassembly(
     assert "local_ops=ds_read_b128:1 device_ops=global_load_b128:1" in summary
 
 
+def test_summary_ranks_matrix_blocks_by_local_memory_ratio(
+    tmp_path: Path,
+) -> None:
+    low_local_path = tmp_path / "low.s"
+    high_local_path = tmp_path / "high.s"
+    _write(
+        low_local_path,
+        """
+0000000000000000 <low_local>:
+      ds_read_b128 v[0:3], v0
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+    _write(
+        high_local_path,
+        """
+0000000000000000 <high_local>:
+      ds_read_b32 v0, v1
+      ds_write_b32 v2, v3
+      ds_write_b32 v4, v5
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[
+            NamedPath("low", low_local_path),
+            NamedPath("high", high_local_path),
+        ],
+        compile_report_paths=[],
+    )
+    summary = format_summary_report(report)
+    assert summary.index("high/high_local") < summary.index("low/low_local")
+
+
 def test_build_kernel_anatomy_report_extracts_rocblas_log(
     tmp_path: Path,
 ) -> None:

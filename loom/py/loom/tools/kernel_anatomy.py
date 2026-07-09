@@ -5793,21 +5793,51 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                     symbol.get("top_device_memory_mnemonics")
                 )
                 matrix_block_lines.append(
-                    "  "
-                    f"{name}/{_shorten_text(str(symbol.get('symbol') or ''), 72)}: "
-                    f"instructions={symbol.get('instruction_count')} "
-                    f"matrix={symbol.get('matrix_instruction_count')} "
-                    f"local={symbol.get('local_memory_instruction_count')} "
-                    f"device={symbol.get('device_memory_instruction_count')} "
-                    f"instr/matrix={instruction_ratio} "
-                    f"local/matrix={local_ratio} "
-                    f"local_ops={local_ops or '-'} "
-                    f"device_ops={device_ops or '-'}"
+                    {
+                        "line": (
+                            "  "
+                            f"{name}/"
+                            f"{_shorten_text(str(symbol.get('symbol') or ''), 72)}: "
+                            f"instructions={symbol.get('instruction_count')} "
+                            f"matrix={symbol.get('matrix_instruction_count')} "
+                            f"local={symbol.get('local_memory_instruction_count')} "
+                            f"device={symbol.get('device_memory_instruction_count')} "
+                            f"instr/matrix={instruction_ratio} "
+                            f"local/matrix={local_ratio} "
+                            f"local_ops={local_ops or '-'} "
+                            f"device_ops={device_ops or '-'}"
+                        ),
+                        "local_ratio": _as_number(
+                            symbol.get(
+                                "local_memory_instructions_per_matrix_instruction"
+                            )
+                        )
+                        or 0,
+                        "instruction_ratio": _as_number(
+                            symbol.get("instructions_per_matrix_instruction")
+                        )
+                        or 0,
+                        "local_memory_instruction_count": _as_number(
+                            symbol.get("local_memory_instruction_count")
+                        )
+                        or 0,
+                    }
                 )
         if matrix_block_lines:
             lines.append("")
             lines.append("Matrix-heavy disassembly blocks:")
-            lines.extend(matrix_block_lines[:12])
+            lines.extend(
+                str(row["line"])
+                for row in sorted(
+                    matrix_block_lines,
+                    key=lambda row: (
+                        row["local_ratio"],
+                        row["instruction_ratio"],
+                        row["local_memory_instruction_count"],
+                    ),
+                    reverse=True,
+                )[:12]
+            )
     verdicts = report.get("comparison_verdicts")
     if verdicts is None:
         comparisons = report.get("comparisons", {})
