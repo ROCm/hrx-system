@@ -4350,6 +4350,25 @@ def _format_p50_ms(timing: Mapping[str, Any]) -> str:
     return f"{p50 / 1_000_000:.6g}" if isinstance(p50, (int, float)) else "?"
 
 
+def _format_compile_report_summary(compile_report: Mapping[str, Any]) -> str:
+    resources = _as_mapping(compile_report.get("target_resources"))
+    vector = _as_mapping(resources.get("vector"))
+    vector_final = _as_mapping(vector.get("final"))
+    static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
+    dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
+    return (
+        f"instructions={compile_report.get('instruction_count')} "
+        f"code_bytes={compile_report.get('code_byte_count')} "
+        f"local_bytes={compile_report.get('local_memory_bytes')} "
+        f"vgpr={vector_final.get('register_count')} "
+        f"occupancy={resources.get('occupancy_percent')}% "
+        f"wmma={static_mix.get('wmma_count')} "
+        f"valu={static_mix.get('vector_alu_count')} "
+        f"dynamic_local={dynamic_mix.get('local_memory_count')} "
+        f"dynamic_private={dynamic_mix.get('private_memory_count')}"
+    )
+
+
 def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     benchmark_reports = report.get("loom_benchmarks", {})
     if not isinstance(benchmark_reports, Mapping) or not benchmark_reports:
@@ -4380,6 +4399,24 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
                     f"benchmark={finding.get('benchmark')} "
                     f"entry={finding.get('entry')}"
                 )
+        compile_rows = benchmark_report.get("compiles", [])
+        if isinstance(compile_rows, list) and compile_rows:
+            lines.append("    benchmark compiles:")
+            for compile_row_value in compile_rows[:8]:
+                compile_row = _as_mapping(compile_row_value)
+                compile_report = _as_mapping(compile_row.get("compile_report"))
+                diagnostic_warning_count = compile_report.get(
+                    "diagnostic_warning_count"
+                )
+                lines.append(
+                    "      "
+                    f"{compile_row.get('candidate_id')} "
+                    f"{compile_row.get('benchmark')} "
+                    f"entry={compile_row.get('entry')} "
+                    f"state={compile_row.get('state')} "
+                    f"{_format_compile_report_summary(compile_report)} "
+                    f"warnings={diagnostic_warning_count}"
+                )
         benchmarks = benchmark_report.get("benchmarks", [])
         if not isinstance(benchmarks, list):
             continue
@@ -4388,11 +4425,6 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
             timing = _as_mapping(benchmark.get("timing_ns"))
             correctness = _as_mapping(benchmark.get("correctness"))
             compile_report = _as_mapping(benchmark.get("compile_report"))
-            resources = _as_mapping(compile_report.get("target_resources"))
-            vector = _as_mapping(resources.get("vector"))
-            vector_final = _as_mapping(vector.get("final"))
-            static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
-            dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
             diagnostic_warning_count = compile_report.get("diagnostic_warning_count")
             lines.append(
                 "    "
@@ -4401,15 +4433,7 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
                 f"p50_ms={_format_p50_ms(timing)} "
                 f"failed_samples={correctness.get('failed_sample_count')}/"
                 f"{correctness.get('sample_count')} "
-                f"instructions={compile_report.get('instruction_count')} "
-                f"code_bytes={compile_report.get('code_byte_count')} "
-                f"local_bytes={compile_report.get('local_memory_bytes')} "
-                f"vgpr={vector_final.get('register_count')} "
-                f"occupancy={resources.get('occupancy_percent')}% "
-                f"wmma={static_mix.get('wmma_count')} "
-                f"valu={static_mix.get('vector_alu_count')} "
-                f"dynamic_local={dynamic_mix.get('local_memory_count')} "
-                f"dynamic_private={dynamic_mix.get('private_memory_count')} "
+                f"{_format_compile_report_summary(compile_report)} "
                 f"warnings={diagnostic_warning_count}"
             )
         comparisons = benchmark_report.get("comparisons", [])

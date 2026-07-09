@@ -973,6 +973,11 @@ def test_build_kernel_anatomy_report_selects_benchmark_compile_entry(
     assert compile_row["compile_report"]["function"] == "selected_kernel"
     assert compile_row["compile_report"]["instruction_count"] == 321
 
+    text_report = format_text_report(report)
+    assert "benchmark compiles:" in text_report
+    assert "entry=selected_kernel" in text_report
+    assert "instructions=321" in text_report
+
 
 def test_build_kernel_anatomy_report_extracts_rocblas_log(
     tmp_path: Path,
