@@ -43,6 +43,64 @@ def _compile_report_payload() -> dict:
         "function": "loom_kernel",
         "target_key": "gfx1100",
         "executable_format": "amdgcn-amd-amdhsa--gfx1100",
+        "economics": {
+            "memory": {
+                "source_low": {
+                    "packet_count": 560,
+                    "load_packet_count": 288,
+                    "store_packet_count": 272,
+                    "dynamic_packet_count": 78464,
+                    "dynamic_read_byte_count": 221184,
+                    "dynamic_write_byte_count": 147712,
+                    "dispatch_source": {
+                        "read_bytes": 110075314176,
+                        "write_bytes": 73510944768,
+                        "total_bytes": 183586258944,
+                    },
+                    "argument_packets": {
+                        "count": 3,
+                        "rows": [
+                            {
+                                "root_argument_name": "input",
+                                "memory_space": "global",
+                                "operation": "load",
+                                "packet": "amdgpu.global_load_b128_saddr",
+                                "packet_count": 16,
+                                "dynamic_packet_count": 2304,
+                                "dispatch_source": {
+                                    "read_bytes": 18345885696,
+                                    "total_bytes": 18345885696,
+                                },
+                            },
+                            {
+                                "root_argument_name": "weight",
+                                "memory_space": "global",
+                                "operation": "load",
+                                "packet": "amdgpu.global_load_b128_saddr",
+                                "packet_count": 16,
+                                "dynamic_packet_count": 2304,
+                                "dispatch_source": {
+                                    "read_bytes": 18345885696,
+                                    "total_bytes": 18345885696,
+                                },
+                            },
+                            {
+                                "root_argument_name": "output",
+                                "memory_space": "global",
+                                "operation": "store",
+                                "packet": "amdgpu.global_store_b16_saddr",
+                                "packet_count": 16,
+                                "dynamic_packet_count": 128,
+                                "dispatch_source": {
+                                    "write_bytes": 127401984,
+                                    "total_bytes": 127401984,
+                                },
+                            },
+                        ],
+                    },
+                },
+            },
+        },
         "entries": {
             "rows": [
                 {
@@ -71,6 +129,40 @@ def _compile_report_payload() -> dict:
                             },
                         },
                         "occupancy_percent": 50,
+                    },
+                    "wait_plan": {
+                        "action_count": 138,
+                        "full_drain_count": 27,
+                        "partial_wait_count": 111,
+                        "drained_count": 417,
+                        "max_outstanding_before": 128,
+                    },
+                    "wait_reason_summary_rows": {
+                        "count": 2,
+                        "rows": [
+                            {
+                                "counter": "lds",
+                                "reason": "amdgpu.read_result_reuse",
+                                "summary": {
+                                    "action_count": 120,
+                                    "full_drain_count": 11,
+                                    "partial_wait_count": 109,
+                                    "drained_count": 120,
+                                    "max_outstanding_before": 32,
+                                },
+                            },
+                            {
+                                "counter": "vmem_load",
+                                "reason": "amdgpu.ssa_use",
+                                "summary": {
+                                    "action_count": 8,
+                                    "full_drain_count": 7,
+                                    "partial_wait_count": 1,
+                                    "drained_count": 17,
+                                    "max_outstanding_before": 4,
+                                },
+                            },
+                        ],
                     },
                     "workload": {
                         "workgroup_size": {
@@ -251,6 +343,22 @@ def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     assert report["schema_version"] == 1
     assert report["loom_compile_reports"]["loom"]["function"] == "loom_kernel"
     assert report["loom_compile_reports"]["loom"]["local_memory_bytes"] == 2048
+    assert report["loom_compile_reports"]["loom"]["wait_plan"]["action_count"] == 138
+    assert (
+        report["loom_compile_reports"]["loom"]["wait_reasons"][0]["reason"]
+        == "amdgpu.read_result_reuse"
+    )
+    assert (
+        report["loom_compile_reports"]["loom"]["wait_reasons"][0]["partial_wait_count"]
+        == 109
+    )
+    source_low = report["loom_compile_reports"]["loom"]["source_low"]
+    assert source_low["dynamic_packet_count"] == 78464
+    assert source_low["dispatch_source"]["total_bytes"] == 183586258944
+    assert source_low["argument_packets"][0]["root_argument_name"] == "input"
+    assert (
+        source_low["argument_packets"][0]["packet"] == "amdgpu.global_load_b128_saddr"
+    )
     assert report["disassemblies"]["asm"]["whole_file"]["family_counts"]["v_wmma"] == 2
     assert report["disassemblies"]["asm"]["top_symbols"][0]["symbol"] == "big"
     ordered_symbols = report["disassemblies"]["asm"]["ordered_symbols"]
@@ -668,6 +776,11 @@ amdhsa.kernels:
 
     assert "Kernel anatomy report" in text
     assert "loom: instructions=123 code_bytes=456 local_bytes=2048" in text
+    assert "waits: actions=138 full=27 partial=111 drained=417" in text
+    assert "wait lds/amdgpu.read_result_reuse: actions=120" in text
+    assert "source-low: packets=560 dynamic_packets=78464" in text
+    assert "dispatch_total_bytes=183586258944" in text
+    assert "input/load: packet=amdgpu.global_load_b128_saddr" in text
     assert "asm: symbols=1 instructions=6" in text
     assert "global_load=1 global_store=1 buffer_load=1 buffer_store=1" in text
     assert "wait=1 barrier=1 read_bytes=24 write_bytes=24" in text
@@ -1030,6 +1143,67 @@ def test_rocprof_metrics_participate_in_comparisons(tmp_path: Path) -> None:
     assert deltas_by_metric["operation_time_ns"]["baseline"] == 200
     assert deltas_by_metric["operation_time_ns"]["candidate"] == 100
     assert "SQ_INSTS_LDS_mean" in comparison["missing_baseline_metrics"]
+
+
+def test_compile_report_wait_and_source_metrics_participate_in_comparisons(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_payload = _compile_report_payload()
+    candidate_payload = _compile_report_payload()
+    candidate_entry = candidate_payload["entries"]["rows"][0]
+    candidate_entry["wait_plan"]["action_count"] = 276
+    candidate_entry["wait_reason_summary_rows"]["rows"][0]["summary"][
+        "partial_wait_count"
+    ] = 218
+    candidate_payload["economics"]["memory"]["source_low"]["dynamic_packet_count"] = (
+        156928
+    )
+    candidate_payload["economics"]["memory"]["source_low"]["dispatch_source"][
+        "total_bytes"
+    ] = 367172517888
+    _write(baseline_path, json.dumps({"compile_report": baseline_payload}))
+    _write(candidate_path, json.dumps({"compile_report": candidate_payload}))
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[
+            NamedPath("baseline", baseline_path),
+            NamedPath("candidate", candidate_path),
+        ],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(baseline="baseline", candidate="candidate"),
+            ComparisonSpec(
+                baseline="baseline/wait/lds/amdgpu.read_result_reuse",
+                candidate="candidate/wait/lds/amdgpu.read_result_reuse",
+            ),
+        ],
+    )
+
+    whole_comparison = comparisons["baseline=candidate"]
+    whole_deltas = {delta["metric"]: delta for delta in whole_comparison["deltas"]}
+    assert whole_deltas["wait_action_count"]["candidate"] == 276
+    assert whole_deltas["source_low_dynamic_packet_count"]["ratio"] == 2
+    assert whole_deltas["source_low_dispatch_source_total_bytes"]["ratio"] == 2
+    whole_scorecard = {
+        entry["metric"]: entry for entry in whole_comparison["scorecard"]
+    }
+    assert whole_scorecard["wait_action_count"]["category"] == "wait"
+    assert (
+        whole_scorecard["source_low_dynamic_packet_count"]["category"]
+        == "source_memory"
+    )
+
+    reason_comparison = comparisons[
+        "baseline/wait/lds/amdgpu.read_result_reuse="
+        "candidate/wait/lds/amdgpu.read_result_reuse"
+    ]
+    reason_deltas = {delta["metric"]: delta for delta in reason_comparison["deltas"]}
+    assert reason_deltas["partial_wait_count"]["ratio"] == 2
 
 
 def test_weighted_symbol_metrics_participate_in_comparisons(

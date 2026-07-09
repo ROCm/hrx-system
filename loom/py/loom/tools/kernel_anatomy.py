@@ -136,6 +136,9 @@ def _summarize_loom_compile_report(
     """Extracts kernel-economics fields from a Loom compile-report object."""
 
     entry = _first_entry(report)
+    report_economics = report.get("economics")
+    if not isinstance(report_economics, Mapping):
+        report_economics = {}
     target_resources = entry.get("target_resources")
     if not isinstance(target_resources, Mapping):
         target_resources = {}
@@ -148,6 +151,9 @@ def _summarize_loom_compile_report(
     economics = entry.get("economics")
     if not isinstance(economics, Mapping):
         economics = {}
+    source_low = _summarize_source_low_economics(report_economics) or (
+        _summarize_source_low_economics(economics)
+    )
     workload = entry.get("workload")
     if not isinstance(workload, Mapping):
         workload = {}
@@ -166,12 +172,168 @@ def _summarize_loom_compile_report(
         "static_instruction_mix": static_instruction_mix,
         "dynamic_instruction_mix": dynamic_instruction_mix,
         "economics": economics,
+        "source_low": source_low,
         "target_resources": target_resources,
         "wait_plan": wait_plan,
+        "wait_reasons": _summarize_wait_reason_rows(report, entry),
     }
     if path is not None:
         summary["path"] = path.as_posix()
     return summary
+
+
+_WAIT_REASON_SUMMARY_METRICS = (
+    "action_count",
+    "explicit_action_count",
+    "planned_action_count",
+    "full_drain_count",
+    "partial_wait_count",
+    "drained_count",
+    "max_drained_count",
+    "max_outstanding_before",
+    "max_full_drain_outstanding_before",
+)
+
+
+def _summarize_wait_reason_rows(
+    report: Mapping[str, Any], entry: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    rows = _table_rows(report.get("wait_reason_summary_rows"))
+    if not rows:
+        rows = _table_rows(entry.get("wait_reason_summary_rows"))
+    summaries: list[dict[str, Any]] = []
+    for row_value in rows:
+        row = _as_mapping(row_value)
+        summary = _as_mapping(row.get("summary"))
+        summarized_row = {
+            "counter": row.get("counter"),
+            "reason": row.get("reason"),
+        }
+        for metric in _WAIT_REASON_SUMMARY_METRICS:
+            value = summary.get(metric)
+            if _as_number(value) is not None:
+                summarized_row[metric] = value
+        summaries.append(summarized_row)
+    return sorted(
+        summaries,
+        key=lambda row: (
+            _as_number(row.get("action_count")) or 0,
+            _as_number(row.get("drained_count")) or 0,
+        ),
+        reverse=True,
+    )
+
+
+_SOURCE_LOW_TOTAL_METRICS = (
+    "packet_count",
+    "load_packet_count",
+    "store_packet_count",
+    "scalar_packet_count",
+    "vector_packet_count",
+    "source_lane_count",
+    "source_byte_count",
+    "read_byte_count",
+    "write_byte_count",
+    "issued_read_byte_count",
+    "issued_write_byte_count",
+    "exact_dynamic_packet_count",
+    "unknown_dynamic_packet_count",
+    "dynamic_packet_count",
+    "dynamic_source_byte_count",
+    "dynamic_read_byte_count",
+    "dynamic_write_byte_count",
+    "dynamic_issued_read_byte_count",
+    "dynamic_issued_write_byte_count",
+    "contiguous_vector_packet_count",
+    "strided_vector_packet_count",
+    "unknown_stride_vector_packet_count",
+)
+
+_SOURCE_LOW_NESTED_METRICS = (
+    "read_bytes",
+    "write_bytes",
+    "total_bytes",
+    "byte_count",
+    "begin_min_bytes",
+    "end_max_bytes",
+)
+
+
+def _summarize_source_low_economics(
+    economics: Mapping[str, Any],
+) -> dict[str, Any]:
+    memory = _as_mapping(economics.get("memory"))
+    source_low = _as_mapping(memory.get("source_low")) or _as_mapping(
+        economics.get("source_low")
+    )
+    if not source_low:
+        return {}
+    summary = _copy_numeric_fields(source_low, _SOURCE_LOW_TOTAL_METRICS)
+    for nested_name in (
+        "dispatch_source",
+        "dispatch_issued",
+        "interval_envelope",
+        "read_interval_envelope",
+        "write_interval_envelope",
+    ):
+        nested_summary = _copy_numeric_fields(
+            _as_mapping(source_low.get(nested_name)), _SOURCE_LOW_NESTED_METRICS
+        )
+        if nested_summary:
+            summary[nested_name] = nested_summary
+    argument_packets = [
+        _summarize_source_low_argument_packet(row)
+        for row in _table_rows(source_low.get("argument_packets"))
+    ]
+    if argument_packets:
+        summary["argument_packets"] = sorted(
+            argument_packets,
+            key=lambda row: (
+                _as_number(row.get("dynamic_packet_count")) or 0,
+                _as_number(row.get("dynamic_source_byte_count")) or 0,
+                _as_number(_as_mapping(row.get("dispatch_source")).get("total_bytes"))
+                or 0,
+            ),
+            reverse=True,
+        )
+    return summary
+
+
+def _summarize_source_low_argument_packet(row_value: Any) -> dict[str, Any]:
+    row = _as_mapping(row_value)
+    summary = {
+        "root_argument_name": row.get("root_argument_name")
+        or row.get("argument")
+        or row.get("root")
+        or row.get("name"),
+        "memory_space": row.get("memory_space"),
+        "operation": row.get("operation"),
+        "packet": row.get("packet") or row.get("packet_key"),
+    }
+    summary.update(_copy_numeric_fields(row, _SOURCE_LOW_TOTAL_METRICS))
+    for nested_name in ("dispatch_source", "dispatch_issued", "interval_envelope"):
+        nested_summary = _copy_numeric_fields(
+            _as_mapping(row.get(nested_name)), _SOURCE_LOW_NESTED_METRICS
+        )
+        if nested_summary:
+            summary[nested_name] = nested_summary
+    return summary
+
+
+def _copy_numeric_fields(
+    source: Mapping[str, Any], fields: Sequence[str]
+) -> dict[str, Any]:
+    return {
+        field: value
+        for field in fields
+        if _as_number(value := source.get(field)) is not None
+    }
+
+
+def _table_rows(table_value: Any) -> list[Any]:
+    table = _as_mapping(table_value)
+    rows = table.get("rows")
+    return rows if isinstance(rows, list) else []
 
 
 def summarize_loom_compile_report(path: Path) -> dict[str, Any]:
@@ -1206,12 +1368,118 @@ def _collect_compile_report_metric_groups(
             resources.get("occupancy_percent"),
             "compile_report",
         )
+        wait_plan = _as_mapping(compile_report.get("wait_plan"))
+        for metric in _WAIT_REASON_SUMMARY_METRICS:
+            _record_metric(
+                groups,
+                name,
+                f"wait_{metric}",
+                wait_plan.get(metric),
+                "compile_report_wait_plan",
+            )
+        _record_source_low_metrics(
+            groups,
+            name,
+            _as_mapping(compile_report.get("source_low")),
+            "compile_report_source_low",
+        )
+        _record_wait_reason_metrics(
+            groups,
+            name,
+            compile_report.get("wait_reasons"),
+            "compile_report_wait_reason",
+        )
         _record_compile_instruction_mix_metrics(
             groups,
             f"{name}/dynamic",
             dynamic_mix,
             "compile_report_dynamic",
         )
+
+
+def _record_wait_reason_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    wait_reasons_value: Any,
+    source: str,
+) -> None:
+    if not isinstance(wait_reasons_value, list):
+        return
+    for wait_reason_value in wait_reasons_value:
+        wait_reason = _as_mapping(wait_reason_value)
+        counter = wait_reason.get("counter")
+        reason = wait_reason.get("reason")
+        if not isinstance(counter, str) or not isinstance(reason, str):
+            continue
+        reason_group = f"{group_name}/wait/{counter}/{reason}"
+        for metric in _WAIT_REASON_SUMMARY_METRICS:
+            _record_metric(
+                groups,
+                reason_group,
+                metric,
+                wait_reason.get(metric),
+                source,
+            )
+
+
+def _record_source_low_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    source_low: Mapping[str, Any],
+    source: str,
+) -> None:
+    for metric in _SOURCE_LOW_TOTAL_METRICS:
+        _record_metric(
+            groups,
+            group_name,
+            f"source_low_{metric}",
+            source_low.get(metric),
+            source,
+        )
+    for nested_name in (
+        "dispatch_source",
+        "dispatch_issued",
+        "interval_envelope",
+        "read_interval_envelope",
+        "write_interval_envelope",
+    ):
+        nested = _as_mapping(source_low.get(nested_name))
+        for metric in _SOURCE_LOW_NESTED_METRICS:
+            _record_metric(
+                groups,
+                group_name,
+                f"source_low_{nested_name}_{metric}",
+                nested.get(metric),
+                source,
+            )
+    argument_packets = source_low.get("argument_packets")
+    if not isinstance(argument_packets, list):
+        return
+    for argument_packet_value in argument_packets:
+        argument_packet = _as_mapping(argument_packet_value)
+        root_name = argument_packet.get("root_argument_name")
+        operation = argument_packet.get("operation")
+        if not isinstance(root_name, str) or not isinstance(operation, str):
+            continue
+        argument_group = f"{group_name}/source/{root_name}/{operation}"
+        for metric in _SOURCE_LOW_TOTAL_METRICS:
+            _record_metric(
+                groups,
+                argument_group,
+                metric,
+                argument_packet.get(metric),
+                source,
+            )
+        for nested_name in ("dispatch_source", "dispatch_issued", "interval_envelope"):
+            nested = _as_mapping(argument_packet.get(nested_name))
+            for metric in _SOURCE_LOW_NESTED_METRICS:
+                _record_metric(
+                    groups,
+                    argument_group,
+                    f"{nested_name}_{metric}",
+                    nested.get(metric),
+                    source,
+                )
 
 
 def _record_compile_instruction_mix_metrics(
@@ -1932,6 +2200,10 @@ def _scorecard_metric_category(metric: str) -> str:
         "total_duration_ns",
     }:
         return "time"
+    if metric.startswith("wait_") or metric in _WAIT_REASON_SUMMARY_METRICS:
+        return "wait"
+    if metric.startswith("source_low_") or metric in _SOURCE_LOW_TOTAL_METRICS:
+        return "source_memory"
     if "local_memory" in metric or metric.startswith("ds_"):
         return "local_memory"
     if "device_memory" in metric or metric.startswith(("global_", "buffer_", "flat_")):
@@ -2142,6 +2414,64 @@ def _append_compile_report_lines(lines: list[str], report: Mapping[str, Any]) ->
             f"wmma={mix.get('wmma_count')} "
             f"mfma={mix.get('mfma_count')} "
             f"valu={mix.get('vector_alu_count')}"
+        )
+        wait_plan = _as_mapping(compile_report.get("wait_plan"))
+        if wait_plan:
+            lines.append(
+                "    "
+                f"waits: actions={wait_plan.get('action_count')} "
+                f"full={wait_plan.get('full_drain_count')} "
+                f"partial={wait_plan.get('partial_wait_count')} "
+                f"drained={wait_plan.get('drained_count')} "
+                f"max_outstanding={wait_plan.get('max_outstanding_before')}"
+            )
+        _append_wait_reason_lines(lines, compile_report.get("wait_reasons"))
+        _append_source_low_lines(lines, compile_report.get("source_low"))
+
+
+def _append_wait_reason_lines(lines: list[str], wait_reasons_value: Any) -> None:
+    if not isinstance(wait_reasons_value, list) or not wait_reasons_value:
+        return
+    for wait_reason_value in wait_reasons_value[:6]:
+        wait_reason = _as_mapping(wait_reason_value)
+        lines.append(
+            "    "
+            f"wait {wait_reason.get('counter')}/{wait_reason.get('reason')}: "
+            f"actions={wait_reason.get('action_count')} "
+            f"full={wait_reason.get('full_drain_count')} "
+            f"partial={wait_reason.get('partial_wait_count')} "
+            f"drained={wait_reason.get('drained_count')} "
+            f"max_outstanding={wait_reason.get('max_outstanding_before')}"
+        )
+
+
+def _append_source_low_lines(lines: list[str], source_low_value: Any) -> None:
+    source_low = _as_mapping(source_low_value)
+    if not source_low:
+        return
+    dispatch_source = _as_mapping(source_low.get("dispatch_source"))
+    lines.append(
+        "    "
+        f"source-low: packets={source_low.get('packet_count')} "
+        f"dynamic_packets={source_low.get('dynamic_packet_count')} "
+        f"read_bytes={source_low.get('dynamic_read_byte_count')} "
+        f"write_bytes={source_low.get('dynamic_write_byte_count')} "
+        f"dispatch_total_bytes={dispatch_source.get('total_bytes')}"
+    )
+    argument_packets = source_low.get("argument_packets")
+    if not isinstance(argument_packets, list):
+        return
+    for argument_packet_value in argument_packets[:6]:
+        argument_packet = _as_mapping(argument_packet_value)
+        argument_dispatch_source = _as_mapping(argument_packet.get("dispatch_source"))
+        lines.append(
+            "      "
+            f"{argument_packet.get('root_argument_name')}/"
+            f"{argument_packet.get('operation')}: "
+            f"packet={argument_packet.get('packet')} "
+            f"packets={argument_packet.get('packet_count')} "
+            f"dynamic_packets={argument_packet.get('dynamic_packet_count')} "
+            f"dispatch_total_bytes={argument_dispatch_source.get('total_bytes')}"
         )
 
 
