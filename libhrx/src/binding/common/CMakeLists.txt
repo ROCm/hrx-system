@@ -92,6 +92,20 @@ iree_cc_test(
     libhrx_defs
 )
 
+iree_cc_test(
+  NAME
+    event_test
+  SRCS
+    "event_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::libhrx::hrx
+    libhrx_defs
+)
+
 iree_cc_binary_benchmark(
   NAME
     buffer_table_benchmark

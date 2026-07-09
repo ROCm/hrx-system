@@ -101,6 +101,20 @@ hrx_cc_test(
     ],
 )
 
+# Drives the streaming event timing host path on a host (local-task) device,
+# so it is GPU-free and runnable without an accelerator.
+hrx_cc_test(
+    name = "event_test",
+    srcs = ["event_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 hrx_cc_benchmark(
     name = "buffer_table_benchmark",
     srcs = ["buffer_table_benchmark.cc"],
