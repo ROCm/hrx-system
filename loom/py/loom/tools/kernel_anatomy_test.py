@@ -13,6 +13,7 @@ from loom.tools.kernel_anatomy import (
     ComparisonSpec,
     NamedPath,
     SymbolWeightSpec,
+    build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
     format_text_report,
@@ -807,6 +808,11 @@ amdhsa.kernels:
     assert deltas_by_metric["vgpr_count"]["candidate"] == 64
     assert deltas_by_metric["operation_time_ns"]["baseline"] == 8503930.0
     assert deltas_by_metric["operation_time_ns"]["candidate"] == 1234000
+    scorecard_by_metric = {entry["metric"]: entry for entry in comparison["scorecard"]}
+    assert scorecard_by_metric["local_memory_bytes"]["category"] == "local_memory"
+    assert scorecard_by_metric["local_memory_bytes"]["finding"] == "candidate_higher"
+    assert scorecard_by_metric["local_memory_bytes"]["severity"] == 2
+    assert scorecard_by_metric["vgpr_count"]["category"] == "resources"
 
 
 def test_rocblas_trace_rows_participate_in_comparisons(tmp_path: Path) -> None:
@@ -865,7 +871,11 @@ amdhsa.kernels:
     text = format_text_report(report)
 
     assert "Comparisons:" in text
+    assert "Comparison scorecard:" in text
     assert "baseline=loom: shared=2 baseline_metrics=2" in text
+    assert "scorecard:" in text
+    assert "local_memory_bytes [local_memory]: candidate_higher" in text
+    assert "baseline=loom :: local_memory_bytes [local_memory]" in text
     assert "local_memory_bytes: baseline=1024 candidate=2048" in text
     assert "ratio=2x sources=amdhsa_metadata/compile_report" in text
 
@@ -938,6 +948,14 @@ def test_weighted_symbol_metrics_participate_in_comparisons(
     assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 99
     assert deltas_by_metric["local_memory_bytes"]["baseline"] == 160
     assert deltas_by_metric["wmma_count"]["baseline"] == 5
+    assert comparison["scorecard"][0]["metric"] == "local_memory_instruction_count"
+    assert comparison["scorecard"][0]["category"] == "local_memory"
+    assert comparison["scorecard"][0]["severity"] == 9.9
+    aggregate_scorecard = build_kernel_anatomy_comparison_scorecard(comparisons)
+    assert aggregate_scorecard[0]["comparison"] == (
+        "tensile/weighted_symbols=loom/dynamic"
+    )
+    assert aggregate_scorecard[0]["metric"] == "local_memory_instruction_count"
 
 
 def test_main_emits_json(tmp_path: Path, capsys) -> None:
@@ -1044,6 +1062,7 @@ amdhsa.kernels:
     report = json.loads(output)
     comparison = report["comparisons"]["baseline=loom"]
     assert comparison["shared_metric_count"] == 3
+    assert report["comparison_scorecard"][0]["comparison"] == "baseline=loom"
 
 
 def test_main_emits_weighted_symbols(tmp_path: Path, capsys) -> None:

@@ -907,6 +907,7 @@ def build_kernel_anatomy_comparisons(
             "candidate_metric_count": len(candidate_metrics),
             "shared_metric_count": len(common_metrics),
             "deltas": sorted(deltas, key=_metric_delta_rank, reverse=True),
+            "scorecard": _build_comparison_scorecard(deltas),
             "missing_baseline_metrics": sorted(
                 set(candidate_metrics) - set(baseline_metrics)
             ),
@@ -915,6 +916,28 @@ def build_kernel_anatomy_comparisons(
             ),
         }
     return comparisons
+
+
+def build_kernel_anatomy_comparison_scorecard(
+    comparisons: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Builds one ranked scorecard across all named metric comparisons."""
+
+    scorecard: list[dict[str, Any]] = []
+    for comparison_name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        entries = comparison.get("scorecard", [])
+        if not isinstance(entries, list):
+            continue
+        for entry_value in entries:
+            entry = dict(_as_mapping(entry_value))
+            if not entry:
+                continue
+            entry["comparison"] = comparison_name
+            entry["baseline_group"] = comparison.get("baseline")
+            entry["candidate_group"] = comparison.get("candidate")
+            scorecard.append(entry)
+    return sorted(scorecard, key=_scorecard_entry_rank, reverse=True)
 
 
 def _collect_comparison_metric_groups(
@@ -1639,6 +1662,147 @@ def _build_metric_delta(
     }
 
 
+_HIGHER_IS_BETTER_METRICS = frozenset(
+    {
+        "gflops",
+        "occupancy_percent",
+    }
+)
+
+_EXACT_PARITY_METRICS = frozenset(
+    {
+        "M",
+        "N",
+        "K",
+        "batch_count",
+        "grid_size",
+        "lda",
+        "ldb",
+        "ldc",
+        "ldd",
+        "matrix_instruction_count",
+        "mfma_count",
+        "solution_index",
+        "wavefront_size",
+        "wmma_count",
+        "workgroup_size",
+    }
+)
+
+_IGNORED_SCORECARD_METRICS = frozenset(
+    {
+        "call_count",
+        "sample_count",
+    }
+)
+
+
+def _build_comparison_scorecard(
+    deltas: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    scorecard = [
+        entry
+        for delta in deltas
+        if (entry := _build_scorecard_entry(delta)) is not None
+    ]
+    return sorted(scorecard, key=_scorecard_entry_rank, reverse=True)
+
+
+def _build_scorecard_entry(delta: Mapping[str, Any]) -> dict[str, Any] | None:
+    metric = delta.get("metric")
+    if not isinstance(metric, str) or metric in _IGNORED_SCORECARD_METRICS:
+        return None
+    baseline_value = _as_number(delta.get("baseline"))
+    candidate_value = _as_number(delta.get("candidate"))
+    if baseline_value is None or candidate_value is None:
+        return None
+    if _numeric_equal(baseline_value, candidate_value):
+        return None
+    ratio = delta.get("ratio")
+    numeric_ratio = ratio if isinstance(ratio, (int, float)) else None
+    goal = _scorecard_metric_goal(metric)
+    if goal == "higher":
+        if candidate_value >= baseline_value:
+            return None
+        category = "throughput"
+        severity = _safe_inverse(numeric_ratio)
+        finding = "candidate_lower"
+    elif goal == "exact":
+        category = "parity"
+        severity = _metric_delta_rank(delta)
+        if not math.isfinite(severity):
+            severity = None
+        finding = "mismatch"
+    else:
+        if candidate_value <= baseline_value:
+            return None
+        category = _scorecard_metric_category(metric)
+        severity = numeric_ratio
+        finding = "candidate_higher"
+    return {
+        "metric": metric,
+        "category": category,
+        "finding": finding,
+        "goal": goal,
+        "baseline": baseline_value,
+        "candidate": candidate_value,
+        "delta": delta.get("delta"),
+        "ratio": numeric_ratio,
+        "severity": severity,
+        "baseline_source": delta.get("baseline_source"),
+        "candidate_source": delta.get("candidate_source"),
+    }
+
+
+def _numeric_equal(lhs: float | int, rhs: float | int) -> bool:
+    return math.isclose(float(lhs), float(rhs), rel_tol=1e-9, abs_tol=1e-12)
+
+
+def _safe_inverse(value: float | int | None) -> float | None:
+    if value is None or value == 0:
+        return None
+    return 1 / value
+
+
+def _scorecard_metric_goal(metric: str) -> str:
+    if metric in _HIGHER_IS_BETTER_METRICS:
+        return "higher"
+    if metric in _EXACT_PARITY_METRICS:
+        return "exact"
+    return "lower"
+
+
+def _scorecard_metric_category(metric: str) -> str:
+    if metric in {
+        "operation_time_ns",
+        "p50_duration_ns",
+        "p90_duration_ns",
+        "p99_duration_ns",
+        "min_duration_ns",
+        "max_duration_ns",
+        "total_duration_ns",
+    }:
+        return "time"
+    if "local_memory" in metric or metric.startswith("ds_"):
+        return "local_memory"
+    if "device_memory" in metric or metric.startswith(("global_", "buffer_", "flat_")):
+        return "device_memory"
+    if "byte" in metric or metric.endswith("_bytes"):
+        return "memory"
+    if "vgpr" in metric or "sgpr" in metric or metric == "private_memory_bytes":
+        return "resources"
+    if "count" in metric or metric.endswith("_instructions"):
+        return "instructions"
+    return "numeric"
+
+
+def _scorecard_entry_rank(entry: Mapping[str, Any]) -> float:
+    severity = entry.get("severity")
+    if isinstance(severity, (int, float)) and severity > 0:
+        return severity
+    return 1.0
+
+
 def _metric_delta_rank(delta: Mapping[str, Any]) -> float:
     ratio = delta.get("ratio")
     if isinstance(ratio, (int, float)) and ratio > 0:
@@ -2093,6 +2257,32 @@ def _format_ratio(ratio: Any) -> str:
     return f"{ratio:.6g}x" if isinstance(ratio, (int, float)) else "?"
 
 
+def _append_comparison_scorecard_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    scorecard = report.get("comparison_scorecard")
+    if scorecard is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            scorecard = build_kernel_anatomy_comparison_scorecard(comparisons)
+    if not isinstance(scorecard, list) or not scorecard:
+        return
+    lines.append("")
+    lines.append("Comparison scorecard:")
+    for entry_value in scorecard[:16]:
+        entry = _as_mapping(entry_value)
+        lines.append(
+            "  "
+            f"{entry.get('comparison')} :: "
+            f"{entry.get('metric')} [{entry.get('category')}]: "
+            f"{entry.get('finding')} "
+            f"severity={_format_ratio(entry.get('severity'))} "
+            f"baseline={entry.get('baseline')} "
+            f"candidate={entry.get('candidate')} "
+            f"ratio={_format_ratio(entry.get('ratio'))}"
+        )
+
+
 def _append_comparison_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     comparisons = report.get("comparisons", {})
     if not isinstance(comparisons, Mapping) or not comparisons:
@@ -2107,6 +2297,22 @@ def _append_comparison_lines(lines: list[str], report: Mapping[str, Any]) -> Non
             f"baseline_metrics={comparison.get('baseline_metric_count')} "
             f"candidate_metrics={comparison.get('candidate_metric_count')}"
         )
+        scorecard = comparison.get("scorecard", [])
+        if isinstance(scorecard, list) and scorecard:
+            lines.append("    scorecard:")
+            for entry_value in scorecard[:12]:
+                entry = _as_mapping(entry_value)
+                lines.append(
+                    "      "
+                    f"{entry.get('metric')} [{entry.get('category')}]: "
+                    f"{entry.get('finding')} "
+                    f"severity={_format_ratio(entry.get('severity'))} "
+                    f"baseline={entry.get('baseline')} "
+                    f"candidate={entry.get('candidate')} "
+                    f"ratio={_format_ratio(entry.get('ratio'))} "
+                    f"sources={entry.get('baseline_source')}/"
+                    f"{entry.get('candidate_source')}"
+                )
         deltas = comparison.get("deltas", [])
         if not isinstance(deltas, list):
             continue
@@ -2286,6 +2492,7 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     _append_rocprof_kernel_trace_lines(lines, report)
     _append_rocprof_counter_collection_lines(lines, report)
     _append_rocblas_log_lines(lines, report)
+    _append_comparison_scorecard_lines(lines, report)
     _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
     _append_amdhsa_metadata_lines(lines, report)
@@ -2425,6 +2632,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.compare:
         report["comparisons"] = build_kernel_anatomy_comparisons(report, args.compare)
+        report["comparison_scorecard"] = build_kernel_anatomy_comparison_scorecard(
+            report["comparisons"]
+        )
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
