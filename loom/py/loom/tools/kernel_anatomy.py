@@ -1418,6 +1418,7 @@ def _collect_comparison_metric_groups(
     _collect_rocblas_metric_groups(groups, report)
     _collect_disassembly_metric_groups(groups, report)
     _collect_metadata_metric_groups(groups, report)
+    _record_per_matrix_metric_groups(groups)
     return groups
 
 
@@ -1448,6 +1449,59 @@ def _record_metric(
         "value": numeric_value,
         "source": source,
     }
+
+
+_PER_MATRIX_NUMERATOR_METRICS = (
+    "barrier_count",
+    "branch_count",
+    "buffer_load_count",
+    "buffer_store_count",
+    "code_byte_count",
+    "conversion_count",
+    "device_memory_load_count",
+    "device_memory_store_count",
+    "flat_load_count",
+    "flat_store_count",
+    "global_load_count",
+    "global_store_count",
+    "instruction_count",
+    "local_memory_access_bytes",
+    "local_memory_instruction_count",
+    "read_bytes",
+    "register_move_count",
+    "vector_alu_count",
+    "wait_action_count",
+    "wait_drained_count",
+    "wait_full_drain_count",
+    "wait_partial_wait_count",
+    "write_bytes",
+)
+
+
+def _record_per_matrix_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]],
+) -> None:
+    for group_name, group in list(groups.items()):
+        matrix_count = _metric_value(group, "matrix_instruction_count")
+        if matrix_count is None or matrix_count <= 0:
+            continue
+        for numerator_metric in _PER_MATRIX_NUMERATOR_METRICS:
+            numerator = _metric_value(group, numerator_metric)
+            if numerator is None:
+                continue
+            _record_metric(
+                groups,
+                group_name,
+                f"{numerator_metric}_per_matrix_instruction",
+                numerator / matrix_count,
+                "derived",
+            )
+
+
+def _metric_value(
+    group: Mapping[str, Mapping[str, Any]], metric: str
+) -> float | int | None:
+    return _as_number(_as_mapping(group.get(metric)).get("value"))
 
 
 def _collect_compile_report_metric_groups(
@@ -1502,6 +1556,13 @@ def _collect_compile_report_metric_groups(
         _record_metric(
             groups,
             name,
+            "matrix_instruction_count",
+            static_mix.get("matrix_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
             "vector_alu_count",
             static_mix.get("vector_alu_count"),
             "compile_report",
@@ -1532,21 +1593,19 @@ def _collect_compile_report_metric_groups(
             groups,
             name,
             "dynamic_local_memory_read_bytes",
-            dynamic_mix.get("local_memory_read_bytes"),
+            dynamic_mix.get("local_read_byte_count"),
             "compile_report",
         )
         _record_metric(
             groups,
             name,
             "dynamic_local_memory_write_bytes",
-            dynamic_mix.get("local_memory_write_bytes"),
+            dynamic_mix.get("local_write_byte_count"),
             "compile_report",
         )
-        dynamic_local_read_bytes = _as_number(
-            dynamic_mix.get("local_memory_read_bytes")
-        )
+        dynamic_local_read_bytes = _as_number(dynamic_mix.get("local_read_byte_count"))
         dynamic_local_write_bytes = _as_number(
-            dynamic_mix.get("local_memory_write_bytes")
+            dynamic_mix.get("local_write_byte_count")
         )
         if (
             dynamic_local_read_bytes is not None
@@ -1559,10 +1618,8 @@ def _collect_compile_report_metric_groups(
                 dynamic_local_read_bytes + dynamic_local_write_bytes,
                 "compile_report",
             )
-        static_local_read_bytes = _as_number(static_mix.get("local_memory_read_bytes"))
-        static_local_write_bytes = _as_number(
-            static_mix.get("local_memory_write_bytes")
-        )
+        static_local_read_bytes = _as_number(static_mix.get("local_read_byte_count"))
+        static_local_write_bytes = _as_number(static_mix.get("local_write_byte_count"))
         if static_local_read_bytes is not None and static_local_write_bytes is not None:
             _record_metric(
                 groups,

@@ -1315,6 +1315,9 @@ def test_compile_report_wait_and_source_metrics_participate_in_comparisons(
     whole_comparison = comparisons["baseline=candidate"]
     whole_deltas = {delta["metric"]: delta for delta in whole_comparison["deltas"]}
     assert whole_deltas["wait_action_count"]["candidate"] == 276
+    assert whole_deltas["dynamic_local_memory_read_bytes"]["baseline"] == 320
+    assert whole_deltas["dynamic_local_memory_write_bytes"]["baseline"] == 160
+    assert whole_deltas["dynamic_local_memory_access_bytes"]["baseline"] == 480
     assert whole_deltas["source_low_dynamic_packet_count"]["ratio"] == 2
     assert whole_deltas["source_low_dispatch_source_total_bytes"]["ratio"] == 2
     whole_scorecard = {
@@ -1369,7 +1372,23 @@ def test_weighted_symbol_metrics_participate_in_comparisons(
     deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
     assert deltas_by_metric["local_memory_instruction_count"]["baseline"] == 10
     assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 99
+    assert (
+        deltas_by_metric["local_memory_instruction_count_per_matrix_instruction"][
+            "baseline"
+        ]
+        == 2
+    )
+    assert (
+        deltas_by_metric["local_memory_instruction_count_per_matrix_instruction"][
+            "candidate"
+        ]
+        == 4.95
+    )
     assert deltas_by_metric["local_memory_access_bytes"]["baseline"] == 160
+    assert (
+        deltas_by_metric["local_memory_access_bytes_per_matrix_instruction"]["baseline"]
+        == 32
+    )
     assert deltas_by_metric["wmma_count"]["baseline"] == 5
     assert comparison["scorecard"][0]["metric"] == "local_memory_instruction_count"
     assert comparison["scorecard"][0]["category"] == "local_memory"
@@ -1426,6 +1445,12 @@ def test_weighted_symbol_group_metrics_participate_in_comparisons(
     deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
     assert deltas_by_metric["local_memory_instruction_count"]["baseline"] == 10
     assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 99
+    assert (
+        deltas_by_metric["local_memory_instruction_count_per_matrix_instruction"][
+            "ratio"
+        ]
+        == 2.475
+    )
     assert deltas_by_metric["wmma_count"]["baseline"] == 5
     assert comparison["scorecard"][0]["category"] == "local_memory"
 
