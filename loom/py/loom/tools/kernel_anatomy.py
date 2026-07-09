@@ -2317,6 +2317,92 @@ def build_kernel_anatomy_best_candidate_rows(
     )
 
 
+def build_kernel_anatomy_structural_bottleneck_rows(
+    comparisons: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Groups comparison verdicts by recurring primary structural cost."""
+
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for comparison_name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        verdict = _build_kernel_anatomy_comparison_verdict(comparison_name, comparison)
+        time_ratio = _as_number(verdict.get("time_ratio"))
+        if time_ratio is not None and time_ratio <= 1.05:
+            continue
+        cost = _as_mapping(verdict.get("primary_cost"))
+        metric = cost.get("metric")
+        if not isinstance(metric, str) or not metric:
+            continue
+        category = str(cost.get("category") or "")
+        role = str(cost.get("role") or "")
+        group = groups.setdefault(
+            (metric, category, role),
+            {
+                "metric": metric,
+                "category": category,
+                "role": role,
+                "comparison_count": 0,
+                "status_counts": {},
+                "time_ratios": [],
+                "cost_ratios": [],
+                "comparisons": [],
+            },
+        )
+        group["comparison_count"] += 1
+        status = str(verdict.get("status") or "")
+        status_counts = group["status_counts"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if time_ratio is not None and time_ratio > 0:
+            group["time_ratios"].append(time_ratio)
+        cost_ratio = _as_number(cost.get("ratio"))
+        if cost_ratio is not None and cost_ratio > 0:
+            group["cost_ratios"].append(cost_ratio)
+        group["comparisons"].append(
+            {
+                "comparison": comparison_name,
+                "baseline": verdict.get("baseline"),
+                "candidate": verdict.get("candidate"),
+                "status": verdict.get("status"),
+                "time_ratio": time_ratio,
+                "cost_ratio": cost_ratio,
+            }
+        )
+    rows = []
+    for group in groups.values():
+        time_ratios = group.pop("time_ratios")
+        cost_ratios = group.pop("cost_ratios")
+        comparisons = group["comparisons"]
+        comparisons.sort(
+            key=lambda row: (
+                _as_number(row.get("time_ratio")) or 0,
+                _as_number(row.get("cost_ratio")) or 0,
+                str(row.get("comparison")),
+            ),
+            reverse=True,
+        )
+        group["time_ratio_min"] = min(time_ratios) if time_ratios else None
+        group["time_ratio_max"] = max(time_ratios) if time_ratios else None
+        group["time_ratio_geomean"] = _geometric_mean(time_ratios)
+        group["cost_ratio_min"] = min(cost_ratios) if cost_ratios else None
+        group["cost_ratio_max"] = max(cost_ratios) if cost_ratios else None
+        group["cost_ratio_geomean"] = _geometric_mean(cost_ratios)
+        rows.append(group)
+    return sorted(rows, key=_structural_bottleneck_rank, reverse=True)
+
+
+def _geometric_mean(values: Sequence[float | int]) -> float | None:
+    if not values:
+        return None
+    return math.exp(sum(math.log(float(value)) for value in values) / len(values))
+
+
+def _structural_bottleneck_rank(row: Mapping[str, Any]) -> float:
+    comparison_count = _as_number(row.get("comparison_count")) or 0
+    time_ratio = _as_number(row.get("time_ratio_geomean")) or 1
+    cost_ratio = _as_number(row.get("cost_ratio_geomean")) or 1
+    return comparison_count * max(time_ratio, 1) * max(cost_ratio, 1)
+
+
 def build_kernel_anatomy_duplicate_candidate_rows(
     report: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
@@ -5536,6 +5622,42 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"time={_format_ratio(row.get('time_ratio'))}"
                 f"{candidate_suffix}"
             )
+    bottlenecks = report.get("comparison_structural_bottlenecks")
+    if bottlenecks is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            bottlenecks = build_kernel_anatomy_structural_bottleneck_rows(comparisons)
+    if isinstance(bottlenecks, list) and bottlenecks:
+        lines.append("")
+        lines.append("Recurring structural bottlenecks:")
+        for row_value in bottlenecks[:8]:
+            row = _as_mapping(row_value)
+            status_counts = _as_mapping(row.get("status_counts"))
+            statuses = ", ".join(
+                f"{status}:{count}"
+                for status, count in sorted(status_counts.items())
+                if status
+            )
+            lines.append(
+                "  "
+                f"{row.get('metric')}[{row.get('category')}]: "
+                f"comparisons={row.get('comparison_count')} "
+                f"time={_format_ratio(row.get('time_ratio_geomean'))} "
+                f"cost={_format_ratio(row.get('cost_ratio_geomean'))} "
+                f"range={_format_ratio(row.get('cost_ratio_min'))}.."
+                f"{_format_ratio(row.get('cost_ratio_max'))} "
+                f"statuses={statuses}"
+            )
+            examples = row.get("comparisons")
+            if isinstance(examples, list) and examples:
+                example_labels = [
+                    _format_short_comparison_pair(
+                        str(_as_mapping(example).get("baseline") or ""),
+                        str(_as_mapping(example).get("candidate") or ""),
+                    )
+                    for example in examples[:3]
+                ]
+                lines.append("    examples: " + "; ".join(example_labels))
     duplicate_candidates = report.get("benchmark_duplicate_candidates")
     if isinstance(duplicate_candidates, list) and duplicate_candidates:
         lines.append("")
@@ -6340,6 +6462,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report["comparison_best_candidates"] = build_kernel_anatomy_best_candidate_rows(
             report["comparisons"]
+        )
+        report["comparison_structural_bottlenecks"] = (
+            build_kernel_anatomy_structural_bottleneck_rows(report["comparisons"])
         )
     if args.frontier:
         report["optimization_frontier"] = build_kernel_anatomy_optimization_frontier(

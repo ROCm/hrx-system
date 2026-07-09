@@ -23,6 +23,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
     build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs,
+    build_kernel_anatomy_structural_bottleneck_rows,
     format_rocblas_replay_script,
     format_rocblas_solution_trace_script,
     format_summary_report,
@@ -1158,6 +1159,74 @@ def test_compare_only_benchmark_rows_participate_in_comparisons(
     )
     assert [entry["candidate"] for entry in frontier] == ["bench/c1/bench_kernel"]
     assert frontier[0]["status"] == "slower"
+
+
+def test_structural_bottleneck_rows_group_recurring_primary_costs(
+    tmp_path: Path,
+) -> None:
+    baseline_report = _compile_report_payload()
+    candidate_report = json.loads(json.dumps(_compile_report_payload()))
+    candidate_report["entries"]["rows"][0]["instruction_count"] = 100
+    candidate_report["entries"]["rows"][0]["dynamic_instruction_mix"][
+        "local_memory_count"
+    ] = 198
+    _write_single_benchmark_jsonl(
+        tmp_path / "baseline_a.jsonl",
+        "baseline_a",
+        baseline_report,
+        1_000_000,
+    )
+    _write_single_benchmark_jsonl(
+        tmp_path / "candidate_a.jsonl",
+        "candidate_a",
+        candidate_report,
+        3_000_000,
+    )
+    _write_single_benchmark_jsonl(
+        tmp_path / "baseline_b.jsonl",
+        "baseline_b",
+        baseline_report,
+        2_000_000,
+    )
+    _write_single_benchmark_jsonl(
+        tmp_path / "candidate_b.jsonl",
+        "candidate_b",
+        candidate_report,
+        8_000_000,
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[
+            NamedPath("baseline_a", tmp_path / "baseline_a.jsonl"),
+            NamedPath("candidate_a", tmp_path / "candidate_a.jsonl"),
+            NamedPath("baseline_b", tmp_path / "baseline_b.jsonl"),
+            NamedPath("candidate_b", tmp_path / "candidate_b.jsonl"),
+        ],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(baseline="baseline_a", candidate="candidate_a"),
+            ComparisonSpec(baseline="baseline_b", candidate="candidate_b"),
+        ],
+    )
+
+    rows = build_kernel_anatomy_structural_bottleneck_rows(comparisons)
+
+    assert rows[0]["metric"] == "dynamic_local_memory_count"
+    assert rows[0]["category"] == "local_memory"
+    assert rows[0]["comparison_count"] == 2
+    assert rows[0]["status_counts"] == {"slower_with_structural_cost": 2}
+    assert rows[0]["cost_ratio_geomean"] == 2
+    assert rows[0]["time_ratio_geomean"] > 3
+    assert len(rows[0]["comparisons"]) == 2
+
+    report["comparisons"] = comparisons
+    summary = format_summary_report(report)
+    assert "Recurring structural bottlenecks:" in summary
+    assert "dynamic_local_memory_count[local_memory]: comparisons=2" in summary
 
 
 def test_duplicate_candidate_rows_find_same_compile_signature(
