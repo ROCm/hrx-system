@@ -5066,6 +5066,115 @@ def _format_ratio(ratio: Any) -> str:
     return f"{ratio:.6g}x" if isinstance(ratio, (int, float)) else "?"
 
 
+def _format_short_ratio_signal(signal: Mapping[str, Any]) -> str:
+    if not signal:
+        return "-"
+    return (
+        f"{signal.get('metric')}[{signal.get('category')}]="
+        f"{_format_ratio(signal.get('ratio'))}"
+    )
+
+
+def _format_short_comparison_name(verdict: Mapping[str, Any]) -> str:
+    baseline = str(verdict.get("baseline") or "")
+    candidate = str(verdict.get("candidate") or "")
+    return _format_short_comparison_pair(baseline, candidate)
+
+
+def _format_short_comparison_pair(baseline: str, candidate: str) -> str:
+    baseline_parts = baseline.split("/")
+    candidate_parts = candidate.split("/")
+    if (
+        len(baseline_parts) >= 3
+        and len(candidate_parts) >= 3
+        and baseline_parts[0] == candidate_parts[0]
+        and "/".join(baseline_parts[2:]) == "/".join(candidate_parts[2:])
+    ):
+        benchmark = _shorten_text("/".join(baseline_parts[2:]), 72)
+        return (
+            f"{baseline_parts[0]} {baseline_parts[1]}->{candidate_parts[1]} {benchmark}"
+        )
+    return _shorten_text(f"{baseline}={candidate}", 120)
+
+
+def _shorten_text(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    if max_length <= 3:
+        return value[:max_length]
+    return "..." + value[-(max_length - 3) :]
+
+
+def format_summary_report(report: Mapping[str, Any]) -> str:
+    """Formats the anatomy report as a compact optimization-loop summary."""
+
+    lines = ["Kernel anatomy summary"]
+    benchmark_reports = report.get("loom_benchmarks", {})
+    if isinstance(benchmark_reports, Mapping) and benchmark_reports:
+        lines.append("")
+        lines.append("Benchmark bundles:")
+        for name, benchmark_report_value in benchmark_reports.items():
+            benchmark_report = _as_mapping(benchmark_report_value)
+            lines.append(
+                "  "
+                f"{name}: "
+                f"comparisons={benchmark_report.get('comparison_count')} "
+                f"compiles={benchmark_report.get('compile_count')} "
+                f"repetitions={benchmark_report.get('repetition_count')}"
+            )
+    verdicts = report.get("comparison_verdicts")
+    if verdicts is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            verdicts = build_kernel_anatomy_comparison_verdicts(comparisons)
+    if isinstance(verdicts, list) and verdicts:
+        lines.append("")
+        lines.append("Comparison verdicts:")
+        for verdict_value in verdicts[:24]:
+            verdict = _as_mapping(verdict_value)
+            cost = _format_short_ratio_signal(_as_mapping(verdict.get("primary_cost")))
+            advantage = _format_short_ratio_signal(
+                _as_mapping(verdict.get("primary_advantage"))
+            )
+            lines.append(
+                "  "
+                f"{_format_short_comparison_name(verdict)}: "
+                f"{verdict.get('status')} "
+                f"time={_format_ratio(verdict.get('time_ratio'))} "
+                f"cost={cost} "
+                f"advantage={advantage}"
+            )
+    scorecard = report.get("comparison_scorecard")
+    if scorecard is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            scorecard = build_kernel_anatomy_comparison_scorecard(comparisons)
+    if isinstance(scorecard, list) and scorecard:
+        lines.append("")
+        lines.append("Top structural costs:")
+        emitted_count = 0
+        for entry_value in scorecard:
+            entry = _as_mapping(entry_value)
+            if entry.get("finding") != "candidate_higher":
+                continue
+            comparison = str(entry.get("comparison") or "")
+            if "=" in comparison:
+                baseline, candidate = comparison.split("=", 1)
+                comparison_label = _format_short_comparison_pair(baseline, candidate)
+            else:
+                comparison_label = _shorten_text(comparison, 80)
+            lines.append(
+                "  "
+                f"{comparison_label} :: "
+                f"{entry.get('metric')}[{entry.get('category')}] "
+                f"ratio={_format_ratio(entry.get('ratio'))}"
+            )
+            emitted_count += 1
+            if emitted_count >= 8:
+                break
+    return "\n".join(lines) + "\n"
+
+
 def _append_optimization_frontier_lines(
     lines: list[str], report: Mapping[str, Any]
 ) -> None:
@@ -5751,7 +5860,7 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("json", "text", "rocblas-replay", "rocblas-solution-trace"),
+        choices=("json", "text", "summary", "rocblas-replay", "rocblas-solution-trace"),
         default="json",
         help="Output format.",
     )
@@ -5815,6 +5924,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write("\n")
     elif args.format == "text":
         sys.stdout.write(format_text_report(report))
+    elif args.format == "summary":
+        sys.stdout.write(format_summary_report(report))
     elif args.format == "rocblas-replay":
         sys.stdout.write(
             format_rocblas_replay_script(

@@ -22,6 +22,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_report,
     format_rocblas_replay_script,
     format_rocblas_solution_trace_script,
+    format_summary_report,
     format_text_report,
     main,
 )
@@ -2406,6 +2407,64 @@ def test_main_emits_benchmark_comparison_scorecard(tmp_path: Path, capsys) -> No
     assert "Comparison verdicts:" in text
     assert "bench/c0/bench_kernel=bench/c1/bench_kernel" in text
     assert "operation_time_ns [time]: candidate_higher" in text
+
+
+def test_summary_report_compacts_benchmark_comparison_verdicts(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "compare_only.jsonl"
+    _write_compare_only_benchmark_jsonl(benchmark_path)
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+    report["comparisons"] = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                "bench/c0/bench_kernel",
+                "bench/c1/bench_kernel",
+            )
+        ],
+    )
+    report["comparison_verdicts"] = build_kernel_anatomy_comparison_verdicts(
+        report["comparisons"]
+    )
+    report["comparison_scorecard"] = build_kernel_anatomy_comparison_scorecard(
+        report["comparisons"]
+    )
+
+    text = format_summary_report(report)
+
+    assert "Kernel anatomy summary" in text
+    assert "Benchmark bundles:" in text
+    assert "Comparison verdicts:" in text
+    assert "bench c0->c1 bench_kernel" in text
+    assert "slower_with_structural_cost time=1.1x" in text
+    assert "Top structural costs:" in text
+
+
+def test_main_emits_summary_report(tmp_path: Path, capsys) -> None:
+    benchmark_path = tmp_path / "compare_only.jsonl"
+    _write_compare_only_benchmark_jsonl(benchmark_path)
+
+    assert (
+        main(
+            [
+                "--benchmark-jsonl",
+                f"bench={benchmark_path}",
+                "--format",
+                "summary",
+            ]
+        )
+        == 0
+    )
+
+    text = capsys.readouterr().out
+    assert "Kernel anatomy summary" in text
+    assert "bench c0->c1 bench_kernel" in text
+    assert "slower_with_structural_cost time=1.1x" in text
 
 
 def test_main_accepts_weighted_symbol_group(tmp_path: Path, capsys) -> None:
