@@ -3,6 +3,7 @@
 
 #include "common/kpack.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -10,6 +11,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/fat_binary.h"
@@ -305,6 +307,64 @@ void FreeBuffer(void* p) { iree_allocator_free(iree_allocator_system(), p); }
 
 using Vec = std::vector<std::string>;
 
+// Returns the offset of the sole occurrence of |needle| within |hay|, requiring
+// exactly one match so the byte-patch tests below target an unambiguous field.
+size_t FindOnce(const std::vector<uint8_t>& hay,
+                const std::vector<uint8_t>& needle) {
+  auto first =
+      std::search(hay.begin(), hay.end(), needle.begin(), needle.end());
+  EXPECT_NE(first, hay.end());
+  if (first == hay.end()) return 0;
+  auto second = std::search(first + 1, hay.end(), needle.begin(), needle.end());
+  EXPECT_EQ(second, hay.end());
+  return static_cast<size_t>(first - hay.begin());
+}
+
+void AppendBytes(std::vector<uint8_t>& buffer, const void* data,
+                 size_t length) {
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  buffer.insert(buffer.end(), bytes, bytes + length);
+}
+
+// __CLANG_OFFLOAD_BUNDLE__ entry descriptor (payload offset/size plus triple
+// length), mirroring the on-disk layout the fat-binary extractor walks.
+struct BundleEntry {
+  uint64_t offset;
+  uint64_t size;
+  uint64_t triple_size;
+};
+
+// Builds an uncompressed Clang offload bundle from {triple, payload} entries,
+// matching the format the fat-binary extractor consumes. Used to check that a
+// kpack-resolved code object which is itself a bundle unpacks end-to-end.
+std::vector<uint8_t> MakeBundle(
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> entries) {
+  constexpr char kMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  uint64_t payload_offset = sizeof(kMagic) - 1 + sizeof(uint64_t);
+  for (const auto& entry : entries) {
+    payload_offset += sizeof(BundleEntry) + entry.first.size();
+  }
+  std::vector<uint8_t> bundle;
+  AppendBytes(bundle, kMagic, sizeof(kMagic) - 1);
+  const uint64_t entry_count = entries.size();
+  AppendBytes(bundle, &entry_count, sizeof(entry_count));
+  uint64_t next_payload_offset = payload_offset;
+  for (const auto& entry : entries) {
+    const BundleEntry bundle_entry = {
+        /*.offset=*/next_payload_offset,
+        /*.size=*/entry.second.size(),
+        /*.triple_size=*/entry.first.size(),
+    };
+    AppendBytes(bundle, &bundle_entry, sizeof(bundle_entry));
+    AppendBytes(bundle, entry.first.data(), entry.first.size());
+    next_payload_offset += entry.second.size();
+  }
+  for (const auto& entry : entries) {
+    AppendBytes(bundle, entry.second.data(), entry.second.size());
+  }
+  return bundle;
+}
+
 //===----------------------------------------------------------------------===//
 // strip_target_prefix
 //===----------------------------------------------------------------------===//
@@ -369,6 +429,16 @@ TEST(KpackTargetMatch, EarlyTerminationStopsAtFirstMatch) {
   EXPECT_TRUE(found);
   EXPECT_EQ(seen, (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+",
                        "gfx942:xnack-"}));
+}
+
+// Feature subsetting only ever drops features; it must never flip a feature's
+// sign. Expanding "xnack-" must not yield "xnack+" -- loading a code object
+// that assumes a hardware feature the agent disabled is a correctness hazard.
+TEST(KpackTargetMatch, FeatureSubsetNeverFlipsSign) {
+  Vec expanded = ExpandTargets("gfx942:xnack-");
+  EXPECT_EQ(expanded, (Vec{"gfx942:xnack-", "gfx942"}));
+  EXPECT_EQ(std::find(expanded.begin(), expanded.end(), "gfx942:xnack+"),
+            expanded.end());
 }
 
 //===----------------------------------------------------------------------===//
@@ -455,6 +525,107 @@ TEST(KpackMetadata, NotAMap) {
               StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
+TEST(KpackMetadata, EmptyOrNullInput) {
+  iree_hal_streaming_kpack_metadata_t md;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(nullptr, 0), &md)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+  std::vector<uint8_t> empty;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(empty.data(), 0), &md)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackMetadata, SearchPathsWrongType) {
+  Mp mp;
+  mp.Map(2);
+  mp.Str("kernel_name");
+  mp.Str("lib/x.so");
+  mp.Str("kpack_search_paths");
+  mp.Str("not-an-array");  // a string where an array is required
+  iree_hal_streaming_kpack_metadata_t md;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(mp.b.data(), mp.b.size()), &md)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackMetadata, SearchPathsSkipsNonStringEntries) {
+  Mp mp;
+  mp.Map(2);
+  mp.Str("kernel_name");
+  mp.Str("lib/x.so");
+  mp.Str("kpack_search_paths");
+  mp.Array(2);
+  mp.UInt(42);  // non-string entry is skipped, not fatal
+  mp.Str("a.kpack");
+  iree_hal_streaming_kpack_metadata_t md;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_parse_metadata(
+      iree_make_const_byte_span(mp.b.data(), mp.b.size()), &md));
+  ASSERT_EQ(md.search_path_count, 1u);
+  EXPECT_EQ(std::string(md.search_paths[0].data, md.search_paths[0].size),
+            "a.kpack");
+}
+
+TEST(KpackMetadata, TooManySearchPaths) {
+  std::vector<std::string> paths;
+  for (int i = 0; i < 33; ++i) {
+    paths.push_back("p" + std::to_string(i) + ".kpack");
+  }
+  auto bytes = MakeMetadata("lib/x.so", paths);
+  iree_hal_streaming_kpack_metadata_t md;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(bytes.data(), bytes.size()), &md)),
+              StatusIs(iree::StatusCode::kOutOfRange));
+}
+
+// A declared string length that runs past the end of the buffer must be
+// rejected rather than read past it. The subtractive length checks in the
+// MessagePack reader exist precisely for these truncated/oversized cases.
+TEST(KpackMetadata, TruncatedStr8ValueRejected) {
+  Mp mp;
+  mp.Map(2);
+  mp.Str("kernel_name");
+  mp.Byte(0xd9);  // str8
+  mp.Byte(200);   // declared length far exceeds what follows
+  mp.Byte('x');
+  mp.Byte('y');
+  mp.Byte('z');  // only three bytes then EOF
+  iree_hal_streaming_kpack_metadata_t md;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(mp.b.data(), mp.b.size()), &md)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackMetadata, OversizeStr32ValueRejected) {
+  Mp mp;
+  mp.Map(2);
+  mp.Str("kernel_name");
+  mp.Byte(0xdb);  // str32
+  mp.Byte(0xff);
+  mp.Byte(0xff);
+  mp.Byte(0xff);
+  mp.Byte(0xff);  // declared length ~4 GiB in a near-empty buffer
+  iree_hal_streaming_kpack_metadata_t md;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                  iree_make_const_byte_span(mp.b.data(), mp.b.size()), &md)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackMetadata, ValueEndingOnMarkerRejected) {
+  // A uint64 (0xcf) marker with no trailing bytes exercises the big-endian
+  // integer read bound; a float64 (0xcb) marker exercises the float bound.
+  for (uint8_t marker : {uint8_t{0xcf}, uint8_t{0xcb}}) {
+    Mp mp;
+    mp.Map(2);
+    mp.Str("kernel_name");
+    mp.Byte(marker);  // EOF immediately after the marker
+    iree_hal_streaming_kpack_metadata_t md;
+    EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_parse_metadata(
+                    iree_make_const_byte_span(mp.b.data(), mp.b.size()), &md)),
+                StatusIs(iree::StatusCode::kInvalidArgument));
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // expand_gfxarch
 //===----------------------------------------------------------------------===//
@@ -532,6 +703,33 @@ TEST(KpackDiscover, ResolvesOwnBinary) {
   // On Linux this should resolve to the running test executable/library.
   IREE_ASSERT_OK(status);
   EXPECT_GT(strlen(path), 0u);
+  // The reported offset should land inside the backing file: a mapped data
+  // symbol sits past the ELF header (nonzero) and within the file's size.
+  std::ifstream f(path, std::ios::binary | std::ios::ate);
+  ASSERT_TRUE(f.good());
+  auto file_size = static_cast<iree_host_size_t>(f.tellg());
+  EXPECT_GT(offset, 0u);
+  EXPECT_LT(offset, file_size);
+}
+
+TEST(KpackDiscover, HeapPointerNotFound) {
+  // A heap allocation is backed by an anonymous / [heap] mapping, not a file,
+  // so discovery must report NOT_FOUND rather than a bogus path.
+  void* heap = malloc(1 << 20);
+  ASSERT_NE(heap, nullptr);
+  char path[1024];
+  iree_status_t status = iree_hal_streaming_kpack_discover_binary_path(
+      heap, path, sizeof(path), nullptr);
+  free(heap);
+  EXPECT_THAT(iree::Status(std::move(status)),
+              StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(KpackDiscover, UnmappedAddressNotFound) {
+  char path[1024];
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_discover_binary_path(
+                  reinterpret_cast<void*>(0x1), path, sizeof(path), nullptr)),
+              StatusIs(iree::StatusCode::kNotFound));
 }
 
 TEST(KpackDiscover, NullAddress) {
@@ -660,6 +858,155 @@ TEST(KpackArchive, ZeroSizeBlobRejected) {
               StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
+TEST(KpackArchive, UnknownCompressionSchemeRejected) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  // Rewrite the compression_scheme value (fixstr "none") to an unknown token;
+  // an unrecognized scheme must fail closed at open time.
+  size_t at = FindOnce(bytes, {0xa4, 'n', 'o', 'n', 'e'});
+  const uint8_t kLzma[] = {'l', 'z', 'm', 'a'};
+  memcpy(bytes.data() + at + 1, kLzma, sizeof(kLzma));
+  iree_hal_streaming_kpack_archive_t archive;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_archive_open(
+          iree_make_const_byte_span(bytes.data(), bytes.size()), &archive)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackArchive, ExactArchMatchDoesNotFuzzMatch) {
+  // get_kernel does an exact architecture-key match: a bare/less-specific
+  // request must not resolve a feature-qualified key ("xnack+"). Loading a code
+  // object that requires a hardware feature the agent lacks is unsafe.
+  auto elf = MakeMinimalAmdgpuElf();
+  auto bytes =
+      KpackBuilder(false).Add("lib/x.so#0", "gfx942:xnack+", elf).Build();
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("lib/x.so#0"), IREE_SV("gfx942"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(KpackArchive, MissingTocKey) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  // Rename the top-level "toc" key so the lookup misses it.
+  size_t at = FindOnce(bytes, {0xa3, 't', 'o', 'c'});
+  bytes[at + 1] = 'x';
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(KpackArchive, ArchNodeMissingOrdinal) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  // Rename the "ordinal" key inside the arch node.
+  size_t at = FindOnce(bytes, {0xa7, 'o', 'r', 'd', 'i', 'n', 'a', 'l'});
+  bytes[at + 1] = 'x';
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackArchive, BlobsArrayShorterThanOrdinal) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  // Shrink the single-element "blobs" fixarray (0x91) to empty (0x90); ordinal
+  // 0 now indexes past its end.
+  size_t at = FindOnce(bytes, {0xa5, 'b', 'l', 'o', 'b', 's', 0x91});
+  bytes[at + 6] = 0x90;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(KpackArchive, BlobOffsetPastEof) {
+  std::vector<uint8_t> big(200, 0xAA);
+  auto bytes = KpackBuilder(false)
+                   .Add("a#0", "gfx900", big)
+                   .Add("b#0", "gfx900", {1, 2, 3})
+                   .Build();
+  // The second blob's offset is 64 + 200 = 264 (msgpack uint16 0xcd 0x01 0x08).
+  // Rewrite it well past EOF so the bounds check rejects it.
+  size_t at =
+      FindOnce(bytes, {0xa6, 'o', 'f', 'f', 's', 'e', 't', 0xcd, 0x01, 0x08});
+  bytes[at + 8] = 0xff;
+  bytes[at + 9] = 0xff;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("b#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackArchive, TocOffsetInsideHeader) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1}).Build();
+  // A TOC offset (u64 at byte 8) that points inside the 16-byte header is below
+  // the lower bound (existing coverage only exercises the >= EOF upper bound).
+  for (int i = 0; i < 8; ++i) bytes[8 + i] = 0;
+  bytes[8] = 8;
+  iree_hal_streaming_kpack_archive_t archive;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_archive_open(
+          iree_make_const_byte_span(bytes.data(), bytes.size()), &archive)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackArchive, TocNotAMap) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1}).Build();
+  uint64_t toc_offset = 0;
+  memcpy(&toc_offset, bytes.data() + 8, sizeof(toc_offset));
+  ASSERT_LT(toc_offset, bytes.size());
+  bytes[toc_offset] = 0x00;  // positive fixint where a map header is required
+  iree_hal_streaming_kpack_archive_t archive;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_archive_open(
+          iree_make_const_byte_span(bytes.data(), bytes.size()), &archive)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+#if !defined(HRX_ENABLE_ZSTD)
+// In the default build (no libzstd) a zstd-per-kernel archive must fail closed
+// with UNIMPLEMENTED once a real (nonzero original_size) kernel is requested.
+// This case runs in the standard CI build and pins the stub contract.
+TEST(KpackArchive, ZstdWithoutSupportUnimplemented) {
+  auto bytes =
+      KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kUnimplemented));
+}
+#endif  // !HRX_ENABLE_ZSTD
+
 #if defined(HRX_ENABLE_ZSTD)
 TEST(KpackArchive, ZstdGetKernelRoundTrips) {
   std::vector<uint8_t> k1;
@@ -687,6 +1034,83 @@ TEST(KpackArchive, ZstdGetKernelRoundTrips) {
   ASSERT_EQ(out_size, k2.size());
   EXPECT_EQ(0, memcmp(out, k2.data(), k2.size()));
   FreeBuffer(out);
+}
+
+// A frame whose declared frame_size exceeds the bytes present in the blob must
+// be rejected, not read past the blob end.
+TEST(KpackArchive, ZstdFrameSizeTruncated) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  // Blob at byte 64: [num_kernels u32][frame_size u32][frame...]. Inflate the
+  // first frame_size so it runs past the blob end.
+  for (int i = 0; i < 4; ++i) bytes[68 + i] = 0xff;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+// A corrupted zstd frame (mangled magic) must surface as DATA_LOSS.
+TEST(KpackArchive, ZstdFrameCorruptedDataLoss) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  // The first frame begins at byte 72 (64 + num_kernels + frame_size). Flip a
+  // magic byte so ZSTD_decompress errors.
+  bytes[72] ^= 0xff;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kDataLoss));
+}
+
+// A recorded original_size that disagrees with the frame's true output size
+// must surface as DATA_LOSS (size mismatch).
+TEST(KpackArchive, ZstdOriginalSizeMismatchDataLoss) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  // original_size for the (only) arch node is 300 (msgpack uint16 0xcd 0x01
+  // 0x2c). Enlarge it so the decompressed size no longer matches.
+  size_t at = FindOnce(bytes, {0xad, 'o', 'r', 'i', 'g', 'i', 'n', 'a', 'l',
+                               '_', 's', 'i', 'z', 'e', 0xcd, 0x01, 0x2c});
+  bytes[at + 15] = 0xff;
+  bytes[at + 16] = 0xff;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kDataLoss));
+}
+
+// An ordinal that points past the frame count must be NOT_FOUND.
+TEST(KpackArchive, ZstdOrdinalOutOfRange) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  // The single arch node's ordinal is 0; point it past the one frame present.
+  size_t at = FindOnce(bytes, {0xa7, 'o', 'r', 'd', 'i', 'n', 'a', 'l', 0x00});
+  bytes[at + 8] = 0x05;
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
 }
 #endif  // HRX_ENABLE_ZSTD
 
@@ -821,6 +1245,39 @@ TEST(KpackResolve, EnvPathOverride) {
   FreeBuffer(out);
 }
 
+TEST(KpackResolve, EnvPathPrefix) {
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string path = WriteTempFile("prefix.kpack", archive);
+
+  // The embedded search path does not resolve; ROCM_KPACK_PATH_PREFIX supplies
+  // the archive. Unlike ROCM_KPACK_PATH (which replaces the embedded paths),
+  // the prefix is prepended, so the archive is reached only if the prefix is
+  // consulted.
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  setenv("ROCM_KPACK_PATH_PREFIX", path.c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH_PREFIX");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+
+  // With a bogus prefix but a resolvable embedded (absolute) path, resolution
+  // still succeeds -- confirming the prefix prepends rather than replaces, the
+  // distinction from ROCM_KPACK_PATH.
+  auto metadata2 = MakeMetadata("lib/x.so", {path});
+  setenv("ROCM_KPACK_PATH_PREFIX", "/nonexistent/prefix.kpack", 1);
+  out = nullptr;
+  out_size = 0;
+  status = Resolve(metadata2, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH_PREFIX");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
 TEST(KpackResolve, EnvDisable) {
   auto metadata = MakeMetadata("lib/x.so", {"/whatever.kpack"});
   setenv("ROCM_KPACK_DISABLE", "1", 1);
@@ -898,6 +1355,87 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
           iree_make_const_byte_span(&header, sizeof(header)),
           IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract)),
       StatusIs(iree::StatusCode::kNotFound));
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(KpackIntegration, HipkResolvesBundleCodeObject) {
+  // The resolved kpack code object is itself a Clang offload bundle; the
+  // fat-binary extractor must unpack it to the matching ELF.
+  auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);  // gfx1100
+  auto bundle = MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
+  auto archive =
+      KpackBuilder(false).Add("lib/libhip.so#0", "gfx1100", bundle).Build();
+  std::string path = WriteTempFile("integration_bundle.kpack", archive);
+  auto metadata = MakeMetadata("lib/libhip.so", {path});
+
+  HipFatHeader header = {};
+  header.magic = 0x4b504948u;  // "HIPK"
+  header.version = 1;
+  header.binary = metadata.data();
+
+  const iree_hal_streaming_fat_binary_target_t targets[] = {
+      {/*.value=*/IREE_SV("gfx1100")},
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(&header, sizeof(header)),
+      IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract));
+  ASSERT_EQ(extract.match_count, 1u);
+  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
+  EXPECT_EQ(extract.matches[0].data.data_length, elf.size());
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(KpackIntegration, HipkResolvedGarbageRejected) {
+  // A resolved object that is neither an ELF nor an offload bundle must be
+  // rejected (fail closed), not handed to a code-object loader.
+  std::vector<uint8_t> garbage(32, 0xAB);  // no ELF or bundle magic
+  auto archive =
+      KpackBuilder(false).Add("lib/libhip.so#0", "gfx1100", garbage).Build();
+  std::string path = WriteTempFile("integration_garbage.kpack", archive);
+  auto metadata = MakeMetadata("lib/libhip.so", {path});
+
+  HipFatHeader header = {};
+  header.magic = 0x4b504948u;
+  header.version = 1;
+  header.binary = metadata.data();
+
+  const iree_hal_streaming_fat_binary_target_t targets[] = {
+      {/*.value=*/IREE_SV("gfx1100")},
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_fat_binary_extract_for_targets(
+          iree_make_const_byte_span(&header, sizeof(header)),
+          IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
+  // The wrapper's |reserved| field is the multi-TU code-object index; a value
+  // of 1 must select the "#1" TOC entry.
+  auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);  // gfx1100
+  auto archive =
+      KpackBuilder(false).Add("lib/libhip.so#1", "gfx1100", elf).Build();
+  std::string path = WriteTempFile("integration_coindex.kpack", archive);
+  auto metadata = MakeMetadata("lib/libhip.so", {path});
+
+  HipFatHeader header = {};
+  header.magic = 0x4b504948u;
+  header.version = 1;
+  header.binary = metadata.data();
+  header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+
+  const iree_hal_streaming_fat_binary_target_t targets[] = {
+      {/*.value=*/IREE_SV("gfx1100")},
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(&header, sizeof(header)),
+      IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract));
+  ASSERT_EQ(extract.match_count, 1u);
+  EXPECT_EQ(extract.matches[0].data.data_length, elf.size());
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
