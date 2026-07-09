@@ -20,6 +20,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
+    build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs,
     format_rocblas_replay_script,
     format_rocblas_solution_trace_script,
     format_summary_report,
@@ -256,6 +257,38 @@ def _compile_report_payload() -> dict:
             ],
         },
     }
+
+
+def _linear_compile_report_payload(
+    *, output_size: int, token_count: int, input_size: int
+) -> dict:
+    payload = _compile_report_payload()
+    payload["config_bindings"] = {
+        "count": 4,
+        "rows": [
+            {
+                "index": 0,
+                "key": "benchmark.linear_wmma.token_count",
+                "value": str(token_count),
+            },
+            {
+                "index": 1,
+                "key": "benchmark.linear_wmma.dispatch_token_count",
+                "value": str(token_count),
+            },
+            {
+                "index": 2,
+                "key": "benchmark.linear_wmma.input_size",
+                "value": str(input_size),
+            },
+            {
+                "index": 3,
+                "key": "benchmark.linear_wmma.output_size",
+                "value": str(output_size),
+            },
+        ],
+    }
+    return payload
 
 
 def _multi_entry_compile_report_payload() -> dict:
@@ -1285,11 +1318,7 @@ def test_build_kernel_anatomy_report_extracts_tensile_catalog(
     loom_deltas = {delta["metric"]: delta for delta in catalog_to_loom["deltas"]}
     assert loom_deltas["flat_workgroup_size"]["baseline"] == 128
     assert loom_deltas["flat_workgroup_size"]["candidate"] == 128
-    assert loom_deltas["workgroup_size_y"]["baseline"] == 4
-    assert loom_deltas["workgroup_size_y"]["candidate"] == 4
-    assert (
-        loom_deltas["workgroup_size_z"]["candidate_source"] == "compile_report_workload"
-    )
+    assert "tensile_workgroup_size_y" in catalog_to_loom["missing_candidate_metrics"]
     match_to_loom = build_kernel_anatomy_comparisons(
         report,
         [
@@ -1299,7 +1328,9 @@ def test_build_kernel_anatomy_report_extracts_tensile_catalog(
             )
         ],
     )["catalog/match/M13824_N4547_K4608_beta0=loom"]
-    assert match_to_loom["shared_metric_count"] >= 4
+    match_deltas = {delta["metric"]: delta for delta in match_to_loom["deltas"]}
+    assert match_deltas["flat_workgroup_size"]["baseline"] == 128
+    assert match_deltas["flat_workgroup_size"]["candidate"] == 128
 
     text = format_text_report(report)
     assert "Tensile catalogs:" in text
@@ -2029,6 +2060,86 @@ def test_rocblas_timing_rows_participate_in_comparisons(tmp_path: Path) -> None:
     assert deltas_by_metric["N"]["baseline"] == 4547
     assert deltas_by_metric["K"]["baseline"] == 4608
     assert deltas_by_metric["hot_iters"]["candidate"] == 20
+    assert deltas_by_metric["macro_tile_x"]["baseline"] == 128
+    assert deltas_by_metric["tensile_workgroup_size_y"]["baseline"] == 4
+    assert deltas_by_metric["flat_workgroup_size"]["baseline"] == 128
+
+
+def test_rocblas_shape_comparisons_match_linear_benchmark_config(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_rocblas_log(rocblas_log_path)
+    _write_single_benchmark_jsonl(
+        benchmark_path,
+        "loom_qkv",
+        _linear_compile_report_payload(
+            output_size=13824,
+            token_count=4608,
+            input_size=4608,
+        ),
+        27_582_000,
+    )
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("loom_qkv", benchmark_path)],
+        rocblas_log_paths=[NamedPath("rocblas", rocblas_log_path)],
+    )
+
+    specs = build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs(report)
+
+    assert specs == [
+        ComparisonSpec(
+            baseline="rocblas/gemm_M13824_N4547_K4608_beta0",
+            candidate="loom_qkv",
+        )
+    ]
+    comparisons = build_kernel_anatomy_comparisons(report, specs)
+    comparison = comparisons["rocblas/gemm_M13824_N4547_K4608_beta0=loom_qkv"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["operation_time_ns"]["ratio"] == 27582000 / 8503930.0
+    assert (
+        "config.benchmark.linear_wmma.output_size"
+        in comparison["missing_baseline_metrics"]
+    )
+
+
+def test_main_emits_rocblas_shape_summary(tmp_path: Path, capsys) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_rocblas_log(rocblas_log_path)
+    _write_single_benchmark_jsonl(
+        benchmark_path,
+        "loom_qkv",
+        _linear_compile_report_payload(
+            output_size=13824,
+            token_count=4608,
+            input_size=4608,
+        ),
+        27_582_000,
+    )
+
+    assert (
+        main(
+            [
+                "--rocblas-log",
+                f"rocblas={rocblas_log_path}",
+                "--benchmark-jsonl",
+                f"loom_qkv={benchmark_path}",
+                "--compare-rocblas-benchmark-shapes",
+                "--format",
+                "summary",
+            ]
+        )
+        == 0
+    )
+
+    text = capsys.readouterr().out
+    assert "rocblas/gemm_M13824_N4547_K4608_beta0=loom_qkv" in text
+    assert "slower_unexplained" in text
+    assert "time=3.24344x" in text
 
 
 def test_rocblas_symbol_parameters_participate_in_comparisons(
@@ -2054,6 +2165,7 @@ def test_rocblas_symbol_parameters_participate_in_comparisons(
     deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
     assert deltas_by_metric["macro_tile_x"]["baseline"] == 128
     assert deltas_by_metric["matrix_instruction_z"]["baseline"] == 16
+    assert deltas_by_metric["tensile_workgroup_size_x"]["candidate"] == 32
     assert deltas_by_metric["flat_workgroup_size"]["candidate"] == 128
 
 

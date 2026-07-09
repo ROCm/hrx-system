@@ -341,6 +341,7 @@ def _summarize_loom_compile_report(
         "static_instruction_mix": static_instruction_mix,
         "dynamic_instruction_mix": dynamic_instruction_mix,
         "economics": economics,
+        "config_bindings": _summarize_config_bindings(report),
         "source_low": source_low,
         "target_resources": target_resources,
         "wait_plan": wait_plan,
@@ -349,6 +350,35 @@ def _summarize_loom_compile_report(
     if path is not None:
         summary["path"] = path.as_posix()
     return summary
+
+
+def _summarize_config_bindings(report: Mapping[str, Any]) -> dict[str, float | int]:
+    bindings = _as_mapping(report.get("config_bindings"))
+    rows = _table_rows(bindings)
+    summary: dict[str, float | int] = {}
+    for row_value in rows:
+        row = _as_mapping(row_value)
+        key = row.get("key")
+        value = _numeric_config_binding_value(row.get("value"))
+        if isinstance(key, str) and value is not None:
+            summary[key] = value
+    return summary
+
+
+def _numeric_config_binding_value(value: Any) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(value, 0)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return None
 
 
 _WAIT_REASON_SUMMARY_METRICS = (
@@ -2112,6 +2142,87 @@ def build_kernel_anatomy_benchmark_comparison_specs(
     return comparison_specs
 
 
+def build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs(
+    report: Mapping[str, Any],
+) -> list[ComparisonSpec]:
+    """Builds rocBLAS-to-Loom comparisons for matching GEMM-shaped benchmarks."""
+
+    metric_groups = _collect_comparison_metric_groups(report)
+    rocblas_groups = [
+        (name, metrics)
+        for name, metrics in metric_groups.items()
+        if _metric_source(metrics, "operation_time_ns") == "rocblas_log_timing"
+        and _metric_value(metrics, "M") is not None
+        and _metric_value(metrics, "N") is not None
+        and _metric_value(metrics, "K") is not None
+        and _metric_value(metrics, "beta") == 0
+    ]
+    comparison_specs: list[ComparisonSpec] = []
+    for candidate_name, candidate_metrics in metric_groups.items():
+        if not _is_loom_benchmark_shape_candidate(candidate_name, candidate_metrics):
+            continue
+        candidate_m = _linear_config_metric_value(candidate_metrics, "output_size")
+        candidate_n = _linear_config_metric_value(
+            candidate_metrics, "dispatch_token_count", "token_count"
+        )
+        candidate_k = _linear_config_metric_value(candidate_metrics, "input_size")
+        if candidate_m is None or candidate_n is None or candidate_k is None:
+            continue
+        matching_rocblas_groups = [
+            (baseline_name, baseline_metrics)
+            for baseline_name, baseline_metrics in rocblas_groups
+            if _numeric_equal(_metric_value(baseline_metrics, "M"), candidate_m)
+            and _numeric_equal(_metric_value(baseline_metrics, "K"), candidate_k)
+            and (_metric_value(baseline_metrics, "N") or 0) <= candidate_n
+        ]
+        if not matching_rocblas_groups:
+            continue
+        baseline_name, _baseline_metrics = min(
+            matching_rocblas_groups,
+            key=lambda item: (
+                candidate_n - (_metric_value(item[1], "N") or 0),
+                item[0],
+            ),
+        )
+        comparison_specs.append(
+            ComparisonSpec(baseline=baseline_name, candidate=candidate_name)
+        )
+    return sorted(
+        comparison_specs,
+        key=lambda spec: (spec.baseline, spec.candidate),
+    )
+
+
+def _is_loom_benchmark_shape_candidate(
+    group_name: str, metrics: Mapping[str, Mapping[str, Any]]
+) -> bool:
+    operation_source = _metric_source(metrics, "operation_time_ns")
+    if operation_source == "benchmark":
+        return "/" not in group_name
+    return operation_source == "benchmark_comparison"
+
+
+def _metric_source(group: Mapping[str, Mapping[str, Any]], metric: str) -> str | None:
+    source = _as_mapping(group.get(metric)).get("source")
+    return source if isinstance(source, str) else None
+
+
+def _linear_config_metric_value(
+    metrics: Mapping[str, Mapping[str, Any]], *suffixes: str
+) -> float | int | None:
+    for suffix in suffixes:
+        metric_suffix = f".{suffix}"
+        for metric_name in sorted(metrics):
+            if not metric_name.startswith("config."):
+                continue
+            if not metric_name.removeprefix("config.").endswith(metric_suffix):
+                continue
+            value = _metric_value(metrics, metric_name)
+            if value is not None:
+                return value
+    return None
+
+
 def build_kernel_anatomy_comparison_scorecard(
     comparisons: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
@@ -2598,6 +2709,16 @@ def _record_compile_summary_metric_group(
     compile_report: Mapping[str, Any],
     source_prefix: str,
 ) -> None:
+    config_bindings = _as_mapping(compile_report.get("config_bindings"))
+    for key, value in config_bindings.items():
+        if isinstance(key, str):
+            _record_metric(
+                groups,
+                name,
+                f"config.{key}",
+                value,
+                f"{source_prefix}_config",
+            )
     _record_metric(
         groups,
         name,
@@ -3366,6 +3487,7 @@ def _collect_rocblas_metric_groups(
     rocblas_logs = _as_mapping(report.get("rocblas_logs"))
     for name, rocblas_log_value in rocblas_logs.items():
         rocblas_log = _as_mapping(rocblas_log_value)
+        symbol_parameters = _as_mapping(rocblas_log.get("symbol_parameters"))
         _record_metric(
             groups,
             name,
@@ -3376,7 +3498,7 @@ def _collect_rocblas_metric_groups(
         _record_tensile_symbol_parameter_metrics(
             groups,
             name,
-            _as_mapping(rocblas_log.get("symbol_parameters")),
+            symbol_parameters,
             "rocblas_symbol",
         )
         timing = _as_mapping(rocblas_log.get("selected_timing_row"))
@@ -3395,13 +3517,19 @@ def _collect_rocblas_metric_groups(
                 timing.get("rocblas-Gflops"),
                 "rocblas_log",
             )
-            for metric in ("M", "N", "K", "lda", "ldb", "ldc", "ldd"):
+            for metric in ("M", "N", "K", "alpha", "beta", "lda", "ldb", "ldc", "ldd"):
                 _record_metric(groups, name, metric, timing.get(metric), "rocblas_log")
         timing_rows = rocblas_log.get("timing_rows", [])
         if isinstance(timing_rows, list):
             for timing_value in timing_rows:
                 timing_row = _as_mapping(timing_value)
                 group_name = _rocblas_timing_group_name(name, timing_row)
+                _record_tensile_symbol_parameter_metrics(
+                    groups,
+                    group_name,
+                    symbol_parameters,
+                    "rocblas_symbol",
+                )
                 _record_metric(
                     groups,
                     group_name,
@@ -3420,6 +3548,8 @@ def _collect_rocblas_metric_groups(
                     "M",
                     "N",
                     "K",
+                    "alpha",
+                    "beta",
                     "lda",
                     "ldb",
                     "ldc",
@@ -3445,6 +3575,8 @@ def _collect_rocblas_metric_groups(
                 "M",
                 "N",
                 "K",
+                "alpha",
+                "beta",
                 "lda",
                 "ldb",
                 "ldc",
@@ -3468,7 +3600,7 @@ def _record_tensile_symbol_parameter_metrics(
     parameters: Mapping[str, Any],
     source: str,
 ) -> None:
-    for parameter_name in ("macro_tile", "matrix_instruction", "workgroup_size"):
+    for parameter_name in ("macro_tile", "matrix_instruction"):
         _record_extent_metrics(
             groups,
             group_name,
@@ -3476,6 +3608,13 @@ def _record_tensile_symbol_parameter_metrics(
             _as_mapping(parameters.get(parameter_name)),
             source,
         )
+    _record_extent_metrics(
+        groups,
+        group_name,
+        "tensile_workgroup_size",
+        _as_mapping(parameters.get("workgroup_size")),
+        source,
+    )
     thread_tile = _as_mapping(parameters.get("thread_tile"))
     _record_metric(groups, group_name, "thread_tile_x", thread_tile.get("x"), source)
     _record_metric(groups, group_name, "thread_tile_y", thread_tile.get("y"), source)
@@ -3975,6 +4114,9 @@ _EXACT_PARITY_METRICS = frozenset(
         "solution_index",
         "thread_tile_x",
         "thread_tile_y",
+        "tensile_workgroup_size_x",
+        "tensile_workgroup_size_y",
+        "tensile_workgroup_size_z",
         "vector_width",
         "wavefront_size",
         "wave_size",
@@ -4073,6 +4215,8 @@ def _safe_inverse(value: float | int | None) -> float | None:
 
 
 def _scorecard_metric_goal(metric: str) -> str:
+    if metric.startswith("config."):
+        return "exact"
     if metric in _HIGHER_IS_BETTER_METRICS:
         return "higher"
     if metric in _EXACT_PARITY_METRICS:
@@ -4094,6 +4238,8 @@ def _scorecard_metric_category(metric: str) -> str:
         "total_duration_ns",
     }:
         return "time"
+    if metric.startswith("config."):
+        return "config"
     if metric.startswith("wait_") or metric in _WAIT_REASON_SUMMARY_METRICS:
         return "wait"
     if metric.startswith("source_low_") or metric in _SOURCE_LOW_TOTAL_METRICS:
@@ -4103,6 +4249,7 @@ def _scorecard_metric_category(metric: str) -> str:
             "macro_tile_",
             "matrix_instruction_",
             "thread_tile_",
+            "tensile_workgroup_size_",
             "workgroup_size_",
         )
     ) or metric in {
@@ -5795,6 +5942,14 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--compare-rocblas-benchmark-shapes",
+        action="store_true",
+        help=(
+            "Build rocBLAS-to-Loom comparison specs by matching rocBLAS GEMM "
+            "M/K/beta timing rows to Loom benchmark linear config bindings."
+        ),
+    )
+    parser.add_argument(
         "--frontier",
         action="append",
         default=[],
@@ -5903,6 +6058,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     comparison_specs = [
         *build_kernel_anatomy_benchmark_comparison_specs(report),
+        *(
+            build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs(report)
+            if args.compare_rocblas_benchmark_shapes
+            else []
+        ),
         *args.compare,
     ]
     if comparison_specs:
