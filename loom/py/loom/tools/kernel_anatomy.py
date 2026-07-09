@@ -1453,6 +1453,13 @@ def _collect_compile_report_metric_groups(
             groups,
             name,
             "local_memory_instruction_count",
+            static_mix.get("local_memory_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "dynamic_local_memory_instruction_count",
             dynamic_mix.get("local_memory_count"),
             "compile_report",
         )
@@ -1483,8 +1490,20 @@ def _collect_compile_report_metric_groups(
             _record_metric(
                 groups,
                 name,
-                "local_memory_bytes",
+                "dynamic_local_memory_access_bytes",
                 dynamic_local_read_bytes + dynamic_local_write_bytes,
+                "compile_report",
+            )
+        static_local_read_bytes = _as_number(static_mix.get("local_memory_read_bytes"))
+        static_local_write_bytes = _as_number(
+            static_mix.get("local_memory_write_bytes")
+        )
+        if static_local_read_bytes is not None and static_local_write_bytes is not None:
+            _record_metric(
+                groups,
+                name,
+                "local_memory_access_bytes",
+                static_local_read_bytes + static_local_write_bytes,
                 "compile_report",
             )
         resources = _as_mapping(compile_report.get("target_resources"))
@@ -1702,7 +1721,7 @@ def _record_compile_instruction_mix_metrics(
         _record_metric(
             groups,
             group_name,
-            "local_memory_bytes",
+            "local_memory_access_bytes",
             local_memory_read_bytes + local_memory_write_bytes,
             source,
         )
@@ -2176,7 +2195,7 @@ def _record_disassembly_family_metrics(
         _record_metric(
             groups,
             group_name,
-            "local_memory_bytes",
+            "local_memory_access_bytes",
             local_memory_read_bytes + local_memory_write_bytes,
             source,
         )

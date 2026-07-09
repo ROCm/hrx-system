@@ -1292,7 +1292,7 @@ def test_weighted_symbol_metrics_participate_in_comparisons(
     deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
     assert deltas_by_metric["local_memory_instruction_count"]["baseline"] == 10
     assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 99
-    assert deltas_by_metric["local_memory_bytes"]["baseline"] == 160
+    assert deltas_by_metric["local_memory_access_bytes"]["baseline"] == 160
     assert deltas_by_metric["wmma_count"]["baseline"] == 5
     assert comparison["scorecard"][0]["metric"] == "local_memory_instruction_count"
     assert comparison["scorecard"][0]["category"] == "local_memory"
