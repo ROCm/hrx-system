@@ -93,7 +93,7 @@ static kpack_mp_reader_t kpack_mp_reader(iree_const_byte_span_t span) {
 
 // Reads an |n|-byte big-endian unsigned integer, advancing the cursor.
 static bool kpack_mp_read_be(kpack_mp_reader_t* r, int n, uint64_t* out) {
-  if (r->p + n > r->end) return false;
+  if ((uint64_t)(r->end - r->p) < (uint64_t)n) return false;
   uint64_t v = 0;
   for (int i = 0; i < n; ++i) v = (v << 8) | (uint64_t)r->p[i];
   r->p += n;
@@ -167,12 +167,12 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
       r->p += len + 1;
       return true;
     case 0xca:  // float32
-      if (r->p + 4 > r->end) return false;
+      if ((uint64_t)(r->end - r->p) < 4) return false;
       out->type = KPACK_MP_FLOAT;
       r->p += 4;
       return true;
     case 0xcb:  // float64
-      if (r->p + 8 > r->end) return false;
+      if ((uint64_t)(r->end - r->p) < 8) return false;
       out->type = KPACK_MP_FLOAT;
       r->p += 8;
       return true;
@@ -634,7 +634,7 @@ static iree_status_t kpack_decompress_zstd(
   // little-endian (these are raw binary fields, not msgpack).
   const uint8_t* p = archive->zstd_blob.data;
   const uint8_t* end = p + archive->zstd_blob.data_length;
-  if (p + sizeof(uint32_t) > end) {
+  if ((uint64_t)(end - p) < sizeof(uint32_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "kpack zstd blob truncated before kernel count");
   }
@@ -648,7 +648,7 @@ static iree_status_t kpack_decompress_zstd(
                             ordinal, num_kernels);
   }
   for (uint32_t i = 0; i <= ordinal; ++i) {
-    if (p + sizeof(uint32_t) > end) {
+    if ((uint64_t)(end - p) < sizeof(uint32_t)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kpack zstd frame %u header truncated", i);
     }
