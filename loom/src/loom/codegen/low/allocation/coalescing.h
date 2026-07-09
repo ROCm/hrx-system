@@ -30,7 +30,8 @@ typedef iree_status_t (*loom_low_allocation_coalescing_append_assignment_fn_t)(
     uint16_t ignored_storage_lease_value_count, uint32_t* out_assignment_index);
 
 typedef iree_status_t (*loom_low_allocation_coalescing_consumption_query_fn_t)(
-    void* user_data, loom_consumption_region_query_t** out_query);
+    void* user_data, const loom_region_t* region,
+    loom_consumption_region_query_t** out_query);
 
 typedef struct loom_low_allocation_coalescing_context_t {
   // Arena used for temporary coalescing scratch.

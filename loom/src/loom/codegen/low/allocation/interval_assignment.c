@@ -23,10 +23,10 @@
 typedef struct loom_low_allocation_interval_assignment_state_t {
   // Caller-provided facts and mutable owner state.
   const loom_low_allocation_interval_assignment_context_t* context;
-  // Reusable consumed-value query for |context->body|.
-  loom_consumption_region_query_t consumption_query;
-  // True once |consumption_query| has been initialized.
-  bool consumption_query_initialized;
+  // Reusable consumed-value query for the allocated function body.
+  loom_consumption_region_query_t function_consumption_query;
+  // Reusable consumed-value query for the current nested relation region.
+  loom_consumption_region_query_t nested_consumption_query;
   // Assignment-index window still live at the current interval start.
   loom_low_allocation_active_set_t active;
   // Cached predicted spill traffic, dense by liveness value ordinal.
@@ -332,23 +332,25 @@ loom_low_allocation_interval_assignment_value_ordinal_for_interval(
 
 static iree_status_t loom_low_allocation_interval_assignment_consumption_query(
     loom_low_allocation_interval_assignment_state_t* state,
-    loom_consumption_region_query_t** out_query) {
-  *out_query = NULL;
-  if (!state->consumption_query_initialized) {
+    const loom_region_t* region, loom_consumption_region_query_t** out_query) {
+  loom_consumption_region_query_t* query =
+      region == state->context->body ? &state->function_consumption_query
+                                     : &state->nested_consumption_query;
+  if (query->region != region) {
     IREE_RETURN_IF_ERROR(loom_consumption_region_query_initialize(
-        state->context->module, state->context->body, state->context->arena,
-        &state->consumption_query));
-    state->consumption_query_initialized = true;
+        state->context->module, region, state->context->arena, query));
   }
-  *out_query = &state->consumption_query;
+  *out_query = query;
   return iree_ok_status();
 }
 
 static iree_status_t
 loom_low_allocation_interval_assignment_consumption_query_callback(
-    void* user_data, loom_consumption_region_query_t** out_query) {
+    void* user_data, const loom_region_t* region,
+    loom_consumption_region_query_t** out_query) {
   return loom_low_allocation_interval_assignment_consumption_query(
-      (loom_low_allocation_interval_assignment_state_t*)user_data, out_query);
+      (loom_low_allocation_interval_assignment_state_t*)user_data, region,
+      out_query);
 }
 
 static iree_status_t
