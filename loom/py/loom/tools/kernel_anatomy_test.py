@@ -143,6 +143,7 @@ Kernel parameters:
 
 transA,transB,M,N,K,alpha,lda,beta,ldb,ldc,ldd,batch_count,cold_iters,hot_iters,rocblas-Gflops,us
 T,N,13824,4547,4608,1,4608,0,4608,13824,13824,1,5,20,68121,8503.93
+with 48.3 GB memory, max. SCLK 1760 MHz, max. MCLK 1124 MHz, memoryBusWidth 48 Bytes, compute capability 11.0
 """,
     )
 
@@ -300,6 +301,7 @@ def test_build_kernel_anatomy_report_extracts_rocblas_log(
     assert rocblas_log["running_kernel"] == "selected_kernel"
     assert rocblas_log["devices"][0]["arch"] == "gfx1100"
     assert rocblas_log["kernel_parameters"]["macroTile"] == "(128, 128, 1)"
+    assert len(rocblas_log["timing_rows"]) == 1
     assert rocblas_log["timing_rows"][0]["M"] == 13824
     assert rocblas_log["timing_rows"][0]["us"] == 8503.93
 

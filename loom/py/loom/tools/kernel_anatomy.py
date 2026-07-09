@@ -294,7 +294,9 @@ def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
             in_kernel_parameters = False
             timing_header = next(csv.reader([stripped]))
         elif timing_header is not None and stripped:
-            timing_rows.append(_parse_rocblas_timing_row(timing_header, stripped))
+            timing_row = _parse_rocblas_timing_row(timing_header, stripped)
+            if timing_row is not None:
+                timing_rows.append(timing_row)
         elif in_kernel_parameters and ":" in stripped:
             key, value = stripped.split(":", 1)
             kernel_parameters[key.strip()] = value.strip()
@@ -465,8 +467,14 @@ def _select_rocblas_timing_row(
     )
 
 
-def _parse_rocblas_timing_row(header: Sequence[str], row: str) -> dict[str, Any]:
+def _parse_rocblas_timing_row(header: Sequence[str], row: str) -> dict[str, Any] | None:
     values = next(csv.reader([row], skipinitialspace=True))
+    if len(values) != len(header):
+        return None
+    if header[:2] == ["transA", "transB"] and values[0] not in {"N", "T", "C"}:
+        return None
+    if header[:2] == ["transA", "transB"] and values[1] not in {"N", "T", "C"}:
+        return None
     return {
         key: _parse_numeric_scalar(value)
         for key, value in zip(header, values, strict=False)
