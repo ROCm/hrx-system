@@ -2257,6 +2257,61 @@ def build_kernel_anatomy_comparison_verdicts(
     return sorted(verdicts, key=_comparison_verdict_rank, reverse=True)
 
 
+def build_kernel_anatomy_best_candidate_rows(
+    comparisons: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Builds the best timed candidate row for each comparison baseline."""
+
+    rows_by_baseline: dict[str, dict[str, Any]] = {}
+    candidate_counts: dict[str, int] = {}
+    for comparison_name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        baseline = comparison.get("baseline")
+        if not isinstance(baseline, str) or not baseline:
+            continue
+        verdict = _build_kernel_anatomy_comparison_verdict(comparison_name, comparison)
+        time_ratio = _as_number(verdict.get("time_ratio"))
+        if time_ratio is None:
+            continue
+        candidate_counts[baseline] = candidate_counts.get(baseline, 0) + 1
+        candidate = comparison.get("candidate")
+        row = {
+            "baseline": baseline,
+            "candidate": candidate,
+            "comparison": comparison_name,
+            "status": verdict.get("status"),
+            "time_ratio": time_ratio,
+            "primary_cost": verdict.get("primary_cost"),
+            "primary_advantage": verdict.get("primary_advantage"),
+        }
+        old_row = rows_by_baseline.get(baseline)
+        old_ratio = (
+            _as_number(old_row.get("time_ratio")) if old_row is not None else None
+        )
+        if old_ratio is None or time_ratio < old_ratio:
+            rows_by_baseline[baseline] = row
+        elif old_ratio is not None and _numeric_equal(time_ratio, old_ratio):
+            old_candidate = str(old_row.get("candidate")) if old_row else ""
+            if str(candidate) < old_candidate:
+                rows_by_baseline[baseline] = row
+    for baseline, row in rows_by_baseline.items():
+        row["candidate_count"] = candidate_counts.get(baseline, 0)
+    best_rows = [
+        row
+        for row in rows_by_baseline.values()
+        if (_as_number(row.get("candidate_count")) or 0) > 1
+    ]
+    return sorted(
+        best_rows,
+        key=lambda row: (
+            _as_number(row.get("time_ratio")) or math.inf,
+            str(row.get("baseline")),
+            str(row.get("candidate")),
+        ),
+        reverse=True,
+    )
+
+
 def build_kernel_anatomy_optimization_frontier(
     report: Mapping[str, Any],
     baseline_names: Sequence[str],
@@ -5291,6 +5346,31 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"cost={cost} "
                 f"advantage={advantage}"
             )
+    best_candidates = report.get("comparison_best_candidates")
+    if best_candidates is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            best_candidates = build_kernel_anatomy_best_candidate_rows(comparisons)
+    if isinstance(best_candidates, list) and best_candidates:
+        lines.append("")
+        lines.append("Best candidates by baseline:")
+        for row_value in best_candidates[:16]:
+            row = _as_mapping(row_value)
+            baseline = str(row.get("baseline") or "")
+            candidate = str(row.get("candidate") or "")
+            candidate_count = _as_number(row.get("candidate_count"))
+            candidate_suffix = (
+                f" ({int(candidate_count)} candidates)"
+                if candidate_count and candidate_count > 1
+                else ""
+            )
+            lines.append(
+                "  "
+                f"{_format_short_comparison_pair(baseline, candidate)}: "
+                f"{row.get('status')} "
+                f"time={_format_ratio(row.get('time_ratio'))}"
+                f"{candidate_suffix}"
+            )
     scorecard = report.get("comparison_scorecard")
     if scorecard is None:
         comparisons = report.get("comparisons", {})
@@ -6073,6 +6153,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             report["comparisons"]
         )
         report["comparison_verdicts"] = build_kernel_anatomy_comparison_verdicts(
+            report["comparisons"]
+        )
+        report["comparison_best_candidates"] = build_kernel_anatomy_best_candidate_rows(
             report["comparisons"]
         )
     if args.frontier:

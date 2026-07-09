@@ -15,6 +15,7 @@ from loom.tools.kernel_anatomy import (
     NamedPath,
     SymbolWeightSpec,
     WeightedSymbolGroupSpec,
+    build_kernel_anatomy_best_candidate_rows,
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
     build_kernel_anatomy_comparisons,
@@ -2104,6 +2105,56 @@ def test_rocblas_shape_comparisons_match_linear_benchmark_config(
         "config.benchmark.linear_wmma.output_size"
         in comparison["missing_baseline_metrics"]
     )
+
+
+def test_best_candidate_rows_select_fastest_matching_shape(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    slow_benchmark_path = tmp_path / "slow_results.jsonl"
+    fast_benchmark_path = tmp_path / "fast_results.jsonl"
+    _write_rocblas_log(rocblas_log_path)
+    compile_report = _linear_compile_report_payload(
+        output_size=13824,
+        token_count=4608,
+        input_size=4608,
+    )
+    _write_single_benchmark_jsonl(
+        slow_benchmark_path,
+        "loom_slow_qkv",
+        compile_report,
+        27_582_000,
+    )
+    _write_single_benchmark_jsonl(
+        fast_benchmark_path,
+        "loom_fast_qkv",
+        compile_report,
+        20_000_000,
+    )
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[
+            NamedPath("loom_slow_qkv", slow_benchmark_path),
+            NamedPath("loom_fast_qkv", fast_benchmark_path),
+        ],
+        rocblas_log_paths=[NamedPath("rocblas", rocblas_log_path)],
+    )
+    specs = build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs(report)
+    comparisons = build_kernel_anatomy_comparisons(report, specs)
+
+    best_rows = build_kernel_anatomy_best_candidate_rows(comparisons)
+
+    assert best_rows == [
+        {
+            "baseline": "rocblas/gemm_M13824_N4547_K4608_beta0",
+            "candidate": "loom_fast_qkv",
+            "comparison": "rocblas/gemm_M13824_N4547_K4608_beta0=loom_fast_qkv",
+            "status": "slower_unexplained",
+            "time_ratio": 20000000 / 8503930.0,
+            "primary_cost": {},
+            "primary_advantage": {},
+            "candidate_count": 2,
+        }
+    ]
 
 
 def test_main_emits_rocblas_shape_summary(tmp_path: Path, capsys) -> None:
