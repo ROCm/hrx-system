@@ -2067,11 +2067,14 @@ def build_kernel_anatomy_comparison_verdicts(
 
 
 def build_kernel_anatomy_optimization_frontier(
-    report: Mapping[str, Any], baseline_names: Sequence[str]
+    report: Mapping[str, Any],
+    baseline_names: Sequence[str],
+    candidate_regexes: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """Builds a candidate frontier against one or more baseline metric groups."""
 
     metric_groups = _collect_comparison_metric_groups(report)
+    candidate_patterns = _compile_frontier_candidate_patterns(candidate_regexes)
     frontier: list[dict[str, Any]] = []
     for baseline_name in baseline_names:
         if baseline_name not in metric_groups:
@@ -2079,7 +2082,7 @@ def build_kernel_anatomy_optimization_frontier(
         comparison_specs = [
             ComparisonSpec(baseline=baseline_name, candidate=candidate_name)
             for candidate_name in _frontier_candidate_names(
-                metric_groups, baseline_name
+                metric_groups, baseline_name, candidate_patterns
             )
         ]
         comparisons = build_kernel_anatomy_comparisons(report, comparison_specs)
@@ -2114,13 +2117,34 @@ def build_kernel_anatomy_optimization_frontier(
 
 
 def _frontier_candidate_names(
-    metric_groups: Mapping[str, Any], baseline_name: str
+    metric_groups: Mapping[str, Any],
+    baseline_name: str,
+    candidate_patterns: Sequence[re.Pattern[str]],
 ) -> list[str]:
     if "/" in baseline_name:
-        return sorted(name for name in metric_groups if name != baseline_name)
+        candidate_names = sorted(
+            name for name in metric_groups if name != baseline_name
+        )
+    else:
+        candidate_names = sorted(
+            name for name in metric_groups if name != baseline_name and "/" not in name
+        )
+    if not candidate_patterns:
+        return candidate_names
     return sorted(
-        name for name in metric_groups if name != baseline_name and "/" not in name
+        name
+        for name in candidate_names
+        if any(pattern.search(name) for pattern in candidate_patterns)
     )
+
+
+def _compile_frontier_candidate_patterns(
+    candidate_regexes: Sequence[str],
+) -> list[re.Pattern[str]]:
+    try:
+        return [re.compile(candidate_regex) for candidate_regex in candidate_regexes]
+    except re.error as exc:
+        raise ValueError(f"invalid frontier candidate regex: {exc}") from exc
 
 
 def _build_kernel_anatomy_comparison_verdict(
@@ -5326,6 +5350,15 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--frontier-candidate-regex",
+        action="append",
+        default=[],
+        help=(
+            "Regex selecting optimization frontier candidate groups. Repeat to "
+            "include multiple candidate families."
+        ),
+    )
+    parser.add_argument(
         "--amdhsa-metadata-regex",
         help="Regex filter applied to AMDHSA kernel name and symbol metadata.",
     )
@@ -5424,7 +5457,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.frontier:
         report["optimization_frontier"] = build_kernel_anatomy_optimization_frontier(
-            report, args.frontier
+            report, args.frontier, args.frontier_candidate_regex
         )
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

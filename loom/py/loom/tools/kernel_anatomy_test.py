@@ -2080,6 +2080,12 @@ def test_optimization_frontier_flags_unconverted_advantage(tmp_path: Path) -> No
         candidate_report,
         1_040_000,
     )
+    _write_single_benchmark_jsonl(
+        tmp_path / "discard.jsonl",
+        "discard_benchmark",
+        candidate_report,
+        900_000,
+    )
 
     report = build_kernel_anatomy_report(
         disassembly_paths=[],
@@ -2087,13 +2093,17 @@ def test_optimization_frontier_flags_unconverted_advantage(tmp_path: Path) -> No
         benchmark_jsonl_paths=[
             NamedPath("baseline", tmp_path / "baseline.jsonl"),
             NamedPath("candidate", tmp_path / "candidate.jsonl"),
+            NamedPath("discard", tmp_path / "discard.jsonl"),
         ],
     )
-    frontier = build_kernel_anatomy_optimization_frontier(report, ["baseline"])
+    frontier = build_kernel_anatomy_optimization_frontier(
+        report, ["baseline"], ["candidate$"]
+    )
 
     whole_kernel_entry = next(
         entry for entry in frontier if entry["candidate"] == "candidate"
     )
+    assert [entry["candidate"] for entry in frontier] == ["candidate"]
     assert whole_kernel_entry["status"] == "advantage_not_converted"
     assert whole_kernel_entry["time_ratio"] == 1.04
     assert whole_kernel_entry["primary_advantage"]["category"] == "local_memory"
@@ -2361,6 +2371,7 @@ def test_main_emits_optimization_frontier(tmp_path: Path, capsys) -> None:
     candidate_mix["local_write_byte_count"] = 80
     baseline_path = tmp_path / "baseline.jsonl"
     candidate_path = tmp_path / "candidate.jsonl"
+    discard_path = tmp_path / "discard.jsonl"
     _write_single_benchmark_jsonl(
         baseline_path,
         "baseline_benchmark",
@@ -2373,6 +2384,12 @@ def test_main_emits_optimization_frontier(tmp_path: Path, capsys) -> None:
         candidate_report,
         1_040_000,
     )
+    _write_single_benchmark_jsonl(
+        discard_path,
+        "discard_benchmark",
+        candidate_report,
+        900_000,
+    )
 
     assert (
         main(
@@ -2383,6 +2400,10 @@ def test_main_emits_optimization_frontier(tmp_path: Path, capsys) -> None:
                 f"candidate={candidate_path}",
                 "--frontier",
                 "baseline",
+                "--frontier-candidate-regex",
+                "candidate$",
+                "--benchmark-jsonl",
+                f"discard={discard_path}",
                 "--format",
                 "json",
             ]
@@ -2396,6 +2417,9 @@ def test_main_emits_optimization_frontier(tmp_path: Path, capsys) -> None:
         for entry in report["optimization_frontier"]
         if entry["candidate"] == "candidate"
     )
+    assert [entry["candidate"] for entry in report["optimization_frontier"]] == [
+        "candidate"
+    ]
     assert whole_kernel_entry["status"] == "advantage_not_converted"
     assert whole_kernel_entry["candidate_metrics"]["p50_ns"] == 1_040_000
 
