@@ -2167,13 +2167,35 @@ def _frontier_candidate_names(
         candidate_names = sorted(
             name for name in metric_groups if name != baseline_name and "/" not in name
         )
-    if not candidate_patterns:
-        return candidate_names
+    if candidate_patterns:
+        candidate_names = [
+            name
+            for name in candidate_names
+            if any(pattern.search(name) for pattern in candidate_patterns)
+        ]
     return sorted(
+        _frontier_preferred_candidate_names(
+            metric_groups, baseline_name, candidate_names
+        )
+    )
+
+
+def _frontier_preferred_candidate_names(
+    metric_groups: Mapping[str, Any],
+    baseline_name: str,
+    candidate_names: Sequence[str],
+) -> list[str]:
+    baseline_metrics = _as_mapping(metric_groups.get(baseline_name))
+    baseline_has_time = _metric_value(baseline_metrics, "operation_time_ns") is not None
+    if not baseline_has_time:
+        return list(candidate_names)
+    timed_candidates = [
         name
         for name in candidate_names
-        if any(pattern.search(name) for pattern in candidate_patterns)
-    )
+        if _metric_value(_as_mapping(metric_groups.get(name)), "operation_time_ns")
+        is not None
+    ]
+    return timed_candidates if timed_candidates else list(candidate_names)
 
 
 def _compile_frontier_candidate_patterns(
@@ -2931,34 +2953,224 @@ def _collect_benchmark_metric_groups(
     benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
     for name, benchmark_report_value in benchmark_reports.items():
         benchmark_report = _as_mapping(benchmark_report_value)
+        compile_rows = benchmark_report.get("compiles", [])
+        if isinstance(compile_rows, list):
+            for compile_row_value in compile_rows:
+                compile_row = _as_mapping(compile_row_value)
+                compile_report = _as_mapping(compile_row.get("compile_report"))
+                if not compile_report:
+                    continue
+                _record_compile_summary_metric_group(
+                    groups,
+                    _loom_benchmark_metric_group_name(name, compile_row),
+                    compile_report,
+                    "benchmark_compile_report",
+                )
+        comparison_rows = benchmark_report.get("comparisons", [])
+        if isinstance(comparison_rows, list):
+            for comparison_row_value in comparison_rows:
+                comparison_row = _as_mapping(comparison_row_value)
+                _record_loom_benchmark_comparison_compile_metrics(
+                    groups, name, compile_rows, comparison_row
+                )
+                _record_loom_benchmark_comparison_timing_metrics(
+                    groups, name, comparison_row
+                )
         benchmarks = benchmark_report.get("benchmarks", [])
         if not isinstance(benchmarks, list) or len(benchmarks) != 1:
+            if isinstance(benchmarks, list):
+                for benchmark_value in benchmarks:
+                    benchmark = _as_mapping(benchmark_value)
+                    _record_loom_benchmark_result_metrics(
+                        groups,
+                        _loom_benchmark_metric_group_name(name, benchmark),
+                        benchmark,
+                    )
             continue
         benchmark = _as_mapping(benchmarks[0])
-        timing = _as_mapping(benchmark.get("timing_ns"))
-        _record_metric(groups, name, "p50_ns", timing.get("p50"), "benchmark")
-        _record_metric(
-            groups,
-            name,
-            "operation_time_ns",
-            timing.get("p50"),
-            "benchmark",
+        _record_loom_benchmark_result_metrics(groups, name, benchmark)
+        _record_loom_benchmark_result_metrics(
+            groups, _loom_benchmark_metric_group_name(name, benchmark), benchmark
         )
-        _record_metric(groups, name, "p90_ns", timing.get("p90"), "benchmark")
-        _record_metric(groups, name, "sample_count", timing.get("count"), "benchmark")
-        correctness = _as_mapping(benchmark.get("correctness"))
-        _record_metric(
-            groups,
-            name,
-            "failed_sample_count",
-            correctness.get("failed_sample_count"),
-            "benchmark",
+
+
+def _loom_benchmark_metric_group_name(
+    report_name: str,
+    row: Mapping[str, Any],
+) -> str:
+    candidate_id = row.get("candidate_id")
+    benchmark = row.get("benchmark") or row.get("comparison_group")
+    fragments = [report_name]
+    fragments.append(str(candidate_id) if candidate_id is not None else "candidate")
+    fragments.append(str(benchmark) if benchmark is not None else "benchmark")
+    return "/".join(fragments)
+
+
+def _record_loom_benchmark_result_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    benchmark: Mapping[str, Any],
+) -> None:
+    timing = _as_mapping(benchmark.get("timing_ns"))
+    _record_metric(groups, group_name, "p50_ns", timing.get("p50"), "benchmark")
+    _record_metric(
+        groups,
+        group_name,
+        "operation_time_ns",
+        timing.get("p50"),
+        "benchmark",
+    )
+    _record_metric(groups, group_name, "p90_ns", timing.get("p90"), "benchmark")
+    _record_metric(groups, group_name, "sample_count", timing.get("count"), "benchmark")
+    correctness = _as_mapping(benchmark.get("correctness"))
+    _record_metric(
+        groups,
+        group_name,
+        "failed_sample_count",
+        correctness.get("failed_sample_count"),
+        "benchmark",
+    )
+    compile_report = _as_mapping(benchmark.get("compile_report"))
+    if compile_report:
+        _record_compile_summary_metric_group(
+            groups, group_name, compile_report, "benchmark_compile_report"
         )
-        compile_report = _as_mapping(benchmark.get("compile_report"))
-        if compile_report:
-            _record_compile_summary_metric_group(
-                groups, name, compile_report, "benchmark_compile_report"
-            )
+
+
+def _record_loom_benchmark_comparison_timing_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    report_name: str,
+    comparison: Mapping[str, Any],
+) -> None:
+    benchmark = comparison.get("comparison_group")
+    baseline_group = _loom_benchmark_metric_group_name(
+        report_name,
+        {
+            "candidate_id": comparison.get("baseline_candidate_id"),
+            "benchmark": benchmark,
+        },
+    )
+    candidate_group = _loom_benchmark_metric_group_name(
+        report_name,
+        {
+            "candidate_id": comparison.get("candidate_id"),
+            "benchmark": benchmark,
+        },
+    )
+    _record_loom_benchmark_comparison_candidate_timing_metrics(
+        groups,
+        baseline_group,
+        comparison,
+        "baseline",
+    )
+    _record_loom_benchmark_comparison_candidate_timing_metrics(
+        groups,
+        candidate_group,
+        comparison,
+        "candidate",
+    )
+
+
+def _record_loom_benchmark_comparison_compile_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    report_name: str,
+    compile_rows_value: Any,
+    comparison: Mapping[str, Any],
+) -> None:
+    if not isinstance(compile_rows_value, list):
+        return
+    compile_rows = [_as_mapping(compile_row) for compile_row in compile_rows_value]
+    benchmark = comparison.get("comparison_group")
+    for candidate_id in (
+        comparison.get("baseline_candidate_id"),
+        comparison.get("candidate_id"),
+    ):
+        compile_row = _find_loom_benchmark_compile_row(
+            compile_rows, candidate_id, benchmark
+        )
+        compile_report = _as_mapping(compile_row.get("compile_report"))
+        if not compile_report:
+            continue
+        _record_compile_summary_metric_group(
+            groups,
+            _loom_benchmark_metric_group_name(
+                report_name,
+                {
+                    "candidate_id": candidate_id,
+                    "benchmark": benchmark,
+                },
+            ),
+            compile_report,
+            "benchmark_compile_report",
+        )
+
+
+def _find_loom_benchmark_compile_row(
+    compile_rows: Sequence[Mapping[str, Any]],
+    candidate_id: Any,
+    benchmark: Any,
+) -> Mapping[str, Any]:
+    matching_candidate_rows = [
+        compile_row
+        for compile_row in compile_rows
+        if compile_row.get("candidate_id") == candidate_id
+    ]
+    for compile_row in matching_candidate_rows:
+        if compile_row.get("benchmark") == benchmark:
+            return compile_row
+    if len(matching_candidate_rows) == 1:
+        return matching_candidate_rows[0]
+    return {}
+
+
+def _record_loom_benchmark_comparison_candidate_timing_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    comparison: Mapping[str, Any],
+    prefix: str,
+) -> None:
+    _record_metric(
+        groups,
+        group_name,
+        "p50_ns",
+        comparison.get(f"{prefix}_p50_ns"),
+        "benchmark_comparison",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "operation_time_ns",
+        comparison.get(f"{prefix}_p50_ns"),
+        "benchmark_comparison",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "p90_ns",
+        comparison.get(f"{prefix}_p90_ns"),
+        "benchmark_comparison",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "repetition_count",
+        comparison.get(f"{prefix}_repetition_count"),
+        "benchmark_comparison",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "p50_spread_ppm",
+        comparison.get(f"{prefix}_p50_spread_ppm"),
+        "benchmark_comparison",
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "p90_spread_ppm",
+        comparison.get(f"{prefix}_p90_spread_ppm"),
+        "benchmark_comparison",
+    )
 
 
 def _collect_iree_dispatch_profile_metric_groups(
@@ -3742,6 +3954,9 @@ _IGNORED_SCORECARD_METRICS = frozenset(
         "call_count",
         "matrix_instruction_count",
         "mfma_count",
+        "p50_spread_ppm",
+        "p90_spread_ppm",
+        "repetition_count",
         "sample_count",
         "wmma_count",
     }

@@ -407,6 +407,80 @@ def _write_benchmark_jsonl(path: Path) -> None:
     )
 
 
+def _write_compare_only_benchmark_jsonl(path: Path) -> None:
+    baseline_report = _compile_report_payload()
+    candidate_report = json.loads(json.dumps(_compile_report_payload()))
+    candidate_entry = candidate_report["entries"]["rows"][0]
+    candidate_entry["instruction_count"] = 100
+    candidate_entry["local_memory_bytes"] = 4096
+    candidate_entry["dynamic_instruction_mix"]["local_memory_count"] = 198
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark": "bench_kernel",
+                        "case": "case_kernel",
+                        "entry": "loom_kernel",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 0,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": baseline_report,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c1",
+                        "candidate_index": 1,
+                        "benchmark": "bench_kernel_candidate",
+                        "case": "case_kernel",
+                        "entry": "loom_kernel",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 0,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": candidate_report,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "comparison",
+                        "run_id": "r0",
+                        "comparison_group": "bench_kernel",
+                        "method": "ABABA",
+                        "baseline_candidate_id": "c0",
+                        "candidate_id": "c1",
+                        "baseline_repetition_count": 4,
+                        "candidate_repetition_count": 3,
+                        "baseline_p50_ns": 1_000_000,
+                        "candidate_p50_ns": 1_100_000,
+                        "baseline_p90_ns": 1_100_000,
+                        "candidate_p90_ns": 1_210_000,
+                        "baseline_p50_spread_ppm": 5000,
+                        "candidate_p50_spread_ppm": 6000,
+                        "baseline_p90_spread_ppm": 7000,
+                        "candidate_p90_spread_ppm": 8000,
+                        "ratio_p50": 1.1,
+                        "speedup_p50": 0.909091,
+                        "ratio_p90": 1.1,
+                        "speedup_p90": 0.909091,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
 def _write_skipped_benchmark_compile_jsonl(path: Path) -> None:
     _write(
         path,
@@ -923,6 +997,62 @@ def test_benchmark_embedded_compile_reports_participate_in_comparisons(
         "counter_improved",
         "instruction_count",
     ) in findings_by_kind_role
+
+
+def test_compare_only_benchmark_rows_participate_in_comparisons(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "compare_only.jsonl"
+    _write_compare_only_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="bench/c0/bench_kernel",
+                candidate="bench/c1/bench_kernel",
+            )
+        ],
+    )
+
+    comparison = comparisons["bench/c0/bench_kernel=bench/c1/bench_kernel"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["operation_time_ns"]["ratio"] == 1.1
+    assert (
+        deltas_by_metric["operation_time_ns"]["baseline_source"]
+        == "benchmark_comparison"
+    )
+    assert (
+        deltas_by_metric["operation_time_ns"]["candidate_source"]
+        == "benchmark_comparison"
+    )
+    assert deltas_by_metric["local_memory_bytes"]["ratio"] == 2
+    assert (
+        deltas_by_metric["local_memory_bytes"]["candidate_source"]
+        == "benchmark_compile_report"
+    )
+    assert deltas_by_metric["dynamic_local_memory_count"]["ratio"] == 2
+    assert deltas_by_metric["instruction_count"]["candidate"] == 100
+    scorecard_metrics = {entry["metric"] for entry in comparison["scorecard"]}
+    assert "p90_spread_ppm" not in scorecard_metrics
+    assert "repetition_count" not in scorecard_metrics
+
+    verdicts = build_kernel_anatomy_comparison_verdicts(comparisons)
+    assert verdicts[0]["status"] == "slower_with_structural_cost"
+    assert verdicts[0]["primary_cost"]["category"] == "local_memory"
+
+    frontier = build_kernel_anatomy_optimization_frontier(
+        report,
+        ["bench/c0/bench_kernel"],
+        ["/c1/"],
+    )
+    assert [entry["candidate"] for entry in frontier] == ["bench/c1/bench_kernel"]
+    assert frontier[0]["status"] == "slower"
 
 
 def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
