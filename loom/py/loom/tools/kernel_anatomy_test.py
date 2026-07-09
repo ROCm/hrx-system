@@ -2202,6 +2202,61 @@ def test_rocblas_shape_comparisons_match_linear_benchmark_config(
     )
 
 
+def test_rocblas_shape_comparisons_include_same_named_disassembly(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    disassembly_path = tmp_path / "rocblas.s"
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_rocblas_log(rocblas_log_path)
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <selected_tensile>:
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+      ds_read_b64 v[0:1], v0
+      ds_write_b64 v0, v[0:1]
+""",
+    )
+    compile_report = _linear_compile_report_payload(
+        output_size=13824,
+        token_count=4608,
+        input_size=4608,
+    )
+    entry = compile_report["entries"]["rows"][0]
+    entry["static_instruction_mix"]["local_memory_count"] = 16
+    entry["static_instruction_mix"]["local_read_byte_count"] = 64
+    entry["static_instruction_mix"]["local_write_byte_count"] = 64
+    _write_single_benchmark_jsonl(
+        benchmark_path,
+        "loom_qkv",
+        compile_report,
+        27_582_000,
+    )
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("rocblas", disassembly_path)],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("loom_qkv", benchmark_path)],
+        rocblas_log_paths=[NamedPath("rocblas", rocblas_log_path)],
+    )
+
+    specs = build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs(report)
+    comparisons = build_kernel_anatomy_comparisons(report, specs)
+
+    comparison = comparisons["rocblas/gemm_M13824_N4547_K4608_beta0=loom_qkv"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["operation_time_ns"]["ratio"] == 27582000 / 8503930.0
+    assert deltas_by_metric["local_memory_instruction_count"]["baseline"] == 2
+    assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 16
+    assert deltas_by_metric["local_memory_instruction_count"]["baseline_source"] == (
+        "rocblas_disassembly"
+    )
+    scorecard_by_metric = {entry["metric"]: entry for entry in comparison["scorecard"]}
+    assert scorecard_by_metric["local_memory_instruction_count"]["category"] == (
+        "local_memory"
+    )
+
+
 def test_best_candidate_rows_select_fastest_matching_shape(tmp_path: Path) -> None:
     rocblas_log_path = tmp_path / "rocblas.log"
     slow_benchmark_path = tmp_path / "slow_results.jsonl"

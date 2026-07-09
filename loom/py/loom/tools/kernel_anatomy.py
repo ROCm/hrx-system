@@ -3661,8 +3661,12 @@ def _collect_rocblas_metric_groups(
     groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
 ) -> None:
     rocblas_logs = _as_mapping(report.get("rocblas_logs"))
+    disassemblies = _as_mapping(report.get("disassemblies"))
     for name, rocblas_log_value in rocblas_logs.items():
         rocblas_log = _as_mapping(rocblas_log_value)
+        shape_log_disassembly = _rocblas_shape_log_disassembly(
+            rocblas_log, _as_mapping(disassemblies.get(name))
+        )
         symbol_parameters = _as_mapping(rocblas_log.get("symbol_parameters"))
         _record_metric(
             groups,
@@ -3695,6 +3699,9 @@ def _collect_rocblas_metric_groups(
             )
             for metric in ("M", "N", "K", "alpha", "beta", "lda", "ldb", "ldc", "ldd"):
                 _record_metric(groups, name, metric, timing.get(metric), "rocblas_log")
+            _record_disassembly_summary_metric_group(
+                groups, name, shape_log_disassembly, "rocblas_disassembly"
+            )
         timing_rows = rocblas_log.get("timing_rows", [])
         if isinstance(timing_rows, list):
             for timing_value in timing_rows:
@@ -3741,6 +3748,12 @@ def _collect_rocblas_metric_groups(
                         timing_row.get(metric),
                         "rocblas_log_timing",
                     )
+                _record_disassembly_summary_metric_group(
+                    groups,
+                    group_name,
+                    shape_log_disassembly,
+                    "rocblas_disassembly",
+                )
         trace_rows = rocblas_log.get("trace_rows", [])
         if not isinstance(trace_rows, list):
             continue
@@ -3768,6 +3781,22 @@ def _collect_rocblas_metric_groups(
                     trace_row.get(metric),
                     "rocblas_trace",
                 )
+
+
+def _rocblas_shape_log_disassembly(
+    rocblas_log: Mapping[str, Any],
+    disassembly: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    if not disassembly:
+        return {}
+    timing_rows = [
+        _as_mapping(timing_row)
+        for timing_row in _as_sequence(rocblas_log.get("timing_rows"))
+        if _as_mapping(timing_row)
+    ]
+    if len(timing_rows) <= 1:
+        return disassembly
+    return {}
 
 
 def _record_tensile_symbol_parameter_metrics(
@@ -4025,18 +4054,8 @@ def _collect_disassembly_metric_groups(
     disassemblies = _as_mapping(report.get("disassemblies"))
     for name, disassembly_value in disassemblies.items():
         disassembly = _as_mapping(disassembly_value)
-        whole_file = _as_mapping(disassembly.get("whole_file"))
-        _record_metric(
-            groups,
-            name,
-            "instruction_count",
-            whole_file.get("instruction_count"),
-            "disassembly",
-        )
-        families = _as_mapping(whole_file.get("family_counts"))
-        memory = _as_mapping(whole_file.get("memory_byte_counts"))
-        _record_disassembly_family_metrics(
-            groups, name, families, memory, "disassembly"
+        _record_disassembly_summary_metric_group(
+            groups, name, disassembly, "disassembly"
         )
         weighted_symbols = _as_mapping(disassembly.get("weighted_symbols"))
         weighted_summary = _as_mapping(weighted_symbols.get("summary"))
@@ -4077,6 +4096,31 @@ def _collect_disassembly_metric_groups(
                 _as_mapping(weighted_summary.get("memory_byte_counts")),
                 "weighted_disassembly",
             )
+
+
+def _record_disassembly_summary_metric_group(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    disassembly: Mapping[str, Any],
+    source: str,
+) -> None:
+    if not disassembly:
+        return
+    whole_file = _as_mapping(disassembly.get("whole_file"))
+    _record_metric(
+        groups,
+        group_name,
+        "instruction_count",
+        whole_file.get("instruction_count"),
+        source,
+    )
+    _record_disassembly_family_metrics(
+        groups,
+        group_name,
+        _as_mapping(whole_file.get("family_counts")),
+        _as_mapping(whole_file.get("memory_byte_counts")),
+        source,
+    )
 
 
 def _record_disassembly_family_metrics(
