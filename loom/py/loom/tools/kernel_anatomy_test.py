@@ -19,6 +19,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
     build_kernel_anatomy_comparisons,
+    build_kernel_anatomy_duplicate_candidate_rows,
     build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
     build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs,
@@ -508,6 +509,75 @@ def _write_compare_only_benchmark_jsonl(path: Path) -> None:
                         "speedup_p50": 0.909091,
                         "ratio_p90": 1.1,
                         "speedup_p90": 0.909091,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
+def _write_duplicate_candidate_benchmark_jsonl(path: Path) -> None:
+    compile_report = _compile_report_payload()
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark": "bench_kernel",
+                        "case": "case_kernel",
+                        "entry": "baseline_entry",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 0,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": compile_report,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c1",
+                        "candidate_index": 1,
+                        "benchmark": "bench_kernel_candidate",
+                        "case": "case_kernel",
+                        "entry": "candidate_entry",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 0,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": compile_report,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "comparison",
+                        "run_id": "r0",
+                        "comparison_group": "bench_kernel",
+                        "method": "ABABA",
+                        "baseline_candidate_id": "c0",
+                        "candidate_id": "c1",
+                        "baseline_repetition_count": 4,
+                        "candidate_repetition_count": 3,
+                        "baseline_p50_ns": 1_000_000,
+                        "candidate_p50_ns": 1_007_000,
+                        "baseline_p90_ns": 1_100_000,
+                        "candidate_p90_ns": 1_107_000,
+                        "baseline_p50_spread_ppm": 5000,
+                        "candidate_p50_spread_ppm": 6000,
+                        "baseline_p90_spread_ppm": 7000,
+                        "candidate_p90_spread_ppm": 8000,
+                        "ratio_p50": 1.007,
+                        "speedup_p50": 0.993049,
+                        "ratio_p90": 1.006364,
+                        "speedup_p90": 0.993677,
                     }
                 ),
             ]
@@ -1088,6 +1158,31 @@ def test_compare_only_benchmark_rows_participate_in_comparisons(
     )
     assert [entry["candidate"] for entry in frontier] == ["bench/c1/bench_kernel"]
     assert frontier[0]["status"] == "slower"
+
+
+def test_duplicate_candidate_rows_find_same_compile_signature(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "duplicate_candidates.jsonl"
+    _write_duplicate_candidate_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+
+    rows = build_kernel_anatomy_duplicate_candidate_rows(report)
+
+    assert len(rows) == 1
+    assert rows[0]["report"] == "bench"
+    assert rows[0]["comparison_group"] == "bench_kernel"
+    assert rows[0]["baseline_candidate_id"] == "c0"
+    assert rows[0]["candidate_id"] == "c1"
+    assert rows[0]["baseline_entry"] == "baseline_entry"
+    assert rows[0]["candidate_entry"] == "candidate_entry"
+    assert rows[0]["ratio_p50"] == 1.007
+    assert rows[0]["signature_digest"]
 
 
 def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
@@ -2606,6 +2701,24 @@ def test_summary_report_compacts_benchmark_comparison_verdicts(
     assert "bench c0->c1 bench_kernel" in text
     assert "slower_with_structural_cost time=1.1x" in text
     assert "Top structural costs:" in text
+
+
+def test_summary_report_flags_duplicate_benchmark_candidates(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "duplicate_candidates.jsonl"
+    _write_duplicate_candidate_benchmark_jsonl(benchmark_path)
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+
+    text = format_summary_report(report)
+
+    assert "Duplicate benchmark candidates:" in text
+    assert "bench c0->c1 bench_kernel" in text
+    assert "same_compile_signature time=1.007x" in text
 
 
 def test_main_emits_summary_report(tmp_path: Path, capsys) -> None:

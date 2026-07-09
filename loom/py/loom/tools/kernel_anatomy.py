@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import re
@@ -2038,7 +2039,7 @@ def build_kernel_anatomy_report(
         )
         for named_path in disassembly_paths
     }
-    return {
+    report = {
         "schema": "loom.kernel_anatomy",
         "schema_version": SCHEMA_VERSION,
         "amdhsa_metadata": amdhsa_metadata,
@@ -2051,6 +2052,10 @@ def build_kernel_anatomy_report(
         "rocprof_kernel_traces": rocprof_kernel_traces,
         "tensile_catalogs": tensile_catalogs,
     }
+    report["benchmark_duplicate_candidates"] = (
+        build_kernel_anatomy_duplicate_candidate_rows(report)
+    )
+    return report
 
 
 def _group_named_paths(named_paths: Sequence[NamedPath]) -> dict[str, list[Path]]:
@@ -2310,6 +2315,122 @@ def build_kernel_anatomy_best_candidate_rows(
         ),
         reverse=True,
     )
+
+
+def build_kernel_anatomy_duplicate_candidate_rows(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Finds benchmark comparison pairs with identical compile signatures."""
+
+    rows: list[dict[str, Any]] = []
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    for report_name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        compile_rows_value = benchmark_report.get("compiles")
+        comparison_rows_value = benchmark_report.get("comparisons")
+        if not isinstance(compile_rows_value, list) or not isinstance(
+            comparison_rows_value, list
+        ):
+            continue
+        compile_rows = [_as_mapping(compile_row) for compile_row in compile_rows_value]
+        for comparison_row_value in comparison_rows_value:
+            comparison_row = _as_mapping(comparison_row_value)
+            comparison_group = comparison_row.get("comparison_group")
+            baseline_candidate_id = comparison_row.get("baseline_candidate_id")
+            candidate_id = comparison_row.get("candidate_id")
+            baseline_compile = _find_loom_benchmark_compile_row(
+                compile_rows, baseline_candidate_id, comparison_group
+            )
+            candidate_compile = _find_loom_benchmark_compile_row(
+                compile_rows, candidate_id, comparison_group
+            )
+            baseline_signature = _compile_report_signature(
+                _as_mapping(baseline_compile.get("compile_report"))
+            )
+            candidate_signature = _compile_report_signature(
+                _as_mapping(candidate_compile.get("compile_report"))
+            )
+            if baseline_signature is None or candidate_signature is None:
+                continue
+            if baseline_signature != candidate_signature:
+                continue
+            rows.append(
+                {
+                    "report": report_name,
+                    "comparison_group": comparison_group,
+                    "baseline_candidate_id": baseline_candidate_id,
+                    "candidate_id": candidate_id,
+                    "baseline_benchmark": baseline_compile.get("benchmark"),
+                    "candidate_benchmark": candidate_compile.get("benchmark"),
+                    "baseline_entry": baseline_compile.get("entry"),
+                    "candidate_entry": candidate_compile.get("entry"),
+                    "ratio_p50": comparison_row.get("ratio_p50"),
+                    "speedup_p50": comparison_row.get("speedup_p50"),
+                    "signature_digest": _compile_report_signature_digest(
+                        baseline_signature
+                    ),
+                }
+            )
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("report")),
+            str(row.get("comparison_group")),
+            str(row.get("baseline_candidate_id")),
+            str(row.get("candidate_id")),
+        ),
+    )
+
+
+_COMPILE_SIGNATURE_FIELDS = (
+    "target_key",
+    "executable_format",
+    "workload",
+    "instruction_count",
+    "code_byte_count",
+    "private_memory_bytes",
+    "local_memory_bytes",
+    "static_instruction_mix",
+    "dynamic_instruction_mix",
+    "economics",
+    "config_bindings",
+    "source_low",
+    "target_resources",
+    "wait_plan",
+    "wait_reasons",
+)
+
+_COMPILE_SIGNATURE_IGNORED_KEYS = frozenset(("function", "path"))
+
+
+def _compile_report_signature(
+    compile_report: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    signature = {
+        field: _canonical_signature_value(compile_report.get(field))
+        for field in _COMPILE_SIGNATURE_FIELDS
+        if compile_report.get(field) is not None
+    }
+    return signature or None
+
+
+def _canonical_signature_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_signature_value(nested_value)
+            for key, nested_value in sorted(
+                value.items(), key=lambda item: str(item[0])
+            )
+            if key not in _COMPILE_SIGNATURE_IGNORED_KEYS
+        }
+    if isinstance(value, list):
+        return [_canonical_signature_value(item) for item in value]
+    return value
+
+
+def _compile_report_signature_digest(signature: Mapping[str, Any]) -> str:
+    payload = json.dumps(signature, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def build_kernel_anatomy_optimization_frontier(
@@ -5370,6 +5491,24 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                 f"{row.get('status')} "
                 f"time={_format_ratio(row.get('time_ratio'))}"
                 f"{candidate_suffix}"
+            )
+    duplicate_candidates = report.get("benchmark_duplicate_candidates")
+    if isinstance(duplicate_candidates, list) and duplicate_candidates:
+        lines.append("")
+        lines.append("Duplicate benchmark candidates:")
+        for row_value in duplicate_candidates[:16]:
+            row = _as_mapping(row_value)
+            report_name = row.get("report")
+            baseline_candidate_id = row.get("baseline_candidate_id")
+            candidate_id = row.get("candidate_id")
+            comparison_group = _shorten_text(str(row.get("comparison_group") or ""), 72)
+            lines.append(
+                "  "
+                f"{report_name} {baseline_candidate_id}->{candidate_id} "
+                f"{comparison_group}: "
+                f"same_compile_signature "
+                f"time={_format_ratio(row.get('ratio_p50'))} "
+                f"digest={row.get('signature_digest')}"
             )
     scorecard = report.get("comparison_scorecard")
     if scorecard is None:
