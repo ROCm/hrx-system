@@ -25,6 +25,8 @@ iree_py_library(
   SRCS
     "__init__.py"
     "amdgpu_asm.py"
+  IMPORTS
+    "../.."
 )
 
 iree_py_library(
@@ -36,6 +38,32 @@ iree_py_library(
   DEPS
     loom::py::loom::core
     loom::py::loom::error::error
+)
+
+iree_py_library(
+  NAME
+    kernel_anatomy
+  SRCS
+    "__init__.py"
+    "kernel_anatomy.py"
+  IMPORTS
+    "../.."
+  DEPS
+    loom::py::loom::tools::amdgpu_asm
+)
+
+iree_py_library(
+  NAME
+    kernel_anatomy_cli
+  MAIN
+    "kernel_anatomy.py"
+  SRCS
+    "__init__.py"
+    "kernel_anatomy.py"
+  IMPORTS
+    "../.."
+  DEPS
+    loom::py::loom::tools::kernel_anatomy
 )
 
 iree_py_library(
@@ -54,10 +82,12 @@ iree_py_test(
     "pytest_style_runner.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
+    "loom.tools.kernel_anatomy_test"
     "loom.tools.loom_opt_test"
     "loom.tools.source_surface_test"
   DEPS
     loom::py::loom::tools::amdgpu_asm
+    loom::py::loom::tools::kernel_anatomy
     loom::py::loom::tools::loom_opt
     loom::py::loom::tools::tools
   PACKAGE_DIRS

@@ -16,6 +16,9 @@ from types import MappingProxyType
 
 _ADDRESS_PREFIX_PATTERN = re.compile(r"^\s*(?:[0-9a-fA-F]+:|[0-9a-fA-F]+\s+)?\s*")
 _MNEMONIC_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$]*")
+_SYMBOL_PATTERN = re.compile(r"^\s*[0-9a-fA-F]+\s+<([^>]+)>:\s*$")
+_BIT_WIDTH_PATTERN = re.compile(r"_b(8|16|32|64|128|256)(?:$|_)")
+_DWORDX_WIDTH_PATTERN = re.compile(r"_dwordx([0-9]+)(?:$|_)")
 
 _FAMILY_PREFIXES = (
     ("v_mfma", "v_mfma"),
@@ -31,6 +34,8 @@ _FAMILY_PREFIXES = (
     ("flat_load", "flat_load"),
     ("flat_store", "flat_store"),
     ("flat_atomic", "flat_atomic"),
+    ("ds_load", "ds_read"),
+    ("ds_store", "ds_write"),
     ("ds_read", "ds_read"),
     ("ds_write", "ds_write"),
     ("ds_", "ds_other"),
@@ -53,17 +58,37 @@ class AmdgpuDisassemblySummary:
     instruction_count: int
     family_counts: Mapping[str, int]
     mnemonic_counts: Mapping[str, int]
+    matrix_mnemonic_counts: Mapping[str, int]
+    memory_byte_counts: Mapping[str, int]
 
     def metadata(self) -> Mapping[str, object]:
         """Returns a JSON-serializable summary object."""
 
-        return MappingProxyType(
-            {
-                "instruction_count": self.instruction_count,
-                "family_counts": dict(self.family_counts),
-                "mnemonic_counts": dict(self.mnemonic_counts),
-            }
-        )
+        return {
+            "instruction_count": self.instruction_count,
+            "family_counts": dict(self.family_counts),
+            "matrix_mnemonic_counts": dict(self.matrix_mnemonic_counts),
+            "memory_byte_counts": dict(self.memory_byte_counts),
+            "mnemonic_counts": dict(self.mnemonic_counts),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuDisassemblyBlock:
+    """Instruction summary for one symbol block in AMDGPU disassembly."""
+
+    symbol: str
+    start_line: int
+    summary: AmdgpuDisassemblySummary
+
+    def metadata(self) -> Mapping[str, object]:
+        """Returns a JSON-serializable summary object."""
+
+        return {
+            "symbol": self.symbol,
+            "start_line": self.start_line,
+            "summary": self.summary.metadata(),
+        }
 
 
 def summarize_amdgpu_disassembly(disassembly: str) -> AmdgpuDisassemblySummary:
@@ -72,10 +97,50 @@ def summarize_amdgpu_disassembly(disassembly: str) -> AmdgpuDisassemblySummary:
     mnemonics = tuple(iter_amdgpu_mnemonics(disassembly.splitlines()))
     mnemonic_counts = Counter(mnemonics)
     family_counts = Counter(_instruction_family(mnemonic) for mnemonic in mnemonics)
+    matrix_mnemonic_counts = {
+        mnemonic: count
+        for mnemonic, count in sorted(mnemonic_counts.items())
+        if _instruction_family(mnemonic) in {"v_mfma", "v_wmma", "v_smfmac"}
+    }
+    memory_byte_counts = _summarize_memory_bytes(mnemonic_counts)
     return AmdgpuDisassemblySummary(
         instruction_count=len(mnemonics),
         family_counts=MappingProxyType(dict(sorted(family_counts.items()))),
         mnemonic_counts=MappingProxyType(dict(sorted(mnemonic_counts.items()))),
+        matrix_mnemonic_counts=MappingProxyType(matrix_mnemonic_counts),
+        memory_byte_counts=MappingProxyType(memory_byte_counts),
+    )
+
+
+def summarize_amdgpu_disassembly_blocks(
+    disassembly: str,
+) -> tuple[AmdgpuDisassemblyBlock, ...]:
+    """Summarizes each symbol block in `llvm-objdump -d` AMDGPU output."""
+
+    blocks: list[tuple[str, int, list[str]]] = []
+    current_symbol: str | None = None
+    current_start_line = 0
+    current_lines: list[str] = []
+    for line_number, line in enumerate(disassembly.splitlines(), start=1):
+        match = _SYMBOL_PATTERN.match(line)
+        if match is not None:
+            if current_symbol is not None:
+                blocks.append((current_symbol, current_start_line, current_lines))
+            current_symbol = match.group(1)
+            current_start_line = line_number
+            current_lines = []
+            continue
+        if current_symbol is not None:
+            current_lines.append(line)
+    if current_symbol is not None:
+        blocks.append((current_symbol, current_start_line, current_lines))
+    return tuple(
+        AmdgpuDisassemblyBlock(
+            symbol=symbol,
+            start_line=start_line,
+            summary=summarize_amdgpu_disassembly("\n".join(lines)),
+        )
+        for symbol, start_line, lines in blocks
     )
 
 
@@ -109,3 +174,53 @@ def _instruction_family(mnemonic: str) -> str:
         if mnemonic.startswith(prefix):
             return family
     return "other"
+
+
+def _summarize_memory_bytes(mnemonic_counts: Mapping[str, int]) -> dict[str, int]:
+    byte_counts: Counter[str] = Counter()
+    for mnemonic, count in mnemonic_counts.items():
+        family = _instruction_family(mnemonic)
+        direction = _memory_direction(family)
+        if direction is None:
+            continue
+        width = _instruction_byte_width(mnemonic)
+        if width is None:
+            continue
+        byte_counts[f"{family}_bytes"] += width * count
+        byte_counts[f"{direction}_bytes"] += width * count
+    return dict(sorted(byte_counts.items()))
+
+
+def _memory_direction(family: str) -> str | None:
+    if family in {
+        "global_load",
+        "buffer_load",
+        "flat_load",
+        "ds_read",
+        "s_load",
+    }:
+        return "read"
+    if family in {
+        "global_store",
+        "buffer_store",
+        "flat_store",
+        "ds_write",
+    }:
+        return "write"
+    return None
+
+
+def _instruction_byte_width(mnemonic: str) -> int | None:
+    bit_match = _BIT_WIDTH_PATTERN.search(mnemonic)
+    if bit_match is not None:
+        return int(bit_match.group(1)) // 8
+    dwordx_match = _DWORDX_WIDTH_PATTERN.search(mnemonic)
+    if dwordx_match is not None:
+        return 4 * int(dwordx_match.group(1))
+    if "_dword" in mnemonic:
+        return 4
+    if "_word" in mnemonic or "_short" in mnemonic:
+        return 2
+    if "_byte" in mnemonic:
+        return 1
+    return None

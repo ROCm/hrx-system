@@ -9,6 +9,7 @@ from __future__ import annotations
 from loom.tools.amdgpu_asm import (
     parse_amdgpu_mnemonic,
     summarize_amdgpu_disassembly,
+    summarize_amdgpu_disassembly_blocks,
 )
 
 
@@ -35,13 +36,17 @@ def test_summarize_amdgpu_disassembly_reports_families_and_mnemonics() -> None:
       s_waitcnt lgkmcnt(0)
       v_mfma_f32_16x16x16f16 a[0:7], v[0:1], v[2:3], a[0:7]
       v_add_u32_e32 v0, v1, v2
+      ds_load_b128 v[0:3], v0
+      ds_store_b64 v0, v[0:1]
       s_endpgm
       s_code_end
 """
     )
 
-    assert summary.instruction_count == 8
+    assert summary.instruction_count == 10
     assert summary.family_counts == {
+        "ds_read": 1,
+        "ds_write": 1,
         "global_load": 1,
         "global_store": 1,
         "s_endpgm": 1,
@@ -53,3 +58,38 @@ def test_summarize_amdgpu_disassembly_reports_families_and_mnemonics() -> None:
     assert summary.mnemonic_counts["s_waitcnt"] == 2
     assert summary.mnemonic_counts["global_load_b128"] == 1
     assert summary.mnemonic_counts["v_add_u32_e32"] == 1
+    assert summary.matrix_mnemonic_counts == {
+        "v_mfma_f32_16x16x16f16": 1,
+    }
+    assert summary.memory_byte_counts == {
+        "global_load_bytes": 16,
+        "global_store_bytes": 16,
+        "ds_read_bytes": 16,
+        "ds_write_bytes": 8,
+        "read_bytes": 48,
+        "s_load_bytes": 16,
+        "write_bytes": 24,
+    }
+
+
+def test_summarize_amdgpu_disassembly_blocks_splits_symbols() -> None:
+    blocks = summarize_amdgpu_disassembly_blocks(
+        """
+0000000000000000 <first_kernel>:
+      global_load_b128 v[0:3], v0
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+0000000000000100 <second_kernel>:
+      ds_read_b64 v[0:1], v0
+      ds_write_b32 v0, v1
+"""
+    )
+
+    assert [block.symbol for block in blocks] == ["first_kernel", "second_kernel"]
+    assert blocks[0].summary.family_counts["v_wmma"] == 1
+    assert blocks[0].summary.memory_byte_counts["global_load_bytes"] == 16
+    assert blocks[1].summary.memory_byte_counts == {
+        "ds_read_bytes": 8,
+        "ds_write_bytes": 4,
+        "read_bytes": 8,
+        "write_bytes": 4,
+    }

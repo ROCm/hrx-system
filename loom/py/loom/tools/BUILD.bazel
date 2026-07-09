@@ -26,6 +26,7 @@ iree_py_library(
         "__init__.py",
         "amdgpu_asm.py",
     ],
+    imports = ["../.."],
 )
 
 iree_py_library(
@@ -40,6 +41,27 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "kernel_anatomy",
+    srcs = [
+        "__init__.py",
+        "kernel_anatomy.py",
+    ],
+    imports = ["../.."],
+    deps = [":amdgpu_asm"],
+)
+
+iree_py_binary(
+    name = "kernel_anatomy_cli",
+    srcs = [
+        "__init__.py",
+        "kernel_anatomy.py",
+    ],
+    imports = ["../.."],
+    main = "kernel_anatomy.py",
+    deps = [":kernel_anatomy"],
+)
+
 iree_py_binary(
     name = "pytest_style_runner",
     srcs = ["pytest_style_runner.py"],
@@ -50,18 +72,21 @@ iree_py_test(
     name = "tools_test",
     srcs = [
         "amdgpu_asm_test.py",
+        "kernel_anatomy_test.py",
         "loom_opt_test.py",
         "pytest_style_runner.py",
         "source_surface_test.py",
     ],
     args = [
         "loom.tools.amdgpu_asm_test",
+        "loom.tools.kernel_anatomy_test",
         "loom.tools.loom_opt_test",
         "loom.tools.source_surface_test",
     ],
     main = "pytest_style_runner.py",
     deps = [
         ":amdgpu_asm",
+        ":kernel_anatomy",
         ":loom_opt",
         ":tools",
     ],
