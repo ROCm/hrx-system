@@ -15,6 +15,7 @@ from loom.tools.kernel_anatomy import (
     NamedPath,
     SymbolWeightSpec,
     WeightedSymbolGroupSpec,
+    attach_kernel_anatomy_benchmark_target_listings,
     build_kernel_anatomy_best_candidate_rows,
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
@@ -769,6 +770,32 @@ def _write_multi_entry_benchmark_jsonl(path: Path) -> None:
     )
 
 
+def _write_target_listing_benchmark_jsonl(path: Path, listing_path: Path) -> None:
+    compile_report = _multi_entry_compile_report_payload()
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "benchmark": "selected_benchmark",
+                        "case": "selected_case",
+                        "entry": "selected_kernel",
+                        "state": "ok",
+                        "target_listing_path": listing_path.as_posix(),
+                        "compile_report": compile_report,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
 def _write_rocblas_log(path: Path) -> None:
     _write(
         path,
@@ -1314,6 +1341,43 @@ def test_build_kernel_anatomy_report_selects_benchmark_compile_entry(
     assert "benchmark compiles:" in text_report
     assert "entry=selected_kernel" in text_report
     assert "instructions=321" in text_report
+
+
+def test_benchmark_target_listings_attach_selected_entry_disassembly(
+    tmp_path: Path,
+) -> None:
+    listing_path = tmp_path / "target_listing.amdgpu-assembly"
+    _write(
+        listing_path,
+        """
+0000000000000000 <wrong_kernel>:
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+0000000000000100 <selected_kernel>:
+      global_load_b128 v[0:3], v0
+      ds_read_b128 v[4:7], v8
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_target_listing_benchmark_jsonl(benchmark_path, listing_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+    attach_kernel_anatomy_benchmark_target_listings(report, top_symbol_count=4)
+
+    disassembly = report["disassemblies"]["bench/c0/selected_benchmark"]
+    assert disassembly["symbol_count"] == 1
+    assert disassembly["top_symbols"][0]["symbol"] == "selected_kernel"
+    assert disassembly["matrix_symbols"][0]["matrix_instruction_count"] == 1
+    assert disassembly["matrix_symbols"][0]["local_memory_instruction_count"] == 1
+
+    summary = format_summary_report(report)
+    assert "Matrix-heavy disassembly blocks:" in summary
+    assert "bench/c0/selected_benchmark/selected_kernel" in summary
+    assert "instructions=3 matrix=1 local=1 device=1" in summary
 
 
 def test_build_kernel_anatomy_report_extracts_rocblas_log(

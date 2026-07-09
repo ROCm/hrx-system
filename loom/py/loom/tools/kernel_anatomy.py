@@ -2523,6 +2523,61 @@ def _compile_report_signature_digest(signature: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def attach_kernel_anatomy_benchmark_target_listings(
+    report: dict[str, Any],
+    top_symbol_count: int,
+) -> None:
+    """Loads benchmark target listings into same-named disassembly groups."""
+
+    disassemblies = report.setdefault("disassemblies", {})
+    if not isinstance(disassemblies, dict):
+        raise ValueError("report disassemblies must be a JSON object")
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    for report_name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        benchmark_path = Path(str(benchmark_report.get("path") or ""))
+        compile_rows = benchmark_report.get("compiles")
+        if not isinstance(compile_rows, list):
+            continue
+        for compile_row_value in compile_rows:
+            compile_row = _as_mapping(compile_row_value)
+            target_listing_path = compile_row.get("target_listing_path")
+            if not isinstance(target_listing_path, str) or not target_listing_path:
+                continue
+            entry = compile_row.get("entry")
+            if not isinstance(entry, str) or not entry:
+                raise ValueError(
+                    f"{report_name}: target listing row is missing an entry name"
+                )
+            group_name = _loom_benchmark_metric_group_name(report_name, compile_row)
+            if group_name in disassemblies:
+                raise ValueError(f"duplicate disassembly group name: {group_name}")
+            path = _resolve_benchmark_artifact_path(target_listing_path, benchmark_path)
+            disassemblies[group_name] = summarize_disassembly_path(
+                NamedPath(group_name, path),
+                _exact_symbol_regex(entry),
+                (),
+                (),
+                top_symbol_count,
+                0,
+            )
+
+
+def _resolve_benchmark_artifact_path(path_text: str, benchmark_path: Path) -> Path:
+    path = Path(path_text)
+    if path.exists():
+        return path
+    if not path.is_absolute() and benchmark_path:
+        anchored_path = benchmark_path.parent / path
+        if anchored_path.exists():
+            return anchored_path
+    raise FileNotFoundError(path_text)
+
+
+def _exact_symbol_regex(symbol: str) -> re.Pattern[str]:
+    return re.compile(rf"^{re.escape(symbol)}(?:$|[.$])")
+
+
 def build_kernel_anatomy_optimization_frontier(
     report: Mapping[str, Any],
     baseline_names: Sequence[str],
@@ -6389,6 +6444,14 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help=("iree-benchmark-loom JSONL as NAME=PATH, or PATH to use the stem."),
     )
     parser.add_argument(
+        "--benchmark-target-listings",
+        action="store_true",
+        help=(
+            "Load target listings referenced by benchmark compile rows as "
+            "same-named disassembly groups."
+        ),
+    )
+    parser.add_argument(
         "--iree-dispatch-profile",
         action="append",
         default=[],
@@ -6558,6 +6621,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         top_symbol_count=args.top_symbols,
         ordered_symbol_count=args.ordered_symbols,
     )
+    if args.benchmark_target_listings:
+        attach_kernel_anatomy_benchmark_target_listings(report, args.top_symbols)
     comparison_specs = [
         *build_kernel_anatomy_benchmark_comparison_specs(report),
         *(
