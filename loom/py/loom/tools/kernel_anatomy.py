@@ -400,6 +400,8 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
     """Extracts timing and compile summaries from benchmark JSONL events."""
 
     benchmark_rows: list[dict[str, Any]] = []
+    compile_rows: list[dict[str, Any]] = []
+    device_rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(_read_text(path).splitlines(), start=1):
         line = line.strip()
         if not line:
@@ -408,7 +410,16 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
             event = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{path}:{line_number}: invalid JSONL row") from exc
-        if not isinstance(event, Mapping) or event.get("row") != "benchmark":
+        if not isinstance(event, Mapping):
+            continue
+        row_kind = event.get("row")
+        if row_kind == "device":
+            device_rows.append(_summarize_loom_benchmark_device_row(event))
+            continue
+        if row_kind == "compile":
+            compile_rows.append(_summarize_loom_benchmark_compile_row(event))
+            continue
+        if row_kind != "benchmark":
             continue
         benchmark_result = event.get("benchmark_result")
         if not isinstance(benchmark_result, Mapping):
@@ -446,8 +457,105 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
     return {
         "path": path.as_posix(),
         "benchmark_count": len(benchmark_rows),
+        "compile_count": len(compile_rows),
+        "device_count": len(device_rows),
         "benchmarks": benchmark_rows,
+        "compiles": compile_rows,
+        "devices": device_rows,
+        "resource_findings": _build_loom_benchmark_resource_findings(
+            device_rows, compile_rows
+        ),
     }
+
+
+def _summarize_loom_benchmark_device_row(event: Mapping[str, Any]) -> dict[str, Any]:
+    device_spec = _as_mapping(event.get("device_spec"))
+    dispatch = _as_mapping(device_spec.get("dispatch"))
+    execution = _as_mapping(dispatch.get("execution"))
+    physical_devices = device_spec.get("physical_devices")
+    physical_device = {}
+    if isinstance(physical_devices, list) and physical_devices:
+        physical_device = _as_mapping(physical_devices[0])
+    return {
+        "run_id": event.get("run_id"),
+        "device_uri": event.get("device_uri"),
+        "driver": event.get("driver"),
+        "provider": event.get("provider"),
+        "target_family": event.get("target_family"),
+        "display_name": physical_device.get("display_name"),
+        "backend_path": physical_device.get("backend_path"),
+        "maximum_workgroup_local_memory_size": execution.get(
+            "maximum_workgroup_local_memory_size"
+        ),
+        "maximum_workgroup_local_memory_size_optin": execution.get(
+            "maximum_workgroup_local_memory_size_optin"
+        ),
+    }
+
+
+def _summarize_loom_benchmark_compile_row(event: Mapping[str, Any]) -> dict[str, Any]:
+    compile_report = event.get("compile_report")
+    compile_summary = None
+    if isinstance(compile_report, Mapping):
+        compile_summary = _summarize_loom_compile_report(compile_report)
+    return {
+        "run_id": event.get("run_id"),
+        "candidate_id": event.get("candidate_id"),
+        "candidate_index": event.get("candidate_index"),
+        "benchmark": event.get("benchmark"),
+        "case": event.get("case"),
+        "entry": event.get("entry"),
+        "state": event.get("state"),
+        "diagnostic_error_count": event.get("diagnostic_error_count"),
+        "diagnostic_warning_count": event.get("diagnostic_warning_count"),
+        "diagnostic_remark_count": event.get("diagnostic_remark_count"),
+        "hal_executable_path": event.get("hal_executable_path"),
+        "target_artifact_path": event.get("target_artifact_path"),
+        "target_listing_path": event.get("target_listing_path"),
+        "compile_report": compile_summary,
+    }
+
+
+def _build_loom_benchmark_resource_findings(
+    device_rows: Sequence[Mapping[str, Any]],
+    compile_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    devices_by_run_id = {
+        device.get("run_id"): device for device in device_rows if device.get("run_id")
+    }
+    findings: list[dict[str, Any]] = []
+    for compile_row in compile_rows:
+        compile_report = _as_mapping(compile_row.get("compile_report"))
+        local_memory_bytes = _as_number(compile_report.get("local_memory_bytes"))
+        if local_memory_bytes is None:
+            continue
+        device = devices_by_run_id.get(compile_row.get("run_id"))
+        if device is None and len(device_rows) == 1:
+            device = device_rows[0]
+        if device is None:
+            continue
+        local_memory_limit = _as_number(
+            device.get("maximum_workgroup_local_memory_size")
+        )
+        if local_memory_limit is None or local_memory_bytes <= local_memory_limit:
+            continue
+        findings.append(
+            {
+                "severity": "error",
+                "resource": "workgroup_local_memory",
+                "run_id": compile_row.get("run_id"),
+                "candidate_id": compile_row.get("candidate_id"),
+                "benchmark": compile_row.get("benchmark"),
+                "case": compile_row.get("case"),
+                "entry": compile_row.get("entry"),
+                "required_bytes": local_memory_bytes,
+                "limit_bytes": local_memory_limit,
+                "overage_bytes": local_memory_bytes - local_memory_limit,
+                "device_uri": device.get("device_uri"),
+                "device": device.get("display_name") or device.get("backend_path"),
+            }
+        )
+    return findings
 
 
 _ROCBLAS_DEVICE_PATTERN = re.compile(
@@ -2893,7 +3001,26 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
     lines.append("Loom benchmark JSONL:")
     for name, benchmark_report_value in benchmark_reports.items():
         benchmark_report = _as_mapping(benchmark_report_value)
-        lines.append(f"  {name}: benchmarks={benchmark_report.get('benchmark_count')}")
+        lines.append(
+            f"  {name}: benchmarks={benchmark_report.get('benchmark_count')} "
+            f"compiles={benchmark_report.get('compile_count')} "
+            f"devices={benchmark_report.get('device_count')}"
+        )
+        resource_findings = benchmark_report.get("resource_findings")
+        if isinstance(resource_findings, list):
+            for finding_value in resource_findings:
+                finding = _as_mapping(finding_value)
+                lines.append(
+                    "    "
+                    f"resource {finding.get('severity')}: "
+                    f"{finding.get('resource')} "
+                    f"required={finding.get('required_bytes')} "
+                    f"limit={finding.get('limit_bytes')} "
+                    f"overage={finding.get('overage_bytes')} "
+                    f"device={finding.get('device')} "
+                    f"benchmark={finding.get('benchmark')} "
+                    f"entry={finding.get('entry')}"
+                )
         benchmarks = benchmark_report.get("benchmarks", [])
         if not isinstance(benchmarks, list):
             continue

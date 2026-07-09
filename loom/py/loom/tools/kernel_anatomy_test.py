@@ -192,6 +192,46 @@ def _write_benchmark_jsonl(path: Path) -> None:
                 json.dumps({"row": "run", "run_id": "r0"}),
                 json.dumps(
                     {
+                        "row": "device",
+                        "run_id": "r0",
+                        "device_uri": "amdgpu",
+                        "driver": "amdgpu",
+                        "provider": "amdgpu-hal",
+                        "target_family": "AMDGPU",
+                        "device_spec": {
+                            "physical_devices": [
+                                {
+                                    "display_name": "gfx1100",
+                                    "backend_path": "gfx1100",
+                                },
+                            ],
+                            "dispatch": {
+                                "execution": {
+                                    "maximum_workgroup_local_memory_size": 4096,
+                                    "maximum_workgroup_local_memory_size_optin": 4096,
+                                },
+                            },
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark": "bench_kernel",
+                        "case": "case_kernel",
+                        "entry": "loom_kernel",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 2,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": _compile_report_payload(),
+                    }
+                ),
+                json.dumps(
+                    {
                         "row": "benchmark",
                         "candidate_id": "c0",
                         "candidate_index": 0,
@@ -216,6 +256,51 @@ def _write_benchmark_jsonl(path: Path) -> None:
                             },
                             "compile_report": _compile_report_payload(),
                         },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
+def _write_resource_violation_benchmark_jsonl(path: Path) -> None:
+    compile_report = _compile_report_payload()
+    compile_report["entries"]["rows"][0]["local_memory_bytes"] = 8192
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "device",
+                        "run_id": "r0",
+                        "device_uri": "amdgpu",
+                        "device_spec": {
+                            "physical_devices": [
+                                {
+                                    "display_name": "gfx1100",
+                                },
+                            ],
+                            "dispatch": {
+                                "execution": {
+                                    "maximum_workgroup_local_memory_size": 4096,
+                                },
+                            },
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "benchmark": "oversized_kernel",
+                        "case": "oversized_case",
+                        "entry": "oversized_entry",
+                        "state": "ok",
+                        "compile_report": compile_report,
                     }
                 ),
             ]
@@ -389,6 +474,11 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
 
     benchmark_report = report["loom_benchmarks"]["bench"]
     assert benchmark_report["benchmark_count"] == 1
+    assert benchmark_report["compile_count"] == 1
+    assert benchmark_report["device_count"] == 1
+    assert not benchmark_report["resource_findings"]
+    assert benchmark_report["devices"][0]["maximum_workgroup_local_memory_size"] == 4096
+    assert benchmark_report["compiles"][0]["diagnostic_warning_count"] == 2
     benchmark = benchmark_report["benchmarks"][0]
     assert benchmark["benchmark"] == "bench_kernel"
     assert benchmark["timing_ns"]["p50"] == 1234000
@@ -398,6 +488,34 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
         benchmark["compile_report"]["dynamic_instruction_mix"]["local_memory_count"]
         == 99
     )
+
+
+def test_build_kernel_anatomy_report_flags_benchmark_resource_violations(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_resource_violation_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+
+    benchmark_report = report["loom_benchmarks"]["bench"]
+    finding = benchmark_report["resource_findings"][0]
+    assert finding["severity"] == "error"
+    assert finding["resource"] == "workgroup_local_memory"
+    assert finding["required_bytes"] == 8192
+    assert finding["limit_bytes"] == 4096
+    assert finding["overage_bytes"] == 4096
+    assert finding["device"] == "gfx1100"
+    assert finding["benchmark"] == "oversized_kernel"
+    assert finding["entry"] == "oversized_entry"
+
+    text_report = format_text_report(report)
+    assert "resource error: workgroup_local_memory" in text_report
+    assert "required=8192 limit=4096 overage=4096" in text_report
 
 
 def test_build_kernel_anatomy_report_extracts_rocblas_log(
