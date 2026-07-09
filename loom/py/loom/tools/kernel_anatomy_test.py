@@ -10,7 +10,9 @@ import json
 from pathlib import Path
 
 from loom.tools.kernel_anatomy import (
+    ComparisonSpec,
     NamedPath,
+    build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
     format_text_report,
     main,
@@ -113,6 +115,30 @@ def _write_benchmark_jsonl(path: Path) -> None:
     )
 
 
+def _write_rocblas_log(path: Path) -> None:
+    _write(
+        path,
+        """
+rocBLAS version: 5.5.0.example
+rocBLAS-commit-hash: abcdef
+Tensile-commit-hash: 123456
+hipBLASLt version: 1.4.0 commit-hash: cafe
+Device ID 0 : AMD Radeon Pro W7900 Dual Slot gfx1100
+Library logic solution index of winning solution: 44
+Running kernel: selected_kernel
+Kernel name: selected_kernel
+Kernel parameters:
+           MatrixInstruction: (16, 16, 16, 1)
+               workGroupSize: (32, 4, 1)
+                   macroTile: (128, 128, 1)
+                      depthU: 16
+
+transA,transB,M,N,K,alpha,lda,beta,ldb,ldc,ldd,batch_count,cold_iters,hot_iters,rocblas-Gflops,us
+T,N,13824,4547,4608,1,4608,0,4608,13824,13824,1,5,20,68121,8503.93
+""",
+    )
+
+
 def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     tmp_path: Path,
 ) -> None:
@@ -172,6 +198,28 @@ def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
         benchmark["compile_report"]["dynamic_instruction_mix"]["local_memory_count"]
         == 99
     )
+
+
+def test_build_kernel_anatomy_report_extracts_rocblas_log(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("tensile", rocblas_log_path)],
+    )
+
+    rocblas_log = report["rocblas_logs"]["tensile"]
+    assert rocblas_log["rocblas_version"] == "5.5.0.example"
+    assert rocblas_log["solution_index"] == 44
+    assert rocblas_log["running_kernel"] == "selected_kernel"
+    assert rocblas_log["devices"][0]["arch"] == "gfx1100"
+    assert rocblas_log["kernel_parameters"]["macroTile"] == "(128, 128, 1)"
+    assert rocblas_log["timing_rows"][0]["M"] == 13824
+    assert rocblas_log["timing_rows"][0]["us"] == 8503.93
 
 
 def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
@@ -344,6 +392,111 @@ def test_text_report_contains_benchmark_jsonl_summary(tmp_path: Path) -> None:
     assert "wmma=2 valu=17 dynamic_local=99" in text
 
 
+def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("tensile", rocblas_log_path)],
+    )
+    text = format_text_report(report)
+
+    assert "rocBLAS logs:" in text
+    assert "tensile: solution=44 arch=gfx1100 kernel=selected_kernel" in text
+    assert "M=13824 N=4547 K=4608 time_ms=8.50393 gflops=68121" in text
+    assert "MatrixInstruction: (16, 16, 16, 1)" in text
+
+
+def test_build_kernel_anatomy_comparisons_ranks_mixed_artifact_metrics(
+    tmp_path: Path,
+) -> None:
+    disassembly_path = tmp_path / "tensile.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <tensile_kernel>:
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+      v_add_f32 v0, v1, v2
+""",
+    )
+    metadata_path = tmp_path / "notes.txt"
+    _write(
+        metadata_path,
+        """
+amdhsa.kernels:
+  - .args:
+    .group_segment_fixed_size: 1024
+    .max_flat_workgroup_size: 128
+    .private_segment_fixed_size: 0
+    .symbol: tensile_kernel.kd
+    .vgpr_count: 32
+""",
+    )
+    compile_report_path = tmp_path / "report.json"
+    _write_compile_report(compile_report_path)
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_benchmark_jsonl(benchmark_path)
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("tensile", disassembly_path)],
+        compile_report_paths=[NamedPath("loom", compile_report_path)],
+        benchmark_jsonl_paths=[NamedPath("loom", benchmark_path)],
+        rocblas_log_paths=[NamedPath("tensile", rocblas_log_path)],
+        amdhsa_metadata_paths=[NamedPath("tensile", metadata_path)],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report, [ComparisonSpec(baseline="tensile", candidate="loom")]
+    )
+
+    comparison = comparisons["tensile=loom"]
+    assert comparison["shared_metric_count"] >= 4
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["local_memory_bytes"]["baseline"] == 1024
+    assert deltas_by_metric["local_memory_bytes"]["candidate"] == 2048
+    assert deltas_by_metric["local_memory_bytes"]["ratio"] == 2
+    assert deltas_by_metric["wmma_count"]["baseline"] == 1
+    assert deltas_by_metric["wmma_count"]["candidate"] == 2
+    assert deltas_by_metric["vgpr_count"]["baseline"] == 32
+    assert deltas_by_metric["vgpr_count"]["candidate"] == 64
+    assert deltas_by_metric["operation_time_ns"]["baseline"] == 8503930.0
+    assert deltas_by_metric["operation_time_ns"]["candidate"] == 1234000
+
+
+def test_text_report_contains_comparison_summary(tmp_path: Path) -> None:
+    compile_report_path = tmp_path / "report.json"
+    _write_compile_report(compile_report_path)
+    metadata_path = tmp_path / "notes.txt"
+    _write(
+        metadata_path,
+        """
+amdhsa.kernels:
+  - .args:
+    .group_segment_fixed_size: 1024
+    .symbol: baseline_kernel.kd
+    .vgpr_count: 32
+""",
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[NamedPath("loom", compile_report_path)],
+        amdhsa_metadata_paths=[NamedPath("baseline", metadata_path)],
+    )
+    report["comparisons"] = build_kernel_anatomy_comparisons(
+        report, [ComparisonSpec(baseline="baseline", candidate="loom")]
+    )
+    text = format_text_report(report)
+
+    assert "Comparisons:" in text
+    assert "baseline=loom: shared=2 baseline_metrics=2" in text
+    assert "local_memory_bytes: baseline=1024 candidate=2048" in text
+    assert "ratio=2x sources=amdhsa_metadata/compile_report" in text
+
+
 def test_main_emits_json(tmp_path: Path, capsys) -> None:
     disassembly_path = tmp_path / "kernel.s"
     _write(
@@ -359,3 +512,47 @@ def test_main_emits_json(tmp_path: Path, capsys) -> None:
     report = json.loads(output)
     assert report["schema"] == "loom.kernel_anatomy"
     assert report["disassemblies"]["asm"]["symbol_count"] == 1
+
+
+def test_main_emits_comparisons(tmp_path: Path, capsys) -> None:
+    compile_report_path = tmp_path / "report.json"
+    _write_compile_report(compile_report_path)
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_benchmark_jsonl(benchmark_path)
+    metadata_path = tmp_path / "notes.txt"
+    _write(
+        metadata_path,
+        """
+amdhsa.kernels:
+  - .args:
+    .group_segment_fixed_size: 1024
+    .symbol: baseline_kernel.kd
+    .vgpr_count: 32
+""",
+    )
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    assert (
+        main(
+            [
+                "--compile-report",
+                f"loom={compile_report_path}",
+                "--benchmark-jsonl",
+                f"loom={benchmark_path}",
+                "--amdhsa-metadata",
+                f"baseline={metadata_path}",
+                "--rocblas-log",
+                f"baseline={rocblas_log_path}",
+                "--compare",
+                "baseline=loom",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    comparison = report["comparisons"]["baseline=loom"]
+    assert comparison["shared_metric_count"] == 3

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sys
@@ -32,6 +33,12 @@ class NamedPath:
     path: Path
 
 
+@dataclass(frozen=True)
+class ComparisonSpec:
+    baseline: str
+    candidate: str
+
+
 def _parse_named_path(value: str) -> NamedPath:
     if "=" not in value:
         path = Path(value)
@@ -40,6 +47,17 @@ def _parse_named_path(value: str) -> NamedPath:
     if not name:
         raise argparse.ArgumentTypeError("named paths must have a non-empty name")
     return NamedPath(name=name, path=Path(path))
+
+
+def _parse_comparison_spec(value: str) -> ComparisonSpec:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("comparisons must use BASELINE=CANDIDATE")
+    baseline, candidate = value.split("=", 1)
+    if not baseline or not candidate:
+        raise argparse.ArgumentTypeError(
+            "comparison baseline and candidate must be non-empty"
+        )
+    return ComparisonSpec(baseline=baseline, candidate=candidate)
 
 
 def _read_text(path: Path) -> str:
@@ -177,6 +195,135 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
     }
 
 
+_ROCBLAS_DEVICE_PATTERN = re.compile(
+    r"Device ID (?P<ordinal>[0-9]+) : (?P<name>.+?) (?P<arch>gfx[0-9a-z]+)"
+)
+_ROCBLAS_HIPBLASLT_PATTERN = re.compile(
+    r"hipBLASLt version:\s*(?P<version>\S+)(?:\s+commit-hash:\s*(?P<commit>\S+))?"
+)
+
+
+def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
+    """Extracts selected solution and timing fields from rocBLAS logs."""
+
+    text = _read_text(named_path.path)
+    lines = text.splitlines()
+    timing_header: list[str] | None = None
+    timing_rows: list[dict[str, Any]] = []
+    kernel_parameters: dict[str, str] = {}
+    summary: dict[str, Any] = {
+        "name": named_path.name,
+        "paths": [named_path.path.as_posix()],
+        "devices": [],
+        "kernel_parameters": kernel_parameters,
+        "timing_rows": timing_rows,
+    }
+    in_kernel_parameters = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("rocBLAS version:"):
+            summary["rocblas_version"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("rocBLAS-commit-hash:"):
+            summary["rocblas_commit_hash"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Tensile-commit-hash:"):
+            summary["tensile_commit_hash"] = stripped.split(":", 1)[1].strip()
+        elif match := _ROCBLAS_HIPBLASLT_PATTERN.match(stripped):
+            summary["hipblaslt_version"] = match.group("version")
+            summary["hipblaslt_commit_hash"] = match.group("commit")
+        elif match := _ROCBLAS_DEVICE_PATTERN.match(stripped):
+            summary["devices"].append(
+                {
+                    "ordinal": int(match.group("ordinal")),
+                    "name": match.group("name").strip(),
+                    "arch": match.group("arch"),
+                }
+            )
+        elif stripped.startswith("Library logic solution index of winning solution:"):
+            summary["solution_index"] = _parse_numeric_scalar(stripped.split(":", 1)[1])
+        elif stripped.startswith("Running kernel:"):
+            summary["running_kernel"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Kernel name:"):
+            summary["kernel_name"] = stripped.split(":", 1)[1].strip()
+        elif stripped == "Kernel parameters:":
+            in_kernel_parameters = True
+        elif stripped.startswith("transA,transB,"):
+            in_kernel_parameters = False
+            timing_header = next(csv.reader([stripped]))
+        elif timing_header is not None and stripped:
+            timing_rows.append(_parse_rocblas_timing_row(timing_header, stripped))
+        elif in_kernel_parameters and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            kernel_parameters[key.strip()] = value.strip()
+    summary["selected_timing_row"] = _select_rocblas_timing_row(timing_rows)
+    return summary
+
+
+def _merge_rocblas_log_summaries(
+    target: dict[str, Any], source: Mapping[str, Any]
+) -> dict[str, Any]:
+    target_paths = target.setdefault("paths", [])
+    source_paths = source.get("paths", [])
+    if isinstance(target_paths, list) and isinstance(source_paths, list):
+        target_paths.extend(source_paths)
+    for key, value in source.items():
+        if key in {"devices", "kernel_parameters", "paths", "timing_rows"}:
+            continue
+        if key not in target or target[key] in (None, "", [], {}):
+            target[key] = value
+    target_devices = target.setdefault("devices", [])
+    source_devices = source.get("devices", [])
+    if isinstance(target_devices, list) and isinstance(source_devices, list):
+        for device in source_devices:
+            if device not in target_devices:
+                target_devices.append(device)
+    target_parameters = target.setdefault("kernel_parameters", {})
+    source_parameters = source.get("kernel_parameters", {})
+    if isinstance(target_parameters, dict) and isinstance(source_parameters, Mapping):
+        for key, value in source_parameters.items():
+            target_parameters.setdefault(key, value)
+    target_timing_rows = target.setdefault("timing_rows", [])
+    source_timing_rows = source.get("timing_rows", [])
+    if isinstance(target_timing_rows, list) and isinstance(source_timing_rows, list):
+        target_timing_rows.extend(source_timing_rows)
+        target["selected_timing_row"] = _select_rocblas_timing_row(target_timing_rows)
+    return target
+
+
+def _select_rocblas_timing_row(
+    timing_rows: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    if not timing_rows:
+        return None
+    return max(
+        timing_rows,
+        key=lambda row: _as_number(row.get("hot_iters")) or 0,
+    )
+
+
+def _parse_rocblas_timing_row(header: Sequence[str], row: str) -> dict[str, Any]:
+    values = next(csv.reader([row], skipinitialspace=True))
+    return {
+        key: _parse_numeric_scalar(value)
+        for key, value in zip(header, values, strict=False)
+    }
+
+
+def _parse_numeric_scalar(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return stripped
+    try:
+        return int(stripped, 0)
+    except ValueError:
+        pass
+    try:
+        return float(stripped)
+    except ValueError:
+        return stripped
+
+
 _KERNEL_BLOCK_PATTERN = re.compile(r"^\s+- \.args:\s*$")
 _KERNEL_FIELD_PATTERN = re.compile(r"^    \.(\w+):\s*(.*)$")
 _INTEGER_FIELDS = frozenset(
@@ -245,6 +392,7 @@ def build_kernel_anatomy_report(
     disassembly_paths: Sequence[NamedPath],
     compile_report_paths: Sequence[NamedPath],
     benchmark_jsonl_paths: Sequence[NamedPath] = (),
+    rocblas_log_paths: Sequence[NamedPath] = (),
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
@@ -265,6 +413,14 @@ def build_kernel_anatomy_report(
         named_path.name: summarize_loom_benchmark_jsonl(named_path.path)
         for named_path in benchmark_jsonl_paths
     }
+    rocblas_logs: dict[str, Any] = {}
+    for named_path in rocblas_log_paths:
+        summary = summarize_rocblas_log_path(named_path)
+        existing_summary = rocblas_logs.get(named_path.name)
+        if isinstance(existing_summary, dict):
+            _merge_rocblas_log_summaries(existing_summary, summary)
+        else:
+            rocblas_logs[named_path.name] = summary
     amdhsa_metadata = {
         named_path.name: summarize_amdhsa_metadata_path(
             named_path, compiled_metadata_regex, top_symbol_count
@@ -287,7 +443,397 @@ def build_kernel_anatomy_report(
         "disassemblies": disassemblies,
         "loom_benchmarks": benchmark_jsonl,
         "loom_compile_reports": compile_reports,
+        "rocblas_logs": rocblas_logs,
     }
+
+
+def build_kernel_anatomy_comparisons(
+    report: Mapping[str, Any], comparison_specs: Sequence[ComparisonSpec]
+) -> dict[str, Any]:
+    """Builds ranked numeric metric deltas between named artifact groups."""
+
+    metric_groups = _collect_comparison_metric_groups(report)
+    comparisons: dict[str, Any] = {}
+    for spec in comparison_specs:
+        name = f"{spec.baseline}={spec.candidate}"
+        baseline_metrics = metric_groups.get(spec.baseline, {})
+        candidate_metrics = metric_groups.get(spec.candidate, {})
+        common_metrics = sorted(set(baseline_metrics) & set(candidate_metrics))
+        deltas = [
+            _build_metric_delta(
+                metric,
+                baseline_metrics[metric],
+                candidate_metrics[metric],
+            )
+            for metric in common_metrics
+        ]
+        comparisons[name] = {
+            "baseline": spec.baseline,
+            "candidate": spec.candidate,
+            "baseline_metric_count": len(baseline_metrics),
+            "candidate_metric_count": len(candidate_metrics),
+            "shared_metric_count": len(common_metrics),
+            "deltas": sorted(deltas, key=_metric_delta_rank, reverse=True),
+            "missing_baseline_metrics": sorted(
+                set(candidate_metrics) - set(baseline_metrics)
+            ),
+            "missing_candidate_metrics": sorted(
+                set(baseline_metrics) - set(candidate_metrics)
+            ),
+        }
+    return comparisons
+
+
+def _collect_comparison_metric_groups(
+    report: Mapping[str, Any],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    groups: dict[str, dict[str, dict[str, Any]]] = {}
+    _collect_compile_report_metric_groups(groups, report)
+    _collect_benchmark_metric_groups(groups, report)
+    _collect_rocblas_metric_groups(groups, report)
+    _collect_disassembly_metric_groups(groups, report)
+    _collect_metadata_metric_groups(groups, report)
+    return groups
+
+
+def _as_number(value: Any) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, (int, float)) else None
+
+
+def _record_metric(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    metric: str,
+    value: Any,
+    source: str,
+) -> None:
+    numeric_value = _as_number(value)
+    if numeric_value is None:
+        return
+    group = groups.setdefault(group_name, {})
+    if metric in group and group[metric]["value"] != numeric_value:
+        group[f"{source}.{metric}"] = {
+            "value": numeric_value,
+            "source": source,
+        }
+        return
+    group[metric] = {
+        "value": numeric_value,
+        "source": source,
+    }
+
+
+def _collect_compile_report_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    compile_reports = _as_mapping(report.get("loom_compile_reports"))
+    for name, compile_report_value in compile_reports.items():
+        compile_report = _as_mapping(compile_report_value)
+        _record_metric(
+            groups,
+            name,
+            "instruction_count",
+            compile_report.get("instruction_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "code_byte_count",
+            compile_report.get("code_byte_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "local_memory_bytes",
+            compile_report.get("local_memory_bytes"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "private_memory_bytes",
+            compile_report.get("private_memory_bytes"),
+            "compile_report",
+        )
+        static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
+        _record_metric(
+            groups,
+            name,
+            "wmma_count",
+            static_mix.get("wmma_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "mfma_count",
+            static_mix.get("mfma_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "vector_alu_count",
+            static_mix.get("vector_alu_count"),
+            "compile_report",
+        )
+        dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
+        _record_metric(
+            groups,
+            name,
+            "dynamic_local_memory_count",
+            dynamic_mix.get("local_memory_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "dynamic_local_memory_read_bytes",
+            dynamic_mix.get("local_memory_read_bytes"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "dynamic_local_memory_write_bytes",
+            dynamic_mix.get("local_memory_write_bytes"),
+            "compile_report",
+        )
+        resources = _as_mapping(compile_report.get("target_resources"))
+        vector = _as_mapping(resources.get("vector"))
+        vector_final = _as_mapping(vector.get("final"))
+        _record_metric(
+            groups,
+            name,
+            "vgpr_count",
+            vector_final.get("register_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
+            "occupancy_percent",
+            resources.get("occupancy_percent"),
+            "compile_report",
+        )
+
+
+def _collect_benchmark_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    for name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        benchmarks = benchmark_report.get("benchmarks", [])
+        if not isinstance(benchmarks, list) or len(benchmarks) != 1:
+            continue
+        benchmark = _as_mapping(benchmarks[0])
+        timing = _as_mapping(benchmark.get("timing_ns"))
+        _record_metric(groups, name, "p50_ns", timing.get("p50"), "benchmark")
+        _record_metric(
+            groups,
+            name,
+            "operation_time_ns",
+            timing.get("p50"),
+            "benchmark",
+        )
+        _record_metric(groups, name, "p90_ns", timing.get("p90"), "benchmark")
+        _record_metric(groups, name, "sample_count", timing.get("count"), "benchmark")
+        correctness = _as_mapping(benchmark.get("correctness"))
+        _record_metric(
+            groups,
+            name,
+            "failed_sample_count",
+            correctness.get("failed_sample_count"),
+            "benchmark",
+        )
+
+
+def _collect_rocblas_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    rocblas_logs = _as_mapping(report.get("rocblas_logs"))
+    for name, rocblas_log_value in rocblas_logs.items():
+        rocblas_log = _as_mapping(rocblas_log_value)
+        _record_metric(
+            groups,
+            name,
+            "solution_index",
+            rocblas_log.get("solution_index"),
+            "rocblas_log",
+        )
+        timing = _as_mapping(rocblas_log.get("selected_timing_row"))
+        if timing:
+            _record_metric(
+                groups,
+                name,
+                "operation_time_ns",
+                _microseconds_to_nanoseconds(timing.get("us")),
+                "rocblas_log",
+            )
+            _record_metric(
+                groups,
+                name,
+                "gflops",
+                timing.get("rocblas-Gflops"),
+                "rocblas_log",
+            )
+            for metric in ("M", "N", "K", "lda", "ldb", "ldc", "ldd"):
+                _record_metric(groups, name, metric, timing.get(metric), "rocblas_log")
+
+
+def _microseconds_to_nanoseconds(value: Any) -> float | int | None:
+    numeric_value = _as_number(value)
+    return numeric_value * 1000 if numeric_value is not None else None
+
+
+def _collect_disassembly_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    disassemblies = _as_mapping(report.get("disassemblies"))
+    for name, disassembly_value in disassemblies.items():
+        disassembly = _as_mapping(disassembly_value)
+        whole_file = _as_mapping(disassembly.get("whole_file"))
+        _record_metric(
+            groups,
+            name,
+            "instruction_count",
+            whole_file.get("instruction_count"),
+            "disassembly",
+        )
+        families = _as_mapping(whole_file.get("family_counts"))
+        _record_metric(
+            groups,
+            name,
+            "wmma_count",
+            families.get("v_wmma"),
+            "disassembly",
+        )
+        _record_metric(
+            groups,
+            name,
+            "mfma_count",
+            families.get("v_mfma"),
+            "disassembly",
+        )
+        _record_metric(
+            groups, name, "vector_alu_count", families.get("v_alu"), "disassembly"
+        )
+        for family in (
+            "global_load",
+            "global_store",
+            "buffer_load",
+            "buffer_store",
+            "ds_read",
+            "ds_write",
+            "s_waitcnt",
+            "s_barrier",
+        ):
+            _record_metric(
+                groups, name, f"{family}_count", families.get(family), "disassembly"
+            )
+        memory = _as_mapping(whole_file.get("memory_byte_counts"))
+        _record_metric(
+            groups,
+            name,
+            "read_bytes",
+            memory.get("read_bytes"),
+            "disassembly",
+        )
+        _record_metric(
+            groups, name, "write_bytes", memory.get("write_bytes"), "disassembly"
+        )
+
+
+def _collect_metadata_metric_groups(
+    groups: dict[str, dict[str, dict[str, Any]]], report: Mapping[str, Any]
+) -> None:
+    amdhsa_metadata = _as_mapping(report.get("amdhsa_metadata"))
+    for name, metadata_value in amdhsa_metadata.items():
+        metadata = _as_mapping(metadata_value)
+        kernels = metadata.get("kernels", [])
+        if not isinstance(kernels, list) or not kernels:
+            continue
+        kernel = _as_mapping(kernels[0])
+        _record_metric(
+            groups,
+            name,
+            "local_memory_bytes",
+            kernel.get("group_segment_fixed_size"),
+            "amdhsa_metadata",
+        )
+        _record_metric(
+            groups,
+            name,
+            "private_memory_bytes",
+            kernel.get("private_segment_fixed_size"),
+            "amdhsa_metadata",
+        )
+        _record_metric(
+            groups, name, "vgpr_count", kernel.get("vgpr_count"), "amdhsa_metadata"
+        )
+        _record_metric(
+            groups, name, "sgpr_count", kernel.get("sgpr_count"), "amdhsa_metadata"
+        )
+        _record_metric(
+            groups,
+            name,
+            "vgpr_spill_count",
+            kernel.get("vgpr_spill_count"),
+            "amdhsa_metadata",
+        )
+        _record_metric(
+            groups,
+            name,
+            "sgpr_spill_count",
+            kernel.get("sgpr_spill_count"),
+            "amdhsa_metadata",
+        )
+        _record_metric(
+            groups,
+            name,
+            "wavefront_size",
+            kernel.get("wavefront_size"),
+            "amdhsa_metadata",
+        )
+        _record_metric(
+            groups,
+            name,
+            "workgroup_size",
+            kernel.get("max_flat_workgroup_size"),
+            "amdhsa_metadata",
+        )
+
+
+def _build_metric_delta(
+    metric: str, baseline_metric: Mapping[str, Any], candidate_metric: Mapping[str, Any]
+) -> dict[str, Any]:
+    baseline_value = baseline_metric["value"]
+    candidate_value = candidate_metric["value"]
+    delta = candidate_value - baseline_value
+    ratio = None
+    if baseline_value != 0:
+        ratio = candidate_value / baseline_value
+    return {
+        "metric": metric,
+        "baseline": baseline_value,
+        "candidate": candidate_value,
+        "delta": delta,
+        "ratio": ratio,
+        "baseline_source": baseline_metric["source"],
+        "candidate_source": candidate_metric["source"],
+    }
+
+
+def _metric_delta_rank(delta: Mapping[str, Any]) -> float:
+    ratio = delta.get("ratio")
+    if isinstance(ratio, (int, float)) and ratio > 0:
+        return ratio if ratio >= 1 else 1 / ratio
+    return float("inf") if delta.get("delta") else 0.0
 
 
 def _iter_amdhsa_metadata_kernels(text: str) -> Sequence[dict[str, Any]]:
@@ -444,6 +990,94 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
             )
 
 
+def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> None:
+    rocblas_logs = report.get("rocblas_logs", {})
+    if not isinstance(rocblas_logs, Mapping) or not rocblas_logs:
+        return
+    lines.append("")
+    lines.append("rocBLAS logs:")
+    for name, rocblas_log_value in rocblas_logs.items():
+        rocblas_log = _as_mapping(rocblas_log_value)
+        devices = rocblas_log.get("devices", [])
+        arch = "?"
+        if isinstance(devices, list) and devices:
+            arch = _as_mapping(devices[0]).get("arch", "?")
+        lines.append(
+            "  "
+            f"{name}: solution={rocblas_log.get('solution_index')} "
+            f"arch={arch} "
+            f"kernel={rocblas_log.get('running_kernel')}"
+        )
+        selected_timing = _as_mapping(rocblas_log.get("selected_timing_row"))
+        if selected_timing:
+            lines.append(
+                "    "
+                f"selected M={selected_timing.get('M')} "
+                f"N={selected_timing.get('N')} "
+                f"K={selected_timing.get('K')} "
+                f"time_ms={_format_rocblas_time_ms(selected_timing)} "
+                f"gflops={selected_timing.get('rocblas-Gflops')}"
+            )
+        timing_rows = rocblas_log.get("timing_rows", [])
+        if isinstance(timing_rows, list):
+            for timing_value in timing_rows[:4]:
+                timing = _as_mapping(timing_value)
+                lines.append(
+                    "    "
+                    f"M={timing.get('M')} N={timing.get('N')} "
+                    f"K={timing.get('K')} "
+                    f"time_ms={_format_rocblas_time_ms(timing)} "
+                    f"gflops={timing.get('rocblas-Gflops')}"
+                )
+        kernel_parameters = _as_mapping(rocblas_log.get("kernel_parameters"))
+        lines.extend(
+            f"    {key}: {kernel_parameters[key]}"
+            for key in ("MatrixInstruction", "workGroupSize", "macroTile", "depthU")
+            if key in kernel_parameters
+        )
+
+
+def _format_rocblas_time_ms(timing: Mapping[str, Any]) -> str:
+    time_us = timing.get("us")
+    time_ms = time_us / 1000 if isinstance(time_us, (int, float)) else None
+    return f"{time_ms:.6g}" if time_ms is not None else "?"
+
+
+def _format_ratio(ratio: Any) -> str:
+    return f"{ratio:.6g}x" if isinstance(ratio, (int, float)) else "?"
+
+
+def _append_comparison_lines(lines: list[str], report: Mapping[str, Any]) -> None:
+    comparisons = report.get("comparisons", {})
+    if not isinstance(comparisons, Mapping) or not comparisons:
+        return
+    lines.append("")
+    lines.append("Comparisons:")
+    for name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        lines.append(
+            "  "
+            f"{name}: shared={comparison.get('shared_metric_count')} "
+            f"baseline_metrics={comparison.get('baseline_metric_count')} "
+            f"candidate_metrics={comparison.get('candidate_metric_count')}"
+        )
+        deltas = comparison.get("deltas", [])
+        if not isinstance(deltas, list):
+            continue
+        for delta_value in deltas[:12]:
+            delta = _as_mapping(delta_value)
+            lines.append(
+                "    "
+                f"{delta.get('metric')}: "
+                f"baseline={delta.get('baseline')} "
+                f"candidate={delta.get('candidate')} "
+                f"delta={delta.get('delta')} "
+                f"ratio={_format_ratio(delta.get('ratio'))} "
+                f"sources={delta.get('baseline_source')}/"
+                f"{delta.get('candidate_source')}"
+            )
+
+
 def _append_disassembly_symbol_lines(
     lines: list[str], symbols: Any, indent: str
 ) -> None:
@@ -561,6 +1195,8 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     lines = ["Kernel anatomy report"]
     _append_compile_report_lines(lines, report)
     _append_benchmark_report_lines(lines, report)
+    _append_rocblas_log_lines(lines, report)
+    _append_comparison_lines(lines, report)
     _append_disassembly_report_lines(lines, report)
     _append_amdhsa_metadata_lines(lines, report)
     return "\n".join(lines) + "\n"
@@ -590,6 +1226,13 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help=("iree-benchmark-loom JSONL as NAME=PATH, or PATH to use the stem."),
     )
     parser.add_argument(
+        "--rocblas-log",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help="rocBLAS log output as NAME=PATH, or PATH to use the stem.",
+    )
+    parser.add_argument(
         "--amdhsa-metadata",
         action="append",
         default=[],
@@ -597,6 +1240,16 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help=(
             "`llvm-readobj --notes` output as NAME=PATH, or PATH to use the "
             "stem as NAME."
+        ),
+    )
+    parser.add_argument(
+        "--compare",
+        action="append",
+        default=[],
+        type=_parse_comparison_spec,
+        help=(
+            "Named metric comparison as BASELINE=CANDIDATE using artifact names "
+            "from this report."
         ),
     )
     parser.add_argument(
@@ -637,12 +1290,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         disassembly_paths=args.disassembly,
         compile_report_paths=args.compile_report,
         benchmark_jsonl_paths=args.benchmark_jsonl,
+        rocblas_log_paths=args.rocblas_log,
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,
         top_symbol_count=args.top_symbols,
         ordered_symbol_count=args.ordered_symbols,
     )
+    if args.compare:
+        report["comparisons"] = build_kernel_anatomy_comparisons(report, args.compare)
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
