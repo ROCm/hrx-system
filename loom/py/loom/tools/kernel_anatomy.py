@@ -48,6 +48,14 @@ class SymbolWeightSpec:
     weight: float | int
 
 
+@dataclass(frozen=True)
+class WeightedSymbolGroupSpec:
+    disassembly_name: str
+    group_name: str
+    symbol_regex: str
+    weight: float | int
+
+
 def _parse_named_path(value: str) -> NamedPath:
     if "=" not in value:
         path = Path(value)
@@ -95,6 +103,51 @@ def _parse_symbol_weight_spec(value: str) -> SymbolWeightSpec:
         raise argparse.ArgumentTypeError("symbol weight must be non-negative")
     return SymbolWeightSpec(
         disassembly_name=disassembly_name,
+        symbol_regex=symbol_regex,
+        weight=weight,
+    )
+
+
+def _parse_weighted_symbol_group_spec(value: str) -> WeightedSymbolGroupSpec:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError(
+            "weighted symbol groups must use "
+            "DISASSEMBLY_NAME/GROUP_NAME=SYMBOL_REGEX=WEIGHT"
+        )
+    disassembly_group, rest = value.split("=", 1)
+    if "/" not in disassembly_group:
+        raise argparse.ArgumentTypeError(
+            "weighted symbol groups must use "
+            "DISASSEMBLY_NAME/GROUP_NAME=SYMBOL_REGEX=WEIGHT"
+        )
+    disassembly_name, group_name = disassembly_group.split("/", 1)
+    if "=" not in rest:
+        raise argparse.ArgumentTypeError(
+            "weighted symbol groups must use "
+            "DISASSEMBLY_NAME/GROUP_NAME=SYMBOL_REGEX=WEIGHT"
+        )
+    symbol_regex, weight_text = rest.rsplit("=", 1)
+    if not disassembly_name or not group_name or not symbol_regex:
+        raise argparse.ArgumentTypeError(
+            "weighted symbol group disassembly name, group name, and regex "
+            "must be non-empty"
+        )
+    if "/" in group_name:
+        raise argparse.ArgumentTypeError("weighted symbol group names cannot contain /")
+    try:
+        weight = int(weight_text, 0)
+    except ValueError:
+        try:
+            weight = float(weight_text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                "weighted symbol weight must be numeric"
+            ) from exc
+    if weight < 0:
+        raise argparse.ArgumentTypeError("weighted symbol weight must be non-negative")
+    return WeightedSymbolGroupSpec(
+        disassembly_name=disassembly_name,
+        group_name=group_name,
         symbol_regex=symbol_regex,
         weight=weight,
     )
@@ -1162,6 +1215,7 @@ def summarize_disassembly_path(
     named_path: NamedPath,
     symbol_regex: re.Pattern[str] | None,
     symbol_weight_specs: Sequence[SymbolWeightSpec],
+    weighted_symbol_group_specs: Sequence[WeightedSymbolGroupSpec],
     top_symbol_count: int,
     ordered_symbol_count: int,
 ) -> dict[str, Any]:
@@ -1186,6 +1240,11 @@ def summarize_disassembly_path(
     weighted_symbols = _summarize_weighted_symbols(blocks, symbol_weight_specs)
     if weighted_symbols is not None:
         summary["weighted_symbols"] = weighted_symbols
+    weighted_symbol_groups = _summarize_weighted_symbol_groups(
+        blocks, weighted_symbol_group_specs
+    )
+    if weighted_symbol_groups:
+        summary["weighted_symbol_groups"] = weighted_symbol_groups
     return summary
 
 
@@ -1201,6 +1260,7 @@ def build_kernel_anatomy_report(
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
     symbol_weight_specs: Sequence[SymbolWeightSpec] = (),
+    weighted_symbol_group_specs: Sequence[WeightedSymbolGroupSpec] = (),
     top_symbol_count: int = 16,
     ordered_symbol_count: int = 0,
 ) -> dict[str, Any]:
@@ -1253,6 +1313,11 @@ def build_kernel_anatomy_report(
             tuple(
                 spec
                 for spec in symbol_weight_specs
+                if spec.disassembly_name == named_path.name
+            ),
+            tuple(
+                spec
+                for spec in weighted_symbol_group_specs
                 if spec.disassembly_name == named_path.name
             ),
             top_symbol_count,
@@ -2104,6 +2169,27 @@ def _collect_disassembly_metric_groups(
                 _as_mapping(weighted_summary.get("memory_byte_counts")),
                 "weighted_disassembly",
             )
+        weighted_symbol_groups = _as_mapping(disassembly.get("weighted_symbol_groups"))
+        for group_name, weighted_group_value in weighted_symbol_groups.items():
+            weighted_group = _as_mapping(weighted_group_value)
+            weighted_summary = _as_mapping(weighted_group.get("summary"))
+            if not weighted_summary:
+                continue
+            comparison_group = f"{name}/weighted/{group_name}"
+            _record_metric(
+                groups,
+                comparison_group,
+                "instruction_count",
+                weighted_summary.get("instruction_count"),
+                "weighted_disassembly",
+            )
+            _record_disassembly_family_metrics(
+                groups,
+                comparison_group,
+                _as_mapping(weighted_summary.get("family_counts")),
+                _as_mapping(weighted_summary.get("memory_byte_counts")),
+                "weighted_disassembly",
+            )
 
 
 def _record_disassembly_family_metrics(
@@ -2601,6 +2687,27 @@ def _summarize_weighted_symbols(
             "memory_byte_counts": _normalize_weighted_counts(memory_byte_counts),
         },
     }
+
+
+def _summarize_weighted_symbol_groups(
+    blocks: Sequence[AmdgpuDisassemblyBlock],
+    weighted_symbol_group_specs: Sequence[WeightedSymbolGroupSpec],
+) -> dict[str, Any]:
+    grouped_specs: dict[str, list[SymbolWeightSpec]] = {}
+    for spec in weighted_symbol_group_specs:
+        grouped_specs.setdefault(spec.group_name, []).append(
+            SymbolWeightSpec(
+                disassembly_name=spec.disassembly_name,
+                symbol_regex=spec.symbol_regex,
+                weight=spec.weight,
+            )
+        )
+    summaries: dict[str, Any] = {}
+    for group_name, group_specs in sorted(grouped_specs.items()):
+        summary = _summarize_weighted_symbols(blocks, group_specs)
+        if summary is not None:
+            summaries[group_name] = summary
+    return summaries
 
 
 def _add_weighted_counts(
@@ -3138,12 +3245,41 @@ def _append_weighted_symbol_lines(
     weighted_symbols = _as_mapping(weighted_symbols_value)
     if not weighted_symbols:
         return
+    _append_weighted_symbol_summary_lines(
+        lines, "weighted symbols", weighted_symbols, "    "
+    )
+
+
+def _append_weighted_symbol_group_lines(
+    lines: list[str], weighted_symbol_groups_value: Any
+) -> None:
+    weighted_symbol_groups = _as_mapping(weighted_symbol_groups_value)
+    if not weighted_symbol_groups:
+        return
+    lines.append("    weighted symbol groups:")
+    for group_name, weighted_symbols_value in weighted_symbol_groups.items():
+        weighted_symbols = _as_mapping(weighted_symbols_value)
+        if not weighted_symbols:
+            continue
+        _append_weighted_symbol_summary_lines(
+            lines, str(group_name), weighted_symbols, "      "
+        )
+
+
+def _append_weighted_symbol_summary_lines(
+    lines: list[str],
+    label: str,
+    weighted_symbols: Mapping[str, Any],
+    indent: str,
+) -> None:
     summary = _as_mapping(weighted_symbols.get("summary"))
     families = _as_mapping(summary.get("family_counts"))
     memory = _as_mapping(summary.get("memory_byte_counts"))
+    group_text = "" if label == "weighted symbols" else f"group={label} "
     lines.append(
-        "    "
+        f"{indent}"
         f"weighted symbols: rules={weighted_symbols.get('rule_count')} "
+        f"{group_text}"
         f"matches={weighted_symbols.get('matched_symbol_count')} "
         f"instructions={summary.get('instruction_count')} "
         f"wmma={families.get('v_wmma', 0)} "
@@ -3164,7 +3300,7 @@ def _append_weighted_symbol_lines(
         if not isinstance(matched_symbols, list):
             matched_symbols = []
         lines.append(
-            "      "
+            f"{indent}  "
             f"{rule.get('symbol_regex')}: "
             f"weight={rule.get('weight')} "
             f"matches={rule.get('matched_symbol_count')} "
@@ -3205,6 +3341,9 @@ def _append_disassembly_report_lines(
         _append_disassembly_symbol_lines(lines, disassembly.get("top_symbols"), "    ")
         _append_ordered_symbol_lines(lines, disassembly.get("ordered_symbols"))
         _append_weighted_symbol_lines(lines, disassembly.get("weighted_symbols"))
+        _append_weighted_symbol_group_lines(
+            lines, disassembly.get("weighted_symbol_groups")
+        )
 
 
 def _append_amdhsa_metadata_lines(lines: list[str], report: Mapping[str, Any]) -> None:
@@ -3398,6 +3537,18 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--weighted-symbol-group",
+        action="append",
+        default=[],
+        type=_parse_weighted_symbol_group_spec,
+        help=(
+            "Named weighted disassembly block rule as "
+            "DISASSEMBLY_NAME/GROUP_NAME=SYMBOL_REGEX=WEIGHT. Repeat with "
+            "the same group to estimate phase-specific dynamic instruction "
+            "family counts from selected symbols or labels."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "text", "rocblas-replay"),
         default="json",
@@ -3435,6 +3586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,
         symbol_weight_specs=args.symbol_weight,
+        weighted_symbol_group_specs=args.weighted_symbol_group,
         top_symbol_count=args.top_symbols,
         ordered_symbol_count=args.ordered_symbols,
     )
