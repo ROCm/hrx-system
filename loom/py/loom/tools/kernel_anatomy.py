@@ -72,10 +72,11 @@ def _first_entry(report: Mapping[str, Any]) -> Mapping[str, Any]:
     return entry
 
 
-def summarize_loom_compile_report(path: Path) -> dict[str, Any]:
-    """Extracts kernel-economics fields from a Loom compile-report artifact."""
+def _summarize_loom_compile_report(
+    report: Mapping[str, Any], path: Path | None = None
+) -> dict[str, Any]:
+    """Extracts kernel-economics fields from a Loom compile-report object."""
 
-    report = _extract_compile_report(_read_json(path))
     entry = _first_entry(report)
     target_resources = entry.get("target_resources")
     if not isinstance(target_resources, Mapping):
@@ -83,14 +84,19 @@ def summarize_loom_compile_report(path: Path) -> dict[str, Any]:
     static_instruction_mix = entry.get("static_instruction_mix")
     if not isinstance(static_instruction_mix, Mapping):
         static_instruction_mix = {}
+    dynamic_instruction_mix = entry.get("dynamic_instruction_mix")
+    if not isinstance(dynamic_instruction_mix, Mapping):
+        dynamic_instruction_mix = {}
+    economics = entry.get("economics")
+    if not isinstance(economics, Mapping):
+        economics = {}
     workload = entry.get("workload")
     if not isinstance(workload, Mapping):
         workload = {}
     wait_plan = entry.get("wait_plan")
     if not isinstance(wait_plan, Mapping):
         wait_plan = {}
-    return {
-        "path": path.as_posix(),
+    summary = {
         "function": report.get("function") or entry.get("function"),
         "target_key": report.get("target_key"),
         "executable_format": report.get("executable_format"),
@@ -100,8 +106,74 @@ def summarize_loom_compile_report(path: Path) -> dict[str, Any]:
         "private_memory_bytes": entry.get("private_memory_bytes"),
         "local_memory_bytes": entry.get("local_memory_bytes"),
         "static_instruction_mix": static_instruction_mix,
+        "dynamic_instruction_mix": dynamic_instruction_mix,
+        "economics": economics,
         "target_resources": target_resources,
         "wait_plan": wait_plan,
+    }
+    if path is not None:
+        summary["path"] = path.as_posix()
+    return summary
+
+
+def summarize_loom_compile_report(path: Path) -> dict[str, Any]:
+    """Extracts kernel-economics fields from a Loom compile-report artifact."""
+
+    report = _extract_compile_report(_read_json(path))
+    return _summarize_loom_compile_report(report, path)
+
+
+def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
+    """Extracts timing and compile summaries from benchmark JSONL events."""
+
+    benchmark_rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(_read_text(path).splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}:{line_number}: invalid JSONL row") from exc
+        if not isinstance(event, Mapping) or event.get("row") != "benchmark":
+            continue
+        benchmark_result = event.get("benchmark_result")
+        if not isinstance(benchmark_result, Mapping):
+            continue
+        measurement = benchmark_result.get("measurement")
+        if not isinstance(measurement, Mapping):
+            measurement = {}
+        operation_timing = measurement.get("operation_timing_ns")
+        if not isinstance(operation_timing, Mapping):
+            operation_timing = {}
+        timing_interpretation = measurement.get("timing_interpretation")
+        if not isinstance(timing_interpretation, Mapping):
+            timing_interpretation = {}
+        correctness = benchmark_result.get("correctness")
+        if not isinstance(correctness, Mapping):
+            correctness = {}
+        compile_report = benchmark_result.get("compile_report")
+        compile_summary = None
+        if isinstance(compile_report, Mapping):
+            compile_summary = _summarize_loom_compile_report(compile_report)
+        benchmark_rows.append(
+            {
+                "benchmark": benchmark_result.get("benchmark"),
+                "case": benchmark_result.get("case"),
+                "state": benchmark_result.get("state"),
+                "candidate_id": event.get("candidate_id"),
+                "candidate_index": event.get("candidate_index"),
+                "sample_compilation": benchmark_result.get("sample_compilation"),
+                "timing_ns": operation_timing,
+                "timing_interpretation": timing_interpretation,
+                "correctness": correctness,
+                "compile_report": compile_summary,
+            }
+        )
+    return {
+        "path": path.as_posix(),
+        "benchmark_count": len(benchmark_rows),
+        "benchmarks": benchmark_rows,
     }
 
 
@@ -172,6 +244,7 @@ def summarize_disassembly_path(
 def build_kernel_anatomy_report(
     disassembly_paths: Sequence[NamedPath],
     compile_report_paths: Sequence[NamedPath],
+    benchmark_jsonl_paths: Sequence[NamedPath] = (),
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
@@ -187,6 +260,10 @@ def build_kernel_anatomy_report(
     compile_reports = {
         named_path.name: summarize_loom_compile_report(named_path.path)
         for named_path in compile_report_paths
+    }
+    benchmark_jsonl = {
+        named_path.name: summarize_loom_benchmark_jsonl(named_path.path)
+        for named_path in benchmark_jsonl_paths
     }
     amdhsa_metadata = {
         named_path.name: summarize_amdhsa_metadata_path(
@@ -208,6 +285,7 @@ def build_kernel_anatomy_report(
         "schema_version": SCHEMA_VERSION,
         "amdhsa_metadata": amdhsa_metadata,
         "disassemblies": disassemblies,
+        "loom_benchmarks": benchmark_jsonl,
         "loom_compile_reports": compile_reports,
     }
 
@@ -292,153 +370,199 @@ def _matrix_count(block: AmdgpuDisassemblyBlock) -> int:
     return sum(block.summary.matrix_mnemonic_counts.values())
 
 
-def format_text_report(report: Mapping[str, Any]) -> str:
-    """Formats the anatomy report as concise human-readable text."""
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
 
-    lines = ["Kernel anatomy report"]
+
+def _append_compile_report_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     compile_reports = report.get("loom_compile_reports", {})
-    if isinstance(compile_reports, Mapping) and compile_reports:
-        lines.append("")
-        lines.append("Loom compile reports:")
-        for name, compile_report in compile_reports.items():
-            if not isinstance(compile_report, Mapping):
-                continue
-            resources = compile_report.get("target_resources", {})
-            if not isinstance(resources, Mapping):
-                resources = {}
-            vector = resources.get("vector", {})
-            if not isinstance(vector, Mapping):
-                vector = {}
-            vector_final = vector.get("final", {})
-            if not isinstance(vector_final, Mapping):
-                vector_final = {}
-            mix = compile_report.get("static_instruction_mix", {})
-            if not isinstance(mix, Mapping):
-                mix = {}
+    if not isinstance(compile_reports, Mapping) or not compile_reports:
+        return
+    lines.append("")
+    lines.append("Loom compile reports:")
+    for name, compile_report_value in compile_reports.items():
+        compile_report = _as_mapping(compile_report_value)
+        resources = _as_mapping(compile_report.get("target_resources"))
+        vector = _as_mapping(resources.get("vector"))
+        vector_final = _as_mapping(vector.get("final"))
+        mix = _as_mapping(compile_report.get("static_instruction_mix"))
+        lines.append(
+            "  "
+            f"{name}: instructions={compile_report.get('instruction_count')} "
+            f"code_bytes={compile_report.get('code_byte_count')} "
+            f"local_bytes={compile_report.get('local_memory_bytes')} "
+            f"vgpr={vector_final.get('register_count')} "
+            f"occupancy={resources.get('occupancy_percent')}% "
+            f"wmma={mix.get('wmma_count')} "
+            f"mfma={mix.get('mfma_count')} "
+            f"valu={mix.get('vector_alu_count')}"
+        )
+
+
+def _format_p50_ms(timing: Mapping[str, Any]) -> str:
+    p50 = timing.get("p50")
+    return f"{p50 / 1_000_000:.6g}" if isinstance(p50, (int, float)) else "?"
+
+
+def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) -> None:
+    benchmark_reports = report.get("loom_benchmarks", {})
+    if not isinstance(benchmark_reports, Mapping) or not benchmark_reports:
+        return
+    lines.append("")
+    lines.append("Loom benchmark JSONL:")
+    for name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        lines.append(f"  {name}: benchmarks={benchmark_report.get('benchmark_count')}")
+        benchmarks = benchmark_report.get("benchmarks", [])
+        if not isinstance(benchmarks, list):
+            continue
+        for benchmark_value in benchmarks[:8]:
+            benchmark = _as_mapping(benchmark_value)
+            timing = _as_mapping(benchmark.get("timing_ns"))
+            correctness = _as_mapping(benchmark.get("correctness"))
+            compile_report = _as_mapping(benchmark.get("compile_report"))
+            resources = _as_mapping(compile_report.get("target_resources"))
+            vector = _as_mapping(resources.get("vector"))
+            vector_final = _as_mapping(vector.get("final"))
+            static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
+            dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
             lines.append(
-                "  "
-                f"{name}: instructions={compile_report.get('instruction_count')} "
+                "    "
+                f"{benchmark.get('benchmark')}: "
+                f"state={benchmark.get('state')} "
+                f"p50_ms={_format_p50_ms(timing)} "
+                f"correctness={correctness.get('failed_sample_count')}/"
+                f"{correctness.get('sample_count')} "
+                f"instructions={compile_report.get('instruction_count')} "
                 f"code_bytes={compile_report.get('code_byte_count')} "
                 f"local_bytes={compile_report.get('local_memory_bytes')} "
                 f"vgpr={vector_final.get('register_count')} "
                 f"occupancy={resources.get('occupancy_percent')}% "
-                f"wmma={mix.get('wmma_count')} "
-                f"mfma={mix.get('mfma_count')} "
-                f"valu={mix.get('vector_alu_count')}"
+                f"wmma={static_mix.get('wmma_count')} "
+                f"valu={static_mix.get('vector_alu_count')} "
+                f"dynamic_local={dynamic_mix.get('local_memory_count')}"
             )
+
+
+def _append_disassembly_symbol_lines(
+    lines: list[str], symbols: Any, indent: str
+) -> None:
+    if not isinstance(symbols, list):
+        return
+    for symbol_value in symbols[:8]:
+        symbol = _as_mapping(symbol_value)
+        summary = _as_mapping(symbol.get("summary"))
+        symbol_families = _as_mapping(summary.get("family_counts"))
+        lines.append(
+            f"{indent}{symbol.get('symbol')}: "
+            f"instructions={summary.get('instruction_count')} "
+            f"wmma={symbol_families.get('v_wmma', 0)} "
+            f"mfma={symbol_families.get('v_mfma', 0)} "
+            f"global_load={symbol_families.get('global_load', 0)} "
+            f"global_store={symbol_families.get('global_store', 0)} "
+            f"buffer_load={symbol_families.get('buffer_load', 0)} "
+            f"buffer_store={symbol_families.get('buffer_store', 0)} "
+            f"ds_read={symbol_families.get('ds_read', 0)} "
+            f"ds_write={symbol_families.get('ds_write', 0)}"
+        )
+
+
+def _append_ordered_symbol_lines(lines: list[str], ordered_symbols: Any) -> None:
+    if not isinstance(ordered_symbols, list) or not ordered_symbols:
+        return
+    lines.append("    ordered symbols:")
+    for symbol_value in ordered_symbols:
+        symbol = _as_mapping(symbol_value)
+        summary = _as_mapping(symbol.get("summary"))
+        symbol_families = _as_mapping(summary.get("family_counts"))
+        address = symbol.get("address")
+        address_text = f"0x{address:x}" if isinstance(address, int) else "?"
+        lines.append(
+            "      "
+            f"{address_text} {symbol.get('symbol')}: "
+            f"instructions={summary.get('instruction_count')} "
+            f"wmma={symbol_families.get('v_wmma', 0)} "
+            f"mfma={symbol_families.get('v_mfma', 0)} "
+            f"buffer_load={symbol_families.get('buffer_load', 0)} "
+            f"buffer_store={symbol_families.get('buffer_store', 0)} "
+            f"ds_read={symbol_families.get('ds_read', 0)} "
+            f"ds_write={symbol_families.get('ds_write', 0)} "
+            f"branch={symbol_families.get('s_branch', 0)}"
+        )
+
+
+def _append_disassembly_report_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
     disassemblies = report.get("disassemblies", {})
-    if isinstance(disassemblies, Mapping) and disassemblies:
-        lines.append("")
-        lines.append("Disassemblies:")
-        for name, disassembly in disassemblies.items():
-            if not isinstance(disassembly, Mapping):
-                continue
-            whole_file = disassembly.get("whole_file", {})
-            if not isinstance(whole_file, Mapping):
-                whole_file = {}
-            families = whole_file.get("family_counts", {})
-            if not isinstance(families, Mapping):
-                families = {}
-            memory = whole_file.get("memory_byte_counts", {})
-            if not isinstance(memory, Mapping):
-                memory = {}
-            lines.append(
-                "  "
-                f"{name}: symbols={disassembly.get('symbol_count')} "
-                f"instructions={whole_file.get('instruction_count')} "
-                f"wmma={families.get('v_wmma', 0)} "
-                f"mfma={families.get('v_mfma', 0)} "
-                f"global_load={families.get('global_load', 0)} "
-                f"global_store={families.get('global_store', 0)} "
-                f"buffer_load={families.get('buffer_load', 0)} "
-                f"buffer_store={families.get('buffer_store', 0)} "
-                f"ds_read={families.get('ds_read', 0)} "
-                f"ds_write={families.get('ds_write', 0)} "
-                f"wait={families.get('s_waitcnt', 0)} "
-                f"barrier={families.get('s_barrier', 0)} "
-                f"read_bytes={memory.get('read_bytes', 0)} "
-                f"write_bytes={memory.get('write_bytes', 0)}"
-            )
-            top_symbols = disassembly.get("top_symbols", [])
-            if isinstance(top_symbols, list):
-                for symbol in top_symbols[:8]:
-                    if not isinstance(symbol, Mapping):
-                        continue
-                    summary = symbol.get("summary", {})
-                    if not isinstance(summary, Mapping):
-                        continue
-                    symbol_families = summary.get("family_counts", {})
-                    if not isinstance(symbol_families, Mapping):
-                        symbol_families = {}
-                    lines.append(
-                        "    "
-                        f"{symbol.get('symbol')}: "
-                        f"instructions={summary.get('instruction_count')} "
-                        f"wmma={symbol_families.get('v_wmma', 0)} "
-                        f"mfma={symbol_families.get('v_mfma', 0)} "
-                        f"global_load={symbol_families.get('global_load', 0)} "
-                        f"global_store={symbol_families.get('global_store', 0)} "
-                        f"buffer_load={symbol_families.get('buffer_load', 0)} "
-                        f"buffer_store={symbol_families.get('buffer_store', 0)} "
-                        f"ds_read={symbol_families.get('ds_read', 0)} "
-                        f"ds_write={symbol_families.get('ds_write', 0)}"
-                    )
-            ordered_symbols = disassembly.get("ordered_symbols", [])
-            if isinstance(ordered_symbols, list) and ordered_symbols:
-                lines.append("    ordered symbols:")
-                for symbol in ordered_symbols:
-                    if not isinstance(symbol, Mapping):
-                        continue
-                    summary = symbol.get("summary", {})
-                    if not isinstance(summary, Mapping):
-                        continue
-                    symbol_families = summary.get("family_counts", {})
-                    if not isinstance(symbol_families, Mapping):
-                        symbol_families = {}
-                    address = symbol.get("address")
-                    if isinstance(address, int):
-                        address_text = f"0x{address:x}"
-                    else:
-                        address_text = "?"
-                    lines.append(
-                        "      "
-                        f"{address_text} {symbol.get('symbol')}: "
-                        f"instructions={summary.get('instruction_count')} "
-                        f"wmma={symbol_families.get('v_wmma', 0)} "
-                        f"mfma={symbol_families.get('v_mfma', 0)} "
-                        f"buffer_load={symbol_families.get('buffer_load', 0)} "
-                        f"buffer_store={symbol_families.get('buffer_store', 0)} "
-                        f"ds_read={symbol_families.get('ds_read', 0)} "
-                        f"ds_write={symbol_families.get('ds_write', 0)} "
-                        f"branch={symbol_families.get('s_branch', 0)}"
-                    )
+    if not isinstance(disassemblies, Mapping) or not disassemblies:
+        return
+    lines.append("")
+    lines.append("Disassemblies:")
+    for name, disassembly_value in disassemblies.items():
+        disassembly = _as_mapping(disassembly_value)
+        whole_file = _as_mapping(disassembly.get("whole_file"))
+        families = _as_mapping(whole_file.get("family_counts"))
+        memory = _as_mapping(whole_file.get("memory_byte_counts"))
+        lines.append(
+            "  "
+            f"{name}: symbols={disassembly.get('symbol_count')} "
+            f"instructions={whole_file.get('instruction_count')} "
+            f"wmma={families.get('v_wmma', 0)} "
+            f"mfma={families.get('v_mfma', 0)} "
+            f"global_load={families.get('global_load', 0)} "
+            f"global_store={families.get('global_store', 0)} "
+            f"buffer_load={families.get('buffer_load', 0)} "
+            f"buffer_store={families.get('buffer_store', 0)} "
+            f"ds_read={families.get('ds_read', 0)} "
+            f"ds_write={families.get('ds_write', 0)} "
+            f"wait={families.get('s_waitcnt', 0)} "
+            f"barrier={families.get('s_barrier', 0)} "
+            f"read_bytes={memory.get('read_bytes', 0)} "
+            f"write_bytes={memory.get('write_bytes', 0)}"
+        )
+        _append_disassembly_symbol_lines(lines, disassembly.get("top_symbols"), "    ")
+        _append_ordered_symbol_lines(lines, disassembly.get("ordered_symbols"))
+
+
+def _append_amdhsa_metadata_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     amdhsa_metadata = report.get("amdhsa_metadata", {})
-    if isinstance(amdhsa_metadata, Mapping) and amdhsa_metadata:
-        lines.append("")
-        lines.append("AMDHSA metadata:")
-        for name, metadata in amdhsa_metadata.items():
-            if not isinstance(metadata, Mapping):
-                continue
-            lines.append(f"  {name}: kernels={metadata.get('kernel_count')}")
-            kernels = metadata.get("kernels", [])
-            if isinstance(kernels, list):
-                for kernel in kernels[:8]:
-                    if not isinstance(kernel, Mapping):
-                        continue
-                    symbol = kernel.get("symbol") or kernel.get("name")
-                    lines.append(
-                        "    "
-                        f"{symbol}: "
-                        f"lds={kernel.get('group_segment_fixed_size')} "
-                        f"private={kernel.get('private_segment_fixed_size')} "
-                        f"vgpr={kernel.get('vgpr_count')} "
-                        f"sgpr={kernel.get('sgpr_count')} "
-                        f"vgpr_spills={kernel.get('vgpr_spill_count')} "
-                        f"sgpr_spills={kernel.get('sgpr_spill_count')} "
-                        f"wavefront={kernel.get('wavefront_size')} "
-                        f"workgroup={kernel.get('max_flat_workgroup_size')} "
-                        f"kernarg={kernel.get('kernarg_segment_size')}"
-                    )
+    if not isinstance(amdhsa_metadata, Mapping) or not amdhsa_metadata:
+        return
+    lines.append("")
+    lines.append("AMDHSA metadata:")
+    for name, metadata_value in amdhsa_metadata.items():
+        metadata = _as_mapping(metadata_value)
+        lines.append(f"  {name}: kernels={metadata.get('kernel_count')}")
+        kernels = metadata.get("kernels", [])
+        if not isinstance(kernels, list):
+            continue
+        for kernel_value in kernels[:8]:
+            kernel = _as_mapping(kernel_value)
+            symbol = kernel.get("symbol") or kernel.get("name")
+            lines.append(
+                "    "
+                f"{symbol}: "
+                f"lds={kernel.get('group_segment_fixed_size')} "
+                f"private={kernel.get('private_segment_fixed_size')} "
+                f"vgpr={kernel.get('vgpr_count')} "
+                f"sgpr={kernel.get('sgpr_count')} "
+                f"vgpr_spills={kernel.get('vgpr_spill_count')} "
+                f"sgpr_spills={kernel.get('sgpr_spill_count')} "
+                f"wavefront={kernel.get('wavefront_size')} "
+                f"workgroup={kernel.get('max_flat_workgroup_size')} "
+                f"kernarg={kernel.get('kernarg_segment_size')}"
+            )
+
+
+def format_text_report(report: Mapping[str, Any]) -> str:
+    """Formats the anatomy report as concise human-readable text."""
+
+    lines = ["Kernel anatomy report"]
+    _append_compile_report_lines(lines, report)
+    _append_benchmark_report_lines(lines, report)
+    _append_disassembly_report_lines(lines, report)
+    _append_amdhsa_metadata_lines(lines, report)
     return "\n".join(lines) + "\n"
 
 
@@ -457,6 +581,13 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         type=_parse_named_path,
         help="Loom compile report JSON as NAME=PATH, or PATH to use the stem.",
+    )
+    parser.add_argument(
+        "--benchmark-jsonl",
+        action="append",
+        default=[],
+        type=_parse_named_path,
+        help=("iree-benchmark-loom JSONL as NAME=PATH, or PATH to use the stem."),
     )
     parser.add_argument(
         "--amdhsa-metadata",
@@ -505,6 +636,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = build_kernel_anatomy_report(
         disassembly_paths=args.disassembly,
         compile_report_paths=args.compile_report,
+        benchmark_jsonl_paths=args.benchmark_jsonl,
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,

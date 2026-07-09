@@ -27,42 +27,89 @@ def _write_compile_report(path: Path) -> None:
         path,
         json.dumps(
             {
-                "compile_report": {
-                    "function": "loom_kernel",
-                    "target_key": "gfx1100",
-                    "executable_format": "amdgcn-amd-amdhsa--gfx1100",
-                    "entries": {
-                        "rows": [
-                            {
-                                "function": "loom_kernel",
-                                "instruction_count": 123,
-                                "code_byte_count": 456,
-                                "private_memory_bytes": 0,
-                                "local_memory_bytes": 2048,
-                                "static_instruction_mix": {
-                                    "vector_alu_count": 17,
-                                    "wmma_count": 2,
-                                    "mfma_count": 0,
-                                },
-                                "target_resources": {
-                                    "vector": {
-                                        "final": {
-                                            "register_count": 64,
-                                        },
-                                    },
-                                    "occupancy_percent": 50,
-                                },
-                                "workload": {
-                                    "workgroup_size": {
-                                        "flat": 128,
-                                    },
-                                },
-                            },
-                        ],
-                    },
-                },
+                "compile_report": _compile_report_payload(),
             }
         ),
+    )
+
+
+def _compile_report_payload() -> dict:
+    return {
+        "function": "loom_kernel",
+        "target_key": "gfx1100",
+        "executable_format": "amdgcn-amd-amdhsa--gfx1100",
+        "entries": {
+            "rows": [
+                {
+                    "function": "loom_kernel",
+                    "instruction_count": 123,
+                    "code_byte_count": 456,
+                    "private_memory_bytes": 0,
+                    "local_memory_bytes": 2048,
+                    "static_instruction_mix": {
+                        "vector_alu_count": 17,
+                        "wmma_count": 2,
+                        "mfma_count": 0,
+                    },
+                    "dynamic_instruction_mix": {
+                        "local_memory_count": 99,
+                    },
+                    "target_resources": {
+                        "vector": {
+                            "final": {
+                                "register_count": 64,
+                            },
+                        },
+                        "occupancy_percent": 50,
+                    },
+                    "workload": {
+                        "workgroup_size": {
+                            "flat": 128,
+                        },
+                    },
+                },
+            ],
+        },
+    }
+
+
+def _write_benchmark_jsonl(path: Path) -> None:
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "benchmark",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark_result": {
+                            "benchmark": "bench_kernel",
+                            "case": "case_kernel",
+                            "state": "ok",
+                            "sample_compilation": "once",
+                            "correctness": {
+                                "sample_count": 1,
+                                "failed_sample_count": 0,
+                            },
+                            "measurement": {
+                                "operation_timing_ns": {
+                                    "count": 5,
+                                    "p50": 1234000,
+                                    "p90": 1250000,
+                                },
+                                "timing_interpretation": {
+                                    "warnings": ["low_sample_count"],
+                                },
+                            },
+                            "compile_report": _compile_report_payload(),
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
     )
 
 
@@ -100,6 +147,31 @@ def test_build_kernel_anatomy_report_merges_disassembly_and_compile_report(
     ordered_symbols = report["disassemblies"]["asm"]["ordered_symbols"]
     assert [symbol["symbol"] for symbol in ordered_symbols] == ["small", "big"]
     assert [symbol["address"] for symbol in ordered_symbols] == [0, 0x100]
+
+
+def test_build_kernel_anatomy_report_extracts_benchmark_jsonl(
+    tmp_path: Path,
+) -> None:
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+
+    benchmark_report = report["loom_benchmarks"]["bench"]
+    assert benchmark_report["benchmark_count"] == 1
+    benchmark = benchmark_report["benchmarks"][0]
+    assert benchmark["benchmark"] == "bench_kernel"
+    assert benchmark["timing_ns"]["p50"] == 1234000
+    assert benchmark["correctness"]["failed_sample_count"] == 0
+    assert benchmark["compile_report"]["instruction_count"] == 123
+    assert (
+        benchmark["compile_report"]["dynamic_instruction_mix"]["local_memory_count"]
+        == 99
+    )
 
 
 def test_symbol_regex_filters_disassembly_blocks(tmp_path: Path) -> None:
@@ -251,6 +323,25 @@ amdhsa.kernels:
     assert "0x0 kernel: instructions=6" in text
     assert "hsaco: kernels=1" in text
     assert "kernel.kd: lds=25600 private=0 vgpr=256 sgpr=66" in text
+
+
+def test_text_report_contains_benchmark_jsonl_summary(tmp_path: Path) -> None:
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_benchmark_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+    text = format_text_report(report)
+
+    assert "Loom benchmark JSONL:" in text
+    assert "bench: benchmarks=1" in text
+    assert "bench_kernel: state=ok p50_ms=1.234" in text
+    assert "correctness=0/1 instructions=123 code_bytes=456" in text
+    assert "local_bytes=2048 vgpr=64 occupancy=50%" in text
+    assert "wmma=2 valu=17 dynamic_local=99" in text
 
 
 def test_main_emits_json(tmp_path: Path, capsys) -> None:
