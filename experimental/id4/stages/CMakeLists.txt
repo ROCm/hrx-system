@@ -277,6 +277,7 @@ iree_cc_library(
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::program
     iree::hal
     iree::io::file_handle
     iree::io::parameter_index
@@ -693,7 +694,6 @@ iree_cc_binary_benchmark(
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::program
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::tooling::diagnostics
     iree::experimental::id4::tooling::filesystem

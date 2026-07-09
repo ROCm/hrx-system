@@ -291,8 +291,25 @@ typedef struct StageDiagnostics {
   iree_host_size_t parameter_issue_encode_window_encoder_dispatch_count;
 } StageDiagnostics;
 
+typedef struct ProgramStreamingRhsEncodeStatistics {
+  // Number of source-program dispatches materializing streamed RHS tiles.
+  iree_host_size_t dispatch_count;
+  // Source-program bytes read by streamed RHS tile materialization dispatches.
+  iree_device_size_t read_byte_length;
+  // Source-program bytes written by streamed RHS tile materialization
+  // dispatches.
+  iree_device_size_t write_byte_length;
+  // Largest streamed RHS tile materialization write in bytes.
+  iree_device_size_t max_write_byte_length;
+} ProgramStreamingRhsEncodeStatistics;
+
 // Returns a diagnostics sink that counts lifecycle and kernel events.
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
+
+// Accumulates source-program dispatch statistics for streaming RHS encoders.
+iree_status_t AccumulateProgramStreamingRhsEncodeStatistics(
+    const id4_pipeline_plan_t* plan,
+    ProgramStreamingRhsEncodeStatistics* inout_statistics);
 
 // Appends a benchmark label group for per-kind parameter loading statistics.
 iree_status_t AppendParameterLoadKindStatisticsLabel(

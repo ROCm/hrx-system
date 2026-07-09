@@ -133,6 +133,11 @@ _LABEL_ISSUE_ENCODE_WINDOW_PATTERN = re.compile(
     r"batches=(?P<batches>[0-9]+),"
     r"dispatches=(?P<dispatches>[0-9]+)\]"
 )
+_LABEL_PROGRAM_STREAMING_RHS_PATTERN = re.compile(
+    r"\bprogram_streaming_rhs_encode\[dispatches=(?P<dispatches>[0-9]+),"
+    r"read=(?P<read>[0-9]+)MiB,write=(?P<write>[0-9]+)MiB,"
+    r"max_write=(?P<max_write>[0-9]+)MiB\]"
+)
 
 
 def _require_object(value: Any, context: str) -> dict[str, Any]:
@@ -515,6 +520,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
     issue_encode_window_match = _require_match(
         _LABEL_ISSUE_ENCODE_WINDOW_PATTERN, label, f"{context}.label"
     )
+    program_streaming_rhs_match = _require_match(
+        _LABEL_PROGRAM_STREAMING_RHS_PATTERN, label, f"{context}.label"
+    )
     timing_match = _require_match(_LABEL_TIMING_PATTERN, label, f"{context}.label")
 
     runtime_stages: dict[str, Any] = {}
@@ -891,6 +899,18 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "issue_encode_window_dispatch_count": _match_unsigned_group(
             issue_encode_window_match, "dispatches", f"{context}.label"
         ),
+        "program_streaming_rhs_encode_dispatch_count": _match_unsigned_group(
+            program_streaming_rhs_match, "dispatches", f"{context}.label"
+        ),
+        "program_streaming_rhs_encode_read_mib": _match_unsigned_group(
+            program_streaming_rhs_match, "read", f"{context}.label"
+        ),
+        "program_streaming_rhs_encode_write_mib": _match_unsigned_group(
+            program_streaming_rhs_match, "write", f"{context}.label"
+        ),
+        "program_streaming_rhs_encode_max_write_mib": _match_unsigned_group(
+            program_streaming_rhs_match, "max_write", f"{context}.label"
+        ),
         "timing_plan_ms": _match_float_group(timing_match, "plan", f"{context}.label"),
         "timing_prepare_ms": _match_float_group(
             timing_match, "prepare", f"{context}.label"
@@ -1252,6 +1272,10 @@ _MARKDOWN_COLUMNS = (
     ("issue encodes", "issue_encode_window_dispatch_count"),
     ("staging MiB", "issue_encode_window_staging_mib"),
     ("max staging MiB", "issue_encode_window_staging_max_mib"),
+    ("program rhs encodes", "program_streaming_rhs_encode_dispatch_count"),
+    ("program rhs read MiB", "program_streaming_rhs_encode_read_mib"),
+    ("program rhs write MiB", "program_streaming_rhs_encode_write_mib"),
+    ("program rhs max MiB", "program_streaming_rhs_encode_max_write_mib"),
     ("max group MiB", "parameter_window_largest_load_group_mib"),
     ("max group stage", "parameter_window_largest_load_group_stage"),
     ("max request MiB", "parameter_window_largest_request_mib"),

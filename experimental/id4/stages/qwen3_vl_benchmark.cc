@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "experimental/id4/pipeline/plan.h"
-#include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/qwen3_vl.h"
@@ -567,127 +566,15 @@ static double AverageRegionDistance(iree_host_size_t distance_sum,
   return (double)distance_sum / (double)count;
 }
 
-struct QwenProgramDispatchStatistics {
-  // Number of program dispatches materializing streamed RHS tiles.
-  iree_host_size_t streaming_rhs_encode_dispatch_count = 0;
-  // Total bytes read by streamed RHS tile materialization dispatches.
-  iree_device_size_t streaming_rhs_encode_read_byte_length = 0;
-  // Total bytes written by streamed RHS tile materialization dispatches.
-  iree_device_size_t streaming_rhs_encode_write_byte_length = 0;
-  // Largest streamed RHS tile materialization write in bytes.
-  iree_device_size_t streaming_rhs_encode_max_write_byte_length = 0;
-};
-
-static iree_status_t AddDeviceByteLength(iree_device_size_t addend,
-                                         iree_device_size_t* inout_value,
-                                         iree_string_view_t name) {
-  iree_device_size_t value = 0;
-  if (!iree_device_size_checked_add(*inout_value, addend, &value)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "%.*s byte length overflow", (int)name.size,
-                            name.data);
-  }
-  *inout_value = value;
-  return iree_ok_status();
-}
-
-static iree_status_t QwenProgramDispatchBindingByteLength(
-    const id4_pipeline_program_t* program,
-    const id4_pipeline_program_dispatch_binding_t* binding,
-    id4_pipeline_program_dispatch_binding_flags_t range_flag,
-    id4_pipeline_program_tensor_byte_range_t range,
-    iree_device_size_t* out_byte_length) {
-  *out_byte_length = 0;
-  const id4_pipeline_program_tensor_record_t* tensor =
-      id4_pipeline_program_tensor_at(program, binding->tensor.ordinal);
-  if (!tensor) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "program dispatch binding tensor %u is missing",
-                            binding->tensor.ordinal);
-  }
-  *out_byte_length = iree_all_bits_set(binding->flags, range_flag)
-                         ? range.length
-                         : tensor->byte_length;
-  return iree_ok_status();
-}
-
-static iree_status_t AccumulateQwenProgramDispatchBindingBytes(
-    const id4_pipeline_program_t* program,
-    const id4_pipeline_program_dispatch_binding_t* binding,
-    id4_pipeline_program_tensor_access_flags_t access,
-    id4_pipeline_program_dispatch_binding_flags_t range_flag,
-    id4_pipeline_program_tensor_byte_range_t range,
-    iree_device_size_t* inout_byte_length) {
-  if (!iree_all_bits_set(binding->access, access)) return iree_ok_status();
-  iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(QwenProgramDispatchBindingByteLength(
-      program, binding, range_flag, range, &byte_length));
-  return AddDeviceByteLength(byte_length, inout_byte_length,
-                             IREE_SV("Qwen program dispatch binding"));
-}
-
-static bool IsQwenStreamingRhsEncodeDispatch(
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch) {
-  return iree_string_view_equal(
-      dispatch->kernel.module_path,
-      IREE_SV("parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile"));
-}
-
-static iree_status_t CollectQwenProgramDispatchStatistics(
-    const id4_pipeline_plan_t* plan,
-    QwenProgramDispatchStatistics* out_statistics) {
-  *out_statistics = {};
-  const id4_pipeline_program_t* program =
-      id4_pipeline_plan_source_program(plan);
-  if (!program) return iree_ok_status();
-  const iree_host_size_t operation_count =
-      id4_pipeline_program_operation_count(program);
-  for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (!operation ||
-        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
-      continue;
-    }
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
-        &operation->payload.dispatch_loom;
-    if (!IsQwenStreamingRhsEncodeDispatch(dispatch)) continue;
-
-    ++out_statistics->streaming_rhs_encode_dispatch_count;
-    iree_device_size_t write_byte_length = 0;
-    for (iree_host_size_t j = 0; j < dispatch->binding_count; ++j) {
-      const id4_pipeline_program_dispatch_binding_t* binding =
-          &dispatch->bindings[j];
-      IREE_RETURN_IF_ERROR(AccumulateQwenProgramDispatchBindingBytes(
-          program, binding, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ,
-          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE,
-          binding->read_range,
-          &out_statistics->streaming_rhs_encode_read_byte_length));
-      IREE_RETURN_IF_ERROR(AccumulateQwenProgramDispatchBindingBytes(
-          program, binding, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE,
-          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE,
-          binding->write_range, &write_byte_length));
-    }
-    IREE_RETURN_IF_ERROR(AddDeviceByteLength(
-        write_byte_length,
-        &out_statistics->streaming_rhs_encode_write_byte_length,
-        IREE_SV("Qwen streaming RHS encoder write")));
-    out_statistics->streaming_rhs_encode_max_write_byte_length =
-        iree_max(out_statistics->streaming_rhs_encode_max_write_byte_length,
-                 write_byte_length);
-  }
-  return iree_ok_status();
-}
-
 static void SetQwenBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state, uint32_t token_count,
     iree_host_size_t parameter_load_prefetch_region_distance,
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_plan_statistics_t& statistics,
     const id4::test::StageDiagnostics& diagnostics, uint64_t iteration_count) {
-  QwenProgramDispatchStatistics program_statistics;
-  IREE_CHECK_OK(
-      CollectQwenProgramDispatchStatistics(plan, &program_statistics));
+  id4::test::ProgramStreamingRhsEncodeStatistics program_statistics = {};
+  IREE_CHECK_OK(id4::test::AccumulateProgramStreamingRhsEncodeStatistics(
+      plan, &program_statistics));
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID;
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
@@ -815,10 +702,10 @@ static void SetQwenBenchmarkLabel(
       diagnostics.parameter_issue_encode_window_logical_source_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count,
-      program_statistics.streaming_rhs_encode_dispatch_count,
-      CeilMiB(program_statistics.streaming_rhs_encode_read_byte_length),
-      CeilMiB(program_statistics.streaming_rhs_encode_write_byte_length),
-      CeilMiB(program_statistics.streaming_rhs_encode_max_write_byte_length)));
+      program_statistics.dispatch_count,
+      CeilMiB(program_statistics.read_byte_length),
+      CeilMiB(program_statistics.write_byte_length),
+      CeilMiB(program_statistics.max_write_byte_length)));
   IREE_CHECK_OK(id4::test::AppendParameterLoadKindStatisticsLabel(
       &label_builder, statistics.parameter_load_kind_statistics));
   iree_benchmark_set_label(benchmark_state,

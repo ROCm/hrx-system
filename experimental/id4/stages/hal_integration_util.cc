@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "experimental/id4/kernels/embedded_loom_sources.h"
+#include "experimental/id4/pipeline/program.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/math.h"
 #include "iree/io/file_handle.h"
@@ -34,6 +35,103 @@ static constexpr uint8_t kId4TensorMagic[8] = {
 
 static uint64_t CeilMiB(iree_device_size_t byte_length) {
   return (uint64_t)((byte_length + 1024 * 1024 - 1) / (1024 * 1024));
+}
+
+static iree_status_t AddDeviceByteLength(iree_device_size_t addend,
+                                         iree_device_size_t* inout_value,
+                                         iree_string_view_t name) {
+  iree_device_size_t value = 0;
+  if (!iree_device_size_checked_add(*inout_value, addend, &value)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s byte length overflow", (int)name.size,
+                            name.data);
+  }
+  *inout_value = value;
+  return iree_ok_status();
+}
+
+static iree_status_t ProgramDispatchBindingByteLength(
+    const id4_pipeline_program_t* program,
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    id4_pipeline_program_dispatch_binding_flags_t range_flag,
+    id4_pipeline_program_tensor_byte_range_t range,
+    iree_device_size_t* out_byte_length) {
+  *out_byte_length = 0;
+  const id4_pipeline_program_tensor_record_t* tensor =
+      id4_pipeline_program_tensor_at(program, binding->tensor.ordinal);
+  if (!tensor) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program dispatch binding tensor %u is missing",
+                            binding->tensor.ordinal);
+  }
+  *out_byte_length = iree_all_bits_set(binding->flags, range_flag)
+                         ? range.length
+                         : tensor->byte_length;
+  return iree_ok_status();
+}
+
+static iree_status_t AccumulateProgramDispatchBindingBytes(
+    const id4_pipeline_program_t* program,
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    id4_pipeline_program_tensor_access_flags_t access,
+    id4_pipeline_program_dispatch_binding_flags_t range_flag,
+    id4_pipeline_program_tensor_byte_range_t range,
+    iree_device_size_t* inout_byte_length) {
+  if (!iree_all_bits_set(binding->access, access)) return iree_ok_status();
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(ProgramDispatchBindingByteLength(
+      program, binding, range_flag, range, &byte_length));
+  return AddDeviceByteLength(byte_length, inout_byte_length,
+                             IREE_SV("program dispatch binding"));
+}
+
+static bool IsStreamingRhsEncodeDispatch(
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch) {
+  return iree_string_view_equal(
+      dispatch->kernel.module_path,
+      IREE_SV("parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile"));
+}
+
+iree_status_t AccumulateProgramStreamingRhsEncodeStatistics(
+    const id4_pipeline_plan_t* plan,
+    ProgramStreamingRhsEncodeStatistics* inout_statistics) {
+  const id4_pipeline_program_t* program =
+      id4_pipeline_plan_source_program(plan);
+  if (!program) return iree_ok_status();
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      continue;
+    }
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
+        &operation->payload.dispatch_loom;
+    if (!IsStreamingRhsEncodeDispatch(dispatch)) continue;
+
+    ++inout_statistics->dispatch_count;
+    iree_device_size_t write_byte_length = 0;
+    for (iree_host_size_t j = 0; j < dispatch->binding_count; ++j) {
+      const id4_pipeline_program_dispatch_binding_t* binding =
+          &dispatch->bindings[j];
+      IREE_RETURN_IF_ERROR(AccumulateProgramDispatchBindingBytes(
+          program, binding, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE,
+          binding->read_range, &inout_statistics->read_byte_length));
+      IREE_RETURN_IF_ERROR(AccumulateProgramDispatchBindingBytes(
+          program, binding, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+          binding->write_range, &write_byte_length));
+    }
+    IREE_RETURN_IF_ERROR(AddDeviceByteLength(
+        write_byte_length, &inout_statistics->write_byte_length,
+        IREE_SV("streaming RHS encoder write")));
+    inout_statistics->max_write_byte_length =
+        iree_max(inout_statistics->max_write_byte_length, write_byte_length);
+  }
+  return iree_ok_status();
 }
 
 static const id4_pipeline_parameter_load_kind_statistics_t*

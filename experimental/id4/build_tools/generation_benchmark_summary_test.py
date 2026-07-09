@@ -60,6 +60,8 @@ TEST_BENCHMARK_LABEL = (
     "issue_encode_window[count=2,staging=1081MiB,max=576MiB,"
     "source=18991MiB,target=27597MiB,chunks=72,sources=450,batches=72,"
     "dispatches=318] "
+    "program_streaming_rhs_encode[dispatches=252,read=6626MiB,"
+    "write=13248MiB,max_write=96MiB] "
     "stage.qwen[param=14436MiB,src=14436MiB,src_direct=4068MiB,"
     "src_encoded=10368MiB,load_steps=36/108,load_groups=36/108,"
     "local_hw=4MiB,boundary=4MiB,kernels=28,dispatches=485] "
@@ -776,6 +778,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["issue_encode_window_staging_mib"], 1081)
             self.assertEqual(row["issue_encode_window_source_count"], 450)
             self.assertEqual(row["issue_encode_window_dispatch_count"], 318)
+            self.assertEqual(row["program_streaming_rhs_encode_dispatch_count"], 252)
+            self.assertEqual(row["program_streaming_rhs_encode_read_mib"], 6626)
+            self.assertEqual(row["program_streaming_rhs_encode_write_mib"], 13248)
+            self.assertEqual(row["program_streaming_rhs_encode_max_write_mib"], 96)
             self.assertEqual(row["parameter_window_largest_load_group_mib"], 1187)
             self.assertEqual(row["parameter_window_largest_load_group_stage"], "qwen")
             self.assertEqual(row["parameter_window_largest_request_mib"], 1187)
@@ -987,7 +993,8 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 "128 | 3627.693 | 3477.614 | 150.049 | - | - | - | - | "
                 "912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | 384 | "
                 "950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 0 | 2 | 318 | "
-                "1081 | 576 | 1187 | qwen | 1187 | qwen | 1507 |",
+                "1081 | 576 | 252 | 6626 | 13248 | 96 | 1187 | qwen | "
+                "1187 | qwen | 1507 |",
                 table,
             )
             self.assertIn(

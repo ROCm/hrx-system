@@ -146,6 +146,8 @@ struct GenerationBenchmarkPlanStatistics {
   iree_host_size_t kernel_count;
   // Total planned dispatches across coarse stage plans.
   iree_host_size_t dispatch_count;
+  // Source-program streaming RHS materialization statistics.
+  id4::test::ProgramStreamingRhsEncodeStatistics streaming_rhs_encode;
   // Number of populated per-stage statistics entries.
   iree_host_size_t stage_count;
   // Per-stage statistics in generation-plan stage order.
@@ -835,6 +837,9 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
         plan, i, &stage_key, &stage_plan));
     id4_pipeline_plan_statistics_t stage_statistics =
         id4_pipeline_plan_statistics(stage_plan);
+    IREE_RETURN_IF_ERROR(
+        id4::test::AccumulateProgramStreamingRhsEncodeStatistics(
+            stage_plan, &out_statistics->streaming_rhs_encode));
     out_statistics->stages[i].key = stage_key;
     out_statistics->stages[i].statistics = stage_statistics;
     out_statistics->total_parameter_slab_byte_length +=
@@ -1794,7 +1799,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
-      ",dispatches=%" PRIhsz "]",
+      ",dispatches=%" PRIhsz
+      "]"
+      " program_streaming_rhs_encode[dispatches=%" PRIhsz ",read=%" PRIu64
+      "MiB,write=%" PRIu64 "MiB,max_write=%" PRIu64 "MiB]",
       static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
@@ -1897,7 +1905,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
       diagnostics.parameter_issue_encode_window_logical_source_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
-      diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
+      diagnostics.parameter_issue_encode_window_encoder_dispatch_count,
+      statistics.streaming_rhs_encode.dispatch_count,
+      CeilMiB(statistics.streaming_rhs_encode.read_byte_length),
+      CeilMiB(statistics.streaming_rhs_encode.write_byte_length),
+      CeilMiB(statistics.streaming_rhs_encode.max_write_byte_length));
   if (iree_status_is_ok(status)) {
     status = AppendGenerationBenchmarkPhaseStageMasksLabel(&label_builder,
                                                            residency);
