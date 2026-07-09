@@ -13,6 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -362,6 +363,19 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
+  void ParseGfx11OverBudgetWorkgroupStorageKernel(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1100> @gfx_target\n"
+        "low.kernel.def target(@gfx_target) workgroup_size(1, 1, 1) "
+        "@loom_kernel() {\n"
+        "  %storage = low.storage.reserve {byte_alignment = 4, "
+        "byte_length = 65540} : low.storage<workgroup>\n"
+        "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
   void ParseGfx11KernelWithArguments(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
@@ -648,6 +662,45 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   loom_module_free(module);
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsFinalWorkgroupStorageAboveTargetLimit) {
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx11OverBudgetWorkgroupStorageKernel(&module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+  };
+  bool emitted = true;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_FALSE(emitted);
+  ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
+  const CapturedDiagnostic* diagnostic =
+      FindDiagnostic(capture, LOOM_ERR_TARGET_051);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "gfx_target");
+  ASSERT_EQ(diagnostic->params.size(), 4u);
+  ASSERT_EQ(diagnostic->params[2].kind, LOOM_PARAM_U64);
+  EXPECT_EQ(diagnostic->params[2].u64, 65540u);
+  ASSERT_EQ(diagnostic->params[3].kind, LOOM_PARAM_U64);
+  EXPECT_EQ(diagnostic->params[3].u64, 65536u);
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
   iree_host_size_t linked_supported_count = 0;
   const iree_host_size_t processor_count =
@@ -778,6 +831,9 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
         << test_case.processor_name;
     EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
                                        feature_bits))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityU64(report, "target",
+                                       "max_workgroup_storage_bytes", 65536))
         << test_case.processor_name;
 
     loom_amdgpu_hal_kernel_library_deinitialize(&library,

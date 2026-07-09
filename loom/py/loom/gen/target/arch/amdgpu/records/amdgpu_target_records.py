@@ -55,6 +55,10 @@ def _u32_expr(value: int) -> str:
     return f"UINT32_C({value})"
 
 
+def _u64_expr(value: int) -> str:
+    return f"UINT64_C({value})"
+
+
 def _c_symbol_suffix(value: str) -> str:
     suffix = c_pascal_identifier(value)
     if not suffix:
@@ -122,6 +126,8 @@ def _validate_target_record_infos(rows: Sequence[_AmdgpuTargetRecordRow]) -> Non
 
     defaults_by_descriptor_set: dict[str, list[_AmdgpuTargetRecordRow]] = {}
     for row in rows:
+        if row.processor.limits.max_workgroup_storage_bytes == 0:
+            raise ValueError(f"AMDGPU target record '{row.info.processor}' requires a max workgroup storage limit")
         if row.descriptor_set_ordinal >= AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE:
             raise ValueError(f"AMDGPU target record '{row.info.processor}' has an invalid descriptor-set ordinal {row.descriptor_set_ordinal}")
         if row.info.default_for_descriptor_set:
@@ -130,6 +136,17 @@ def _validate_target_record_infos(rows: Sequence[_AmdgpuTargetRecordRow]) -> Non
         defaults = defaults_by_descriptor_set.get(descriptor_set_key, [])
         if len(defaults) != 1:
             raise ValueError(f"AMDGPU descriptor set '{descriptor_set_key}' requires exactly one default target record, found {len(defaults)}")
+        expected_limit = defaults[0].processor.limits.max_workgroup_storage_bytes
+        for row in rows:
+            if row.descriptor_set.key != descriptor_set_key:
+                continue
+            actual_limit = row.processor.limits.max_workgroup_storage_bytes
+            if actual_limit != expected_limit:
+                raise ValueError(
+                    f"AMDGPU descriptor set '{descriptor_set_key}' has inconsistent max workgroup storage limits: "
+                    f"default target record '{defaults[0].info.processor}' has {expected_limit}, "
+                    f"target record '{row.info.processor}' has {actual_limit}"
+                )
 
 
 def _descriptor_sets_from_rows(
@@ -167,7 +184,8 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         "//",
         "// Define one or more of the documented macros before including this file:",
         "//   LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,",
-        "//       snapshot_name, descriptor_set_key, wavefront_size)",
+        "//       snapshot_name, descriptor_set_key, wavefront_size,",
+        "//       max_workgroup_storage_bytes)",
         "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, processor,",
         "//       descriptor_set_ordinal, bundle_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT(descriptor_set_ordinal, record_suffix)",
@@ -184,7 +202,8 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
             f"{_c_string_arg(bundle_name)}, "
             f"{_c_string_arg(bundle_name + '-low')}, "
             f"{_c_string_arg(descriptor_set.key)}, "
-            f"{default_row.processor.wavefront.default_size})"
+            f"{default_row.processor.wavefront.default_size}, "
+            f"{_u64_expr(default_row.processor.limits.max_workgroup_storage_bytes)})"
         )
     lines.extend(["#endif  // LOOM_AMDGPU_TARGET_DESCRIPTOR_SET", ""])
 

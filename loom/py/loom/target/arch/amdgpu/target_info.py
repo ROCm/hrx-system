@@ -38,6 +38,7 @@ AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = "none"
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT = "stride14_enable_bit"
@@ -230,6 +231,11 @@ class AmdgpuProcessorFeatureInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuProcessorLimitInfo:
+    max_workgroup_storage_bytes: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuProcessorInfo:
     processor: str
     flags: int
@@ -238,6 +244,7 @@ class AmdgpuProcessorInfo:
     wavefront: AmdgpuProcessorWavefrontInfo
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo
     features: AmdgpuProcessorFeatureInfo = AmdgpuProcessorFeatureInfo()
+    limits: AmdgpuProcessorLimitInfo = AmdgpuProcessorLimitInfo()
 
 
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
@@ -372,8 +379,15 @@ def processor_info(
     ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     scheduling_bits: int = 0,
+    max_workgroup_storage_bytes: int = 0,
     flags: int = 0,
 ) -> AmdgpuProcessorInfo:
+    if flags & AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION:
+        max_workgroup_storage_bytes = (
+            max_workgroup_storage_bytes
+            if max_workgroup_storage_bytes != 0
+            else AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES
+        )
     return AmdgpuProcessorInfo(
         processor=processor,
         flags=flags,
@@ -387,6 +401,9 @@ def processor_info(
         features=AmdgpuProcessorFeatureInfo(
             matrix=matrix_feature_profile,
             scheduling=scheduling_bits,
+        ),
+        limits=AmdgpuProcessorLimitInfo(
+            max_workgroup_storage_bytes=max_workgroup_storage_bytes,
         ),
     )
 
