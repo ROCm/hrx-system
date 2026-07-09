@@ -575,6 +575,8 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
         benchmark_rows.append(
             _summarize_loom_benchmark_result(event, benchmark_result, preferred_entry)
         )
+    _attach_benchmark_compile_reports(benchmark_rows, compile_rows)
+    _attach_benchmark_compile_reports(repetition_rows, compile_rows)
     return {
         "path": path.as_posix(),
         "benchmark_count": len(benchmark_rows),
@@ -591,6 +593,42 @@ def summarize_loom_benchmark_jsonl(path: Path) -> dict[str, Any]:
             device_rows, compile_rows
         ),
     }
+
+
+def _attach_benchmark_compile_reports(
+    benchmark_rows: Sequence[dict[str, Any]],
+    compile_rows: Sequence[Mapping[str, Any]],
+) -> None:
+    compile_rows_by_key = {
+        (
+            compile_row.get("candidate_id"),
+            compile_row.get("benchmark"),
+            compile_row.get("case"),
+        ): compile_row
+        for compile_row in compile_rows
+    }
+    for benchmark_row in benchmark_rows:
+        compile_row = compile_rows_by_key.get(
+            (
+                benchmark_row.get("candidate_id"),
+                benchmark_row.get("benchmark"),
+                benchmark_row.get("case"),
+            )
+        )
+        if not compile_row:
+            continue
+        compile_report = dict(_as_mapping(benchmark_row.get("compile_report")))
+        if not compile_report:
+            compile_report = dict(_as_mapping(compile_row.get("compile_report")))
+        if not compile_report:
+            continue
+        for field in (
+            "diagnostic_error_count",
+            "diagnostic_warning_count",
+            "diagnostic_remark_count",
+        ):
+            compile_report[field] = compile_row.get(field)
+        benchmark_row["compile_report"] = compile_report
 
 
 def _summarize_loom_benchmark_result(
@@ -2266,6 +2304,8 @@ _FRONTIER_SNAPSHOT_METRICS = (
     "local_memory_access_bytes",
     "device_memory_load_count",
     "device_memory_store_count",
+    "private_memory_instruction_count",
+    "private_memory_access_bytes",
     "source_low_dynamic_packet_count",
     "wait_action_count",
     "wait_full_drain_count",
@@ -2438,6 +2478,8 @@ _PER_MATRIX_NUMERATOR_METRICS = (
     "instruction_count",
     "local_memory_access_bytes",
     "local_memory_instruction_count",
+    "private_memory_access_bytes",
+    "private_memory_instruction_count",
     "read_bytes",
     "register_move_count",
     "vector_alu_count",
@@ -2843,6 +2885,13 @@ def _record_compile_instruction_mix_metrics(
     _record_metric(
         groups,
         group_name,
+        "private_memory_instruction_count",
+        mix.get("private_memory_count"),
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
         "read_bytes",
         mix.get("memory_read_byte_count"),
         source,
@@ -2862,6 +2911,16 @@ def _record_compile_instruction_mix_metrics(
             group_name,
             "local_memory_access_bytes",
             local_memory_read_bytes + local_memory_write_bytes,
+            source,
+        )
+    private_memory_read_bytes = _as_number(mix.get("private_read_byte_count"))
+    private_memory_write_bytes = _as_number(mix.get("private_write_byte_count"))
+    if private_memory_read_bytes is not None and private_memory_write_bytes is not None:
+        _record_metric(
+            groups,
+            group_name,
+            "private_memory_access_bytes",
+            private_memory_read_bytes + private_memory_write_bytes,
             source,
         )
 
@@ -3803,9 +3862,11 @@ def _scorecard_metric_category(metric: str) -> str:
         return "local_memory"
     if "device_memory" in metric or metric.startswith(("global_", "buffer_", "flat_")):
         return "device_memory"
+    if "private_memory" in metric:
+        return "private_memory"
     if "byte" in metric or metric.endswith("_bytes"):
         return "memory"
-    if "vgpr" in metric or "sgpr" in metric or metric == "private_memory_bytes":
+    if "vgpr" in metric or "sgpr" in metric:
         return "resources"
     if "count" in metric or metric.endswith("_instructions"):
         return "instructions"
@@ -4332,6 +4393,7 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
             vector_final = _as_mapping(vector.get("final"))
             static_mix = _as_mapping(compile_report.get("static_instruction_mix"))
             dynamic_mix = _as_mapping(compile_report.get("dynamic_instruction_mix"))
+            diagnostic_warning_count = compile_report.get("diagnostic_warning_count")
             lines.append(
                 "    "
                 f"{benchmark.get('benchmark')}: "
@@ -4346,7 +4408,9 @@ def _append_benchmark_report_lines(lines: list[str], report: Mapping[str, Any]) 
                 f"occupancy={resources.get('occupancy_percent')}% "
                 f"wmma={static_mix.get('wmma_count')} "
                 f"valu={static_mix.get('vector_alu_count')} "
-                f"dynamic_local={dynamic_mix.get('local_memory_count')}"
+                f"dynamic_local={dynamic_mix.get('local_memory_count')} "
+                f"dynamic_private={dynamic_mix.get('private_memory_count')} "
+                f"warnings={diagnostic_warning_count}"
             )
         comparisons = benchmark_report.get("comparisons", [])
         if isinstance(comparisons, list) and comparisons:

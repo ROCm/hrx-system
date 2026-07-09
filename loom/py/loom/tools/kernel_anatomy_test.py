@@ -190,6 +190,9 @@ def _compile_report_payload() -> dict:
                         "local_memory_count": 99,
                         "local_read_byte_count": 320,
                         "local_write_byte_count": 160,
+                        "private_memory_count": 7,
+                        "private_read_byte_count": 96,
+                        "private_write_byte_count": 64,
                     },
                     "target_resources": {
                         "vector": {
@@ -396,6 +399,51 @@ def _write_benchmark_jsonl(path: Path) -> None:
                         "speedup_p50": 1.110711,
                         "ratio_p90": 0.9,
                         "speedup_p90": 1.111111,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+    )
+
+
+def _write_skipped_benchmark_compile_jsonl(path: Path) -> None:
+    _write(
+        path,
+        "\n".join(
+            [
+                json.dumps({"row": "run", "run_id": "r0"}),
+                json.dumps(
+                    {
+                        "row": "compile",
+                        "run_id": "r0",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark": "skipped_kernel",
+                        "case": "skipped_case",
+                        "entry": "loom_kernel",
+                        "state": "ok",
+                        "diagnostic_error_count": 0,
+                        "diagnostic_warning_count": 41,
+                        "diagnostic_remark_count": 0,
+                        "compile_report": _compile_report_payload(),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "row": "benchmark",
+                        "candidate_id": "c0",
+                        "candidate_index": 0,
+                        "benchmark_result": {
+                            "benchmark": "skipped_kernel",
+                            "case": "skipped_case",
+                            "state": "skipped",
+                            "sample_compilation": "once",
+                            "correctness": {
+                                "sample_count": 1,
+                                "failed_sample_count": 1,
+                            },
+                        },
                     }
                 ),
             ]
@@ -1546,7 +1594,23 @@ def test_text_report_contains_benchmark_jsonl_summary(tmp_path: Path) -> None:
     assert "bench_kernel: state=ok p50_ms=1.234" in text
     assert "failed_samples=0/1 instructions=123 code_bytes=456" in text
     assert "local_bytes=2048 vgpr=64 occupancy=50%" in text
-    assert "wmma=2 valu=17 dynamic_local=99" in text
+    assert "wmma=2 valu=17 dynamic_local=99 dynamic_private=7 warnings=2" in text
+
+
+def test_text_report_uses_compile_row_for_skipped_benchmark(tmp_path: Path) -> None:
+    benchmark_path = tmp_path / "results.jsonl"
+    _write_skipped_benchmark_compile_jsonl(benchmark_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[NamedPath("bench", benchmark_path)],
+    )
+    text = format_text_report(report)
+
+    assert "skipped_kernel: state=skipped p50_ms=?" in text
+    assert "failed_samples=1/1 instructions=123 code_bytes=456" in text
+    assert "dynamic_local=99 dynamic_private=7 warnings=41" in text
 
 
 def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:
