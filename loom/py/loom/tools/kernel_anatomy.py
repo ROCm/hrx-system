@@ -249,6 +249,7 @@ def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
     lines = text.splitlines()
     timing_header: list[str] | None = None
     timing_rows: list[dict[str, Any]] = []
+    trace_rows: list[dict[str, Any]] = []
     kernel_parameters: dict[str, str] = {}
     summary: dict[str, Any] = {
         "name": named_path.name,
@@ -256,11 +257,14 @@ def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
         "devices": [],
         "kernel_parameters": kernel_parameters,
         "timing_rows": timing_rows,
+        "trace_rows": trace_rows,
     }
     in_kernel_parameters = False
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("rocBLAS version:"):
+        if trace_row := _parse_rocblas_trace_row(stripped):
+            trace_rows.append(trace_row)
+        elif stripped.startswith("rocBLAS version:"):
             summary["rocblas_version"] = stripped.split(":", 1)[1].strip()
         elif stripped.startswith("rocBLAS-commit-hash:"):
             summary["rocblas_commit_hash"] = stripped.split(":", 1)[1].strip()
@@ -297,6 +301,29 @@ def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
     return summary
 
 
+_ROCBLAS_TRACE_ROW_PATTERN = re.compile(r"^-\s*\{(?P<payload>.*)\}\s*$")
+
+
+def _parse_rocblas_trace_row(row: str) -> dict[str, Any] | None:
+    match = _ROCBLAS_TRACE_ROW_PATTERN.match(row)
+    if match is None or "rocblas_function" not in row:
+        return None
+    fields = next(csv.reader([match.group("payload")], skipinitialspace=True))
+    parsed_row: dict[str, Any] = {}
+    for field in fields:
+        if ":" not in field:
+            continue
+        key, value = field.split(":", 1)
+        parsed_row[key.strip()] = _parse_rocblas_trace_value(value.strip())
+    return parsed_row
+
+
+def _parse_rocblas_trace_value(value: str) -> Any:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return _parse_numeric_scalar(value)
+
+
 def _merge_rocblas_log_summaries(
     target: dict[str, Any], source: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -325,6 +352,10 @@ def _merge_rocblas_log_summaries(
     if isinstance(target_timing_rows, list) and isinstance(source_timing_rows, list):
         target_timing_rows.extend(source_timing_rows)
         target["selected_timing_row"] = _select_rocblas_timing_row(target_timing_rows)
+    target_trace_rows = target.setdefault("trace_rows", [])
+    source_trace_rows = source.get("trace_rows", [])
+    if isinstance(target_trace_rows, list) and isinstance(source_trace_rows, list):
+        target_trace_rows.extend(source_trace_rows)
     return target
 
 
@@ -1354,6 +1385,39 @@ def _collect_rocblas_metric_groups(
             )
             for metric in ("M", "N", "K", "lda", "ldb", "ldc", "ldd"):
                 _record_metric(groups, name, metric, timing.get(metric), "rocblas_log")
+        trace_rows = rocblas_log.get("trace_rows", [])
+        if not isinstance(trace_rows, list):
+            continue
+        for trace_value in trace_rows:
+            trace_row = _as_mapping(trace_value)
+            group_name = _rocblas_trace_group_name(name, trace_row)
+            for metric in (
+                "M",
+                "N",
+                "K",
+                "lda",
+                "ldb",
+                "ldc",
+                "ldd",
+                "batch_count",
+                "solution_index",
+                "call_count",
+            ):
+                _record_metric(
+                    groups,
+                    group_name,
+                    metric,
+                    trace_row.get(metric),
+                    "rocblas_trace",
+                )
+
+
+def _rocblas_trace_group_name(name: str, trace_row: Mapping[str, Any]) -> str:
+    m = trace_row.get("M", "?")
+    n = trace_row.get("N", "?")
+    k = trace_row.get("K", "?")
+    beta = trace_row.get("beta", "?")
+    return f"{name}/gemm_M{m}_N{n}_K{k}_beta{beta}"
 
 
 def _microseconds_to_nanoseconds(value: Any) -> float | int | None:
@@ -1994,6 +2058,29 @@ def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> No
             for key in ("MatrixInstruction", "workGroupSize", "macroTile", "depthU")
             if key in kernel_parameters
         )
+        trace_rows = rocblas_log.get("trace_rows", [])
+        if isinstance(trace_rows, list) and trace_rows:
+            lines.append("    trace rows:")
+            for trace_value in _top_rocblas_trace_rows(trace_rows)[:8]:
+                trace_row = _as_mapping(trace_value)
+                lines.append(
+                    "      "
+                    f"{trace_row.get('rocblas_function')}: "
+                    f"M={trace_row.get('M')} "
+                    f"N={trace_row.get('N')} "
+                    f"K={trace_row.get('K')} "
+                    f"beta={trace_row.get('beta')} "
+                    f"solution={trace_row.get('solution_index')} "
+                    f"calls={trace_row.get('call_count')}"
+                )
+
+
+def _top_rocblas_trace_rows(trace_rows: Sequence[Any]) -> list[Mapping[str, Any]]:
+    return sorted(
+        (_as_mapping(trace_value) for trace_value in trace_rows),
+        key=lambda trace_row: _as_number(trace_row.get("call_count")) or 0,
+        reverse=True,
+    )
 
 
 def _format_rocblas_time_ms(timing: Mapping[str, Any]) -> str:

@@ -145,6 +145,16 @@ T,N,13824,4547,4608,1,4608,0,4608,13824,13824,1,5,20,68121,8503.93
     )
 
 
+def _write_rocblas_trace_log(path: Path) -> None:
+    _write(
+        path,
+        """
+- { rocblas_function: "rocblas_gemm_ex", atomics_mode: atomics_allowed, a_type: "bf16_r", b_type: "bf16_r", c_type: "bf16_r", d_type: "bf16_r", compute_type: "f32_r", transA: 'T', transB: 'N', M: 12288, N: 4547, K: 4608, alpha: 1.0, lda: 4608, beta: 0.0, ldb: 4608, ldc: 12288, ldd: 12288, batch_count: 1, algo: 0, solution_index: 0, flags: none, call_count: 136 }
+- { rocblas_function: "rocblas_gemm_ex", atomics_mode: atomics_allowed, a_type: "bf16_r", b_type: "bf16_r", c_type: "bf16_r", d_type: "bf16_r", compute_type: "f32_r", transA: 'T', transB: 'N', M: 13824, N: 4547, K: 4608, alpha: 1.0, lda: 4608, beta: 0.0, ldb: 4608, ldc: 13824, ldd: 13824, batch_count: 1, algo: 0, solution_index: 0, flags: none, call_count: 68 }
+""",
+    )
+
+
 def _write_iree_dispatch_profile(path: Path) -> None:
     _write(
         path,
@@ -290,6 +300,26 @@ def test_build_kernel_anatomy_report_extracts_rocblas_log(
     assert rocblas_log["kernel_parameters"]["macroTile"] == "(128, 128, 1)"
     assert rocblas_log["timing_rows"][0]["M"] == 13824
     assert rocblas_log["timing_rows"][0]["us"] == 8503.93
+
+
+def test_build_kernel_anatomy_report_extracts_rocblas_trace_rows(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("pytorch", rocblas_log_path)],
+    )
+
+    rocblas_log = report["rocblas_logs"]["pytorch"]
+    assert len(rocblas_log["trace_rows"]) == 2
+    assert rocblas_log["trace_rows"][0]["rocblas_function"] == "rocblas_gemm_ex"
+    assert rocblas_log["trace_rows"][0]["M"] == 12288
+    assert rocblas_log["trace_rows"][0]["transA"] == "T"
+    assert rocblas_log["trace_rows"][0]["call_count"] == 136
 
 
 def test_build_kernel_anatomy_report_extracts_iree_dispatch_profile(
@@ -648,6 +678,22 @@ def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:
     assert "MatrixInstruction: (16, 16, 16, 1)" in text
 
 
+def test_text_report_contains_rocblas_trace_rows(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("pytorch", rocblas_log_path)],
+    )
+    text = format_text_report(report)
+
+    assert "trace rows:" in text
+    assert "M=12288 N=4547 K=4608 beta=0.0 solution=0 calls=136" in text
+    assert "M=13824 N=4547 K=4608 beta=0.0 solution=0 calls=68" in text
+
+
 def test_text_report_contains_iree_dispatch_profile_summary(
     tmp_path: Path,
 ) -> None:
@@ -761,6 +807,36 @@ amdhsa.kernels:
     assert deltas_by_metric["vgpr_count"]["candidate"] == 64
     assert deltas_by_metric["operation_time_ns"]["baseline"] == 8503930.0
     assert deltas_by_metric["operation_time_ns"]["candidate"] == 1234000
+
+
+def test_rocblas_trace_rows_participate_in_comparisons(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("pytorch", rocblas_log_path)],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="pytorch/gemm_M13824_N4547_K4608_beta0.0",
+                candidate="pytorch/gemm_M12288_N4547_K4608_beta0.0",
+            )
+        ],
+    )
+
+    comparison = comparisons[
+        "pytorch/gemm_M13824_N4547_K4608_beta0.0="
+        "pytorch/gemm_M12288_N4547_K4608_beta0.0"
+    ]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["call_count"]["baseline"] == 68
+    assert deltas_by_metric["call_count"]["candidate"] == 136
+    assert deltas_by_metric["M"]["baseline"] == 13824
+    assert deltas_by_metric["M"]["candidate"] == 12288
 
 
 def test_text_report_contains_comparison_summary(tmp_path: Path) -> None:
