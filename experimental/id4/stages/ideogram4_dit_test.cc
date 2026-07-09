@@ -240,7 +240,13 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
   EXPECT_GT(id4_pipeline_plan_boundary_tensor_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
   EXPECT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 2u);
-  EXPECT_GT(id4_pipeline_plan_region_count(plan), 1u);
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
+  EXPECT_EQ(id4_pipeline_plan_shared_tensor_count(plan), 0u);
+  const id4_pipeline_region_plan_t* region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(region, nullptr);
+  EXPECT_GT(region->statistics.local_acquire_count, 0u);
+  EXPECT_GT(region->statistics.local_slab_byte_length, 0u);
 
   const uint32_t head_size = model.hidden_size / model.attention_head_count;
   bool found_timestep_boundary = false;

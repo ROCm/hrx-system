@@ -1265,15 +1265,6 @@ iree_status_t id4_ideogram4_dit_program_barrier(
   return id4_pipeline_program_barrier(builder, &options);
 }
 
-static iree_status_t id4_ideogram4_dit_program_region_cut(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
-  id4_pipeline_program_region_cut_options_t options = {
-      .structure_size = sizeof(options),
-      .name = name,
-  };
-  return id4_pipeline_program_region_cut(builder, &options);
-}
-
 iree_status_t id4_ideogram4_dit_program_tap(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     id4_pipeline_program_tensor_t tensor) {
@@ -5263,15 +5254,6 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_tap(builder, adaln_input_name, adaln_input));
   }
-  char prelude_region_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t prelude_region_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
-      prelude_region_name_buffer, IREE_ARRAYSIZE(prelude_region_name_buffer),
-      &prelude_region_name, "%.*s.prelude", (int)branch_name.size,
-      branch_name.data));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_region_cut(builder, prelude_region_name));
-
   id4_pipeline_program_tensor_t layer_input = prelude_hidden;
   for (uint32_t layer_ordinal = 0; layer_ordinal < options->model.layer_count;
        ++layer_ordinal) {
@@ -5300,13 +5282,6 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_author_transformer_block(
         &block_options, &layer_output));
     layer_input = layer_output;
-    char layer_region_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-    iree_string_view_t layer_region_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-        branch_name, layer_ordinal, IREE_SV("block"), layer_region_name_buffer,
-        IREE_ARRAYSIZE(layer_region_name_buffer), &layer_region_name));
-    IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_region_cut(builder, layer_region_name));
   }
   return id4_ideogram4_dit_program_author_final_output(
       options, builder, branch_name, total_token_count, layer_input,

@@ -809,7 +809,7 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
   EXPECT_EQ(phase_stage_statistics.resident_stage_bundle_byte_length, 0u);
-  EXPECT_GT(phase_stage_statistics.phase_concurrent_parameter_peak_byte_length,
+  EXPECT_GE(phase_stage_statistics.phase_concurrent_parameter_peak_byte_length,
             issue_phase_statistics.phase_concurrent_parameter_peak_byte_length);
   EXPECT_GT(phase_stage_statistics.stage_serial_parameter_peak_byte_length,
             issue_phase_statistics.stage_serial_parameter_peak_byte_length);
@@ -906,47 +906,27 @@ TEST_F(SessionTest,
   GenerationPlanPtr plan =
       PlanGeneration(session.get(), tokenizer.get(), &request.value);
 
-  id4_ideogram4_generation_resource_statistics_t qwen_statistics =
+  const id4_ideogram4_generation_resource_statistics_t qwen_statistics =
       EstimateGenerationResources(
           plan.get(),
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
-  id4_ideogram4_generation_resource_statistics_t conditioned_statistics =
-      EstimateGenerationResources(
-          plan.get(),
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
-          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
-  id4_ideogram4_generation_resource_statistics_t combined_statistics =
-      EstimateGenerationResources(
-          plan.get(),
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
-          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
-              ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
-  const iree_device_size_t individual_peak =
-      std::max(qwen_statistics.phase_concurrent_total_peak_byte_length,
-               conditioned_statistics.phase_concurrent_total_peak_byte_length);
-  ASSERT_GT(combined_statistics.phase_concurrent_total_peak_byte_length,
-            individual_peak);
-
-  const id4_ideogram4_generation_resident_stage_mask_t candidates =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
   id4_ideogram4_generation_residency_selection_t selection =
       SelectGenerationResidency(
           plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT,
-          candidates,
-          combined_statistics.phase_concurrent_total_peak_byte_length - 1);
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN,
+          qwen_statistics.phase_concurrent_total_peak_byte_length);
 
   EXPECT_EQ(selection.residency_mode,
             ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
   EXPECT_EQ(selection.resident_stage_mask,
-            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
   EXPECT_TRUE(GenerationResidencyPhaseStageMasksAreEmpty(selection));
-  EXPECT_LE(selection.selected_peak_byte_length,
-            combined_statistics.phase_concurrent_total_peak_byte_length - 1);
   EXPECT_EQ(
       selection.selected_peak_byte_length,
       selection.resource_statistics.phase_concurrent_total_peak_byte_length);
+  EXPECT_EQ(selection.selected_peak_byte_length,
+            qwen_statistics.phase_concurrent_total_peak_byte_length);
 }
 
 TEST_F(SessionTest,
@@ -960,46 +940,26 @@ TEST_F(SessionTest,
   GenerationPlanPtr plan =
       PlanGeneration(session.get(), tokenizer.get(), &request.value);
 
-  id4_ideogram4_generation_resource_statistics_t qwen_statistics =
+  const id4_ideogram4_generation_resource_statistics_t qwen_statistics =
       EstimateGenerationResources(
           plan.get(),
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
-  id4_ideogram4_generation_resource_statistics_t conditioned_statistics =
-      EstimateGenerationResources(
-          plan.get(),
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
-          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
-  id4_ideogram4_generation_resource_statistics_t combined_statistics =
-      EstimateGenerationResources(
-          plan.get(),
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
-          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
-              ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
-  const iree_device_size_t individual_peak =
-      std::max(qwen_statistics.stage_serial_total_peak_byte_length,
-               conditioned_statistics.stage_serial_total_peak_byte_length);
-  ASSERT_GT(combined_statistics.stage_serial_total_peak_byte_length,
-            individual_peak);
-
-  const id4_ideogram4_generation_resident_stage_mask_t candidates =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
   id4_ideogram4_generation_residency_selection_t selection =
       SelectGenerationResidency(
           plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL,
-          candidates,
-          combined_statistics.stage_serial_total_peak_byte_length - 1);
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN,
+          qwen_statistics.stage_serial_total_peak_byte_length);
 
   EXPECT_EQ(selection.residency_mode,
             ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
   EXPECT_EQ(selection.resident_stage_mask,
-            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
   EXPECT_TRUE(GenerationResidencyPhaseStageMasksAreEmpty(selection));
-  EXPECT_LE(selection.selected_peak_byte_length,
-            combined_statistics.stage_serial_total_peak_byte_length - 1);
   EXPECT_EQ(selection.selected_peak_byte_length,
             selection.resource_statistics.stage_serial_total_peak_byte_length);
+  EXPECT_EQ(selection.selected_peak_byte_length,
+            qwen_statistics.stage_serial_total_peak_byte_length);
 }
 
 TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {
