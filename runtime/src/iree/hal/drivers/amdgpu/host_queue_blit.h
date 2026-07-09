@@ -34,6 +34,19 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready);
 
+// Emits a PM4 device-timestamp capture submission writing a single 64-bit GPU
+// clock tick into |target_buffer| at |target_offset| (must be 8-byte aligned).
+// Returns IREE_STATUS_UNIMPLEMENTED when the queue cannot emit device-side
+// timestamps. Caller must hold submission_mutex.
+iree_status_t iree_hal_amdgpu_host_queue_submit_timestamp(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready);
+
 // Emits a copy blit kernel submission. Caller must hold submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
     iree_hal_amdgpu_host_queue_t* queue,

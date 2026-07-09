@@ -301,6 +301,106 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
   return iree_ok_status();
 }
 
+// Validates a timestamp-capture target and resolves the 8-byte-aligned target
+// device pointer the GPU clock tick is written to.
+static iree_status_t iree_hal_amdgpu_host_queue_prepare_timestamp_target(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    uint8_t** out_target_device_ptr) {
+  *out_target_device_ptr = NULL;
+  if (IREE_UNLIKELY(!target_buffer)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target buffer must be non-null");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
+      iree_hal_buffer_allowed_usage(target_buffer),
+      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(target_buffer),
+      IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
+      target_buffer, target_offset, sizeof(uint64_t)));
+
+  iree_hal_buffer_t* allocated_target_buffer =
+      iree_hal_buffer_allocated_buffer(target_buffer);
+  uint8_t* target_device_ptr =
+      (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(allocated_target_buffer);
+  if (IREE_UNLIKELY(!target_device_ptr)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target buffer must be backed by an AMDGPU allocation");
+  }
+  target_device_ptr +=
+      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+  if (IREE_UNLIKELY(
+          !iree_host_ptr_has_alignment(target_device_ptr, sizeof(uint64_t)))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "timestamp target must be 8-byte aligned");
+  }
+
+  *out_target_device_ptr = target_device_ptr;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_submit_timestamp(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready) {
+  IREE_ASSERT_ARGUMENT(out_ready);
+  *out_ready = false;
+  if (IREE_UNLIKELY(queue->is_shutting_down)) {
+    return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+  }
+  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported timestamp flags: 0x%" PRIx64, flags);
+  }
+
+  // Defensive: this function is only reached after the device-spec
+  // DEVICE_TIMESTAMPS query confirmed support, so on the reachable
+  // immediate/deferred-issue paths this check never fires (pm4_ib_slots and
+  // pm4_timestamp_strategy are immutable after queue init). It guards direct
+  // internal callers of this function.
+  if (!queue->pm4_ib_slots || iree_hal_amdgpu_pm4_copy_timestamp_control(
+                                  queue->pm4_timestamp_strategy) == 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "queue does not support device-side timestamp capture");
+  }
+
+  uint8_t* target_device_ptr = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_timestamp_target(
+      target_buffer, target_offset, &target_device_ptr));
+
+  iree_hal_resource_t* operation_resources[1] = {
+      (iree_hal_resource_t*)target_buffer,
+  };
+  iree_hal_amdgpu_host_queue_pm4_ib_submission_t submission;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_try_begin_pm4_ib_submission(
+      queue, resolution, signal_semaphore_list,
+      IREE_ARRAYSIZE(operation_resources), iree_hsa_signal_null(),
+      /*profile_queue_event_info=*/NULL, out_ready, &submission));
+  if (!*out_ready) return iree_ok_status();
+
+  const bool did_emit =
+      iree_hal_amdgpu_pm4_ib_builder_emit_copy_timestamp_to_memory(
+          &submission.pm4_ib_builder, queue->pm4_timestamp_strategy,
+          target_device_ptr);
+  if (IREE_UNLIKELY(!did_emit)) {
+    iree_hal_amdgpu_host_queue_fail_pm4_ib_submission(queue, &submission);
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "PM4 timestamp payload does not fit IB slot");
+  }
+  uint64_t submission_epoch = 0;
+  return iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
+      queue, resolution, signal_semaphore_list, operation_resources,
+      IREE_ARRAYSIZE(operation_resources), /*profile_queue_event_info=*/NULL,
+      submission_flags, &submission, &submission_epoch);
+}
+
 // Prepares a fill dispatch packet and kernargs in stack-local storage without
 // touching queue rings. All user-input validation must happen before this so
 // the caller can avoid reserving AQL slots before the packet shape is known.

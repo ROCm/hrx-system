@@ -930,6 +930,36 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_execute_flags_t flags);
 
+// Flags controlling iree_hal_device_queue_timestamp behavior.
+typedef uint64_t iree_hal_timestamp_flags_t;
+enum iree_hal_timestamp_flag_bits_t {
+  IREE_HAL_TIMESTAMP_FLAG_NONE = 0u,
+};
+
+// Enqueues a device-side timestamp at the point in the |queue_affinity|
+// timeline reached after |wait_semaphore_list| is satisfied, signaling
+// |signal_semaphore_list| when that point is reached. A single 64-bit device
+// timestamp tick is written by the device into |target_buffer| at
+// |target_offset|. The target must be 8-byte aligned and be a transfer target
+// the device can write 8 bytes into; to read the tick back on the host the
+// buffer must additionally be host-visible (e.g. mappable).
+//
+// The written value is in the device timestamp domain. Convert a delta between
+// two timestamps to nanoseconds by dividing by the tick frequency reported in
+// iree_hal_device_spec_timing()->timestamp_frequency_hz. Callers must wait on
+// |signal_semaphore_list| before reading the tick back from |target_buffer|.
+//
+// Device-side timestamp support is a capability discovered via the device spec:
+// it is available only when iree_hal_device_spec_timing() reports the
+// IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS flag. Callers must query
+// that flag and only enqueue this operation on devices that advertise it.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags);
+
 // Enqueues a barrier waiting for |wait_semaphore_list| and signaling
 // |signal_semaphore_list| when reached.
 // Equivalent to iree_hal_device_queue_execute with no command buffers.
@@ -1216,6 +1246,13 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table,
       iree_hal_execute_flags_t flags);
+
+  iree_status_t(IREE_API_PTR* queue_timestamp)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_timestamp_flags_t flags);
 
   iree_status_t(IREE_API_PTR* queue_flush)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
