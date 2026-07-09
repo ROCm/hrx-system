@@ -2386,6 +2386,28 @@ def test_main_emits_json(tmp_path: Path, capsys) -> None:
     assert report["disassemblies"]["asm"]["symbol_count"] == 1
 
 
+def test_main_emits_benchmark_comparison_scorecard(tmp_path: Path, capsys) -> None:
+    benchmark_path = tmp_path / "compare_only.jsonl"
+    _write_compare_only_benchmark_jsonl(benchmark_path)
+
+    assert (
+        main(
+            [
+                "--benchmark-jsonl",
+                f"bench={benchmark_path}",
+                "--format",
+                "text",
+            ]
+        )
+        == 0
+    )
+    text = capsys.readouterr().out
+    assert "Comparison scorecard:" in text
+    assert "Comparison verdicts:" in text
+    assert "bench/c0/bench_kernel=bench/c1/bench_kernel" in text
+    assert "operation_time_ns [time]: candidate_higher" in text
+
+
 def test_main_accepts_weighted_symbol_group(tmp_path: Path, capsys) -> None:
     disassembly_path = tmp_path / "kernel.s"
     _write(

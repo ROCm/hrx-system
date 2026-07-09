@@ -2070,6 +2070,48 @@ def build_kernel_anatomy_comparisons(
     return comparisons
 
 
+def build_kernel_anatomy_benchmark_comparison_specs(
+    report: Mapping[str, Any],
+) -> list[ComparisonSpec]:
+    """Builds metric comparisons from benchmark JSONL comparison rows."""
+
+    benchmark_reports = _as_mapping(report.get("loom_benchmarks"))
+    comparison_specs: list[ComparisonSpec] = []
+    for name, benchmark_report_value in benchmark_reports.items():
+        benchmark_report = _as_mapping(benchmark_report_value)
+        comparison_rows = benchmark_report.get("comparisons", [])
+        if not isinstance(comparison_rows, list):
+            continue
+        for comparison_row_value in comparison_rows:
+            comparison_row = _as_mapping(comparison_row_value)
+            comparison_group = comparison_row.get("comparison_group")
+            baseline_candidate_id = comparison_row.get("baseline_candidate_id")
+            candidate_id = comparison_row.get("candidate_id")
+            if comparison_group is None or baseline_candidate_id is None:
+                continue
+            if candidate_id is None:
+                continue
+            comparison_specs.append(
+                ComparisonSpec(
+                    baseline=_loom_benchmark_metric_group_name(
+                        name,
+                        {
+                            "candidate_id": baseline_candidate_id,
+                            "benchmark": comparison_group,
+                        },
+                    ),
+                    candidate=_loom_benchmark_metric_group_name(
+                        name,
+                        {
+                            "candidate_id": candidate_id,
+                            "benchmark": comparison_group,
+                        },
+                    ),
+                )
+            )
+    return comparison_specs
+
+
 def build_kernel_anatomy_comparison_scorecard(
     comparisons: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
@@ -5750,8 +5792,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         top_symbol_count=args.top_symbols,
         ordered_symbol_count=args.ordered_symbols,
     )
-    if args.compare:
-        report["comparisons"] = build_kernel_anatomy_comparisons(report, args.compare)
+    comparison_specs = [
+        *build_kernel_anatomy_benchmark_comparison_specs(report),
+        *args.compare,
+    ]
+    if comparison_specs:
+        report["comparisons"] = build_kernel_anatomy_comparisons(
+            report, comparison_specs
+        )
         report["comparison_scorecard"] = build_kernel_anatomy_comparison_scorecard(
             report["comparisons"]
         )
