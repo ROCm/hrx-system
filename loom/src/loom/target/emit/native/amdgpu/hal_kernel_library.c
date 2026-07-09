@@ -13,8 +13,11 @@
 #include "iree/io/vec_stream.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/allocation_materialization.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/verify.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
@@ -971,6 +974,42 @@ static iree_status_t loom_amdgpu_hal_kernel_library_materialize_address_state(
                                                table_arena, out_result);
 }
 
+static iree_status_t
+loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
+    void* user_data, const loom_low_emission_frame_t* frame,
+    iree_arena_allocator_t* table_arena) {
+  (void)table_arena;
+  const uint64_t limit =
+      frame->target.bundle_storage.snapshot.max_workgroup_storage_bytes;
+  if (limit == 0) {
+    return iree_ok_status();
+  }
+
+  loom_low_storage_layout_space_sizes_t sizes = {0};
+  IREE_RETURN_IF_ERROR(loom_low_storage_layout_collect_space_sizes(
+      frame->module, frame->function_op, &sizes));
+  if (sizes.workgroup_bytes <= limit) {
+    return iree_ok_status();
+  }
+
+  const iree_diagnostic_emitter_t* emitter =
+      (const iree_diagnostic_emitter_t*)user_data;
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(
+          loom_low_diagnostic_function_name(frame->module, frame->function_op)),
+      loom_param_string(loom_low_diagnostic_target_key(&frame->target)),
+      loom_param_u64(sizes.workgroup_bytes),
+      loom_param_u64(limit),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = frame->function_op,
+      .error = LOOM_ERR_TARGET_051,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(*emitter, &emission);
+}
+
 static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
@@ -1033,6 +1072,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       spill_lowering_context = {
           .descriptor_set = descriptor_set,
       };
+  iree_diagnostic_emitter_t final_validation_emitter = frame_options.emitter;
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
           {
@@ -1050,6 +1090,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       .materialize_address_state =
           loom_amdgpu_hal_kernel_library_materialize_address_state,
       .materialize_address_state_user_data = NULL,
+      .validate_frame =
+          loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage,
+      .validate_frame_user_data = (void*)&final_validation_emitter,
   };
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_spill_free(
       module, plan->low_function_op, &frame_options, &spill_free_options,

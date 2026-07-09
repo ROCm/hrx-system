@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 from loom.gen.target.arch.amdgpu.records import amdgpu_target_records
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AmdgpuDescriptorSetInfo,
     AmdgpuTargetRecordInfo,
@@ -49,12 +50,14 @@ def _row(
     *,
     enum_value: int = 1,
     default_for_descriptor_set: bool = True,
+    max_workgroup_storage_bytes: int = (AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES),
 ) -> amdgpu_target_records._AmdgpuTargetRecordRow:
     descriptor_set = _descriptor_set_info()
     processor = processor_info(
         processor_name,
         0x001,
         descriptor_set_key=descriptor_set.key,
+        max_workgroup_storage_bytes=max_workgroup_storage_bytes,
     )
     info = AmdgpuTargetRecordInfo(
         processor=processor_name,
@@ -85,6 +88,7 @@ def test_target_records_materialize_current_rows() -> None:
     assert "LOOM_AMDGPU_TARGET_RECORD_INFO(Gfx1250" in source
     assert "LOOM_AMDGPU_TARGET_RECORD_DEFAULT(" in source
     assert "Gfx1250)" in source
+    assert f"UINT64_C({AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES})" in source
 
 
 def test_target_records_reject_unknown_processor() -> None:
@@ -126,5 +130,23 @@ def test_target_records_require_one_default_per_descriptor_set() -> None:
             (
                 _row("gfx-test-a", enum_value=1),
                 _row("gfx-test-b", enum_value=2),
+            )
+        )
+
+
+def test_target_records_require_consistent_descriptor_set_storage_limits() -> None:
+    with _raises_value_error("requires a max workgroup storage limit"):
+        amdgpu_target_records._validate_target_record_infos((_row("gfx-test", max_workgroup_storage_bytes=0),))
+
+    with _raises_value_error("inconsistent max workgroup storage limits"):
+        amdgpu_target_records._validate_target_record_infos(
+            (
+                _row("gfx-test-a", enum_value=1),
+                _row(
+                    "gfx-test-b",
+                    enum_value=2,
+                    default_for_descriptor_set=False,
+                    max_workgroup_storage_bytes=32 * 1024,
+                ),
             )
         )

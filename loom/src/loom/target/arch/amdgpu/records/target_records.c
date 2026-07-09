@@ -11,7 +11,8 @@
 #include "loom/target/arch/amdgpu/target_info.h"
 
 // clang-format off
-#define LOOM_AMDGPU_LOW_SNAPSHOT(symbol, snapshot_name, wavefront_size)      \
+#define LOOM_AMDGPU_LOW_SNAPSHOT(symbol, snapshot_name, wavefront_size,      \
+                                  workgroup_storage_byte_limit)             \
   static const loom_target_snapshot_t symbol = {                             \
       .name = IREE_SVL(snapshot_name),                                       \
       .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,               \
@@ -25,6 +26,7 @@
       .max_grid_size = {.x = INT32_MAX, .y = UINT16_MAX, .z = UINT16_MAX},   \
       .max_flat_grid_size = UINT32_MAX,                                      \
       .max_workgroup_count = {.x = INT32_MAX, .y = UINT16_MAX, .z = UINT16_MAX}, \
+      .max_workgroup_storage_bytes = workgroup_storage_byte_limit,           \
       .memory_spaces = {                                                     \
           .generic = 0,                                                      \
           .global = 1,                                                       \
@@ -37,9 +39,10 @@
   }
 
 #define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size) \
+                                          snapshot_name, key, wavefront_size, \
+                                          workgroup_storage_byte_limit) \
   LOOM_AMDGPU_LOW_SNAPSHOT(kAmdgpu##symbol_suffix##Snapshot, snapshot_name, \
-                           wavefront_size);
+                           wavefront_size, workgroup_storage_byte_limit);
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
@@ -62,13 +65,15 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
   }
 
 #define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size) \
+                                          snapshot_name, key, wavefront_size, \
+                                          workgroup_storage_byte_limit) \
   LOOM_AMDGPU_LOW_CONFIG(kAmdgpu##symbol_suffix##Config, key);
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
 #define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size) \
+                                          snapshot_name, key, wavefront_size, \
+                                          workgroup_storage_byte_limit) \
   static const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core = { \
     .name = IREE_SVL(bundle_name), \
     .snapshot = &kAmdgpu##symbol_suffix##Snapshot, \
