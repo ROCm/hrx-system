@@ -135,6 +135,9 @@ typedef struct id4_pipeline_stage_issue_options_t {
   const void* next;
   // Issue behavior flags.
   id4_pipeline_stage_issue_flags_t flags;
+  // Maximum number of scheduler-visible regions submitted without host-side
+  // completion backpressure.
+  iree_host_size_t region_submission_window;
   // Number of caller-owned boundary tensor bindings.
   iree_host_size_t boundary_binding_count;
   // Caller-owned boundary tensor bindings in plan boundary tensor order.

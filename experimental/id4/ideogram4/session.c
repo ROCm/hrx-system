@@ -522,6 +522,7 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
+  issue_options.region_submission_window = 1;
   issue_options.flags = execution->stage_issue_flags;
   issue_options.boundary_binding_count = slot->boundary_bindings.count;
   issue_options.boundary_bindings = slot->boundary_bindings.bindings;

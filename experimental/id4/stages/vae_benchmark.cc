@@ -373,6 +373,7 @@ static iree_status_t IssueVaeBundle(
   id4_pipeline_stage_issue_options_t issue_options;
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
+  issue_options.region_submission_window = 1;
   issue_options.boundary_binding_count = boundary_bindings.count;
   issue_options.boundary_bindings = boundary_bindings.bindings;
   issue_options.wait_semaphore_list = wait.list();

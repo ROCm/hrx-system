@@ -2992,6 +2992,16 @@ iree_status_t id4_pipeline_program_prepared_issue(
             id4_pipeline_plan_stage_name(prepared->plan), region->name,
             region_signal_list);
         if (!iree_status_is_ok(status)) break;
+      } else if (i + 1 >= options->region_submission_window) {
+        const iree_host_size_t wait_region_index =
+            i + 1 - options->region_submission_window;
+        if (wait_region_index + 1 < prepared->region_count) {
+          status = iree_hal_semaphore_wait(
+              internal_semaphores[wait_region_index],
+              internal_payload_values[wait_region_index],
+              iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+          if (!iree_status_is_ok(status)) break;
+        }
       }
       if (parameter_window_slot) {
         status =

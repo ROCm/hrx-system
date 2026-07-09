@@ -644,6 +644,7 @@ static iree_status_t IssueStage(
   id4_pipeline_stage_issue_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
+  options.region_submission_window = 1;
   options.boundary_binding_count = boundary_bindings.count;
   options.boundary_bindings = boundary_bindings.bindings;
   options.diagnostic_tap_binding_count = diagnostic_tap_bindings.count;

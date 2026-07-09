@@ -552,7 +552,8 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
           IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
           IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
           /*byte_length=*/2048, /*alignment=*/16,
           IREE_ARRAYSIZE(target_requests), target_requests);
 
@@ -948,7 +949,8 @@ static void RunCompactLinearRhsTileEncoding(
           IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
           IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
           /*byte_length=*/kTargetRequestCount * kCompactRhsTileByteLength,
           /*alignment=*/16, kTargetRequestCount, target_requests);
 

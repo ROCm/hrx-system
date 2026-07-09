@@ -872,6 +872,7 @@ TEST(PipelineStage, IssueRequiresPlannedBoundaryBindings) {
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
+  issue_options.region_submission_window = 1;
   issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;
 
@@ -1083,6 +1084,7 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
+  issue_options.region_submission_window = 1;
   issue_options.wait_semaphore_list = readiness_list;
   issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;

@@ -374,6 +374,10 @@ static iree_status_t id4_pipeline_validate_issue_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "issue final signal is required");
   }
+  if (options->region_submission_window == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue region submission window is required");
+  }
   if (options->parameter_load_prefetch_region_distance != 0) {
     id4_pipeline_parameter_slab_set_t* parameter_slabs =
         id4_pipeline_bundle_parameter_slabs(bundle);
