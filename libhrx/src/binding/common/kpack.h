@@ -105,7 +105,8 @@ typedef struct iree_hal_streaming_kpack_metadata_t {
 // [str, ...]}). The reader self-bounds within |data|; pass a generous upper
 // bound when the true length is unknown (see MAX_METADATA_SIZE). Fails with
 // IREE_STATUS_INVALID_ARGUMENT if the blob is not the expected shape or carries
-// no search paths.
+// no search paths, and IREE_STATUS_OUT_OF_RANGE if it lists more than
+// IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS paths.
 iree_status_t iree_hal_streaming_kpack_parse_metadata(
     iree_const_byte_span_t data,
     iree_hal_streaming_kpack_metadata_t* out_metadata);
@@ -142,7 +143,11 @@ iree_status_t iree_hal_streaming_kpack_archive_open(
 // returns a freshly-allocated, decompressed copy via |host_allocator| (caller
 // frees with iree_allocator_free). |binary_key| is the full indexed key, e.g.
 // "lib/libfoo.so#0"; |arch| is an exact TOC architecture key, e.g. "gfx942".
-// Fails with IREE_STATUS_NOT_FOUND when the key/arch is absent and
+// Fails with IREE_STATUS_NOT_FOUND when the key/arch is absent or its ordinal
+// has no backing blob/frame, IREE_STATUS_INVALID_ARGUMENT on a malformed TOC
+// entry (missing ordinal, zero-size blob, or a blob offset/size outside the
+// archive), IREE_STATUS_DATA_LOSS when zstd decompression fails or the
+// decompressed size does not match the recorded original_size, and
 // IREE_STATUS_UNIMPLEMENTED for zstd archives when built without
 // HRX_ENABLE_ZSTD.
 iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
@@ -175,7 +180,10 @@ iree_status_t iree_hal_streaming_kpack_expand_gfxarch(
 // |address_in_binary| (e.g. the HIPK wrapper's binary pointer), used to resolve
 // archive paths relative to the owning library. On Linux this scans
 // /proc/self/maps. |out_offset| (optional) receives the address's offset within
-// the file. Fails with IREE_STATUS_NOT_FOUND if the address maps to no file and
+// the file. Fails with IREE_STATUS_INVALID_ARGUMENT on a null address/buffer or
+// zero |out_capacity|, IREE_STATUS_NOT_FOUND if the address maps to no file
+// (including when /proc/self/maps cannot be read), IREE_STATUS_OUT_OF_RANGE if
+// the resolved path does not fit in |out_capacity|, and
 // IREE_STATUS_UNIMPLEMENTED on unsupported platforms.
 iree_status_t iree_hal_streaming_kpack_discover_binary_path(
     const void* address_in_binary, char* out, iree_host_size_t out_capacity,
