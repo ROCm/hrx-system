@@ -23,6 +23,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_compile_diagnostic_rows,
     build_kernel_anatomy_duplicate_candidate_rows,
+    build_kernel_anatomy_matrix_mnemonic_gap_rows,
     build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
     build_kernel_anatomy_rocblas_benchmark_shape_comparison_specs,
@@ -2509,6 +2510,80 @@ def test_rocblas_shape_comparisons_include_same_named_disassembly(
     assert scorecard_by_metric["local_memory_instruction_count"]["category"] == (
         "local_memory"
     )
+
+
+def test_matrix_mnemonic_gaps_compare_resolved_disassembly_blocks(
+    tmp_path: Path,
+) -> None:
+    rocblas_disassembly_path = tmp_path / "rocblas.s"
+    loom_disassembly_path = tmp_path / "loom.s"
+    _write(
+        rocblas_disassembly_path,
+        """
+0000000000000000 <selected_tensile_loop>:
+      ds_read_b128 v[0:3], v0
+      ds_write_b64 v0, v[0:1]
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+    _write(
+        loom_disassembly_path,
+        """
+0000000000000000 <loom_loop>:
+      ds_read_b32 v0, v1
+      ds_read_b32 v2, v3
+      ds_write_b32 v4, v5
+      ds_write_b32 v6, v7
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[
+            NamedPath("rocblas", rocblas_disassembly_path),
+            NamedPath("loom/c0/selected_listing", loom_disassembly_path),
+        ],
+        compile_report_paths=[],
+    )
+    comparisons = {
+        "rocblas/gemm_M128_N128_K16_beta0=loom/c0/logical_benchmark": {
+            "baseline": "rocblas/gemm_M128_N128_K16_beta0",
+            "candidate": "loom/c0/logical_benchmark",
+            "deltas": [
+                {
+                    "metric": "operation_time_ns",
+                    "baseline": 100,
+                    "candidate": 300,
+                    "ratio": 3.0,
+                    "baseline_source": "rocblas_log_timing",
+                    "candidate_source": "benchmark",
+                }
+            ],
+            "scorecard": [],
+        }
+    }
+
+    rows = build_kernel_anatomy_matrix_mnemonic_gap_rows(report, comparisons)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["baseline_disassembly"] == "rocblas"
+    assert row["candidate_disassembly"] == "loom/c0/selected_listing"
+    assert row["time_ratio"] == 3.0
+    assert row["baseline_local_memory_instructions_per_matrix_instruction"] == 2.0
+    assert row["candidate_local_memory_instructions_per_matrix_instruction"] == 4.0
+    deltas_by_mnemonic = {
+        delta["mnemonic"]: delta for delta in row["local_mnemonic_deltas"]
+    }
+    assert deltas_by_mnemonic["ds_read_b32"]["delta_per_matrix_instruction"] == 2.0
+    assert deltas_by_mnemonic["ds_read_b128"]["delta_per_matrix_instruction"] == -1.0
+
+    report["comparisons"] = comparisons
+    report["matrix_mnemonic_gaps"] = rows
+    summary = format_summary_report(report)
+    assert "Matrix mnemonic gaps:" in summary
+    assert "time=3x local/matrix=4/2" in summary
+    assert "ds_read_b32:c=2/m,b=0/m,d=+2/m" in summary
+    assert "ds_read_b128:c=0/m,b=1/m,d=-1/m" in summary
 
 
 def test_best_candidate_rows_select_fastest_matching_shape(tmp_path: Path) -> None:

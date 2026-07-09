@@ -2464,6 +2464,172 @@ def build_kernel_anatomy_structural_bottleneck_rows(
     return sorted(rows, key=_structural_bottleneck_rank, reverse=True)
 
 
+def build_kernel_anatomy_matrix_mnemonic_gap_rows(
+    report: Mapping[str, Any], comparisons: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Builds per-matrix mnemonic deltas for compared disassembly blocks."""
+
+    disassemblies = _as_mapping(report.get("disassemblies"))
+    rows: list[dict[str, Any]] = []
+    for comparison_name, comparison_value in comparisons.items():
+        comparison = _as_mapping(comparison_value)
+        baseline = comparison.get("baseline")
+        candidate = comparison.get("candidate")
+        if not isinstance(baseline, str) or not isinstance(candidate, str):
+            continue
+        baseline_key = _resolve_matrix_disassembly_key(disassemblies, baseline)
+        candidate_key = _resolve_matrix_disassembly_key(disassemblies, candidate)
+        if baseline_key is None or candidate_key is None:
+            continue
+        baseline_symbol = _first_matrix_symbol(disassemblies, baseline_key)
+        candidate_symbol = _first_matrix_symbol(disassemblies, candidate_key)
+        if not baseline_symbol or not candidate_symbol:
+            continue
+        verdict = _build_kernel_anatomy_comparison_verdict(comparison_name, comparison)
+        row = {
+            "comparison": comparison_name,
+            "baseline": baseline,
+            "candidate": candidate,
+            "baseline_disassembly": baseline_key,
+            "candidate_disassembly": candidate_key,
+            "baseline_symbol": baseline_symbol.get("symbol"),
+            "candidate_symbol": candidate_symbol.get("symbol"),
+            "time_ratio": verdict.get("time_ratio"),
+            "baseline_local_memory_instructions_per_matrix_instruction": (
+                baseline_symbol.get("local_memory_instructions_per_matrix_instruction")
+            ),
+            "candidate_local_memory_instructions_per_matrix_instruction": (
+                candidate_symbol.get("local_memory_instructions_per_matrix_instruction")
+            ),
+            "local_mnemonic_deltas": _build_mnemonic_delta_rows(
+                baseline_symbol.get("top_local_memory_mnemonics"),
+                candidate_symbol.get("top_local_memory_mnemonics"),
+                baseline_symbol.get("matrix_instruction_count"),
+                candidate_symbol.get("matrix_instruction_count"),
+            ),
+            "device_mnemonic_deltas": _build_mnemonic_delta_rows(
+                baseline_symbol.get("top_device_memory_mnemonics"),
+                candidate_symbol.get("top_device_memory_mnemonics"),
+                baseline_symbol.get("matrix_instruction_count"),
+                candidate_symbol.get("matrix_instruction_count"),
+            ),
+        }
+        rows.append(row)
+    return sorted(rows, key=_matrix_mnemonic_gap_row_rank, reverse=True)
+
+
+def _resolve_matrix_disassembly_key(
+    disassemblies: Mapping[str, Any], group_name: str
+) -> str | None:
+    if group_name in disassemblies:
+        return group_name
+    parts = group_name.split("/")
+    for part_count in range(len(parts) - 1, 0, -1):
+        prefix = "/".join(parts[:part_count])
+        if prefix in disassemblies:
+            return prefix
+        matches = [
+            key
+            for key in disassemblies
+            if isinstance(key, str) and key.startswith(prefix + "/")
+        ]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _first_matrix_symbol(
+    disassemblies: Mapping[str, Any], disassembly_key: str
+) -> Mapping[str, Any]:
+    matrix_symbols = _as_mapping(disassemblies.get(disassembly_key)).get(
+        "matrix_symbols"
+    )
+    if not isinstance(matrix_symbols, list) or not matrix_symbols:
+        return {}
+    return _as_mapping(matrix_symbols[0])
+
+
+def _build_mnemonic_delta_rows(
+    baseline_rows_value: Any,
+    candidate_rows_value: Any,
+    baseline_matrix_count_value: Any,
+    candidate_matrix_count_value: Any,
+) -> list[dict[str, Any]]:
+    baseline_matrix_count = _as_number(baseline_matrix_count_value)
+    candidate_matrix_count = _as_number(candidate_matrix_count_value)
+    baseline_rows = _mnemonic_count_map(baseline_rows_value)
+    candidate_rows = _mnemonic_count_map(candidate_rows_value)
+    rows: list[dict[str, Any]] = []
+    for mnemonic in sorted(set(baseline_rows) | set(candidate_rows)):
+        baseline_count = baseline_rows.get(mnemonic, 0)
+        candidate_count = candidate_rows.get(mnemonic, 0)
+        baseline_per_matrix = _ratio_or_none(baseline_count, baseline_matrix_count)
+        candidate_per_matrix = _ratio_or_none(candidate_count, candidate_matrix_count)
+        delta_per_matrix = (
+            candidate_per_matrix - baseline_per_matrix
+            if baseline_per_matrix is not None and candidate_per_matrix is not None
+            else None
+        )
+        ratio = (
+            _ratio_or_none(candidate_per_matrix, baseline_per_matrix)
+            if baseline_per_matrix is not None and baseline_per_matrix > 0
+            else None
+        )
+        rows.append(
+            {
+                "mnemonic": mnemonic,
+                "baseline_count": baseline_count,
+                "candidate_count": candidate_count,
+                "baseline_per_matrix_instruction": baseline_per_matrix,
+                "candidate_per_matrix_instruction": candidate_per_matrix,
+                "delta_per_matrix_instruction": delta_per_matrix,
+                "ratio": ratio,
+            }
+        )
+    return sorted(rows, key=_mnemonic_delta_row_rank, reverse=True)
+
+
+def _mnemonic_count_map(rows_value: Any) -> dict[str, int]:
+    if not isinstance(rows_value, list):
+        return {}
+    counts: dict[str, int] = {}
+    for row_value in rows_value:
+        row = _as_mapping(row_value)
+        mnemonic = row.get("mnemonic")
+        count = _as_number(row.get("count"))
+        if isinstance(mnemonic, str) and count is not None:
+            counts[mnemonic] = int(count)
+    return counts
+
+
+def _mnemonic_delta_row_rank(row: Mapping[str, Any]) -> tuple[float, float, str]:
+    delta = _as_number(row.get("delta_per_matrix_instruction"))
+    candidate = _as_number(row.get("candidate_per_matrix_instruction"))
+    return (
+        abs(float(delta)) if delta is not None else 0.0,
+        float(candidate) if candidate is not None else 0.0,
+        str(row.get("mnemonic") or ""),
+    )
+
+
+def _matrix_mnemonic_gap_row_rank(row: Mapping[str, Any]) -> tuple[float, float, str]:
+    time_ratio = _as_number(row.get("time_ratio"))
+    local_delta_rows = row.get("local_mnemonic_deltas")
+    max_local_delta = 0.0
+    if isinstance(local_delta_rows, list):
+        for delta_value in local_delta_rows:
+            delta = _as_number(
+                _as_mapping(delta_value).get("delta_per_matrix_instruction")
+            )
+            if delta is not None:
+                max_local_delta = max(max_local_delta, abs(float(delta)))
+    return (
+        float(time_ratio) if time_ratio is not None else 0.0,
+        max_local_delta,
+        str(row.get("comparison") or ""),
+    )
+
+
 def _geometric_mean(values: Sequence[float | int]) -> float | None:
     if not values:
         return None
@@ -5687,6 +5853,32 @@ def _format_mnemonic_rows(rows_value: Any) -> str:
     return ",".join(fragments)
 
 
+def _format_mnemonic_gap_rows(rows_value: Any) -> str:
+    if not isinstance(rows_value, list):
+        return ""
+    fragments = []
+    for row_value in rows_value[:4]:
+        row = _as_mapping(row_value)
+        mnemonic = row.get("mnemonic")
+        candidate_per_matrix = _as_number(row.get("candidate_per_matrix_instruction"))
+        baseline_per_matrix = _as_number(row.get("baseline_per_matrix_instruction"))
+        delta_per_matrix = _as_number(row.get("delta_per_matrix_instruction"))
+        if not isinstance(mnemonic, str):
+            continue
+        if candidate_per_matrix is None or baseline_per_matrix is None:
+            continue
+        delta_prefix = (
+            "+" if delta_per_matrix is not None and delta_per_matrix >= 0 else ""
+        )
+        fragments.append(
+            f"{mnemonic}:"
+            f"c={_format_scalar(candidate_per_matrix)}/m,"
+            f"b={_format_scalar(baseline_per_matrix)}/m,"
+            f"d={delta_prefix}{_format_scalar(delta_per_matrix)}/m"
+        )
+    return "; ".join(fragments)
+
+
 def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> None:
     rocblas_logs = report.get("rocblas_logs", {})
     if not isinstance(rocblas_logs, Mapping) or not rocblas_logs:
@@ -5973,6 +6165,44 @@ def _append_summary_benchmark_timing_lines(
         )
 
 
+def _append_summary_matrix_mnemonic_gap_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    matrix_mnemonic_gaps = report.get("matrix_mnemonic_gaps")
+    if matrix_mnemonic_gaps is None:
+        comparisons = report.get("comparisons", {})
+        if isinstance(comparisons, Mapping):
+            matrix_mnemonic_gaps = build_kernel_anatomy_matrix_mnemonic_gap_rows(
+                report, comparisons
+            )
+    if not isinstance(matrix_mnemonic_gaps, list) or not matrix_mnemonic_gaps:
+        return
+    lines.append("")
+    lines.append("Matrix mnemonic gaps:")
+    for row_value in matrix_mnemonic_gaps[:12]:
+        row = _as_mapping(row_value)
+        baseline = str(row.get("baseline") or "")
+        candidate = str(row.get("candidate") or "")
+        local_ops = _format_mnemonic_gap_rows(row.get("local_mnemonic_deltas"))
+        device_ops = _format_mnemonic_gap_rows(row.get("device_mnemonic_deltas"))
+        candidate_local_per_matrix = row.get(
+            "candidate_local_memory_instructions_per_matrix_instruction"
+        )
+        baseline_local_per_matrix = row.get(
+            "baseline_local_memory_instructions_per_matrix_instruction"
+        )
+        lines.append(
+            "  "
+            f"{_format_short_comparison_pair(baseline, candidate)}: "
+            f"time={_format_ratio(row.get('time_ratio'))} "
+            f"local/matrix="
+            f"{_format_scalar(candidate_local_per_matrix)}/"
+            f"{_format_scalar(baseline_local_per_matrix)} "
+            f"local_ops={local_ops or '-'} "
+            f"device_ops={device_ops or '-'}"
+        )
+
+
 def format_summary_report(report: Mapping[str, Any]) -> str:
     """Formats the anatomy report as a compact optimization-loop summary."""
 
@@ -6080,6 +6310,7 @@ def format_summary_report(report: Mapping[str, Any]) -> str:
                     reverse=True,
                 )[:12]
             )
+    _append_summary_matrix_mnemonic_gap_lines(lines, report)
     verdicts = report.get("comparison_verdicts")
     if verdicts is None:
         comparisons = report.get("comparisons", {})
@@ -6980,6 +7211,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report["comparison_structural_bottlenecks"] = (
             build_kernel_anatomy_structural_bottleneck_rows(report["comparisons"])
+        )
+        report["matrix_mnemonic_gaps"] = build_kernel_anatomy_matrix_mnemonic_gap_rows(
+            report, report["comparisons"]
         )
     if args.frontier:
         report["optimization_frontier"] = build_kernel_anatomy_optimization_frontier(
