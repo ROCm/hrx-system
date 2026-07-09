@@ -140,14 +140,17 @@ or reduction order.
 HAL queue ordering must be expressed with semaphores and command-buffer
 barriers. Submission order alone is not a correctness mechanism.
 
-Use reusable command buffers where the operation sequence is stable. Prefer
-indirect binding references into the `queue_execute` binding table so command
-buffers can be reused across requests, slabs, offsets, and specializations.
+Each coarse single-device stage should prepare one immutable reusable command
+buffer. Layer boundaries, parameter locality, and ordinary barriers are not
+submission boundaries. A placement lowering may use one command buffer per
+participating device for tensor parallel or heterogeneous execution, with
+explicit semaphore and data edges between devices. Prefer indirect binding
+references into the `queue_execute` binding table so command buffers can be
+reused across requests, slabs, offsets, and specializations.
 
 Transient tensors inside a command-buffer scope should be suballocations from a
 small number of `queue_alloca` slabs. Do not queue hundreds of independent HAL
-allocations for tensors whose lifetimes are known to be local to one recorded
-region.
+allocations for tensors whose lifetimes are known to be local to one stage.
 
 Memory plans are correctness objects. They should make slab sizes, offsets,
 lifetimes, aliasing, and cross-command-buffer transients inspectable.

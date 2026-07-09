@@ -383,19 +383,22 @@ HAL queues are not FIFO. Every user-visible ordering edge must be expressed
 through semaphores or explicit command-buffer barriers. Submission order alone
 is not a correctness contract.
 
-Command buffers should be reusable whenever their operation sequence is stable.
-Recordings should use indirect buffer references into the queue-execute binding
-table so the same command buffer can run against different slabs, offsets,
-request instances, LoRA selections, and transient allocations.
+Each coarse single-device stage should prepare one immutable reusable command
+buffer. Qwen forward, each DiT forward, and VAE decode are stage-sized command
+buffers; layer boundaries and parameter locality do not create queue
+submissions. Tensor-parallel or heterogeneous placement may lower one semantic
+stage to one command buffer per participating device with explicit cross-device
+edges. Recordings should use indirect buffer references into the queue-execute
+binding table so the same command buffer can run against different slabs,
+offsets, request instances, LoRA selections, and transient allocations.
 
 ### Memory Planning
 
-A command buffer should normally see:
+A stage command buffer should normally see:
 
 - one or more immutable weight slabs;
 - one local transient slab allocated with `queue_alloca`;
-- any cross-command-buffer transients that intentionally live past the local
-  slab;
+- any cross-stage transients that intentionally live past the local slab;
 - small scalar/config buffers when dispatch parameters need device-visible
   storage.
 

@@ -213,6 +213,8 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithParameters) {
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_ASSERT_OK(
       id4_pipeline_stage_plan(stage.get(), &plan_options, plan.out()));
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan.get()), 1u);
+  EXPECT_EQ(id4_pipeline_plan_shared_tensor_count(plan.get()), 0u);
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;

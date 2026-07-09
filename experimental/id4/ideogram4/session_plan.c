@@ -1177,6 +1177,26 @@ static uint32_t id4_ideogram4_generation_stage_issue_count(
   }
 }
 
+static id4_ideogram4_generation_resident_stage_mask_t
+id4_ideogram4_generation_phase_local_candidate_mask(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask) {
+  id4_ideogram4_generation_resident_stage_mask_t phase_local_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (iree_any_bit_set(candidate_stage_mask,
+                         descriptor->resident_stage_bit) &&
+        id4_ideogram4_generation_stage_issue_count(plan, descriptor->ordinal) >
+            1) {
+      phase_local_stage_mask |= descriptor->resident_stage_bit;
+    }
+  }
+  return phase_local_stage_mask;
+}
+
 static iree_device_size_t id4_ideogram4_generation_ceil_mib(
     iree_device_size_t byte_length) {
   const iree_device_size_t mib = 1024ull * 1024ull;
@@ -1546,8 +1566,9 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
          ++phase_subset) {
       const id4_ideogram4_generation_resident_stage_mask_t
           phase_local_stage_mask =
-              id4_ideogram4_generation_stage_mask_from_subset(
-                  options->candidate_stage_mask, phase_subset);
+              id4_ideogram4_generation_phase_local_candidate_mask(
+                  plan, id4_ideogram4_generation_stage_mask_from_subset(
+                            options->candidate_stage_mask, phase_subset));
       if (phase_local_stage_mask ==
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         continue;
