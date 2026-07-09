@@ -22,8 +22,9 @@ enum {
   KPACK_MAX_FEATURES = 6,       // ISA feature flags considered for subsetting
   KPACK_PATH_MAX = 4096,        // filesystem path buffer
   KPACK_MAX_LOOKUP_KEY = 1024,  // "<kernel_name>#<co_index>"
-  KPACK_MAX_ARCH_CANDIDATES = 64,  // distinct compatible arch strings
-  KPACK_MAX_OPEN_ARCHIVES = 64,    // archives opened per resolve
+  KPACK_MAX_ARCH_CANDIDATES = 64,        // distinct compatible arch strings
+  KPACK_MAX_OPEN_ARCHIVES = 64,          // archives opened per resolve
+  KPACK_ZSTD_MAX_KERNELS = 1024 * 1024,  // frame-count cap for a zstd blob
 };
 
 // Refuse to load absurdly large archive files into memory.
@@ -630,6 +631,20 @@ static iree_status_t kpack_decompress_zstd(
       "kpack zstd-per-kernel archive requires building HRX with "
       "HRX_ENABLE_ZSTD (install libzstd and rebuild)");
 #else
+  // Bound the trusted sizes before allocating or walking frames: original_size
+  // drives the output allocation and num_kernels drives the frame walk, so an
+  // absurd value would be an allocation-amplification / graceful-fail DoS
+  // shape. The num_kernels cap matches the reference unpacker's MAX_KERNELS;
+  // the original_size cap reuses HRX's whole-file KPACK_MAX_FILE_SIZE limit and
+  // has no counterpart in the reference, which bounds the compressed blob but
+  // not the decompressed size.
+  if (original_size > KPACK_MAX_FILE_SIZE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack zstd decompressed size %" PRIu64
+                            " exceeds limit %" PRIu64,
+                            original_size, (uint64_t)KPACK_MAX_FILE_SIZE);
+  }
+
   // Blob layout: [num_kernels: u32][ (frame_size: u32)(zstd_frame) ]*, all
   // little-endian (these are raw binary fields, not msgpack).
   const uint8_t* p = archive->zstd_blob.data;
@@ -641,6 +656,11 @@ static iree_status_t kpack_decompress_zstd(
   uint32_t num_kernels;
   memcpy(&num_kernels, p, sizeof(num_kernels));
   p += sizeof(uint32_t);
+  if (num_kernels > KPACK_ZSTD_MAX_KERNELS) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack zstd kernel count %u exceeds limit %d",
+                            num_kernels, KPACK_ZSTD_MAX_KERNELS);
+  }
   if (ordinal >= num_kernels) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "kpack zstd ordinal %" PRIu64
@@ -684,6 +704,8 @@ static iree_status_t kpack_decompress_zstd(
     }
     p += frame_size;
   }
+  // Unreachable: the loop returns at i == ordinal and ordinal < num_kernels is
+  // enforced above; kept as a defensive backstop.
   return iree_make_status(IREE_STATUS_INTERNAL, "kpack zstd frame walk failed");
 #endif  // HRX_ENABLE_ZSTD
 }

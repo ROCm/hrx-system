@@ -145,11 +145,11 @@ iree_status_t iree_hal_streaming_kpack_archive_open(
 // "lib/libfoo.so#0"; |arch| is an exact TOC architecture key, e.g. "gfx942".
 // Fails with IREE_STATUS_NOT_FOUND when the key/arch is absent or its ordinal
 // has no backing blob/frame, IREE_STATUS_INVALID_ARGUMENT on a malformed TOC
-// entry (missing ordinal, zero-size blob, or a blob offset/size outside the
-// archive), IREE_STATUS_DATA_LOSS when zstd decompression fails or the
-// decompressed size does not match the recorded original_size, and
-// IREE_STATUS_UNIMPLEMENTED for zstd archives when built without
-// HRX_ENABLE_ZSTD.
+// entry or zstd blob (missing ordinal, zero-size blob, a blob offset/size
+// outside the archive, or a truncated/oversized zstd frame or kernel count),
+// IREE_STATUS_DATA_LOSS when zstd decompression fails or the decompressed size
+// does not match the recorded original_size, and IREE_STATUS_UNIMPLEMENTED for
+// zstd archives when built without HRX_ENABLE_ZSTD.
 iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
     const iree_hal_streaming_kpack_archive_t* archive,
     iree_string_view_t binary_key, iree_string_view_t arch,

@@ -1112,6 +1112,52 @@ TEST(KpackArchive, ZstdOrdinalOutOfRange) {
                   iree_allocator_system(), &out, &out_size)),
               StatusIs(iree::StatusCode::kNotFound));
 }
+
+// A blob kernel count beyond the sanity cap must be rejected before the frame
+// walk indexes or allocates anything (allocation-amplification guard).
+TEST(KpackArchive, ZstdKernelCountCapEnforced) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  const uint32_t kHuge = 2000000;  // > 1M cap
+  for (int i = 0; i < 4; ++i) {
+    bytes[64 + i] = static_cast<uint8_t>(kHuge >> (i * 8));
+  }
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+// A recorded original_size beyond the decompressed-size cap must be rejected
+// before the output buffer is allocated (allocation-amplification guard). The
+// check runs before the frame is read, so no large data is needed.
+TEST(KpackArchive, ZstdOriginalSizeCapEnforced) {
+  std::vector<uint8_t> k(300, 0x5a);
+  auto bytes = KpackBuilder(/*zstd=*/true).Add("a#0", "gfx900", k).Build();
+  // original_size is encoded as a uint16 (0xcd 0x01 0x2c = 300). Widen it to a
+  // uint32 (0xce) above KPACK_MAX_FILE_SIZE (2 GiB). Widening is safe: the TOC
+  // is self-describing and sits after the unchanged blob, and toc_offset points
+  // at the TOC start, which does not move.
+  size_t at = FindOnce(bytes, {0xad, 'o', 'r', 'i', 'g', 'i', 'n', 'a', 'l',
+                               '_', 's', 'i', 'z', 'e', 0xcd, 0x01, 0x2c});
+  const std::vector<uint8_t> big_u32 = {0xce, 0x90, 0x00, 0x00, 0x00};  // 2.25G
+  bytes.erase(bytes.begin() + at + 14, bytes.begin() + at + 17);
+  bytes.insert(bytes.begin() + at + 14, big_u32.begin(), big_u32.end());
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
 #endif  // HRX_ENABLE_ZSTD
 
 //===----------------------------------------------------------------------===//
