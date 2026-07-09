@@ -21,6 +21,14 @@ from loom.tools.kernel_anatomy import (
     main,
 )
 
+_TENSILE_SYMBOL = (
+    "Cijk_Alik_Bljk_BBS_BH_MT128x128x16_MI16x16x16x1_SN_1LDSB0_AMAS3_BL1_BS1_"
+    "EPS1_GLVWA4_GLVWB4_GRVW4_GSU1_GSUASB_ISA1100_IU1_K1_KLA_LBSPPA128_"
+    "LBSPPB128_LPA8_LPB8_LRVW16_MIAV1_MMFGLC_NLCA1_NLCB1_PGR1_PLR1_SIA3_SS1_"
+    "SU0_SUM0_SUS0_SVW4_TT4_64_TLDS1_UMLDSA1_UMLDSB1_USFGROn1_VAW1_VSn1_"
+    "VW4_VWB2_WSGRA1_WSGRB1_WS32_WG32_4_1_WGM4"
+)
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,15 +226,15 @@ def _write_benchmark_jsonl(path: Path) -> None:
 def _write_rocblas_log(path: Path) -> None:
     _write(
         path,
-        """
+        f"""
 rocBLAS version: 5.5.0.example
 rocBLAS-commit-hash: abcdef
 Tensile-commit-hash: 123456
 hipBLASLt version: 1.4.0 commit-hash: cafe
 Device ID 0 : AMD Radeon Pro W7900 Dual Slot gfx1100
 Library logic solution index of winning solution: 44
-Running kernel: selected_kernel
-Kernel name: selected_kernel
+Running kernel: {_TENSILE_SYMBOL}
+Kernel name: {_TENSILE_SYMBOL}
 Kernel parameters:
            MatrixInstruction: (16, 16, 16, 1)
                workGroupSize: (32, 4, 1)
@@ -406,9 +414,24 @@ def test_build_kernel_anatomy_report_extracts_rocblas_log(
     rocblas_log = report["rocblas_logs"]["tensile"]
     assert rocblas_log["rocblas_version"] == "5.5.0.example"
     assert rocblas_log["solution_index"] == 44
-    assert rocblas_log["running_kernel"] == "selected_kernel"
+    assert rocblas_log["running_kernel"] == _TENSILE_SYMBOL
     assert rocblas_log["devices"][0]["arch"] == "gfx1100"
     assert rocblas_log["kernel_parameters"]["macroTile"] == "(128, 128, 1)"
+    symbol_parameters = rocblas_log["symbol_parameters"]
+    assert symbol_parameters["macro_tile"] == {"x": 128, "y": 128, "z": 16}
+    assert symbol_parameters["matrix_instruction"] == {
+        "x": 16,
+        "y": 16,
+        "z": 16,
+        "w": 1,
+    }
+    assert symbol_parameters["workgroup_size"] == {"x": 32, "y": 4, "z": 1}
+    assert symbol_parameters["flat_workgroup_size"] == 128
+    assert symbol_parameters["thread_tile"] == {"x": 4, "y": 64}
+    assert symbol_parameters["wave_size"] == 32
+    assert symbol_parameters["global_load_vector_width_a"] == 4
+    assert symbol_parameters["global_load_vector_width_b"] == 4
+    assert symbol_parameters["local_read_vector_width"] == 16
     assert len(rocblas_log["timing_rows"]) == 1
     assert rocblas_log["timing_rows"][0]["M"] == 13824
     assert rocblas_log["timing_rows"][0]["us"] == 8503.93
@@ -845,7 +868,9 @@ def test_text_report_contains_rocblas_log_summary(tmp_path: Path) -> None:
     text = format_text_report(report)
 
     assert "rocBLAS logs:" in text
-    assert "tensile: solution=44 arch=gfx1100 kernel=selected_kernel" in text
+    assert f"tensile: solution=44 arch=gfx1100 kernel={_TENSILE_SYMBOL}" in text
+    assert "symbol tile: MT=128x128x16 MI=16x16x16x1 WG=32x4x1" in text
+    assert "TT=4x64 WS=32 VW=4 GLVWA=4 GLVWB=4 LRVW=16" in text
     assert "M=13824 N=4547 K=4608 time_ms=8.50393 gflops=68121" in text
     assert "MatrixInstruction: (16, 16, 16, 1)" in text
 
@@ -1077,6 +1102,32 @@ def test_rocblas_timing_rows_participate_in_comparisons(tmp_path: Path) -> None:
     assert deltas_by_metric["N"]["baseline"] == 4547
     assert deltas_by_metric["K"]["baseline"] == 4608
     assert deltas_by_metric["hot_iters"]["candidate"] == 20
+
+
+def test_rocblas_symbol_parameters_participate_in_comparisons(
+    tmp_path: Path,
+) -> None:
+    rocblas_log_path = tmp_path / "rocblas.log"
+    _write_rocblas_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[
+            NamedPath("baseline", rocblas_log_path),
+            NamedPath("candidate", rocblas_log_path),
+        ],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [ComparisonSpec(baseline="baseline", candidate="candidate")],
+    )
+
+    comparison = comparisons["baseline=candidate"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["macro_tile_x"]["baseline"] == 128
+    assert deltas_by_metric["matrix_instruction_z"]["baseline"] == 16
+    assert deltas_by_metric["flat_workgroup_size"]["candidate"] == 128
 
 
 def test_text_report_contains_comparison_summary(tmp_path: Path) -> None:

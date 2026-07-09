@@ -463,6 +463,11 @@ def summarize_rocblas_log_path(named_path: NamedPath) -> dict[str, Any]:
             key, value = stripped.split(":", 1)
             kernel_parameters[key.strip()] = value.strip()
     summary["selected_timing_row"] = _select_rocblas_timing_row(timing_rows)
+    symbol_parameters = _parse_tensile_kernel_symbol(
+        summary.get("running_kernel") or summary.get("kernel_name")
+    )
+    if symbol_parameters:
+        summary["symbol_parameters"] = symbol_parameters
     return summary
 
 
@@ -641,6 +646,137 @@ def _parse_rocblas_timing_row(header: Sequence[str], row: str) -> dict[str, Any]
         key: _parse_numeric_scalar(value)
         for key, value in zip(header, values, strict=False)
     }
+
+
+def _parse_tensile_kernel_symbol(symbol_value: Any) -> dict[str, Any]:
+    if not isinstance(symbol_value, str) or not symbol_value:
+        return {}
+    parameters: dict[str, Any] = {}
+    _parse_tensile_symbol_triplet(
+        parameters,
+        symbol_value,
+        r"(?:^|_)MT(?P<x>[0-9]+)x(?P<y>[0-9]+)x(?P<z>[0-9]+)(?:_|$)",
+        "macro_tile",
+    )
+    _parse_tensile_symbol_quad(
+        parameters,
+        symbol_value,
+        r"(?:^|_)MI(?P<x>[0-9]+)x(?P<y>[0-9]+)x(?P<z>[0-9]+)x(?P<w>[0-9]+)(?:_|$)",
+        "matrix_instruction",
+    )
+    _parse_tensile_symbol_triplet(
+        parameters,
+        symbol_value,
+        r"(?:^|_)WG(?P<x>[0-9]+)_(?P<y>[0-9]+)_(?P<z>[0-9]+)(?:_|$)",
+        "workgroup_size",
+    )
+    _parse_tensile_symbol_pair(
+        parameters,
+        symbol_value,
+        r"(?:^|_)TT(?P<x>[0-9]+)_(?P<y>[0-9]+)(?:_|$)",
+        "thread_tile",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters, symbol_value, r"(?:^|_)ISA(?P<value>[0-9]+)(?:_|$)", "isa"
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)WS(?P<value>[0-9]+)(?:_|$)",
+        "wave_size",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)VW(?P<value>[0-9]+)(?:_|$)",
+        "vector_width",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)GLVWA(?P<value>[0-9]+)(?:_|$)",
+        "global_load_vector_width_a",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)GLVWB(?P<value>[0-9]+)(?:_|$)",
+        "global_load_vector_width_b",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)LPA(?P<value>[0-9]+)(?:_|$)",
+        "local_split_a",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)LPB(?P<value>[0-9]+)(?:_|$)",
+        "local_split_b",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)LRVW(?P<value>[0-9]+)(?:_|$)",
+        "local_read_vector_width",
+    )
+    _parse_tensile_symbol_scalar(
+        parameters,
+        symbol_value,
+        r"(?:^|_)WGM(?P<value>[0-9]+)(?:_|$)",
+        "workgroup_mapping",
+    )
+    macro_tile = _as_mapping(parameters.get("macro_tile"))
+    if macro_tile:
+        parameters["depth_u"] = macro_tile.get("z")
+    workgroup_size = _as_mapping(parameters.get("workgroup_size"))
+    if workgroup_size:
+        parameters["flat_workgroup_size"] = (
+            workgroup_size.get("x") * workgroup_size.get("y") * workgroup_size.get("z")
+        )
+    return parameters
+
+
+def _parse_tensile_symbol_scalar(
+    parameters: dict[str, Any], symbol: str, pattern: str, key: str
+) -> None:
+    match = re.search(pattern, symbol)
+    if match is not None:
+        parameters[key] = int(match.group("value"))
+
+
+def _parse_tensile_symbol_pair(
+    parameters: dict[str, Any], symbol: str, pattern: str, key: str
+) -> None:
+    match = re.search(pattern, symbol)
+    if match is not None:
+        parameters[key] = {"x": int(match.group("x")), "y": int(match.group("y"))}
+
+
+def _parse_tensile_symbol_triplet(
+    parameters: dict[str, Any], symbol: str, pattern: str, key: str
+) -> None:
+    match = re.search(pattern, symbol)
+    if match is not None:
+        parameters[key] = {
+            "x": int(match.group("x")),
+            "y": int(match.group("y")),
+            "z": int(match.group("z")),
+        }
+
+
+def _parse_tensile_symbol_quad(
+    parameters: dict[str, Any], symbol: str, pattern: str, key: str
+) -> None:
+    match = re.search(pattern, symbol)
+    if match is not None:
+        parameters[key] = {
+            "x": int(match.group("x")),
+            "y": int(match.group("y")),
+            "z": int(match.group("z")),
+            "w": int(match.group("w")),
+        }
 
 
 def _parse_numeric_scalar(value: Any) -> Any:
@@ -1761,6 +1897,12 @@ def _collect_rocblas_metric_groups(
             rocblas_log.get("solution_index"),
             "rocblas_log",
         )
+        _record_tensile_symbol_parameter_metrics(
+            groups,
+            name,
+            _as_mapping(rocblas_log.get("symbol_parameters")),
+            "rocblas_symbol",
+        )
         timing = _as_mapping(rocblas_log.get("selected_timing_row"))
         if timing:
             _record_metric(
@@ -1842,6 +1984,47 @@ def _collect_rocblas_metric_groups(
                     trace_row.get(metric),
                     "rocblas_trace",
                 )
+
+
+def _record_tensile_symbol_parameter_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    parameters: Mapping[str, Any],
+    source: str,
+) -> None:
+    for parameter_name in ("macro_tile", "matrix_instruction", "workgroup_size"):
+        parameter = _as_mapping(parameters.get(parameter_name))
+        for axis in ("x", "y", "z", "w"):
+            _record_metric(
+                groups,
+                group_name,
+                f"{parameter_name}_{axis}",
+                parameter.get(axis),
+                source,
+            )
+    thread_tile = _as_mapping(parameters.get("thread_tile"))
+    _record_metric(groups, group_name, "thread_tile_x", thread_tile.get("x"), source)
+    _record_metric(groups, group_name, "thread_tile_y", thread_tile.get("y"), source)
+    for parameter_name in (
+        "depth_u",
+        "flat_workgroup_size",
+        "global_load_vector_width_a",
+        "global_load_vector_width_b",
+        "isa",
+        "local_read_vector_width",
+        "local_split_a",
+        "local_split_b",
+        "vector_width",
+        "wave_size",
+        "workgroup_mapping",
+    ):
+        _record_metric(
+            groups,
+            group_name,
+            parameter_name,
+            parameters.get(parameter_name),
+            source,
+        )
 
 
 def _rocblas_trace_group_name(name: str, trace_row: Mapping[str, Any]) -> str:
@@ -2093,16 +2276,38 @@ _EXACT_PARITY_METRICS = frozenset(
         "K",
         "batch_count",
         "grid_size",
+        "depth_u",
+        "flat_workgroup_size",
+        "global_load_vector_width_a",
+        "global_load_vector_width_b",
+        "isa",
         "lda",
         "ldb",
         "ldc",
         "ldd",
+        "local_read_vector_width",
+        "local_split_a",
+        "local_split_b",
+        "macro_tile_x",
+        "macro_tile_y",
+        "macro_tile_z",
+        "matrix_instruction_w",
+        "matrix_instruction_x",
+        "matrix_instruction_y",
+        "matrix_instruction_z",
         "matrix_instruction_count",
         "mfma_count",
         "solution_index",
+        "thread_tile_x",
+        "thread_tile_y",
+        "vector_width",
         "wavefront_size",
+        "wave_size",
         "wmma_count",
         "workgroup_size",
+        "workgroup_size_x",
+        "workgroup_size_y",
+        "workgroup_size_z",
     }
 )
 
@@ -2204,6 +2409,23 @@ def _scorecard_metric_category(metric: str) -> str:
         return "wait"
     if metric.startswith("source_low_") or metric in _SOURCE_LOW_TOTAL_METRICS:
         return "source_memory"
+    if metric.startswith(
+        (
+            "macro_tile_",
+            "matrix_instruction_",
+            "thread_tile_",
+            "workgroup_size_",
+        )
+    ) or metric in {
+        "depth_u",
+        "flat_workgroup_size",
+        "local_read_vector_width",
+        "local_split_a",
+        "local_split_b",
+        "vector_width",
+        "wave_size",
+    }:
+        return "tiling"
     if "local_memory" in metric or metric.startswith("ds_"):
         return "local_memory"
     if "device_memory" in metric or metric.startswith(("global_", "buffer_", "flat_")):
@@ -2674,6 +2896,9 @@ def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> No
             f"arch={arch} "
             f"kernel={rocblas_log.get('running_kernel')}"
         )
+        _append_tensile_symbol_parameter_lines(
+            lines, _as_mapping(rocblas_log.get("symbol_parameters"))
+        )
         selected_timing = _as_mapping(rocblas_log.get("selected_timing_row"))
         if selected_timing:
             lines.append(
@@ -2727,6 +2952,35 @@ def _top_rocblas_trace_rows(trace_rows: Sequence[Any]) -> list[Mapping[str, Any]
         key=lambda trace_row: _as_number(trace_row.get("call_count")) or 0,
         reverse=True,
     )
+
+
+def _append_tensile_symbol_parameter_lines(
+    lines: list[str], parameters: Mapping[str, Any]
+) -> None:
+    if not parameters:
+        return
+    lines.append(
+        "    "
+        f"symbol tile: "
+        f"MT={_format_extent(_as_mapping(parameters.get('macro_tile')))} "
+        f"MI={_format_extent(_as_mapping(parameters.get('matrix_instruction')))} "
+        f"WG={_format_extent(_as_mapping(parameters.get('workgroup_size')))} "
+        f"TT={_format_extent(_as_mapping(parameters.get('thread_tile')))} "
+        f"WS={parameters.get('wave_size')} "
+        f"VW={parameters.get('vector_width')} "
+        f"GLVWA={parameters.get('global_load_vector_width_a')} "
+        f"GLVWB={parameters.get('global_load_vector_width_b')} "
+        f"LRVW={parameters.get('local_read_vector_width')}"
+    )
+
+
+def _format_extent(extent: Mapping[str, Any]) -> str:
+    axes = [
+        value
+        for axis in ("x", "y", "z", "w")
+        if (value := extent.get(axis)) is not None
+    ]
+    return "x".join(str(axis) for axis in axes) if axes else "?"
 
 
 def _format_rocblas_time_ms(timing: Mapping[str, Any]) -> str:
