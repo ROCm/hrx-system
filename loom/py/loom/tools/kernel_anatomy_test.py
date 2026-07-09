@@ -12,6 +12,7 @@ from pathlib import Path
 from loom.tools.kernel_anatomy import (
     ComparisonSpec,
     NamedPath,
+    SymbolWeightSpec,
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
     format_text_report,
@@ -54,7 +55,12 @@ def _compile_report_payload() -> dict:
                         "mfma_count": 0,
                     },
                     "dynamic_instruction_mix": {
+                        "matrix_count": 20,
+                        "wmma_count": 20,
+                        "mfma_count": 0,
                         "local_memory_count": 99,
+                        "local_read_byte_count": 320,
+                        "local_write_byte_count": 160,
                     },
                     "target_resources": {
                         "vector": {
@@ -439,6 +445,46 @@ def test_ordered_symbols_preserve_disassembly_address_order(tmp_path: Path) -> N
     assert [symbol["address"] for symbol in ordered_symbols] == [0, 0x100]
 
 
+def test_symbol_weights_estimate_dynamic_block_counts(tmp_path: Path) -> None:
+    disassembly_path = tmp_path / "kernel.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <prologue>:
+      buffer_load_b128 v[0:3], v0, s[0:3], 0 offen
+0000000000000100 <open_loop>:
+      buffer_load_b128 v[0:3], v0, s[0:3], 0 offen
+      ds_write_b128 v0, v[0:3]
+      ds_read_b128 v[0:3], v0
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+0000000000000200 <tail>:
+      buffer_store_b128 v0, v[0:3], s[0:3], 0 offen
+""",
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("tensile", disassembly_path)],
+        compile_report_paths=[],
+        symbol_weight_specs=[
+            SymbolWeightSpec("tensile", "open_loop", 7),
+            SymbolWeightSpec("tensile", "tail", 1),
+        ],
+    )
+
+    weighted_symbols = report["disassemblies"]["tensile"]["weighted_symbols"]
+    assert weighted_symbols["matched_symbol_count"] == 2
+    assert weighted_symbols["rules"][0]["matched_symbols"] == ["open_loop"]
+    summary = weighted_symbols["summary"]
+    assert summary["instruction_count"] == 29
+    assert summary["family_counts"]["buffer_load"] == 7
+    assert summary["family_counts"]["buffer_store"] == 1
+    assert summary["family_counts"]["ds_read"] == 7
+    assert summary["family_counts"]["ds_write"] == 7
+    assert summary["family_counts"]["v_wmma"] == 7
+    assert summary["memory_byte_counts"]["read_bytes"] == 224
+    assert summary["memory_byte_counts"]["write_bytes"] == 128
+
+
 def test_amdhsa_metadata_extracts_kernel_resources(tmp_path: Path) -> None:
     metadata_path = tmp_path / "notes.txt"
     _write(
@@ -540,6 +586,30 @@ amdhsa.kernels:
     assert "0x0 kernel: instructions=6" in text
     assert "hsaco: kernels=1" in text
     assert "kernel.kd: lds=25600 private=0 vgpr=256 sgpr=66" in text
+
+
+def test_text_report_contains_weighted_symbols(tmp_path: Path) -> None:
+    disassembly_path = tmp_path / "kernel.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <open_loop>:
+      ds_read_b128 v[0:3], v0
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("asm", disassembly_path)],
+        compile_report_paths=[],
+        symbol_weight_specs=[SymbolWeightSpec("asm", "open_loop", 4)],
+    )
+    text = format_text_report(report)
+
+    assert "weighted symbols: rules=1 matches=1 instructions=8" in text
+    assert "wmma=4" in text
+    assert "ds_read=4" in text
+    assert "open_loop: weight=4 matches=1 symbols=open_loop" in text
 
 
 def test_text_report_contains_benchmark_jsonl_summary(tmp_path: Path) -> None:
@@ -755,6 +825,45 @@ def test_rocprof_metrics_participate_in_comparisons(tmp_path: Path) -> None:
     assert "SQ_INSTS_LDS_mean" in comparison["missing_baseline_metrics"]
 
 
+def test_weighted_symbol_metrics_participate_in_comparisons(
+    tmp_path: Path,
+) -> None:
+    disassembly_path = tmp_path / "tensile.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <open_loop>:
+      ds_read_b128 v[0:3], v0
+      ds_write_b128 v0, v[0:3]
+      v_wmma_f32_16x16x16_bf16 v[0:7], v[8:9], v[10:11], v[0:7]
+""",
+    )
+    compile_report_path = tmp_path / "report.json"
+    _write_compile_report(compile_report_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[NamedPath("tensile", disassembly_path)],
+        compile_report_paths=[NamedPath("loom", compile_report_path)],
+        symbol_weight_specs=[SymbolWeightSpec("tensile", "open_loop", 5)],
+    )
+    comparisons = build_kernel_anatomy_comparisons(
+        report,
+        [
+            ComparisonSpec(
+                baseline="tensile/weighted_symbols",
+                candidate="loom/dynamic",
+            )
+        ],
+    )
+
+    comparison = comparisons["tensile/weighted_symbols=loom/dynamic"]
+    deltas_by_metric = {delta["metric"]: delta for delta in comparison["deltas"]}
+    assert deltas_by_metric["local_memory_instruction_count"]["baseline"] == 10
+    assert deltas_by_metric["local_memory_instruction_count"]["candidate"] == 99
+    assert deltas_by_metric["local_memory_bytes"]["baseline"] == 160
+    assert deltas_by_metric["wmma_count"]["baseline"] == 5
+
+
 def test_main_emits_json(tmp_path: Path, capsys) -> None:
     disassembly_path = tmp_path / "kernel.s"
     _write(
@@ -859,3 +968,32 @@ amdhsa.kernels:
     report = json.loads(output)
     comparison = report["comparisons"]["baseline=loom"]
     assert comparison["shared_metric_count"] == 3
+
+
+def test_main_emits_weighted_symbols(tmp_path: Path, capsys) -> None:
+    disassembly_path = tmp_path / "kernel.s"
+    _write(
+        disassembly_path,
+        """
+0000000000000000 <main_loop>:
+      ds_read_b128 v[0:3], v0
+""",
+    )
+
+    assert (
+        main(
+            [
+                "--disassembly",
+                f"asm={disassembly_path}",
+                "--symbol-weight",
+                "asm=main_loop=9",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    weighted_symbols = report["disassemblies"]["asm"]["weighted_symbols"]
+    assert weighted_symbols["summary"]["family_counts"]["ds_read"] == 9

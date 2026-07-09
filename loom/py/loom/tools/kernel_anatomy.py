@@ -40,6 +40,13 @@ class ComparisonSpec:
     candidate: str
 
 
+@dataclass(frozen=True)
+class SymbolWeightSpec:
+    disassembly_name: str
+    symbol_regex: str
+    weight: float | int
+
+
 def _parse_named_path(value: str) -> NamedPath:
     if "=" not in value:
         path = Path(value)
@@ -59,6 +66,37 @@ def _parse_comparison_spec(value: str) -> ComparisonSpec:
             "comparison baseline and candidate must be non-empty"
         )
     return ComparisonSpec(baseline=baseline, candidate=candidate)
+
+
+def _parse_symbol_weight_spec(value: str) -> SymbolWeightSpec:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError(
+            "symbol weights must use DISASSEMBLY_NAME=SYMBOL_REGEX=WEIGHT"
+        )
+    disassembly_name, rest = value.split("=", 1)
+    if "=" not in rest:
+        raise argparse.ArgumentTypeError(
+            "symbol weights must use DISASSEMBLY_NAME=SYMBOL_REGEX=WEIGHT"
+        )
+    symbol_regex, weight_text = rest.rsplit("=", 1)
+    if not disassembly_name or not symbol_regex:
+        raise argparse.ArgumentTypeError(
+            "symbol weight disassembly name and regex must be non-empty"
+        )
+    try:
+        weight = int(weight_text, 0)
+    except ValueError:
+        try:
+            weight = float(weight_text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("symbol weight must be numeric") from exc
+    if weight < 0:
+        raise argparse.ArgumentTypeError("symbol weight must be non-negative")
+    return SymbolWeightSpec(
+        disassembly_name=disassembly_name,
+        symbol_regex=symbol_regex,
+        weight=weight,
+    )
 
 
 def _read_text(path: Path) -> str:
@@ -691,6 +729,7 @@ def summarize_amdhsa_metadata_path(
 def summarize_disassembly_path(
     named_path: NamedPath,
     symbol_regex: re.Pattern[str] | None,
+    symbol_weight_specs: Sequence[SymbolWeightSpec],
     top_symbol_count: int,
     ordered_symbol_count: int,
 ) -> dict[str, Any]:
@@ -702,7 +741,7 @@ def summarize_disassembly_path(
     if symbol_regex is not None:
         blocks = tuple(block for block in blocks if symbol_regex.search(block.symbol))
     top_blocks = _top_blocks(blocks, top_symbol_count)
-    return {
+    summary = {
         "name": named_path.name,
         "path": named_path.path.as_posix(),
         "whole_file": whole_file.metadata(),
@@ -712,6 +751,10 @@ def summarize_disassembly_path(
             block.metadata() for block in _ordered_blocks(blocks, ordered_symbol_count)
         ],
     }
+    weighted_symbols = _summarize_weighted_symbols(blocks, symbol_weight_specs)
+    if weighted_symbols is not None:
+        summary["weighted_symbols"] = weighted_symbols
+    return summary
 
 
 def build_kernel_anatomy_report(
@@ -725,6 +768,7 @@ def build_kernel_anatomy_report(
     symbol_regex: str | None = None,
     amdhsa_metadata_paths: Sequence[NamedPath] = (),
     amdhsa_metadata_regex: str | None = None,
+    symbol_weight_specs: Sequence[SymbolWeightSpec] = (),
     top_symbol_count: int = 16,
     ordered_symbol_count: int = 0,
 ) -> dict[str, Any]:
@@ -774,6 +818,11 @@ def build_kernel_anatomy_report(
         named_path.name: summarize_disassembly_path(
             named_path,
             compiled_symbol_regex,
+            tuple(
+                spec
+                for spec in symbol_weight_specs
+                if spec.disassembly_name == named_path.name
+            ),
             top_symbol_count,
             ordered_symbol_count,
         )
@@ -948,6 +997,13 @@ def _collect_compile_report_metric_groups(
         _record_metric(
             groups,
             name,
+            "local_memory_instruction_count",
+            dynamic_mix.get("local_memory_count"),
+            "compile_report",
+        )
+        _record_metric(
+            groups,
+            name,
             "dynamic_local_memory_read_bytes",
             dynamic_mix.get("local_memory_read_bytes"),
             "compile_report",
@@ -959,6 +1015,23 @@ def _collect_compile_report_metric_groups(
             dynamic_mix.get("local_memory_write_bytes"),
             "compile_report",
         )
+        dynamic_local_read_bytes = _as_number(
+            dynamic_mix.get("local_memory_read_bytes")
+        )
+        dynamic_local_write_bytes = _as_number(
+            dynamic_mix.get("local_memory_write_bytes")
+        )
+        if (
+            dynamic_local_read_bytes is not None
+            and dynamic_local_write_bytes is not None
+        ):
+            _record_metric(
+                groups,
+                name,
+                "local_memory_bytes",
+                dynamic_local_read_bytes + dynamic_local_write_bytes,
+                "compile_report",
+            )
         resources = _as_mapping(compile_report.get("target_resources"))
         vector = _as_mapping(resources.get("vector"))
         vector_final = _as_mapping(vector.get("final"))
@@ -975,6 +1048,102 @@ def _collect_compile_report_metric_groups(
             "occupancy_percent",
             resources.get("occupancy_percent"),
             "compile_report",
+        )
+        _record_compile_instruction_mix_metrics(
+            groups,
+            f"{name}/dynamic",
+            dynamic_mix,
+            "compile_report_dynamic",
+        )
+
+
+def _record_compile_instruction_mix_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    mix: Mapping[str, Any],
+    source: str,
+) -> None:
+    _record_metric(
+        groups,
+        group_name,
+        "matrix_instruction_count",
+        mix.get("matrix_count"),
+        source,
+    )
+    _record_metric(groups, group_name, "wmma_count", mix.get("wmma_count"), source)
+    _record_metric(groups, group_name, "mfma_count", mix.get("mfma_count"), source)
+    _record_metric(
+        groups,
+        group_name,
+        "vector_alu_count",
+        mix.get("vector_alu_count"),
+        source,
+    )
+    for metric in (
+        "global_load_count",
+        "global_store_count",
+        "buffer_load_count",
+        "buffer_store_count",
+        "flat_load_count",
+        "flat_store_count",
+        "barrier_count",
+        "branch_count",
+        "conversion_count",
+        "register_move_count",
+    ):
+        _record_metric(groups, group_name, metric, mix.get(metric), source)
+    device_memory_load_count = sum(
+        _as_number(mix.get(metric)) or 0
+        for metric in ("global_load_count", "buffer_load_count", "flat_load_count")
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "device_memory_load_count",
+        device_memory_load_count,
+        source,
+    )
+    device_memory_store_count = sum(
+        _as_number(mix.get(metric)) or 0
+        for metric in ("global_store_count", "buffer_store_count", "flat_store_count")
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "device_memory_store_count",
+        device_memory_store_count,
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "local_memory_instruction_count",
+        mix.get("local_memory_count"),
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "read_bytes",
+        mix.get("memory_read_byte_count"),
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "write_bytes",
+        mix.get("memory_write_byte_count"),
+        source,
+    )
+    local_memory_read_bytes = _as_number(mix.get("local_read_byte_count"))
+    local_memory_write_bytes = _as_number(mix.get("local_write_byte_count"))
+    if local_memory_read_bytes is not None and local_memory_write_bytes is not None:
+        _record_metric(
+            groups,
+            group_name,
+            "local_memory_bytes",
+            local_memory_read_bytes + local_memory_write_bytes,
+            source,
         )
 
 
@@ -1207,46 +1376,122 @@ def _collect_disassembly_metric_groups(
             "disassembly",
         )
         families = _as_mapping(whole_file.get("family_counts"))
-        _record_metric(
-            groups,
-            name,
-            "wmma_count",
-            families.get("v_wmma"),
-            "disassembly",
-        )
-        _record_metric(
-            groups,
-            name,
-            "mfma_count",
-            families.get("v_mfma"),
-            "disassembly",
-        )
-        _record_metric(
-            groups, name, "vector_alu_count", families.get("v_alu"), "disassembly"
-        )
-        for family in (
-            "global_load",
-            "global_store",
-            "buffer_load",
-            "buffer_store",
-            "ds_read",
-            "ds_write",
-            "s_waitcnt",
-            "s_barrier",
-        ):
-            _record_metric(
-                groups, name, f"{family}_count", families.get(family), "disassembly"
-            )
         memory = _as_mapping(whole_file.get("memory_byte_counts"))
+        _record_disassembly_family_metrics(
+            groups, name, families, memory, "disassembly"
+        )
+        weighted_symbols = _as_mapping(disassembly.get("weighted_symbols"))
+        weighted_summary = _as_mapping(weighted_symbols.get("summary"))
+        if weighted_summary:
+            weighted_group = f"{name}/weighted_symbols"
+            _record_metric(
+                groups,
+                weighted_group,
+                "instruction_count",
+                weighted_summary.get("instruction_count"),
+                "weighted_disassembly",
+            )
+            _record_disassembly_family_metrics(
+                groups,
+                weighted_group,
+                _as_mapping(weighted_summary.get("family_counts")),
+                _as_mapping(weighted_summary.get("memory_byte_counts")),
+                "weighted_disassembly",
+            )
+
+
+def _record_disassembly_family_metrics(
+    groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    families: Mapping[str, Any],
+    memory: Mapping[str, Any],
+    source: str,
+) -> None:
+    _record_metric(
+        groups,
+        group_name,
+        "wmma_count",
+        families.get("v_wmma"),
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "mfma_count",
+        families.get("v_mfma"),
+        source,
+    )
+    matrix_count = (_as_number(families.get("v_wmma")) or 0) + (
+        _as_number(families.get("v_mfma")) or 0
+    )
+    _record_metric(groups, group_name, "matrix_instruction_count", matrix_count, source)
+    _record_metric(
+        groups, group_name, "vector_alu_count", families.get("v_alu"), source
+    )
+    for family in (
+        "global_load",
+        "global_store",
+        "buffer_load",
+        "buffer_store",
+        "flat_load",
+        "flat_store",
+        "ds_read",
+        "ds_write",
+        "s_waitcnt",
+        "s_barrier",
+    ):
+        _record_metric(
+            groups, group_name, f"{family}_count", families.get(family), source
+        )
+    device_memory_load_count = sum(
+        _as_number(families.get(family)) or 0
+        for family in ("global_load", "buffer_load", "flat_load")
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "device_memory_load_count",
+        device_memory_load_count,
+        source,
+    )
+    device_memory_store_count = sum(
+        _as_number(families.get(family)) or 0
+        for family in ("global_store", "buffer_store", "flat_store")
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "device_memory_store_count",
+        device_memory_store_count,
+        source,
+    )
+    local_memory_instruction_count = (_as_number(families.get("ds_read")) or 0) + (
+        _as_number(families.get("ds_write")) or 0
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "local_memory_instruction_count",
+        local_memory_instruction_count,
+        source,
+    )
+    _record_metric(
+        groups,
+        group_name,
+        "read_bytes",
+        memory.get("read_bytes"),
+        source,
+    )
+    _record_metric(groups, group_name, "write_bytes", memory.get("write_bytes"), source)
+    local_memory_read_bytes = _as_number(memory.get("ds_read_bytes"))
+    local_memory_write_bytes = _as_number(memory.get("ds_write_bytes"))
+    if local_memory_read_bytes is not None and local_memory_write_bytes is not None:
         _record_metric(
             groups,
-            name,
-            "read_bytes",
-            memory.get("read_bytes"),
-            "disassembly",
-        )
-        _record_metric(
-            groups, name, "write_bytes", memory.get("write_bytes"), "disassembly"
+            group_name,
+            "local_memory_bytes",
+            local_memory_read_bytes + local_memory_write_bytes,
+            source,
         )
 
 
@@ -1411,6 +1656,83 @@ def _ordered_blocks(
             ),
         )[:ordered_symbol_count]
     )
+
+
+def _summarize_weighted_symbols(
+    blocks: Sequence[AmdgpuDisassemblyBlock],
+    symbol_weight_specs: Sequence[SymbolWeightSpec],
+) -> dict[str, Any] | None:
+    if not symbol_weight_specs:
+        return None
+    instruction_count = 0.0
+    family_counts: dict[str, float] = {}
+    mnemonic_counts: dict[str, float] = {}
+    matrix_counts: dict[str, float] = {}
+    memory_byte_counts: dict[str, float] = {}
+    rules: list[dict[str, Any]] = []
+    matched_symbol_count = 0
+    for spec in symbol_weight_specs:
+        symbol_regex = re.compile(spec.symbol_regex)
+        matched_blocks = tuple(
+            block for block in blocks if symbol_regex.search(block.symbol)
+        )
+        matched_symbol_count += len(matched_blocks)
+        rules.append(
+            {
+                "symbol_regex": spec.symbol_regex,
+                "weight": spec.weight,
+                "matched_symbol_count": len(matched_blocks),
+                "matched_symbols": [block.symbol for block in matched_blocks],
+            }
+        )
+        for block in matched_blocks:
+            instruction_count += block.summary.instruction_count * spec.weight
+            _add_weighted_counts(
+                family_counts, block.summary.family_counts, spec.weight
+            )
+            _add_weighted_counts(
+                mnemonic_counts, block.summary.mnemonic_counts, spec.weight
+            )
+            _add_weighted_counts(
+                matrix_counts, block.summary.matrix_mnemonic_counts, spec.weight
+            )
+            _add_weighted_counts(
+                memory_byte_counts, block.summary.memory_byte_counts, spec.weight
+            )
+    return {
+        "rule_count": len(symbol_weight_specs),
+        "matched_symbol_count": matched_symbol_count,
+        "rules": rules,
+        "summary": {
+            "instruction_count": _normalize_weighted_number(instruction_count),
+            "family_counts": _normalize_weighted_counts(family_counts),
+            "mnemonic_counts": _normalize_weighted_counts(mnemonic_counts),
+            "matrix_mnemonic_counts": _normalize_weighted_counts(matrix_counts),
+            "memory_byte_counts": _normalize_weighted_counts(memory_byte_counts),
+        },
+    }
+
+
+def _add_weighted_counts(
+    target: dict[str, float], source: Mapping[str, int], weight: float | int
+) -> None:
+    for key, value in source.items():
+        target[key] = target.get(key, 0.0) + value * weight
+
+
+def _normalize_weighted_counts(source: Mapping[str, float]) -> dict[str, float | int]:
+    return {
+        key: _normalize_weighted_number(value)
+        for key, value in sorted(source.items())
+        if value
+    }
+
+
+def _normalize_weighted_number(value: float) -> float | int:
+    rounded_value = round(value)
+    if math.isclose(value, rounded_value):
+        return int(rounded_value)
+    return value
 
 
 def _matrix_count(block: AmdgpuDisassemblyBlock) -> int:
@@ -1762,6 +2084,46 @@ def _append_ordered_symbol_lines(lines: list[str], ordered_symbols: Any) -> None
         )
 
 
+def _append_weighted_symbol_lines(
+    lines: list[str], weighted_symbols_value: Any
+) -> None:
+    weighted_symbols = _as_mapping(weighted_symbols_value)
+    if not weighted_symbols:
+        return
+    summary = _as_mapping(weighted_symbols.get("summary"))
+    families = _as_mapping(summary.get("family_counts"))
+    memory = _as_mapping(summary.get("memory_byte_counts"))
+    lines.append(
+        "    "
+        f"weighted symbols: rules={weighted_symbols.get('rule_count')} "
+        f"matches={weighted_symbols.get('matched_symbol_count')} "
+        f"instructions={summary.get('instruction_count')} "
+        f"wmma={families.get('v_wmma', 0)} "
+        f"mfma={families.get('v_mfma', 0)} "
+        f"buffer_load={families.get('buffer_load', 0)} "
+        f"buffer_store={families.get('buffer_store', 0)} "
+        f"ds_read={families.get('ds_read', 0)} "
+        f"ds_write={families.get('ds_write', 0)} "
+        f"read_bytes={memory.get('read_bytes', 0)} "
+        f"write_bytes={memory.get('write_bytes', 0)}"
+    )
+    rules = weighted_symbols.get("rules", [])
+    if not isinstance(rules, list):
+        return
+    for rule_value in rules[:8]:
+        rule = _as_mapping(rule_value)
+        matched_symbols = rule.get("matched_symbols", [])
+        if not isinstance(matched_symbols, list):
+            matched_symbols = []
+        lines.append(
+            "      "
+            f"{rule.get('symbol_regex')}: "
+            f"weight={rule.get('weight')} "
+            f"matches={rule.get('matched_symbol_count')} "
+            f"symbols={','.join(str(symbol) for symbol in matched_symbols[:4])}"
+        )
+
+
 def _append_disassembly_report_lines(
     lines: list[str], report: Mapping[str, Any]
 ) -> None:
@@ -1794,6 +2156,7 @@ def _append_disassembly_report_lines(
         )
         _append_disassembly_symbol_lines(lines, disassembly.get("top_symbols"), "    ")
         _append_ordered_symbol_lines(lines, disassembly.get("ordered_symbols"))
+        _append_weighted_symbol_lines(lines, disassembly.get("weighted_symbols"))
 
 
 def _append_amdhsa_metadata_lines(lines: list[str], report: Mapping[str, Any]) -> None:
@@ -1937,6 +2300,17 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--symbol-weight",
+        action="append",
+        default=[],
+        type=_parse_symbol_weight_spec,
+        help=(
+            "Weighted disassembly block rule as DISASSEMBLY_NAME=SYMBOL_REGEX=WEIGHT. "
+            "Repeat to estimate dynamic instruction family counts from selected "
+            "symbols or labels."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "text"),
         default="json",
@@ -1958,6 +2332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         symbol_regex=args.symbol_regex,
         amdhsa_metadata_paths=args.amdhsa_metadata,
         amdhsa_metadata_regex=args.amdhsa_metadata_regex,
+        symbol_weight_specs=args.symbol_weight,
         top_symbol_count=args.top_symbols,
         ordered_symbol_count=args.ordered_symbols,
     )
