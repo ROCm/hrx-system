@@ -77,7 +77,6 @@ iree_cc_library(
     "native.h"
     "nop_executable_cache.h"
     "semaphore.h"
-    "transfer_queue.h"
     "util.h"
     "xclbin_util.h"
   SRCS
@@ -97,7 +96,6 @@ iree_cc_library(
     "executable.c"
     "nop_executable_cache.c"
     "semaphore.c"
-    "transfer_queue.c"
     "xclbin_util.c"
   DEPS
     iree::async
@@ -253,28 +251,6 @@ iree_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "driver=amdxdna"
-    "iree-build-requirement=runtime.hal.amdxdna"
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
-iree_cc_test(
-  NAME
-    transfer_queue_test
-  SRCS
-    "transfer_queue_test.cc"
-  DEPS
-    ::amdxdna
-    iree::async
-    iree::base
-    iree::base::internal::arena
-    iree::hal
-    iree::hal::utils::files
-    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

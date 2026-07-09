@@ -145,10 +145,6 @@ iree_hal_amdxdna_allocator_query_buffer_compatibility(
   iree_hal_buffer_compatibility_t compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE;
 
-  if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
-    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
-  }
-
   // Buffers can only be used on the queue if they are device visible.
   if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
     if (iree_any_bit_set(params->usage,
@@ -159,12 +155,11 @@ iree_hal_amdxdna_allocator_query_buffer_compatibility(
 
   params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
   // amdxdna native host-visible allocations are shared-mapped with the device,
-  // so every allocation is simultaneously host-local, device-visible,
-  // host-mappable, and host-transferable. Declaring those capabilities lets
-  // iree-tooling's `requires_buffer_transfer` return false for output buffer
-  // views and skip the staging copy_buffer; the host can read the dispatch
-  // output buffer directly, saving one allocation + one submission + one host
-  // memcpy per output.
+  // so every allocation is simultaneously host-local, device-visible, and
+  // host-mappable. Transfer usage remains legal buffer metadata, but
+  // queue-transfer compatibility is intentionally not advertised until amdxdna
+  // has a native blit path; the device queue must not hide host-emulated
+  // map/sync/memcpy transfers behind asynchronous APIs.
   params->type |=
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params->usage |=

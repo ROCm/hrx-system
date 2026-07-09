@@ -25,7 +25,6 @@
 #include "iree/hal/drivers/amdxdna/event.h"
 #include "iree/hal/drivers/amdxdna/nop_executable_cache.h"
 #include "iree/hal/drivers/amdxdna/semaphore.h"
-#include "iree/hal/drivers/amdxdna/transfer_queue.h"
 #include "iree/hal/drivers/amdxdna/util.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/memory/passthrough_pool.h"
@@ -80,8 +79,6 @@ static iree_status_t iree_hal_amdxdna_device_initialize_hal_resources(
       &device->device_allocator));
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_async_queue_create(
       &device->block_pool, device->host_allocator, &device->async_queue));
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_transfer_queue_create(
-      &device->block_pool, device->host_allocator, &device->transfer_queue));
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_completion_queue_create(
       device->host_allocator, &device->completion_queue));
   return iree_ok_status();
@@ -175,8 +172,6 @@ static iree_status_t iree_hal_amdxdna_device_assign_topology_info(
       iree_async_frontier_tracker_retire_axis(
           device->frontier_tracker, device->frontier_axis,
           iree_status_from_code(IREE_STATUS_CANCELLED));
-      iree_hal_amdxdna_transfer_queue_set_frontier(device->transfer_queue, NULL,
-                                                   0, NULL);
       iree_hal_amdxdna_completion_queue_set_frontier(device->completion_queue,
                                                      NULL, 0, NULL);
       iree_hal_amdxdna_async_queue_set_frontier(device->async_queue, NULL, 0,
@@ -207,8 +202,6 @@ static iree_status_t iree_hal_amdxdna_device_assign_topology_info(
   iree_async_frontier_tracker_retain(device->frontier_tracker);
   iree_hal_amdxdna_async_queue_set_frontier(device->async_queue, tracker, axis,
                                             &device->queue_epoch);
-  iree_hal_amdxdna_transfer_queue_set_frontier(device->transfer_queue, tracker,
-                                               axis, &device->queue_epoch);
   iree_hal_amdxdna_completion_queue_set_frontier(
       device->completion_queue, tracker, axis, &device->queue_epoch);
   return iree_ok_status();
@@ -323,7 +316,7 @@ static iree_status_t iree_hal_amdxdna_record_direct_command(
 //   * issue immediately only when all waits are already satisfied and the
 //     operation can hand completion/signaling to a native completion batch;
 //   * otherwise register wait timepoints and enqueue work to
-//     async_queue/transfer_queue.
+//     async_queue/completion_queue.
 //
 // Queue entry points must not wait for native completion, run file-transfer
 // loops, or perform large map/sync/memcpy operations on the caller thread.
@@ -977,27 +970,13 @@ static iree_status_t iree_hal_amdxdna_device_queue_dealloca(
   return status;
 }
 
-typedef struct iree_hal_amdxdna_queue_fill_op_t {
-  iree_allocator_t host_allocator;
-  iree_hal_buffer_t* target_buffer;
-  iree_device_size_t target_offset;
-  iree_device_size_t length;
-  iree_host_size_t pattern_length;
-  uint8_t pattern[4];
-} iree_hal_amdxdna_queue_fill_op_t;
-
-static iree_status_t iree_hal_amdxdna_queue_fill_op_fn(void* user_data) {
-  iree_hal_amdxdna_queue_fill_op_t* op =
-      (iree_hal_amdxdna_queue_fill_op_t*)user_data;
-  return iree_hal_buffer_map_fill(op->target_buffer, op->target_offset,
-                                  op->length, op->pattern, op->pattern_length);
-}
-
-static void iree_hal_amdxdna_queue_fill_op_cleanup(void* user_data) {
-  iree_hal_amdxdna_queue_fill_op_t* op =
-      (iree_hal_amdxdna_queue_fill_op_t*)user_data;
-  if (!op) return;
-  iree_allocator_free(op->host_allocator, op);
+static iree_status_t iree_hal_amdxdna_unsupported_native_transfer(
+    const char* operation) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna %s requires native blit support; host-emulated map/sync/memcpy "
+      "transfers are not available on device queues",
+      operation);
 }
 
 static iree_status_t iree_hal_amdxdna_device_queue_fill(
@@ -1031,59 +1010,7 @@ static iree_status_t iree_hal_amdxdna_device_queue_fill(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported fill flags: 0x%" PRIx64, flags);
   }
-
-  iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
-      base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-  iree_hal_amdxdna_queue_fill_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(device->host_allocator, sizeof(*op), (void**)&op));
-  memset(op, 0, sizeof(*op));
-  op->host_allocator = device->host_allocator;
-  op->target_buffer = target_buffer;
-  op->target_offset = target_offset;
-  op->length = length;
-  op->pattern_length = pattern_length;
-  memcpy(op->pattern, pattern, pattern_length);
-
-  iree_hal_buffer_retain(target_buffer);
-  iree_hal_resource_t* retained[] = {
-      (iree_hal_resource_t*)target_buffer,
-  };
-  iree_status_t status = iree_hal_amdxdna_async_queue_enqueue(
-      device->async_queue, wait_semaphore_list, signal_semaphore_list,
-      iree_hal_amdxdna_queue_fill_op_fn, iree_hal_amdxdna_queue_fill_op_cleanup,
-      op,
-      /*retained_resources=*/retained,
-      /*retained_resource_count=*/IREE_ARRAYSIZE(retained));
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(target_buffer);
-    iree_hal_amdxdna_queue_fill_op_cleanup(op);
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
-  }
-  return status;
-}
-
-typedef struct iree_hal_amdxdna_queue_update_op_t {
-  iree_allocator_t host_allocator;
-  iree_hal_buffer_t* target_buffer;
-  iree_device_size_t target_offset;
-  iree_device_size_t length;
-  uint8_t* data;
-} iree_hal_amdxdna_queue_update_op_t;
-
-static iree_status_t iree_hal_amdxdna_queue_update_op_fn(void* user_data) {
-  iree_hal_amdxdna_queue_update_op_t* op =
-      (iree_hal_amdxdna_queue_update_op_t*)user_data;
-  return iree_hal_buffer_map_write(op->target_buffer, op->target_offset,
-                                   op->data, op->length);
-}
-
-static void iree_hal_amdxdna_queue_update_op_cleanup(void* user_data) {
-  iree_hal_amdxdna_queue_update_op_t* op =
-      (iree_hal_amdxdna_queue_update_op_t*)user_data;
-  if (!op) return;
-  iree_allocator_free(op->host_allocator, op);
+  return iree_hal_amdxdna_unsupported_native_transfer("queue_fill");
 }
 
 static iree_status_t iree_hal_amdxdna_device_queue_update(
@@ -1122,54 +1049,8 @@ static iree_status_t iree_hal_amdxdna_device_queue_update(
         "(source_offset=%" PRIhsz ", length=%" PRIhsz ")",
         source_offset, host_length);
   }
-  iree_host_size_t total_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul_add(
-          sizeof(iree_hal_amdxdna_queue_update_op_t), 1, host_length,
-          &total_size))) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "queue_update payload copy is too large");
-  }
-
-  iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
-      base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-  iree_hal_amdxdna_queue_update_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(device->host_allocator, total_size, (void**)&op));
-  memset(op, 0, sizeof(*op));
-  op->host_allocator = device->host_allocator;
-  op->target_buffer = target_buffer;
-  op->target_offset = target_offset;
-  op->length = length;
-  op->data = (uint8_t*)op + sizeof(*op);
-  memcpy(op->data, (const uint8_t*)source_buffer + source_offset, host_length);
-
-  iree_hal_buffer_retain(target_buffer);
-  iree_hal_resource_t* retained[] = {
-      (iree_hal_resource_t*)target_buffer,
-  };
-  iree_status_t status = iree_hal_amdxdna_async_queue_enqueue(
-      device->async_queue, wait_semaphore_list, signal_semaphore_list,
-      iree_hal_amdxdna_queue_update_op_fn,
-      iree_hal_amdxdna_queue_update_op_cleanup, op,
-      /*retained_resources=*/retained,
-      /*retained_resource_count=*/IREE_ARRAYSIZE(retained));
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(target_buffer);
-    iree_hal_amdxdna_queue_update_op_cleanup(op);
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
-  }
-  return status;
+  return iree_hal_amdxdna_unsupported_native_transfer("queue_update");
 }
-
-typedef struct iree_hal_amdxdna_queue_copy_op_t {
-  iree_allocator_t host_allocator;
-  iree_hal_buffer_t* source_buffer;
-  iree_device_size_t source_offset;
-  iree_hal_buffer_t* target_buffer;
-  iree_device_size_t target_offset;
-  iree_device_size_t length;
-} iree_hal_amdxdna_queue_copy_op_t;
 
 static iree_status_t iree_hal_amdxdna_validate_copy(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
@@ -1194,61 +1075,6 @@ static iree_status_t iree_hal_amdxdna_validate_copy(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdxdna_copy_buffer_ranges(
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length) {
-  iree_hal_buffer_t* allocated_source_buffer =
-      iree_hal_buffer_allocated_buffer(source_buffer);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_live_buffer(
-      allocated_source_buffer, "queue_copy source"));
-  iree_hal_buffer_t* allocated_target_buffer =
-      iree_hal_buffer_allocated_buffer(target_buffer);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_live_buffer(
-      allocated_target_buffer, "queue_copy target"));
-  if (length == 0) return iree_ok_status();
-
-  iree_hal_amdxdna_native_buffer_t* source_device_buffer =
-      iree_hal_amdxdna_buffer_handle(allocated_source_buffer);
-  void* source_device_buffer_ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_map(
-      source_device_buffer, &source_device_buffer_ptr));
-  iree_device_size_t source_absolute_offset =
-      iree_hal_buffer_byte_offset(source_buffer) + source_offset;
-
-  iree_hal_amdxdna_native_buffer_t* target_device_buffer =
-      iree_hal_amdxdna_buffer_handle(allocated_target_buffer);
-  void* target_device_buffer_ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_map(
-      target_device_buffer, &target_device_buffer_ptr));
-  iree_device_size_t target_absolute_offset =
-      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
-
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_sync(
-      source_device_buffer, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_DEVICE_TO_HOST,
-      length, source_absolute_offset));
-  memcpy((uint8_t*)target_device_buffer_ptr + target_absolute_offset,
-         (uint8_t*)source_device_buffer_ptr + source_absolute_offset, length);
-  return iree_hal_amdxdna_native_buffer_c_sync(
-      target_device_buffer, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE,
-      length, target_absolute_offset);
-}
-
-static iree_status_t iree_hal_amdxdna_queue_copy_op_fn(void* user_data) {
-  iree_hal_amdxdna_queue_copy_op_t* op =
-      (iree_hal_amdxdna_queue_copy_op_t*)user_data;
-  return iree_hal_amdxdna_copy_buffer_ranges(
-      op->source_buffer, op->source_offset, op->target_buffer,
-      op->target_offset, op->length);
-}
-
-static void iree_hal_amdxdna_queue_copy_op_cleanup(void* user_data) {
-  iree_hal_amdxdna_queue_copy_op_t* op =
-      (iree_hal_amdxdna_queue_copy_op_t*)user_data;
-  if (!op) return;
-  iree_allocator_free(op->host_allocator, op);
-}
-
 static iree_status_t iree_hal_amdxdna_device_queue_copy(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1261,39 +1087,13 @@ static iree_status_t iree_hal_amdxdna_device_queue_copy(
       source_buffer, source_offset, target_buffer, target_offset, length,
       flags));
 
-  iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
-      base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-
-  iree_hal_amdxdna_queue_copy_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(device->host_allocator, sizeof(*op), (void**)&op));
-  op->host_allocator = device->host_allocator;
-  op->source_buffer = source_buffer;
-  op->source_offset = source_offset;
-  op->target_buffer = target_buffer;
-  op->target_offset = target_offset;
-  op->length = length;
-
-  iree_hal_buffer_retain(source_buffer);
-  iree_hal_buffer_retain(target_buffer);
-  iree_hal_resource_t* retained[] = {
-      (iree_hal_resource_t*)source_buffer,
-      (iree_hal_resource_t*)target_buffer,
-  };
-  iree_status_t status = iree_hal_amdxdna_async_queue_enqueue(
-      device->async_queue, wait_semaphore_list, signal_semaphore_list,
-      iree_hal_amdxdna_queue_copy_op_fn, iree_hal_amdxdna_queue_copy_op_cleanup,
-      op,
-      /*retained_resources=*/retained,
-      /*retained_resource_count=*/IREE_ARRAYSIZE(retained));
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(source_buffer);
-    iree_hal_buffer_release(target_buffer);
-    iree_hal_amdxdna_queue_copy_op_cleanup(op);
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
+  if (length == 0) {
+    iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
+        base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+    return iree_hal_amdxdna_enqueue_signal_op(device, wait_semaphore_list,
+                                              signal_semaphore_list);
   }
-  return status;
+  return iree_hal_amdxdna_unsupported_native_transfer("queue_copy");
 }
 
 static iree_status_t iree_hal_amdxdna_validate_file_range(
@@ -1360,9 +1160,7 @@ static iree_status_t iree_hal_amdxdna_device_queue_read(
         storage_buffer, source_device_offset, target_buffer, target_offset,
         length, IREE_HAL_COPY_FLAG_NONE);
   }
-  return iree_hal_amdxdna_transfer_queue_read(
-      device->transfer_queue, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length);
+  return iree_hal_amdxdna_unsupported_native_transfer("queue_read");
 }
 
 static iree_status_t iree_hal_amdxdna_device_queue_write(
@@ -1400,9 +1198,7 @@ static iree_status_t iree_hal_amdxdna_device_queue_write(
         source_buffer, source_offset, storage_buffer, target_device_offset,
         length, IREE_HAL_COPY_FLAG_NONE);
   }
-  return iree_hal_amdxdna_transfer_queue_write(
-      device->transfer_queue, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length);
+  return iree_hal_amdxdna_unsupported_native_transfer("queue_write");
 }
 
 typedef struct iree_hal_amdxdna_queue_host_call_op_t {
@@ -1835,10 +1631,6 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
 
   // Drain and shut down worker queues before tearing down the block pool (the
   // queues' pending ops live in arenas backed by the block pool).
-  if (device->transfer_queue) {
-    iree_hal_amdxdna_transfer_queue_destroy(device->transfer_queue);
-    device->transfer_queue = NULL;
-  }
   if (device->async_queue) {
     iree_hal_amdxdna_async_queue_destroy(device->async_queue);
     device->async_queue = NULL;

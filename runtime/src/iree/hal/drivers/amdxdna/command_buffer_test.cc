@@ -183,6 +183,11 @@ class CommandBufferTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
 };
 
+static void ExpectUnimplemented(iree_status_t status) {
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
+  iree_status_free(status);
+}
+
 TEST_F(CommandBufferTest, CreateReturnsAmdxdnaCommandBuffer) {
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_create(
@@ -197,6 +202,45 @@ TEST_F(CommandBufferTest, CreateReturnsAmdxdnaCommandBuffer) {
   iree_hal_command_buffer_release(command_buffer);
 }
 
+TEST_F(CommandBufferTest, TransferCommandsRequireNativeBlitsAtRecordTime) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_create(
+      device_allocator_, &native_caps_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, &block_pool_, iree_allocator_system(),
+      &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+
+  auto* fake_buffer = reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{0x1});
+  const iree_hal_buffer_ref_t buffer_ref =
+      iree_hal_make_buffer_ref(fake_buffer, 0, 4);
+  const iree_hal_buffer_ref_t empty_ref =
+      iree_hal_make_buffer_ref(fake_buffer, 0, 0);
+  uint32_t pattern = 0;
+
+  IREE_EXPECT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, &pattern, /*source_offset=*/0, empty_ref,
+      IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_command_buffer_fill_buffer(command_buffer, empty_ref,
+                                                     &pattern, sizeof(pattern),
+                                                     IREE_HAL_FILL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer, empty_ref, empty_ref, IREE_HAL_COPY_FLAG_NONE));
+
+  ExpectUnimplemented(iree_hal_command_buffer_update_buffer(
+      command_buffer, &pattern, /*source_offset=*/0, buffer_ref,
+      IREE_HAL_UPDATE_FLAG_NONE));
+  ExpectUnimplemented(iree_hal_command_buffer_fill_buffer(
+      command_buffer, buffer_ref, &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+  ExpectUnimplemented(iree_hal_command_buffer_copy_buffer(
+      command_buffer, buffer_ref, buffer_ref, IREE_HAL_COPY_FLAG_NONE));
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
 TEST_F(CommandBufferTest, ApplyResolvesIndirectBindingRefsAndResetsOneShot) {
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_create(
@@ -208,12 +252,16 @@ TEST_F(CommandBufferTest, ApplyResolvesIndirectBindingRefsAndResetsOneShot) {
       &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  const uint32_t pattern = 0xA5A5A5A5u;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-      command_buffer,
-      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/8,
-                                        /*length=*/16),
-      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  iree_hal_buffer_barrier_t buffer_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+      .buffer_ref = iree_hal_make_indirect_buffer_ref(
+          /*buffer_slot=*/0, /*offset=*/8, /*length=*/16),
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, nullptr, 1, &buffer_barrier));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   FakeTargetCommandBuffer target = {};
@@ -235,18 +283,16 @@ TEST_F(CommandBufferTest, ApplyResolvesIndirectBindingRefsAndResetsOneShot) {
 
   EXPECT_EQ(target.begin_count, 1);
   EXPECT_EQ(target.end_count, 1);
-  EXPECT_EQ(target.fill_count, 1);
-  EXPECT_EQ(target.fill_target_ref.buffer, fake_buffer);
-  EXPECT_EQ(target.fill_target_ref.offset, 40);
-  EXPECT_EQ(target.fill_target_ref.length, 16);
-  EXPECT_EQ(target.fill_pattern, pattern);
-  EXPECT_EQ(target.fill_pattern_length, sizeof(pattern));
+  EXPECT_EQ(target.barrier_count, 1);
+  EXPECT_EQ(target.barrier_ref.buffer, fake_buffer);
+  EXPECT_EQ(target.barrier_ref.offset, 40);
+  EXPECT_EQ(target.barrier_ref.length, 16);
 
   IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_apply(
       command_buffer, &target.base, binding_table));
   EXPECT_EQ(target.begin_count, 2);
   EXPECT_EQ(target.end_count, 2);
-  EXPECT_EQ(target.fill_count, 1);
+  EXPECT_EQ(target.barrier_count, 1);
 
   iree_hal_command_buffer_release(command_buffer);
 }

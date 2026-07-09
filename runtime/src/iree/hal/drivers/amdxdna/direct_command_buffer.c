@@ -524,113 +524,50 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  const uint8_t* src = (const uint8_t*)source_buffer + source_offset;
-  // No need to allocate scratch space (in an arena) as the memcpy
-  // used below is expected to be synchronized.
-  iree_hal_amdxdna_native_buffer_t* target_device_buffer =
-      iree_hal_amdxdna_buffer_handle(
-          iree_hal_buffer_allocated_buffer(target_ref.buffer));
-  void* target_device_buffer_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_map(target_device_buffer,
-                                               &target_device_buffer_ptr));
-  iree_device_size_t target_offset =
-      iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-  uint8_t* dst = (uint8_t*)target_device_buffer_ptr + target_offset;
-  memcpy(dst, src, target_ref.length);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_sync(
-              target_device_buffer,
-              IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE,
-              target_ref.length, target_offset));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  if (target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_ref;
+  (void)flags;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command_buffer_update_buffer requires native blit support; "
+      "host-emulated map/sync/memcpy transfers are not available on device "
+      "queues");
 }
 
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_amdxdna_native_buffer_t* target_device_buffer =
-      iree_hal_amdxdna_buffer_handle(
-          iree_hal_buffer_allocated_buffer(target_ref.buffer));
-  void* target_device_buffer_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_map(target_device_buffer,
-                                               &target_device_buffer_ptr));
-  iree_device_size_t target_offset =
-      iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-  uint8_t* dst = (uint8_t*)target_device_buffer_ptr + target_offset;
-  const iree_device_size_t length = target_ref.length;
-
-  // Fast path for byte-pattern fills (most common case).
-  if (pattern_length == 1) {
-    memset(dst, *(const uint8_t*)pattern, length);
-  } else {
-    const uint8_t* p = (const uint8_t*)pattern;
-    for (iree_device_size_t i = 0; i < length; ++i) {
-      dst[i] = p[i % pattern_length];
-    }
-  }
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_sync(
-              target_device_buffer,
-              IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE,
-              target_ref.length, target_offset));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  if (target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)target_ref;
+  (void)pattern;
+  (void)pattern_length;
+  (void)flags;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command_buffer_fill_buffer requires native blit support; "
+      "host-emulated map/sync/memcpy transfers are not available on device "
+      "queues");
 }
 
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
     iree_hal_copy_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_amdxdna_native_buffer_t* target_device_buffer =
-      iree_hal_amdxdna_buffer_handle(
-          iree_hal_buffer_allocated_buffer(target_ref.buffer));
-  void* target_device_buffer_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_map(target_device_buffer,
-                                               &target_device_buffer_ptr));
-  iree_device_size_t target_offset =
-      iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-
-  iree_hal_amdxdna_native_buffer_t* source_device_buffer =
-      iree_hal_amdxdna_buffer_handle(
-          iree_hal_buffer_allocated_buffer(source_ref.buffer));
-  void* source_device_buffer_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_map(source_device_buffer,
-                                               &source_device_buffer_ptr));
-  iree_device_size_t source_offset =
-      iree_hal_buffer_byte_offset(source_ref.buffer) + source_ref.offset;
-
-  // Sync the host-mapped source range so the host memcpy reads device-written
-  // data, then sync the target range back to device so a subsequent dispatch
-  // sees the freshly copied bytes.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_sync(
-              source_device_buffer,
-              IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_DEVICE_TO_HOST,
-              target_ref.length, source_offset));
-  memcpy((uint8_t*)target_device_buffer_ptr + target_offset,
-         (uint8_t*)source_device_buffer_ptr + source_offset, target_ref.length);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdxdna_native_buffer_c_sync(
-              target_device_buffer,
-              IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE,
-              target_ref.length, target_offset));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  if (source_ref.length == 0 && target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)source_ref;
+  (void)target_ref;
+  (void)flags;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command_buffer_copy_buffer requires native blit support; "
+      "host-emulated map/sync/memcpy transfers are not available on device "
+      "queues");
 }
 
 // ===========================================================================

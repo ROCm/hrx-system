@@ -42,6 +42,11 @@ class DirectCommandBufferTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
 };
 
+static void ExpectUnimplemented(iree_status_t status) {
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
+  iree_status_free(status);
+}
+
 TEST_F(DirectCommandBufferTest, CreateRejectsUnretainedMode) {
   iree_hal_command_buffer_t* command_buffer = nullptr;
   iree_status_t status = iree_hal_amdxdna_direct_command_buffer_create(
@@ -88,6 +93,44 @@ TEST_F(DirectCommandBufferTest, VtableHasOptionalOperationStubs) {
   EXPECT_NE(vtable->end_debug_group, nullptr);
   EXPECT_NE(vtable->advise_buffer, nullptr);
   EXPECT_NE(vtable->collective, nullptr);
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST_F(DirectCommandBufferTest, TransferCommandsRequireNativeBlits) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_direct_command_buffer_create(
+      device_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, /*binding_capacity=*/0, &block_pool_,
+      iree_allocator_system(), &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+
+  auto* fake_buffer = reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{0x1});
+  const iree_hal_buffer_ref_t buffer_ref =
+      iree_hal_make_buffer_ref(fake_buffer, 0, 4);
+  const iree_hal_buffer_ref_t empty_ref =
+      iree_hal_make_buffer_ref(fake_buffer, 0, 0);
+  uint32_t pattern = 0;
+
+  IREE_EXPECT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, &pattern, /*source_offset=*/0, empty_ref,
+      IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_command_buffer_fill_buffer(command_buffer, empty_ref,
+                                                     &pattern, sizeof(pattern),
+                                                     IREE_HAL_FILL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer, empty_ref, empty_ref, IREE_HAL_COPY_FLAG_NONE));
+
+  ExpectUnimplemented(iree_hal_command_buffer_update_buffer(
+      command_buffer, &pattern, /*source_offset=*/0, buffer_ref,
+      IREE_HAL_UPDATE_FLAG_NONE));
+  ExpectUnimplemented(iree_hal_command_buffer_fill_buffer(
+      command_buffer, buffer_ref, &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+  ExpectUnimplemented(iree_hal_command_buffer_copy_buffer(
+      command_buffer, buffer_ref, buffer_ref, IREE_HAL_COPY_FLAG_NONE));
 
   iree_hal_command_buffer_release(command_buffer);
 }

@@ -24,8 +24,6 @@ typedef struct iree_hal_amdxdna_device_context_cache_t
     iree_hal_amdxdna_device_context_cache_t;
 typedef struct iree_hal_amdxdna_device_single_command_cache_t
     iree_hal_amdxdna_device_single_command_cache_t;
-typedef struct iree_hal_amdxdna_transfer_queue_t
-    iree_hal_amdxdna_transfer_queue_t;
 typedef struct iree_hal_amdxdna_device {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
@@ -49,9 +47,6 @@ typedef struct iree_hal_amdxdna_device {
   // Per-device async work queue. Defers HAL queue ops until their wait
   // semaphores are satisfied, then runs them on a single worker thread.
   iree_hal_amdxdna_async_queue_t* async_queue;
-  // Dedicated transfer worker for synchronous HAL file handles. Keeping this
-  // separate prevents large file I/O from occupying the NPU submission worker.
-  iree_hal_amdxdna_transfer_queue_t* transfer_queue;
   // Dedicated native-completion worker. The async queue issues work; this queue
   // waits native submissions, runs post-completion actions, and signals HAL
   // semaphores after resources are no longer in use by the NPU.

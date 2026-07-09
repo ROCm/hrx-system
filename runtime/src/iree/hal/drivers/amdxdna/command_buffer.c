@@ -20,9 +20,6 @@ typedef enum iree_hal_amdxdna_cmd_type_e {
   IREE_HAL_AMDXDNA_CMD_RESET_EVENT,
   IREE_HAL_AMDXDNA_CMD_WAIT_EVENTS,
   IREE_HAL_AMDXDNA_CMD_ADVISE_BUFFER,
-  IREE_HAL_AMDXDNA_CMD_FILL_BUFFER,
-  IREE_HAL_AMDXDNA_CMD_UPDATE_BUFFER,
-  IREE_HAL_AMDXDNA_CMD_COPY_BUFFER,
   IREE_HAL_AMDXDNA_CMD_COLLECTIVE,
   IREE_HAL_AMDXDNA_CMD_DISPATCH,
 } iree_hal_amdxdna_cmd_type_t;
@@ -124,6 +121,15 @@ static iree_status_t iree_hal_amdxdna_command_buffer_retain_resources_strided(
   if (!command_buffer->resource_set || count == 0) return iree_ok_status();
   return iree_hal_resource_set_insert_strided(command_buffer->resource_set,
                                               count, data, offset, stride);
+}
+
+static iree_status_t iree_hal_amdxdna_command_buffer_unsupported_transfer(
+    const char* operation) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna %s requires native blit support; host-emulated map/sync/memcpy "
+      "transfers are not available on command buffers",
+      operation);
 }
 
 iree_status_t iree_hal_amdxdna_command_buffer_create(
@@ -494,139 +500,45 @@ static iree_status_t iree_hal_amdxdna_apply_advise_buffer(
       target_command_buffer, buffer_ref, cmd->flags, cmd->arg0, cmd->arg1);
 }
 
-typedef struct iree_hal_amdxdna_cmd_fill_buffer_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_hal_buffer_ref_t target_ref;
-  uint64_t pattern;
-  iree_host_size_t pattern_length;
-  iree_hal_fill_flags_t flags;
-} iree_hal_amdxdna_cmd_fill_buffer_t;
-
 static iree_status_t iree_hal_amdxdna_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  if (IREE_UNLIKELY(pattern_length > sizeof(uint64_t))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "fill patterns must be <= 8 bytes");
-  }
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  if (target_ref.buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-        command_buffer, 1, &target_ref.buffer));
-  }
-  iree_hal_amdxdna_cmd_fill_buffer_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_FILL_BUFFER, sizeof(*cmd),
-      (void**)&cmd));
-  cmd->target_ref = target_ref;
-  cmd->pattern = 0;
-  memcpy(&cmd->pattern, pattern, pattern_length);
-  cmd->pattern_length = pattern_length;
-  cmd->flags = flags;
-  return iree_ok_status();
+  if (target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)target_ref;
+  (void)pattern;
+  (void)pattern_length;
+  (void)flags;
+  return iree_hal_amdxdna_command_buffer_unsupported_transfer(
+      "command_buffer_fill_buffer");
 }
-
-static iree_status_t iree_hal_amdxdna_apply_fill_buffer(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_fill_buffer_t* cmd) {
-  iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
-      binding_table, cmd->target_ref, &target_ref));
-  return iree_hal_command_buffer_fill_buffer(target_command_buffer, target_ref,
-                                             &cmd->pattern, cmd->pattern_length,
-                                             cmd->flags);
-}
-
-typedef struct iree_hal_amdxdna_cmd_update_buffer_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_hal_buffer_ref_t target_ref;
-  iree_hal_update_flags_t flags;
-  uint8_t source_buffer[];
-} iree_hal_amdxdna_cmd_update_buffer_t;
 
 static iree_status_t iree_hal_amdxdna_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags) {
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  if (target_ref.buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-        command_buffer, 1, &target_ref.buffer));
-  }
-  iree_host_size_t total_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(
-          sizeof(iree_hal_amdxdna_cmd_update_buffer_t), target_ref.length,
-          &total_size))) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "update command is too large");
-  }
-  iree_hal_amdxdna_cmd_update_buffer_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_UPDATE_BUFFER, total_size,
-      (void**)&cmd));
-  cmd->target_ref = target_ref;
-  cmd->flags = flags;
-  memcpy(cmd->source_buffer, (const uint8_t*)source_buffer + source_offset,
-         target_ref.length);
-  return iree_ok_status();
+  if (target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_ref;
+  (void)flags;
+  return iree_hal_amdxdna_command_buffer_unsupported_transfer(
+      "command_buffer_update_buffer");
 }
-
-static iree_status_t iree_hal_amdxdna_apply_update_buffer(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_update_buffer_t* cmd) {
-  iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
-      binding_table, cmd->target_ref, &target_ref));
-  return iree_hal_command_buffer_update_buffer(
-      target_command_buffer, cmd->source_buffer, 0, target_ref, cmd->flags);
-}
-
-typedef struct iree_hal_amdxdna_cmd_copy_buffer_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_hal_buffer_ref_t source_ref;
-  iree_hal_buffer_ref_t target_ref;
-  iree_hal_copy_flags_t flags;
-} iree_hal_amdxdna_cmd_copy_buffer_t;
 
 static iree_status_t iree_hal_amdxdna_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
     iree_hal_copy_flags_t flags) {
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  iree_host_size_t resource_count = 0;
-  const void* resources[2] = {NULL, NULL};
-  if (source_ref.buffer) resources[resource_count++] = source_ref.buffer;
-  if (target_ref.buffer) resources[resource_count++] = target_ref.buffer;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-      command_buffer, resource_count, resources));
-  iree_hal_amdxdna_cmd_copy_buffer_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_COPY_BUFFER, sizeof(*cmd),
-      (void**)&cmd));
-  cmd->source_ref = source_ref;
-  cmd->target_ref = target_ref;
-  cmd->flags = flags;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdxdna_apply_copy_buffer(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_copy_buffer_t* cmd) {
-  iree_hal_buffer_ref_t source_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
-      binding_table, cmd->source_ref, &source_ref));
-  iree_hal_buffer_ref_t target_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
-      binding_table, cmd->target_ref, &target_ref));
-  return iree_hal_command_buffer_copy_buffer(target_command_buffer, source_ref,
-                                             target_ref, cmd->flags);
+  if (source_ref.length == 0 && target_ref.length == 0) return iree_ok_status();
+  (void)base_command_buffer;
+  (void)source_ref;
+  (void)target_ref;
+  (void)flags;
+  return iree_hal_amdxdna_command_buffer_unsupported_transfer(
+      "command_buffer_copy_buffer");
 }
 
 typedef struct iree_hal_amdxdna_cmd_collective_t {
@@ -786,12 +698,6 @@ static const iree_hal_amdxdna_cmd_apply_fn_t
             (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_wait_events,
         [IREE_HAL_AMDXDNA_CMD_ADVISE_BUFFER] = (iree_hal_amdxdna_cmd_apply_fn_t)
             iree_hal_amdxdna_apply_advise_buffer,
-        [IREE_HAL_AMDXDNA_CMD_FILL_BUFFER] =
-            (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_fill_buffer,
-        [IREE_HAL_AMDXDNA_CMD_UPDATE_BUFFER] = (iree_hal_amdxdna_cmd_apply_fn_t)
-            iree_hal_amdxdna_apply_update_buffer,
-        [IREE_HAL_AMDXDNA_CMD_COPY_BUFFER] =
-            (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_copy_buffer,
         [IREE_HAL_AMDXDNA_CMD_COLLECTIVE] =
             (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_collective,
         [IREE_HAL_AMDXDNA_CMD_DISPATCH] =

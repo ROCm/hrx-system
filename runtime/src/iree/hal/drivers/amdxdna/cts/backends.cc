@@ -83,6 +83,79 @@ static bool amdxdna_registered_ =
                "single-queue driver: cannot submit the dealloca that "
                "releases the first block while the second alloca is waiting "
                "on pool notification on the same physical queue."},
+              // Native amdxdna queues do not support blit/fill/update/copy
+              // commands yet. Keep these CTS cases disabled instead of
+              // reintroducing blocking host-emulated transfers behind queue
+              // entry points. TODO(#amdxdna): remove these once native blit
+              // support exists and QUEUE_TRANSFER compatibility can be
+              // advertised.
+              {"AllocatorTest.BaselineBufferCompatibility",
+               "amdxdna does not advertise QUEUE_TRANSFER compatibility until "
+               "native blit support exists."},
+              {"QueueAllocaTest.BasicAlloca",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.ExplicitPassthroughPoolAllocaDealloca",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.ExplicitTLSFPoolTransferAllocaDealloca",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest."
+               "ExplicitFixedBlockPoolPendingDeallocaWaitFrontier",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.AllocaWithWaitSemaphores",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.AllocaDeallocaCycle",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.DeallocaReleasesMemory",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.FailedDeallocaWaitDoesNotDealloca",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueAllocaTest.ZeroAccessFlagsCanonicalized",
+               "CTS validates allocated contents with queue_fill; amdxdna does "
+               "not expose queue transfer operations until native blit support "
+               "exists."},
+              {"QueueTransferTest.*",
+               "amdxdna does not expose queue transfer operations until it has "
+               "native blit support; host-emulated map/sync/memcpy transfers "
+               "are intentionally unsupported on device queues."},
+              {"CommandBufferFillBufferTest.*",
+               "amdxdna command buffers require native blit support for fill "
+               "commands; host-emulated transfer commands are unsupported."},
+              {"CommandBufferUpdateBufferTest.*",
+               "amdxdna command buffers require native blit support for update "
+               "commands; host-emulated transfer commands are unsupported."},
+              {"CommandBufferCopyBufferTest.*",
+               "amdxdna command buffers require native blit support for copy "
+               "commands; host-emulated transfer commands are unsupported."},
+              {"CommandBufferStressTest.*",
+               "amdxdna command-buffer transfer stress cases require native "
+               "blit support."},
+              {"TransientBufferTest.*",
+               "amdxdna transient-buffer CTS cases exercise command-buffer "
+               "transfer commands, which require native blit support."},
+              {"AsyncTransientBufferTest.*",
+               "amdxdna transient-buffer CTS cases exercise command-buffer "
+               "transfer commands, which require native blit support."},
+              {"SemaphoreSubmissionTest."
+               "IndirectCommandBufferBindingTableRetainedUntilSignal",
+               "this CTS case is specifically a command-buffer copy test; "
+               "amdxdna does not expose copy commands until native blits "
+               "exist."},
           },
           /*expected_failures=*/{}},
          /*tags=*/{"allocator", "buffer_mapping", "driver"},
