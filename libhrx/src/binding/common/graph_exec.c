@@ -2151,6 +2151,9 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       }
       if (iree_status_is_ok(status)) {
         event->record_time_ns = iree_time_now();
+        // A graph-replayed record writes no device tick; elapsed time uses the
+        // host record-time delta.
+        event->device_tick_valid = false;
         ++event->signal_value;
         signal_sems[signal_count] = event->semaphore;
         signal_vals[signal_count] = event->signal_value;

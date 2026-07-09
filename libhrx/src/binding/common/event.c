@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 static void iree_hal_streaming_event_destroy(iree_hal_streaming_event_t* event);
+static iree_status_t iree_hal_streaming_event_enable_device_timing(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_context_t* context);
 
 iree_status_t iree_hal_streaming_event_create(
     iree_hal_streaming_context_t* context,
@@ -34,6 +36,9 @@ iree_status_t iree_hal_streaming_event_create(
   event->context = context;
   iree_hal_streaming_context_retain(context);
   event->record_time_ns = 0;
+  event->timestamp_buffer = NULL;
+  event->timestamp_frequency_hz = 0;
+  event->device_tick_valid = false;
   event->ipc_handle = NULL;
   event->capture_graph = NULL;
   event->capture_dependencies = NULL;
@@ -46,6 +51,15 @@ iree_status_t iree_hal_streaming_event_create(
   iree_status_t status = iree_hal_semaphore_create(
       context->device, IREE_HAL_QUEUE_AFFINITY_ANY, 0ULL,
       IREE_HAL_SEMAPHORE_FLAG_NONE, &event->semaphore);
+
+  // Enable device-side timing when the device advertises a device timestamp
+  // domain. Devices without one stay host-timed; a capable device that cannot
+  // allocate its tick buffer fails creation rather than silently using
+  // (wrong) host timing.
+  if (iree_status_is_ok(status) &&
+      !iree_all_bits_set(flags, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    status = iree_hal_streaming_event_enable_device_timing(event, context);
+  }
 
   if (iree_status_is_ok(status)) {
     *out_event = event;
@@ -63,6 +77,9 @@ static void iree_hal_streaming_event_destroy(
   // Release semaphore.
   iree_hal_semaphore_release(event->semaphore);
 
+  // Release device timestamp buffer.
+  iree_hal_buffer_release(event->timestamp_buffer);
+
   // Release recording stream reference.
   iree_hal_streaming_stream_release(event->recording_stream);
 
@@ -77,6 +94,47 @@ static void iree_hal_streaming_event_destroy(
   iree_allocator_free(host_allocator, event);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+// Enables device-side timestamping for |event| when the device advertises a
+// device timestamp domain, allocating the per-event tick buffer. Returns OK and
+// leaves the event host-timed (timestamp_buffer == NULL) when the device does
+// not advertise the capability. Returns a failure status when the device DOES
+// advertise it but the tick buffer cannot be allocated: dropping to host timing
+// there would report wrong (host-enqueue) durations on a device that can
+// measure real ones.
+static iree_status_t iree_hal_streaming_event_enable_device_timing(
+    iree_hal_streaming_event_t* event, iree_hal_streaming_context_t* context) {
+  const iree_hal_device_spec_t* spec = iree_hal_device_spec(context->device);
+  if (!spec) return iree_ok_status();
+  // iree_hal_device_spec_timing returns &spec->timing, so it is non-NULL once
+  // spec is.
+  const iree_hal_device_timing_spec_t* timing =
+      iree_hal_device_spec_timing(spec);
+  if (!iree_all_bits_set(timing->flags,
+                         IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS) ||
+      timing->timestamp_frequency_hz == 0) {
+    // Device does not advertise device-side timestamps; the event stays
+    // host-timed.
+    return iree_ok_status();
+  }
+  iree_hal_buffer_params_t params = {0};
+  // Host-visible host-pool buffer; adding DEVICE_LOCAL would require a
+  // fine-grained device pool that only large-BAR / APU GPUs expose. The host
+  // pool is device-visible, so the device still writes the tick here and the
+  // host maps it to read it back.
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  iree_hal_buffer_t* buffer = NULL;
+  // The device advertised the capability, so a failed allocation is a real
+  // error rather than a reason to fall back to (wrong) host timing.
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
+      context->device_allocator, params, sizeof(uint64_t), &buffer));
+  event->timestamp_buffer = buffer;
+  event->timestamp_frequency_hz = timing->timestamp_frequency_hz;
+  return iree_ok_status();
 }
 
 void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event) {
@@ -114,6 +172,10 @@ iree_status_t iree_hal_streaming_event_record(
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Reset per-record: only a successful device-tick write below sets this true,
+  // so capture- and graph-recorded events remain host-timed.
+  event->device_tick_valid = false;
 
   // Check if we're capturing to a graph.
   if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
@@ -182,9 +244,20 @@ iree_status_t iree_hal_streaming_event_record(
       .payload_values = signal_values,
   };
 
-  iree_status_t status = iree_hal_device_queue_barrier(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  // Device-timed events write a device GPU-clock tick at this queue point; the
+  // timestamp op signals the same semaphores a barrier would. Host-timed events
+  // use a plain barrier (record_time_ns above is the timestamp).
+  iree_status_t status;
+  if (event->timestamp_buffer) {
+    status = iree_hal_device_queue_timestamp(
+        stream->context->device, stream->queue_affinity, wait_semaphores,
+        signal_semaphores, event->timestamp_buffer,
+        /*target_offset=*/0, IREE_HAL_TIMESTAMP_FLAG_NONE);
+  } else {
+    status = iree_hal_device_queue_barrier(
+        stream->context->device, stream->queue_affinity, wait_semaphores,
+        signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_flush(stream->context->device,
                                          stream->queue_affinity);
@@ -192,6 +265,9 @@ iree_status_t iree_hal_streaming_event_record(
   if (iree_status_is_ok(status)) {
     stream->pending_value = event->signal_value;
     stream->submitted_value = event->signal_value;
+    // A device tick was submitted for this record iff the timestamp path was
+    // taken; mark it valid only after the whole record submission succeeded.
+    event->device_tick_valid = event->timestamp_buffer != NULL;
   }
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
@@ -212,6 +288,15 @@ iree_status_t iree_hal_streaming_event_synchronize(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+float iree_hal_streaming_event_ticks_to_ms(uint64_t start_tick,
+                                           uint64_t stop_tick,
+                                           uint64_t frequency_hz) {
+  // Signed delta so a stop-before-start yields a negative duration rather than
+  // an unsigned wrap.
+  const int64_t delta_ticks = (int64_t)stop_tick - (int64_t)start_tick;
+  return (float)((double)delta_ticks * 1000.0 / (double)frequency_hz);
 }
 
 iree_status_t iree_hal_streaming_event_elapsed_time(
@@ -250,7 +335,32 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
                             "stop event has not completed");
   }
 
-  // Calculate elapsed time in milliseconds.
+  // Device-side timestamps: read both GPU-clock ticks and convert using the
+  // device tick frequency. The ticks must come from one device clock, so both
+  // events must be on the same device (as hipEventElapsedTime requires); ticks
+  // are then valid across streams on that device. Same device means stop shares
+  // start's nonzero frequency, so the start->timestamp_frequency_hz guard and
+  // conversion below cover both events. Events on different devices fall
+  // through to the host-observed path below.
+  if (start->device_tick_valid && stop->device_tick_valid &&
+      start->timestamp_frequency_hz != 0 &&
+      start->context->device == stop->context->device) {
+    uint64_t start_tick = 0;
+    uint64_t stop_tick = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+        start->timestamp_buffer, 0, &start_tick, sizeof(start_tick)));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
+        stop->timestamp_buffer, 0, &stop_tick, sizeof(stop_tick)));
+    // Full 64-bit counter: the amdgpu device timestamp domain reports a
+    // full-width clock, so the signed subtraction cannot wrap. A device that
+    // advertised a narrower counter (timestamp_valid_bits < 64, from
+    // iree_hal_device_spec_timing) is not currently supported here.
+    *ms = iree_hal_streaming_event_ticks_to_ms(start_tick, stop_tick,
+                                               start->timestamp_frequency_hz);
+    return iree_ok_status();
+  }
+
+  // Host-observed fallback (devices without a device timestamp domain).
   int64_t elapsed_ns = stop->record_time_ns - start->record_time_ns;
   *ms = (float)elapsed_ns / 1000000.0f;  // Convert nanoseconds to milliseconds.
 

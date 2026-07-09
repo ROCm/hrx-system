@@ -732,6 +732,19 @@ typedef struct iree_hal_streaming_event_t {
   // Timing information.
   iree_time_t record_time_ns;
 
+  // Owned 8-byte device-visible buffer holding the GPU clock tick written at
+  // record time, or NULL when the event is host-timed. Released in
+  // iree_hal_streaming_event_destroy.
+  iree_hal_buffer_t* timestamp_buffer;
+  // Device timestamp domain frequency in ticks per second, used to convert a
+  // tick delta to milliseconds. Zero when the event is host-timed.
+  uint64_t timestamp_frequency_hz;
+  // Whether |timestamp_buffer| currently holds a device tick written by the
+  // most recent record. Only the direct (non-capture) record path writes a
+  // tick; capture- and graph-recorded events leave this false and fall back to
+  // host timing in iree_hal_streaming_event_elapsed_time.
+  bool device_tick_valid;
+
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
 
@@ -1713,6 +1726,14 @@ iree_status_t iree_hal_streaming_event_synchronize(
 iree_status_t iree_hal_streaming_event_elapsed_time(
     float* ms, iree_hal_streaming_event_t* start,
     iree_hal_streaming_event_t* stop);
+
+// Converts a device timestamp tick delta to milliseconds using the device tick
+// frequency (ticks/second), which must be nonzero. Signed: a stop tick recorded
+// before the start tick yields a negative duration (matching CUDA/HIP), not an
+// unsigned wrap.
+float iree_hal_streaming_event_ticks_to_ms(uint64_t start_tick,
+                                           uint64_t stop_tick,
+                                           uint64_t frequency_hz);
 
 //===----------------------------------------------------------------------===//
 // Memory management
