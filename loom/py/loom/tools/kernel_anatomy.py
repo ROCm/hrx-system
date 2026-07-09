@@ -2066,6 +2066,63 @@ def build_kernel_anatomy_comparison_verdicts(
     return sorted(verdicts, key=_comparison_verdict_rank, reverse=True)
 
 
+def build_kernel_anatomy_optimization_frontier(
+    report: Mapping[str, Any], baseline_names: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Builds a candidate frontier against one or more baseline metric groups."""
+
+    metric_groups = _collect_comparison_metric_groups(report)
+    frontier: list[dict[str, Any]] = []
+    for baseline_name in baseline_names:
+        if baseline_name not in metric_groups:
+            raise ValueError(f"unknown frontier baseline group: {baseline_name}")
+        comparison_specs = [
+            ComparisonSpec(baseline=baseline_name, candidate=candidate_name)
+            for candidate_name in _frontier_candidate_names(
+                metric_groups, baseline_name
+            )
+        ]
+        comparisons = build_kernel_anatomy_comparisons(report, comparison_specs)
+        for comparison_name, comparison_value in comparisons.items():
+            comparison = _as_mapping(comparison_value)
+            verdict = _build_kernel_anatomy_comparison_verdict(
+                comparison_name, comparison
+            )
+            candidate_name = str(comparison.get("candidate"))
+            frontier.append(
+                {
+                    "baseline": baseline_name,
+                    "candidate": candidate_name,
+                    "comparison": comparison_name,
+                    "status": _frontier_status(verdict),
+                    "verdict_status": verdict.get("status"),
+                    "time_ratio": verdict.get("time_ratio"),
+                    "parity_mismatch_count": verdict.get("parity_mismatch_count"),
+                    "cost_count": verdict.get("cost_count"),
+                    "advantage_count": verdict.get("advantage_count"),
+                    "primary_cost": verdict.get("primary_cost"),
+                    "primary_advantage": verdict.get("primary_advantage"),
+                    "baseline_metrics": _frontier_metric_snapshot(
+                        metric_groups.get(baseline_name, {})
+                    ),
+                    "candidate_metrics": _frontier_metric_snapshot(
+                        metric_groups.get(candidate_name, {})
+                    ),
+                }
+            )
+    return sorted(frontier, key=_frontier_rank)
+
+
+def _frontier_candidate_names(
+    metric_groups: Mapping[str, Any], baseline_name: str
+) -> list[str]:
+    if "/" in baseline_name:
+        return sorted(name for name in metric_groups if name != baseline_name)
+    return sorted(
+        name for name in metric_groups if name != baseline_name and "/" not in name
+    )
+
+
 def _build_kernel_anatomy_comparison_verdict(
     name: str, comparison: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -2175,6 +2232,73 @@ def _comparison_verdict_rank(verdict: Mapping[str, Any]) -> float:
     if cost_ratio is not None and cost_ratio > 0:
         return cost_ratio
     return float(_as_number(verdict.get("parity_mismatch_count")) or 0)
+
+
+_FRONTIER_SNAPSHOT_METRICS = (
+    "p50_ns",
+    "operation_time_ns",
+    "local_memory_instruction_count_per_matrix_instruction",
+    "local_memory_instruction_count",
+    "local_memory_access_bytes",
+    "device_memory_load_count",
+    "device_memory_store_count",
+    "source_low_dynamic_packet_count",
+    "wait_action_count",
+    "wait_full_drain_count",
+    "vgpr_count",
+    "occupancy_percent",
+)
+
+
+def _frontier_status(verdict: Mapping[str, Any]) -> str:
+    parity_mismatches = _as_number(verdict.get("parity_mismatch_count")) or 0
+    if parity_mismatches:
+        return "not_apples_to_apples"
+    time_ratio = _as_number(verdict.get("time_ratio"))
+    if time_ratio is not None:
+        if time_ratio <= 1.0:
+            return "meets_time_target"
+        primary_advantage = _as_mapping(verdict.get("primary_advantage"))
+        advantage_ratio = _as_number(primary_advantage.get("ratio"))
+        if advantage_ratio is not None and advantage_ratio <= 0.75:
+            return "advantage_not_converted"
+        return "slower"
+    if _as_mapping(verdict.get("primary_cost")):
+        return "structural_cost"
+    if _as_mapping(verdict.get("primary_advantage")):
+        return "structural_advantage"
+    return "metric_parity"
+
+
+def _frontier_metric_snapshot(
+    metrics: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    snapshot = {}
+    for metric_name in _FRONTIER_SNAPSHOT_METRICS:
+        value = _metric_value(metrics, metric_name)
+        if value is not None:
+            snapshot[metric_name] = value
+    return snapshot
+
+
+def _frontier_rank(entry: Mapping[str, Any]) -> tuple[float, float, float, str]:
+    status = entry.get("status")
+    status_rank = {
+        "meets_time_target": 0.0,
+        "advantage_not_converted": 1.0,
+        "slower": 2.0,
+        "time_parity": 3.0,
+        "structural_advantage": 4.0,
+        "structural_cost": 5.0,
+        "metric_parity": 6.0,
+        "not_apples_to_apples": 7.0,
+    }.get(status, 8.0)
+    time_ratio = _as_number(entry.get("time_ratio"))
+    time_rank = float(time_ratio) if time_ratio is not None else float("inf")
+    primary_cost = _as_mapping(entry.get("primary_cost"))
+    cost_ratio = _as_number(primary_cost.get("ratio"))
+    cost_rank = float(cost_ratio) if cost_ratio is not None else 1.0
+    return (status_rank, time_rank, cost_rank, str(entry.get("candidate") or ""))
 
 
 def _collect_comparison_metric_groups(
@@ -4573,6 +4697,51 @@ def _format_ratio(ratio: Any) -> str:
     return f"{ratio:.6g}x" if isinstance(ratio, (int, float)) else "?"
 
 
+def _append_optimization_frontier_lines(
+    lines: list[str], report: Mapping[str, Any]
+) -> None:
+    frontier = report.get("optimization_frontier")
+    if not isinstance(frontier, list) or not frontier:
+        return
+    lines.append("")
+    lines.append("Optimization frontier:")
+    for entry_value in frontier[:16]:
+        entry = _as_mapping(entry_value)
+        candidate_metrics = _as_mapping(entry.get("candidate_metrics"))
+        p50_ns = _as_number(candidate_metrics.get("p50_ns")) or _as_number(
+            candidate_metrics.get("operation_time_ns")
+        )
+        p50_ms = p50_ns / 1000000 if p50_ns is not None else None
+        p50_text = f"{p50_ms:.6g} ms" if p50_ms is not None else "?"
+        lines.append(
+            "  "
+            f"{entry.get('baseline')} -> {entry.get('candidate')}: "
+            f"{entry.get('status')} "
+            f"time_ratio={_format_ratio(entry.get('time_ratio'))} "
+            f"p50={p50_text}"
+        )
+        primary_cost = _as_mapping(entry.get("primary_cost"))
+        if primary_cost:
+            lines.append(
+                "    "
+                f"cost: {primary_cost.get('metric')} "
+                f"[{primary_cost.get('category')}] "
+                f"baseline={primary_cost.get('baseline')} "
+                f"candidate={primary_cost.get('candidate')} "
+                f"ratio={_format_ratio(primary_cost.get('ratio'))}"
+            )
+        primary_advantage = _as_mapping(entry.get("primary_advantage"))
+        if primary_advantage:
+            lines.append(
+                "    "
+                f"advantage: {primary_advantage.get('metric')} "
+                f"[{primary_advantage.get('category')}] "
+                f"baseline={primary_advantage.get('baseline')} "
+                f"candidate={primary_advantage.get('candidate')} "
+                f"ratio={_format_ratio(primary_advantage.get('ratio'))}"
+            )
+
+
 def _append_comparison_scorecard_lines(
     lines: list[str], report: Mapping[str, Any]
 ) -> None:
@@ -4921,6 +5090,7 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     _append_rocprof_counter_collection_lines(lines, report)
     _append_rocblas_log_lines(lines, report)
     _append_tensile_catalog_lines(lines, report)
+    _append_optimization_frontier_lines(lines, report)
     _append_comparison_scorecard_lines(lines, report)
     _append_gap_finding_lines(lines, report)
     _append_comparison_verdict_lines(lines, report)
@@ -5147,6 +5317,15 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--frontier",
+        action="append",
+        default=[],
+        help=(
+            "Build an optimization frontier by comparing every other metric "
+            "group against this baseline group. Repeat for multiple baselines."
+        ),
+    )
+    parser.add_argument(
         "--amdhsa-metadata-regex",
         help="Regex filter applied to AMDHSA kernel name and symbol metadata.",
     )
@@ -5242,6 +5421,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report["comparison_verdicts"] = build_kernel_anatomy_comparison_verdicts(
             report["comparisons"]
+        )
+    if args.frontier:
+        report["optimization_frontier"] = build_kernel_anatomy_optimization_frontier(
+            report, args.frontier
         )
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

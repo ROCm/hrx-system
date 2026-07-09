@@ -18,6 +18,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparison_verdicts,
     build_kernel_anatomy_comparisons,
+    build_kernel_anatomy_optimization_frontier,
     build_kernel_anatomy_report,
     format_rocblas_replay_script,
     format_rocblas_solution_trace_script,
@@ -2060,6 +2061,50 @@ def test_weighted_symbol_metrics_participate_in_comparisons(
     assert verdicts[0]["primary_cost"]["category"] == "local_memory"
 
 
+def test_optimization_frontier_flags_unconverted_advantage(tmp_path: Path) -> None:
+    baseline_report = _compile_report_payload()
+    candidate_report = json.loads(json.dumps(_compile_report_payload()))
+    candidate_mix = candidate_report["entries"]["rows"][0]["dynamic_instruction_mix"]
+    candidate_mix["local_memory_count"] = 40
+    candidate_mix["local_read_byte_count"] = 120
+    candidate_mix["local_write_byte_count"] = 80
+    _write_single_benchmark_jsonl(
+        tmp_path / "baseline.jsonl",
+        "baseline_benchmark",
+        baseline_report,
+        1_000_000,
+    )
+    _write_single_benchmark_jsonl(
+        tmp_path / "candidate.jsonl",
+        "candidate_benchmark",
+        candidate_report,
+        1_040_000,
+    )
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        benchmark_jsonl_paths=[
+            NamedPath("baseline", tmp_path / "baseline.jsonl"),
+            NamedPath("candidate", tmp_path / "candidate.jsonl"),
+        ],
+    )
+    frontier = build_kernel_anatomy_optimization_frontier(report, ["baseline"])
+
+    whole_kernel_entry = next(
+        entry for entry in frontier if entry["candidate"] == "candidate"
+    )
+    assert whole_kernel_entry["status"] == "advantage_not_converted"
+    assert whole_kernel_entry["time_ratio"] == 1.04
+    assert whole_kernel_entry["primary_advantage"]["category"] == "local_memory"
+    assert whole_kernel_entry["candidate_metrics"]["p50_ns"] == 1_040_000
+
+    report["optimization_frontier"] = frontier
+    text = format_text_report(report)
+    assert "Optimization frontier:" in text
+    assert "baseline -> candidate: advantage_not_converted" in text
+
+
 def test_weighted_symbol_group_metrics_participate_in_comparisons(
     tmp_path: Path,
 ) -> None:
@@ -2305,6 +2350,54 @@ amdhsa.kernels:
     assert report["comparison_scorecard"][0]["comparison"] == "baseline=loom"
     assert report["comparison_verdicts"][0]["comparison"] == "baseline=loom"
     assert report["comparison_verdicts"][0]["status"] == "candidate_faster"
+
+
+def test_main_emits_optimization_frontier(tmp_path: Path, capsys) -> None:
+    baseline_report = _compile_report_payload()
+    candidate_report = json.loads(json.dumps(_compile_report_payload()))
+    candidate_mix = candidate_report["entries"]["rows"][0]["dynamic_instruction_mix"]
+    candidate_mix["local_memory_count"] = 40
+    candidate_mix["local_read_byte_count"] = 120
+    candidate_mix["local_write_byte_count"] = 80
+    baseline_path = tmp_path / "baseline.jsonl"
+    candidate_path = tmp_path / "candidate.jsonl"
+    _write_single_benchmark_jsonl(
+        baseline_path,
+        "baseline_benchmark",
+        baseline_report,
+        1_000_000,
+    )
+    _write_single_benchmark_jsonl(
+        candidate_path,
+        "candidate_benchmark",
+        candidate_report,
+        1_040_000,
+    )
+
+    assert (
+        main(
+            [
+                "--benchmark-jsonl",
+                f"baseline={baseline_path}",
+                "--benchmark-jsonl",
+                f"candidate={candidate_path}",
+                "--frontier",
+                "baseline",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    whole_kernel_entry = next(
+        entry
+        for entry in report["optimization_frontier"]
+        if entry["candidate"] == "candidate"
+    )
+    assert whole_kernel_entry["status"] == "advantage_not_converted"
+    assert whole_kernel_entry["candidate_metrics"]["p50_ns"] == 1_040_000
 
 
 def test_main_emits_weighted_symbols(tmp_path: Path, capsys) -> None:
