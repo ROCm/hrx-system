@@ -92,14 +92,17 @@ The active precision sequence is:
 
 - BF16 weights and BF16-activation kernels first, using the Python BF16
   execution path as the tensor-golden reference.
-- FP8-weight structural parity next, matching the Python path: official FP8
-  e4m3 source weights plus their checkpoint scale tensors are prepared into
-  BF16 execution layouts and consumed by BF16-activation WMMA kernels. Current
-  DiT files use F32 row scales; Qwen3-VL FP8 files use F32
-  `weight_scale_inv` tensors over 128x128 source blocks.
-- Direct FP8-weight kernels on RDNA3/gfx1100 after parity is established, where
-  compact FP8 values and scale metadata may be decoded in the kernel when that
-  wins over prepared BF16 layouts.
+- FP8-weight structural parity next, matching the Python semantics: official
+  FP8 e4m3 source weights plus their checkpoint scale tensors feed
+  BF16-activation WMMA/F32-accumulate kernels. Current DiT files use F32 row
+  scales; Qwen3-VL FP8 files use F32 `weight_scale_inv` tensors over 128x128
+  source blocks.
+- Compact FP8 RHS execution on RDNA3/gfx1100 is the current source-resident
+  product lane when it beats prepared BF16 layouts for the request shape. It
+  keeps FP8 weight capacity, prepares a target-friendly compact RHS layout, and
+  applies scale metadata in the compute kernel. Strict source-only streaming
+  remains available when resident encoded execution layouts are too expensive,
+  but it pays per-issue materialization traffic.
 - Native FP8-weight kernels on CDNA3/gfx942, using the same logical operation
   contracts and goldens while specializing the implementation to the target's
   FP8 execution path.
@@ -107,12 +110,12 @@ The active precision sequence is:
   target-specific internals behind stable kernel I/O and comparison fixtures.
 
 FP8 storage on gfx1100 is an important bandwidth and capacity experiment, but
-the first usable product shape should stay structurally close to the Python
-implementation. Prepared BF16 execution layouts give us a correctness and
-schedule baseline before asking whether direct in-kernel FP8 decode or native
-FP8 target paths are better. Compiler reports and benchmark artifacts should
-make the chosen inner loop visible, including whether the generated code uses
-WMMA/MFMA instructions for the relevant target.
+the product shape must stay semantically close to the Python implementation.
+Prepared BF16 execution layouts remain a correctness and schedule baseline,
+while compact FP8 execution layouts and strict streaming layouts are evaluated
+against the same tensor goldens and memory budget. Compiler reports and
+benchmark artifacts should make the chosen inner loop visible, including
+whether the generated code uses WMMA/MFMA instructions for the relevant target.
 
 ## Product Goal
 

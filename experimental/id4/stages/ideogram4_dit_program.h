@@ -89,11 +89,12 @@ typedef enum id4_ideogram4_dit_weight_execution_format_e {
   ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID = 0,
   // Prepare FP8 sources into persistent BF16 execution tensors.
   ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT = 1,
-  // Bind compact FP8 weights and row scales directly to compute kernels.
-  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT = 2,
-  // Bind most compact FP8 weights directly, but prepare transformer
-  // feed-forward weights into persistent BF16 execution tensors.
-  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT =
+  // Prepare FP8 sources into persistent compact-RHS FP8 execution tensors and
+  // bind row scales directly to compute kernels.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS = 2,
+  // Prepare most FP8 sources into persistent compact-RHS FP8 execution tensors,
+  // but prepare transformer feed-forward weights into persistent BF16 tensors.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS_FEED_FORWARD_BF16_RESIDENT =
       3,
   // Keep FP8 source weights resident and stream BF16 compact RHS tiles through
   // transient program storage before each linear consumer.

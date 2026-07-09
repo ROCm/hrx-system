@@ -39,9 +39,9 @@ id4_ideogram4_dit_program_generic_linear_weight_execution_format(
   switch (weight_execution_format) {
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
-    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
-    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
-      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS_FEED_FORWARD_BF16_RESIDENT:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
     default:
@@ -54,10 +54,10 @@ id4_ideogram4_dit_program_feed_forward_weight_execution_format(
     id4_ideogram4_dit_weight_execution_format_t weight_execution_format) {
   switch (weight_execution_format) {
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
-    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS_FEED_FORWARD_BF16_RESIDENT:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
-    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
-      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS:
       return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
     default:
@@ -177,7 +177,7 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
           out_parameter->layout = bf16_resident_layout;
           break;
         }
-        case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT: {
+        case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS: {
           if (bf16_resident_layout ==
               ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE) {
             IREE_RETURN_IF_ERROR(
@@ -1637,19 +1637,19 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const id4_pipeline_program_shape_t intermediate_stream_shape =
       id4_pipeline_program_make_shape_rank2(intermediate_size,
                                             total_token_count);
-  const bool fp8_direct_feed_forward_weight_execution =
+  const bool fp8_compact_rhs_feed_forward_weight_execution =
       feed_forward_weight_execution_format ==
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
   const bool streaming_feed_forward_weight_execution =
       feed_forward_weight_execution_format ==
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_STREAMING_COMPACT_RHS;
   const bool compact_feed_forward_w1_w3_layout =
       bf16_resident_feed_forward_weight_execution ||
-      fp8_direct_feed_forward_weight_execution ||
+      fp8_compact_rhs_feed_forward_weight_execution ||
       streaming_feed_forward_weight_execution;
   const bool compact_feed_forward_w2_layout =
       bf16_resident_feed_forward_weight_execution ||
-      fp8_direct_feed_forward_weight_execution ||
+      fp8_compact_rhs_feed_forward_weight_execution ||
       streaming_feed_forward_weight_execution;
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w1_w3_weight_layout =

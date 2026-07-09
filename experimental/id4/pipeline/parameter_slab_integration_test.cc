@@ -1158,7 +1158,7 @@ static void RunCompactFp8LinearRhsTileEncoding(
   constexpr iree_host_size_t kElementCount = kOutputSize * kInputSize;
   constexpr iree_device_size_t kByteLength = kElementCount * sizeof(uint8_t);
   const iree_string_view_t kParameterKey =
-      IREE_SV("weight.fp8_direct_rhs_tile");
+      IREE_SV("weight.fp8_compact_rhs_tile");
 
   std::vector<uint8_t> source_data(kElementCount);
   for (iree_host_size_t i = 0; i < source_data.size(); ++i) {
@@ -1203,7 +1203,7 @@ static void RunCompactFp8LinearRhsTileEncoding(
                                          weight_shape, kByteLength);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_load_step(
-          IREE_SV("parameters.encode_fp8_direct_rhs_tile"),
+          IREE_SV("parameters.encode_fp8_compact_rhs_tile"),
           /*source_count=*/1, &source,
           /*target_slab_index=*/0, /*request_offset=*/0);
 

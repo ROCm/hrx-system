@@ -50,14 +50,15 @@ IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
           "scopes below as the branch parameter providers.");
-IREE_FLAG(string, qwen_parameter_format, "bf16",
+IREE_FLAG(string, qwen_parameter_format, "fp8_e4m3_block_scaled",
           "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
-IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
-          "DiT weight execution format: bf16_resident, fp8_direct, "
-          "fp8_direct_feed_forward_bf16_resident, or streaming_compact_rhs.");
-IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
+IREE_FLAG(string, dit_weight_execution_format, "fp8_compact_rhs",
+          "DiT weight execution format: bf16_resident, fp8_compact_rhs, "
+          "fp8_compact_rhs_feed_forward_bf16_resident, or "
+          "streaming_compact_rhs.");
+IREE_FLAG(string, qwen_weight_execution_strategy, "streaming_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs, or streaming_compact_rhs.");
 IREE_FLAG(string, qwen_attention_implementation, "auto",
@@ -65,7 +66,7 @@ IREE_FLAG(string, qwen_attention_implementation, "auto",
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
-IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
+IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",

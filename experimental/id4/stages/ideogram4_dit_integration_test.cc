@@ -1564,7 +1564,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueOnlineWmmaAttentionFixture) {
 }
 
 TEST(Ideogram4DitStageIntegration,
-     PrepareAndIssueOnlineWmmaAttentionFp8DirectFixture) {
+     PrepareAndIssueOnlineWmmaAttentionFp8CompactRhsFixture) {
   const iree_string_view_t diagnostic_tap_names[] = {
       IREE_SV("ideogram4.cond.layers.0.attention.context"),
       IREE_SV("ideogram4.cond.layers.0.attention.output"),
@@ -1573,7 +1573,7 @@ TEST(Ideogram4DitStageIntegration,
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
       .weight_execution_format =
-          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
       .feed_forward_implementation =
@@ -1585,13 +1585,13 @@ TEST(Ideogram4DitStageIntegration,
               diagnostic_tap_names,
           },
       .capture_run_id =
-          IREE_SV("ideogram4_dit_online_wmma_attention_fp8_direct"),
+          IREE_SV("ideogram4_dit_online_wmma_attention_fp8_compact_rhs"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
 }
 
 TEST(Ideogram4DitStageIntegration,
-     PrepareAndIssueOnlineWmmaAttentionFp8DirectFusedFeedForwardFixture) {
+     PrepareAndIssueOnlineWmmaAttentionFp8CompactRhsFusedFeedForwardFixture) {
   const iree_string_view_t diagnostic_tap_names[] = {
       IREE_SV("ideogram4.cond.layers.0.attention.context"),
       IREE_SV("ideogram4.cond.layers.0.attention.output"),
@@ -1600,7 +1600,7 @@ TEST(Ideogram4DitStageIntegration,
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
       .weight_execution_format =
-          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
       .feed_forward_implementation =
@@ -1611,8 +1611,8 @@ TEST(Ideogram4DitStageIntegration,
               IREE_ARRAYSIZE(diagnostic_tap_names),
               diagnostic_tap_names,
           },
-      .capture_run_id =
-          IREE_SV("ideogram4_dit_online_wmma_attention_fp8_direct_fused_ffn"),
+      .capture_run_id = IREE_SV(
+          "ideogram4_dit_online_wmma_attention_fp8_compact_rhs_fused_ffn"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
 }
@@ -1663,24 +1663,27 @@ TEST(
           "ideogram4_dit_online_wmma_fused_ffn_unconditioned_pytorch_oracle"));
 }
 
-TEST(Ideogram4DitStageIntegration,
-     PrepareAndIssueOnlineWmmaFp8DirectFusedFeedForwardPytorchOracleFixture) {
+TEST(
+    Ideogram4DitStageIntegration,
+    PrepareAndIssueOnlineWmmaFp8CompactRhsFusedFeedForwardPytorchOracleFixture) {
   RunFusedFeedForwardFixture(
       id4::test::Ideogram4DitBranch::kConditioned,
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
       IREE_SV("ideogram4.cond.layers.0.ffn.hidden"),
-      IREE_SV("ideogram4_dit_online_wmma_fp8_direct_fused_ffn_pytorch_oracle"));
+      IREE_SV("ideogram4_dit_online_wmma_fp8_compact_rhs_fused_ffn_pytorch_"
+              "oracle"));
 }
 
 TEST(
     Ideogram4DitStageIntegration,
-    PrepareAndIssueOnlineWmmaFp8DirectFusedFeedForwardUnconditionedPytorchOracleFixture) {
+    PrepareAndIssueOnlineWmmaFp8CompactRhsFusedFeedForwardUnconditionedPytorchOracleFixture) {
   RunFusedFeedForwardFixture(
       id4::test::Ideogram4DitBranch::kUnconditioned,
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
       IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
-      IREE_SV("ideogram4_dit_online_wmma_fp8_direct_fused_ffn_unconditioned_"
-              "pytorch_oracle"));
+      IREE_SV(
+          "ideogram4_dit_online_wmma_fp8_compact_rhs_fused_ffn_unconditioned_"
+          "pytorch_oracle"));
 }
 
 TEST(Ideogram4DitStageIntegration,

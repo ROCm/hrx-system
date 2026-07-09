@@ -778,7 +778,7 @@ TEST(Ideogram4DitProgram, AuthorsScaledFp8ProjectionParameterContract) {
   id4_pipeline_program_release(program);
 }
 
-TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
+TEST(Ideogram4DitProgram, AuthorsCompactFp8ProjectionParameterContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
   id4_ideogram4_dit_program_options_t options =
@@ -786,7 +786,7 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
   options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   options.weight_execution_format =
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
   options.feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   options.model.hidden_size = 128;
@@ -831,7 +831,7 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
       &rules, iree_allocator_system());
 }
 
-TEST(Ideogram4DitProgram, AuthorsDirectFp8FusedFeedForwardCompactParameters) {
+TEST(Ideogram4DitProgram, AuthorsCompactFp8FusedFeedForwardCompactParameters) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
   id4_ideogram4_dit_program_options_t options =
@@ -839,7 +839,7 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8FusedFeedForwardCompactParameters) {
   options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   options.weight_execution_format =
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
   options.model.hidden_size = 128;
   options.model.intermediate_size = 128;
   options.model.attention_head_count = 2;
@@ -870,7 +870,7 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8FusedFeedForwardCompactParameters) {
 }
 
 TEST(Ideogram4DitProgram,
-     AuthorsDirectFp8WithFeedForwardBf16ExecutionParameterContract) {
+     AuthorsCompactFp8WithFeedForwardBf16ExecutionParameterContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
   id4_ideogram4_dit_program_options_t options =
@@ -878,7 +878,7 @@ TEST(Ideogram4DitProgram,
   options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   options.weight_execution_format =
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT;
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS_FEED_FORWARD_BF16_RESIDENT;
   id4_ideogram4_dit_parameter_source_rule_list_t rules;
   IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3, options.model,
