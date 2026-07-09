@@ -16,6 +16,7 @@ from loom.tools.kernel_anatomy import (
     build_kernel_anatomy_comparison_scorecard,
     build_kernel_anatomy_comparisons,
     build_kernel_anatomy_report,
+    format_rocblas_replay_script,
     format_text_report,
     main,
 )
@@ -151,7 +152,7 @@ def _write_rocblas_trace_log(path: Path) -> None:
         path,
         """
 - { rocblas_function: "rocblas_gemm_ex", atomics_mode: atomics_allowed, a_type: "bf16_r", b_type: "bf16_r", c_type: "bf16_r", d_type: "bf16_r", compute_type: "f32_r", transA: 'T', transB: 'N', M: 12288, N: 4547, K: 4608, alpha: 1.0, lda: 4608, beta: 0.0, ldb: 4608, ldc: 12288, ldd: 12288, batch_count: 1, algo: 0, solution_index: 0, flags: none, call_count: 136 }
-- { rocblas_function: "rocblas_gemm_ex", atomics_mode: atomics_allowed, a_type: "bf16_r", b_type: "bf16_r", c_type: "bf16_r", d_type: "bf16_r", compute_type: "f32_r", transA: 'T', transB: 'N', M: 13824, N: 4547, K: 4608, alpha: 1.0, lda: 4608, beta: 0.0, ldb: 4608, ldc: 13824, ldd: 13824, batch_count: 1, algo: 0, solution_index: 0, flags: none, call_count: 68 }
+- { rocblas_function: "rocblas_gemm_ex", atomics_mode: atomics_not_allowed, a_type: "bf16_r", b_type: "bf16_r", c_type: "bf16_r", d_type: "bf16_r", compute_type: "f32_r", transA: 'T', transB: 'N', M: 13824, N: 4547, K: 4608, alpha: 1.0, lda: 4608, beta: 0.0, ldb: 4608, ldc: 13824, ldd: 13824, batch_count: 1, algo: 0, solution_index: 0, flags: none, cold_iters: 5, iters: 20, device: 1, call_count: 68 }
 """,
     )
 
@@ -321,6 +322,61 @@ def test_build_kernel_anatomy_report_extracts_rocblas_trace_rows(
     assert rocblas_log["trace_rows"][0]["M"] == 12288
     assert rocblas_log["trace_rows"][0]["transA"] == "T"
     assert rocblas_log["trace_rows"][0]["call_count"] == 136
+    assert rocblas_log["trace_rows"][0]["operation_key"] == "rocblas_gemm_ex"
+    assert rocblas_log["trace_rows"][0]["shape_key"] == "M12288_N4547_K4608_beta0.0"
+    assert rocblas_log["trace_rows"][0]["rocblas_bench_arguments"] == [
+        "--function",
+        "gemm_ex",
+        "--transposeA",
+        "T",
+        "--transposeB",
+        "N",
+        "--sizem",
+        "12288",
+        "--sizen",
+        "4547",
+        "--sizek",
+        "4608",
+        "--a_type",
+        "bf16_r",
+        "--b_type",
+        "bf16_r",
+        "--c_type",
+        "bf16_r",
+        "--d_type",
+        "bf16_r",
+        "--compute_type",
+        "f32_r",
+        "--alpha",
+        "1",
+        "--beta",
+        "0",
+        "--lda",
+        "4608",
+        "--ldb",
+        "4608",
+        "--ldc",
+        "12288",
+        "--ldd",
+        "12288",
+        "--batch_count",
+        "1",
+        "--algo",
+        "0",
+        "--solution_index",
+        "0",
+        "--flags",
+        "0",
+        "--atomics_allowed",
+    ]
+    assert "--cold_iters" not in rocblas_log["trace_rows"][0]["rocblas_bench_arguments"]
+    assert (
+        "--atomics_not_allowed"
+        in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
+    )
+    assert "--cold_iters" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
+    assert "--iters" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
+    assert "--device" in rocblas_log["trace_rows"][1]["rocblas_bench_arguments"]
 
 
 def test_build_kernel_anatomy_report_extracts_iree_dispatch_profile(
@@ -693,6 +749,35 @@ def test_text_report_contains_rocblas_trace_rows(tmp_path: Path) -> None:
     assert "trace rows:" in text
     assert "M=12288 N=4547 K=4608 beta=0.0 solution=0 calls=136" in text
     assert "M=13824 N=4547 K=4608 beta=0.0 solution=0 calls=68" in text
+    assert "replay: rocblas-bench --function gemm_ex" in text
+    assert "--sizem 12288 --sizen 4547 --sizek 4608" in text
+    assert "--flags 0 --atomics_allowed" in text
+    assert "--cold_iters 5 --iters 20 --device 1 --atomics_not_allowed" in text
+
+
+def test_rocblas_replay_script_contains_profile_commands(tmp_path: Path) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    report = build_kernel_anatomy_report(
+        disassembly_paths=[],
+        compile_report_paths=[],
+        rocblas_log_paths=[NamedPath("pytorch", rocblas_log_path)],
+    )
+    text = format_rocblas_replay_script(
+        report,
+        executable="/opt/rocm/bin/rocblas-bench",
+        extra_arguments=["--cold_iters", "7", "--iters", "11"],
+    )
+
+    assert text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert "# pytorch M12288_N4547_K4608_beta0.0 calls=136" in text
+    assert "/opt/rocm/bin/rocblas-bench --function gemm_ex" in text
+    assert "--sizem 12288 --sizen 4547 --sizek 4608" in text
+    assert "--flags 0 --atomics_allowed" in text
+    assert "# pytorch M13824_N4547_K4608_beta0.0 calls=68" in text
+    assert "--cold_iters 5 --iters 20 --device 1 --atomics_not_allowed" in text
+    assert "--atomics_allowed --cold_iters 7 --iters 11" in text
 
 
 def test_text_report_contains_iree_dispatch_profile_summary(
@@ -973,6 +1058,33 @@ def test_main_emits_json(tmp_path: Path, capsys) -> None:
     report = json.loads(output)
     assert report["schema"] == "loom.kernel_anatomy"
     assert report["disassemblies"]["asm"]["symbol_count"] == 1
+
+
+def test_main_emits_rocblas_replay_script(tmp_path: Path, capsys) -> None:
+    rocblas_log_path = tmp_path / "rocblas_trace.log"
+    _write_rocblas_trace_log(rocblas_log_path)
+
+    assert (
+        main(
+            [
+                "--rocblas-log",
+                f"pytorch={rocblas_log_path}",
+                "--rocblas-bench-executable",
+                "/tools/rocblas-bench",
+                "--rocblas-replay-arg=--cold_iters",
+                "--rocblas-replay-arg",
+                "9",
+                "--format",
+                "rocblas-replay",
+            ]
+        )
+        == 0
+    )
+    text = capsys.readouterr().out
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "/tools/rocblas-bench --function gemm_ex" in text
+    assert "--sizem 13824 --sizen 4547 --sizek 4608" in text
+    assert "--atomics_not_allowed --cold_iters 9" in text
 
 
 def test_main_emits_iree_dispatch_profile(tmp_path: Path, capsys) -> None:

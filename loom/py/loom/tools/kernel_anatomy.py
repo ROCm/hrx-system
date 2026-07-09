@@ -13,6 +13,7 @@ import csv
 import json
 import math
 import re
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -315,7 +316,101 @@ def _parse_rocblas_trace_row(row: str) -> dict[str, Any] | None:
             continue
         key, value = field.split(":", 1)
         parsed_row[key.strip()] = _parse_rocblas_trace_value(value.strip())
+    _annotate_rocblas_trace_row(parsed_row)
     return parsed_row
+
+
+def _annotate_rocblas_trace_row(row: dict[str, Any]) -> None:
+    operation_key = _rocblas_trace_operation_key(row)
+    shape_key = _rocblas_trace_shape_key(row)
+    row["operation_key"] = operation_key
+    row["shape_key"] = shape_key
+    arguments = _rocblas_trace_bench_arguments(row)
+    if arguments:
+        row["rocblas_bench_arguments"] = arguments
+        row["rocblas_bench_command"] = shlex.join(["rocblas-bench", *arguments])
+
+
+def _rocblas_trace_operation_key(row: Mapping[str, Any]) -> str:
+    function = row.get("rocblas_function")
+    return str(function) if function is not None else "?"
+
+
+def _rocblas_trace_shape_key(row: Mapping[str, Any]) -> str:
+    m = row.get("M", "?")
+    n = row.get("N", "?")
+    k = row.get("K", "?")
+    beta = row.get("beta", "?")
+    return f"M{m}_N{n}_K{k}_beta{beta}"
+
+
+_ROCBLAS_BENCH_FUNCTIONS = {
+    "rocblas_gemm_ex": "gemm_ex",
+    "rocblas_gemm_strided_batched_ex": "gemm_strided_batched_ex",
+    "rocblas_gemm_batched_ex": "gemm_batched_ex",
+}
+
+_ROCBLAS_BENCH_FLAG_BY_TRACE_KEY = (
+    ("transA", "--transposeA"),
+    ("transB", "--transposeB"),
+    ("M", "--sizem"),
+    ("N", "--sizen"),
+    ("K", "--sizek"),
+    ("a_type", "--a_type"),
+    ("b_type", "--b_type"),
+    ("c_type", "--c_type"),
+    ("d_type", "--d_type"),
+    ("compute_type", "--compute_type"),
+    ("alpha", "--alpha"),
+    ("beta", "--beta"),
+    ("lda", "--lda"),
+    ("ldb", "--ldb"),
+    ("ldc", "--ldc"),
+    ("ldd", "--ldd"),
+    ("batch_count", "--batch_count"),
+    ("algo", "--algo"),
+    ("solution_index", "--solution_index"),
+    ("flags", "--flags"),
+    ("cold_iters", "--cold_iters"),
+    ("iters", "--iters"),
+    ("device", "--device"),
+)
+
+
+def _rocblas_trace_bench_arguments(row: Mapping[str, Any]) -> list[str]:
+    bench_function = _rocblas_trace_bench_function(row.get("rocblas_function"))
+    if bench_function is None:
+        return []
+    arguments = ["--function", bench_function]
+    for key, flag in _ROCBLAS_BENCH_FLAG_BY_TRACE_KEY:
+        value = row.get(key)
+        if value is None:
+            continue
+        arguments.extend([flag, _format_rocblas_bench_argument_value(key, value)])
+    atomics_mode = row.get("atomics_mode")
+    if atomics_mode == "atomics_allowed":
+        arguments.append("--atomics_allowed")
+    elif atomics_mode == "atomics_not_allowed":
+        arguments.append("--atomics_not_allowed")
+    return arguments
+
+
+def _rocblas_trace_bench_function(function: Any) -> str | None:
+    if not isinstance(function, str) or not function:
+        return None
+    if function in _ROCBLAS_BENCH_FUNCTIONS:
+        return _ROCBLAS_BENCH_FUNCTIONS[function]
+    if function.startswith("rocblas_"):
+        return function.removeprefix("rocblas_")
+    return function
+
+
+def _format_rocblas_bench_argument_value(key: str, value: Any) -> str:
+    if key == "flags" and value == "none":
+        return "0"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _parse_rocblas_trace_value(value: str) -> Any:
@@ -2237,6 +2332,9 @@ def _append_rocblas_log_lines(lines: list[str], report: Mapping[str, Any]) -> No
                     f"solution={trace_row.get('solution_index')} "
                     f"calls={trace_row.get('call_count')}"
                 )
+                replay_command = trace_row.get("rocblas_bench_command")
+                if isinstance(replay_command, str) and replay_command:
+                    lines.append(f"        replay: {replay_command}")
 
 
 def _top_rocblas_trace_rows(trace_rows: Sequence[Any]) -> list[Mapping[str, Any]]:
@@ -2499,6 +2597,44 @@ def format_text_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def format_rocblas_replay_script(
+    report: Mapping[str, Any],
+    executable: str = "rocblas-bench",
+    extra_arguments: Sequence[str] = (),
+) -> str:
+    """Formats rocBLAS profile rows as a directly runnable replay script."""
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+    ]
+    rocblas_logs = report.get("rocblas_logs", {})
+    if isinstance(rocblas_logs, Mapping):
+        for name, rocblas_log_value in rocblas_logs.items():
+            rocblas_log = _as_mapping(rocblas_log_value)
+            trace_rows = rocblas_log.get("trace_rows", [])
+            if not isinstance(trace_rows, list):
+                continue
+            for trace_value in trace_rows:
+                trace_row = _as_mapping(trace_value)
+                arguments = trace_row.get("rocblas_bench_arguments")
+                if not isinstance(arguments, list) or not arguments:
+                    continue
+                argument_strings = [
+                    argument for argument in arguments if isinstance(argument, str)
+                ]
+                if len(argument_strings) != len(arguments):
+                    continue
+                shape_key = trace_row.get("shape_key", "?")
+                call_count = trace_row.get("call_count", "?")
+                lines.append("")
+                lines.append(f"# {name} {shape_key} calls={call_count}")
+                lines.append(
+                    shlex.join([executable, *argument_strings, *extra_arguments])
+                )
+    return "\n".join(lines) + "\n"
+
+
 def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -2606,9 +2742,24 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("json", "text"),
+        choices=("json", "text", "rocblas-replay"),
         default="json",
         help="Output format.",
+    )
+    parser.add_argument(
+        "--rocblas-bench-executable",
+        default="rocblas-bench",
+        help="Executable path used when --format=rocblas-replay.",
+    )
+    parser.add_argument(
+        "--rocblas-replay-arg",
+        action="append",
+        default=[],
+        help=(
+            "Additional argument appended to each command emitted by "
+            "--format=rocblas-replay. Repeat for flags and values; use "
+            "--rocblas-replay-arg=--flag when the value begins with '-'."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -2638,8 +2789,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.format == "json":
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
-    else:
+    elif args.format == "text":
         sys.stdout.write(format_text_report(report))
+    else:
+        sys.stdout.write(
+            format_rocblas_replay_script(
+                report,
+                args.rocblas_bench_executable,
+                args.rocblas_replay_arg,
+            )
+        )
     return 0
 
 
