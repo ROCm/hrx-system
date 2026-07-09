@@ -1014,6 +1014,17 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
+      case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE:
+        load_steps[*out_load_step_count] =
+            id4_pipeline_parameter_encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_load_step(
+                IREE_SV("parameters.encode_fp8_e4m3_block_scaled_to_bf16_"
+                        "linear_rhs_tile"),
+                record->source_count, record->sources,
+                /*target_slab_index=*/0,
+                /*request_offset=*/record->request_offset);
+        load_steps[*out_load_step_count].readiness_group_key =
+            readiness_group_key;
+        break;
       default:
         continue;
     }

@@ -218,6 +218,7 @@ PLAN_PARAMETER_LOAD_KIND_NAMES = (
     "encode_bf16_linear_rhs_tile",
     "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile",
     "encode_fp8_e4m3_linear_rhs_tile",
+    "encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile",
 )
 
 PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (
@@ -321,7 +322,12 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--qwen_weight_execution_strategy",
         default="hybrid_compact_rhs",
-        choices=("row_major", "compact_rhs", "hybrid_compact_rhs"),
+        choices=(
+            "row_major",
+            "compact_rhs",
+            "hybrid_compact_rhs",
+            "streaming_compact_rhs",
+        ),
     )
     parser.add_argument(
         "--qwen_attention_implementation",

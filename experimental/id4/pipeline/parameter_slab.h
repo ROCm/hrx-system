@@ -112,10 +112,14 @@ typedef enum id4_pipeline_parameter_load_step_kind_e {
       4u,
   // Provider FP8 e4m3 matrix weights packed into compact FP8 RHS tiles.
   ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE = 5u,
+  // Provider FP8 e4m3 weights and F32 block scales encoded into compact BF16
+  // RHS tiles.
+  ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE =
+      6u,
 } id4_pipeline_parameter_load_step_kind_e;
 
 // Number of entries required to index load-step kind tables by enum value.
-#define ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY 6u
+#define ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY 7u
 
 // Prepare-time parameter loading group kind.
 typedef uint32_t id4_pipeline_parameter_load_group_kind_t;
@@ -325,6 +329,27 @@ id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_load_step(
   step.name = name;
   step.kind =
       ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE;
+  step.source_scope = iree_string_view_empty();
+  step.source_count = source_count;
+  step.sources = sources;
+  step.target_slab_index = target_slab_index;
+  step.request_offset = request_offset;
+  step.request_count = 1;
+  step.request_indices = NULL;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
+  return step;
+}
+
+// Returns a block-scaled FP8 e4m3 to BF16 linear RHS tile encoder load step.
+static inline id4_pipeline_parameter_load_step_t
+id4_pipeline_parameter_encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_load_step(
+    iree_string_view_t name, iree_host_size_t source_count,
+    const id4_pipeline_parameter_load_source_t* sources,
+    iree_host_size_t target_slab_index, iree_host_size_t request_offset) {
+  id4_pipeline_parameter_load_step_t step;
+  step.name = name;
+  step.kind =
+      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE;
   step.source_scope = iree_string_view_empty();
   step.source_count = source_count;
   step.sources = sources;

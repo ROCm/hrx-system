@@ -130,6 +130,11 @@ def minimal_generation_plan() -> dict:
                             "source_byte_length": 0,
                             "target_byte_length": 0,
                         },
+                        "encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile": {
+                            "step_count": 0,
+                            "source_byte_length": 0,
+                            "target_byte_length": 0,
+                        },
                     },
                 },
                 "parameter_window_statistics": [

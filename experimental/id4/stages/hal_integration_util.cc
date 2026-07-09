@@ -88,6 +88,12 @@ iree_status_t AppendParameterLoadKindStatisticsLabel(
       ParameterLoadKindStatisticsAt(
           statistics,
           ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(AppendParameterLoadKindStatisticsEntry(
+      builder, IREE_SV("fp8_block_bf16_rhs"),
+      ParameterLoadKindStatisticsAt(
+          statistics,
+          ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE)));
   return iree_string_builder_append_cstring(builder, "]");
 }
 

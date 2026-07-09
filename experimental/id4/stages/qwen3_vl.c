@@ -253,6 +253,7 @@ static iree_status_t id4_qwen3_vl_stage_parse_plan_extension(
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_STREAMING_COMPACT_RHS:
       break;
     default:
       return iree_make_status(

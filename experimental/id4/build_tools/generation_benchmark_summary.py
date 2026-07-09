@@ -55,7 +55,10 @@ _LABEL_LOAD_KIND_PATTERN = re.compile(
     r"fp8_bf16_rhs_target=(?P<fp8_bf16_rhs_target>[0-9]+)MiB,"
     r"fp8_rhs_steps=(?P<fp8_rhs_steps>[0-9]+),"
     r"fp8_rhs_source=(?P<fp8_rhs_source>[0-9]+)MiB,"
-    r"fp8_rhs_target=(?P<fp8_rhs_target>[0-9]+)MiB\]"
+    r"fp8_rhs_target=(?P<fp8_rhs_target>[0-9]+)MiB,"
+    r"fp8_block_bf16_rhs_steps=(?P<fp8_block_bf16_rhs_steps>[0-9]+),"
+    r"fp8_block_bf16_rhs_source=(?P<fp8_block_bf16_rhs_source>[0-9]+)MiB,"
+    r"fp8_block_bf16_rhs_target=(?P<fp8_block_bf16_rhs_target>[0-9]+)MiB\]"
 )
 _LABEL_LOGICAL_LIVE_PATTERN = re.compile(
     r"\blogical_live\[boundary=(?P<boundary>[0-9]+)MiB,"
@@ -239,6 +242,9 @@ _LOAD_KIND_ROW_PREFIXES = {
     "encode_bf16_linear_rhs_tile": "parameter_load_bf16_rhs",
     "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile": ("parameter_load_fp8_bf16_rhs"),
     "encode_fp8_e4m3_linear_rhs_tile": "parameter_load_fp8_rhs",
+    "encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile": (
+        "parameter_load_fp8_block_bf16_rhs"
+    ),
 }
 
 
@@ -363,10 +369,12 @@ def _derive_parameter_storage_metrics(
     fp8_to_bf16_source_byte_length = (
         load_kind_totals["parameter_load_fp8_bf16_source_byte_length"]
         + load_kind_totals["parameter_load_fp8_bf16_rhs_source_byte_length"]
+        + load_kind_totals["parameter_load_fp8_block_bf16_rhs_source_byte_length"]
     )
     fp8_to_bf16_target_byte_length = (
         load_kind_totals["parameter_load_fp8_bf16_target_byte_length"]
         + load_kind_totals["parameter_load_fp8_bf16_rhs_target_byte_length"]
+        + load_kind_totals["parameter_load_fp8_block_bf16_rhs_target_byte_length"]
     )
     fp8_to_bf16_expansion_byte_length = max(
         0,
@@ -735,6 +743,19 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "runtime_parameter_load_fp8_rhs_target_mib": _match_unsigned_group(
             load_kind_match, "fp8_rhs_target", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_block_bf16_rhs_steps": _match_unsigned_group(
+            load_kind_match, "fp8_block_bf16_rhs_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_block_bf16_rhs_source_mib": (
+            _match_unsigned_group(
+                load_kind_match, "fp8_block_bf16_rhs_source", f"{context}.label"
+            )
+        ),
+        "runtime_parameter_load_fp8_block_bf16_rhs_target_mib": (
+            _match_unsigned_group(
+                load_kind_match, "fp8_block_bf16_rhs_target", f"{context}.label"
+            )
         ),
         "runtime_local_high_water_total_mib": _label_mib(
             label, "local_hw_total", f"{context}.label"
@@ -1223,6 +1244,10 @@ _MARKDOWN_COLUMNS = (
     ("bf16 rhs src MiB", "runtime_parameter_load_bf16_rhs_source_mib"),
     ("fp8 bf16 rhs src MiB", "runtime_parameter_load_fp8_bf16_rhs_source_mib"),
     ("fp8 rhs src MiB", "runtime_parameter_load_fp8_rhs_source_mib"),
+    (
+        "fp8 block bf16 rhs src MiB",
+        "runtime_parameter_load_fp8_block_bf16_rhs_source_mib",
+    ),
     ("issue windows", "issue_encode_window_count"),
     ("issue encodes", "issue_encode_window_dispatch_count"),
     ("staging MiB", "issue_encode_window_staging_mib"),

@@ -635,6 +635,7 @@ iree_runtime_cc_benchmark(
         ":hal_integration_util",
         ":qwen3_vl",
         "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:program",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/tooling:diagnostics",
         "//experimental/id4/tooling:filesystem",

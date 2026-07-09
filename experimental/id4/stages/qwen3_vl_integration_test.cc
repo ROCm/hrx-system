@@ -29,7 +29,7 @@ IREE_FLAG(string, qwen_parameter_format, "bf16",
           "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
-          "hybrid_compact_rhs.");
+          "hybrid_compact_rhs, or streaming_compact_rhs.");
 IREE_FLAG(string, qwen_attention_implementation, "auto",
           "Qwen3-VL attention implementation: auto, materialized, or wmma.");
 

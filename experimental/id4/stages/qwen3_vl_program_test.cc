@@ -157,6 +157,8 @@ TEST(Qwen3VLProgramTest, ParsesWeightExecutionStrategyNames) {
        ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS},
       {IREE_SV("hybrid_compact_rhs"),
        ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS},
+      {IREE_SV("streaming_compact_rhs"),
+       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_STREAMING_COMPACT_RHS},
   };
   for (const StrategyCase& test_case : cases) {
     id4_qwen3_vl_weight_execution_strategy_t parsed_strategy =

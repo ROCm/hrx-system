@@ -290,6 +290,47 @@ id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_parameter_
 }
 
 static iree_status_t
+id4_pipeline_program_validate_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_linear_rhs_tile_shape(
+      options, ID4_PIPELINE_PROGRAM_DTYPE_BF16, IREE_SV("BF16"),
+      IREE_SV("FP8 e4m3 block-scaled linear RHS tile")));
+  if ((options->shape.dims[0] % 128) != 0 ||
+      (options->shape.dims[1] % 128) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 block-scaled linear RHS tile parameter %.*s execution "
+        "shape must have both dimensions divisible by 128",
+        (int)options->key.size, options->key.data);
+  }
+  const id4_pipeline_program_parameter_source_t* weight_source =
+      &options->sources[0];
+  const id4_pipeline_program_parameter_source_t* scale_source =
+      &options->sources[1];
+  if (weight_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3 ||
+      !id4_pipeline_program_shape_equal(weight_source->shape, options->shape)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 block-scaled linear RHS tile parameter %.*s weight source "
+        "must be f8_e4m3 with the execution shape",
+        (int)options->key.size, options->key.data);
+  }
+  const uint64_t scale_output_count = options->shape.dims[0] / 128;
+  const uint64_t scale_input_count = options->shape.dims[1] / 128;
+  if (scale_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F32 ||
+      scale_source->shape.rank != 2 ||
+      scale_source->shape.dims[0] != scale_output_count ||
+      scale_source->shape.dims[1] != scale_input_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 block-scaled linear RHS tile parameter %.*s scale source "
+        "must be f32[output/128, input/128]",
+        (int)options->key.size, options->key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
 id4_pipeline_program_validate_fp8_e4m3_linear_rhs_tile_parameter_encoding(
     const id4_pipeline_program_parameter_options_t* options) {
   IREE_RETURN_IF_ERROR(
@@ -376,6 +417,16 @@ static iree_status_t id4_pipeline_program_validate_parameter_encoding(
             (int)options->key.size, options->key.data);
       }
       return id4_pipeline_program_validate_fp8_e4m3_linear_rhs_tile_parameter_encoding(
+          options);
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      if (options->source_count != 2) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "FP8 e4m3 block-scaled linear RHS tile parameter %.*s must have "
+            "weight and scale sources",
+            (int)options->key.size, options->key.data);
+      }
+      return id4_pipeline_program_validate_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_parameter_encoding(
           options);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

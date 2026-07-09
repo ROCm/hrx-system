@@ -246,6 +246,36 @@ _KERNEL_CASES = [
         "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape",
     },
     {
+        "actual_case": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=128",
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.input_size=128",
+        ],
+        "source": "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=128",
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.input_size=128",
+        ],
+        "source": "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=12288",
+            "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.input_size=4096",
+        ],
+        "source": "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_adaln_split_f32_small_case",
         "benchmark": "@id4_ideogram4_adaln_split_f32_small",
         "configs": [
@@ -9169,6 +9199,7 @@ _KERNEL_SOURCES = [
     "elementwise/cast_bf16_f32.loom",
     "elementwise/cast_f32_bf16.loom",
     "parameter/bf16_linear_rhs_tile.loom",
+    "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom",
     "parameter/fp8_e4m3_linear_rhs_tile.loom",
     "parameter/fp8_e4m3_scaled_to_bf16.loom",
     "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",

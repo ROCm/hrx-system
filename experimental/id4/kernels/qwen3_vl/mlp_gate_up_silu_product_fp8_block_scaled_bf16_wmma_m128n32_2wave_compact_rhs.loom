@@ -229,26 +229,26 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_fp8_block_scaled_bf16_w
 }
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_fp8_block_scaled_bf16_wmma_m128n32_2wave_compact_rhs_qwen_shape_512_case {
-  %input = check.generate.fill value(1.0) : tensor<512x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<50331648xf8E4M3>
+  %input = check.generate.fill value(0.0078125) : tensor<512x4096xbf16>
+  %gate_weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
   %gate_scale = check.generate.fill value(1.0) : tensor<96x32xf32>
-  %up_weight = check.generate.fill value(1.0) : tensor<50331648xf8E4M3>
-  %up_scale = check.generate.fill value(1.0) : tensor<96x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<512x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<512x12288xbf16>
+  %up_weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
+  %up_scale = check.generate.fill value(2.0) : tensor<96x32xf32>
+  %output = check.generate.fill value(0.0) : tensor<512x12288xbf16>
+  %expected = check.generate.fill value(512.0) : tensor<512x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_fp8_block_scaled_bf16_wmma_m128n32_2wave_compact_rhs(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<512x4096xbf16>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<512x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x12288xbf16>
   check.return
 }
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_fp8_block_scaled_bf16_wmma_m128n32_2wave_compact_rhs_qwen_shape_1024_case {
-  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<50331648xf8E4M3>
+  %input = check.generate.fill value(0.0078125) : tensor<1024x4096xbf16>
+  %gate_weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
   %gate_scale = check.generate.fill value(1.0) : tensor<96x32xf32>
-  %up_weight = check.generate.fill value(1.0) : tensor<50331648xf8E4M3>
-  %up_scale = check.generate.fill value(1.0) : tensor<96x32xf32>
-  %output = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
+  %up_weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
+  %up_scale = check.generate.fill value(2.0) : tensor<96x32xf32>
+  %output = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
+  %expected = check.generate.fill value(512.0) : tensor<1024x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_fp8_block_scaled_bf16_wmma_m128n32_2wave_compact_rhs(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<1024x4096xbf16>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<1024x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x12288xbf16>
   check.return

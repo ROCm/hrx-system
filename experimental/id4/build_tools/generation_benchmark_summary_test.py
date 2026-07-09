@@ -40,7 +40,9 @@ TEST_BENCHMARK_LABEL = (
     "bf16_rhs_steps=108,bf16_rhs_source=10368MiB,"
     "bf16_rhs_target=10368MiB,fp8_bf16_rhs_steps=0,"
     "fp8_bf16_rhs_source=0MiB,fp8_bf16_rhs_target=0MiB,"
-    "fp8_rhs_steps=0,fp8_rhs_source=0MiB,fp8_rhs_target=0MiB] "
+    "fp8_rhs_steps=0,fp8_rhs_source=0MiB,fp8_rhs_target=0MiB,"
+    "fp8_block_bf16_rhs_steps=0,fp8_block_bf16_rhs_source=0MiB,"
+    "fp8_block_bf16_rhs_target=0MiB] "
     "local_hw_total=43MiB "
     "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
     "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
@@ -86,6 +88,9 @@ def load_kind_statistics(
     fp8_rhs_steps: int = 0,
     fp8_rhs_source_mib: int = 0,
     fp8_rhs_target_mib: int = 0,
+    fp8_block_bf16_rhs_steps: int = 0,
+    fp8_block_bf16_rhs_source_mib: int = 0,
+    fp8_block_bf16_rhs_target_mib: int = 0,
 ) -> dict:
     return load_kind_statistics_bytes(
         gather_steps=gather_steps,
@@ -103,6 +108,9 @@ def load_kind_statistics(
         fp8_rhs_steps=fp8_rhs_steps,
         fp8_rhs_source_byte_length=fp8_rhs_source_mib * MIB,
         fp8_rhs_target_byte_length=fp8_rhs_target_mib * MIB,
+        fp8_block_bf16_rhs_steps=fp8_block_bf16_rhs_steps,
+        fp8_block_bf16_rhs_source_byte_length=(fp8_block_bf16_rhs_source_mib * MIB),
+        fp8_block_bf16_rhs_target_byte_length=(fp8_block_bf16_rhs_target_mib * MIB),
     )
 
 
@@ -123,6 +131,9 @@ def load_kind_statistics_bytes(
     fp8_rhs_steps: int = 0,
     fp8_rhs_source_byte_length: int = 0,
     fp8_rhs_target_byte_length: int = 0,
+    fp8_block_bf16_rhs_steps: int = 0,
+    fp8_block_bf16_rhs_source_byte_length: int = 0,
+    fp8_block_bf16_rhs_target_byte_length: int = 0,
 ) -> dict:
     return {
         "gather": {
@@ -149,6 +160,11 @@ def load_kind_statistics_bytes(
             "step_count": fp8_rhs_steps,
             "source_byte_length": fp8_rhs_source_byte_length,
             "target_byte_length": fp8_rhs_target_byte_length,
+        },
+        "encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile": {
+            "step_count": fp8_block_bf16_rhs_steps,
+            "source_byte_length": fp8_block_bf16_rhs_source_byte_length,
+            "target_byte_length": fp8_block_bf16_rhs_target_byte_length,
         },
     }
 
@@ -970,8 +986,8 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 "34951 | 43 | 45292 | 34924 | 17444 | 0 | 19 | 32 | 83 | "
                 "128 | 3627.693 | 3477.614 | 150.049 | - | - | - | - | "
                 "912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | 384 | "
-                "950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 2 | 318 | 1081 | "
-                "576 | 1187 | qwen | 1187 | qwen | 1507 |",
+                "950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 0 | 2 | 318 | "
+                "1081 | 576 | 1187 | qwen | 1187 | qwen | 1507 |",
                 table,
             )
             self.assertIn(

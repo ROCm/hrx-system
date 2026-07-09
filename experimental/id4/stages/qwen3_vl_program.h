@@ -74,6 +74,9 @@ typedef enum id4_qwen3_vl_weight_execution_strategy_e {
   // Use compact RHS for authored compact tile families and row-major for
   // row-major-only tile families.
   ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS = 3,
+  // Keep source weights in their provider format and stream encoded compact
+  // RHS BF16 execution tiles for selected regions.
+  ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_STREAMING_COMPACT_RHS = 4,
 } id4_qwen3_vl_weight_execution_strategy_t;
 
 // Qwen3-VL attention implementation selected by the planner.

@@ -45,7 +45,7 @@ IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
           "fp8_direct_feed_forward_bf16_resident.");
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
-          "hybrid_compact_rhs.");
+          "hybrid_compact_rhs, or streaming_compact_rhs.");
 IREE_FLAG(string, qwen_attention_implementation, "auto",
           "Qwen3-VL attention implementation: auto, materialized, or wmma.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
