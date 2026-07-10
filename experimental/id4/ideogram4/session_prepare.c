@@ -710,20 +710,19 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  if (defer_parameter_loads_to_issue) {
-    prepare_options.flags =
-        ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE;
+  if (!has_parameter_slabs) {
+    prepare_options.parameter_source = id4_pipeline_stage_no_parameters();
   } else if (reuse_parameter_slabs) {
-    prepare_options.flags =
-        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS;
+    prepare_options.parameter_source =
+        id4_pipeline_stage_resident_parameters(resident_parameter_slabs);
+  } else {
+    prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
+        id4_ideogram4_generation_prepare_stage_parameter_provider(
+            &bundle->parameter_providers, stage_ordinal),
+        defer_parameter_loads_to_issue
+            ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
+            : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
   }
-  prepare_options.parameter_provider =
-      reuse_parameter_slabs
-          ? NULL
-          : id4_ideogram4_generation_prepare_stage_parameter_provider(
-                &bundle->parameter_providers, stage_ordinal);
-  prepare_options.parameter_slabs =
-      reuse_parameter_slabs ? resident_parameter_slabs : NULL;
   prepare_options.kernel_library = bundle->kernel_library;
   prepare_options.wait_semaphore_list =
       has_parameter_slabs && !reuse_parameter_slabs

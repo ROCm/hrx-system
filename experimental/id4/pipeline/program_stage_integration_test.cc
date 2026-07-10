@@ -516,11 +516,12 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   id4_pipeline_stage_prepare_options_t stage_prepare_options;
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
-  stage_prepare_options.flags =
-      defers_parameter_loads
-          ? ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE
-          : 0;
-  stage_prepare_options.parameter_provider = parameter_provider.get();
+  stage_prepare_options.parameter_source =
+      id4_pipeline_stage_checkpoint_parameters(
+          parameter_provider.get(),
+          defers_parameter_loads
+              ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
+              : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
@@ -557,9 +558,8 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                 sizeof(reuse_stage_prepare_options));
     reuse_stage_prepare_options.structure_size =
         sizeof(reuse_stage_prepare_options);
-    reuse_stage_prepare_options.flags =
-        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS;
-    reuse_stage_prepare_options.parameter_slabs = source_parameter_slabs;
+    reuse_stage_prepare_options.parameter_source =
+        id4_pipeline_stage_resident_parameters(source_parameter_slabs);
     reuse_stage_prepare_options.kernel_library = kernel_library.get();
     reuse_stage_prepare_options.wait_semaphore_list =
         iree_hal_semaphore_list_empty();
@@ -766,7 +766,10 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   id4_pipeline_stage_prepare_options_t stage_prepare_options;
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
-  stage_prepare_options.parameter_provider = parameter_provider.get();
+  stage_prepare_options.parameter_source =
+      id4_pipeline_stage_checkpoint_parameters(
+          parameter_provider.get(),
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
   stage_prepare_options.command_buffer_mode = context.value.command_buffer_mode;
@@ -807,7 +810,13 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   ASSERT_NE(source_slab, nullptr);
   ASSERT_NE(shifted_slab, nullptr);
   EXPECT_EQ(source_slab->byte_length, shifted_slab->byte_length);
-  EXPECT_EQ(source_slab->request_count, shifted_slab->request_count);
+  const id4_pipeline_parameter_request_table_t* source_requests =
+      id4_pipeline_plan_parameter_request_table_at(source_plan.get(), 0);
+  const id4_pipeline_parameter_request_table_t* shifted_requests =
+      id4_pipeline_plan_parameter_request_table_at(shifted_plan.get(), 0);
+  ASSERT_NE(source_requests, nullptr);
+  ASSERT_NE(shifted_requests, nullptr);
+  EXPECT_EQ(source_requests->count, shifted_requests->count);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_plan_validate_parameter_slabs(
                             shifted_plan.get(), source_parameter_slabs));

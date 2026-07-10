@@ -61,13 +61,17 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slabs[] = {
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
-          storage_params, /*byte_length=*/128, /*alignment=*/16,
-          /*request_count=*/1, /*requests=*/&parameter_requests[0]),
+          /*placement_id=*/0, /*binding_slot=*/0, storage_params,
+          /*byte_length=*/128, /*alignment=*/16),
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/1,
-          storage_params, /*byte_length=*/512, /*alignment=*/16,
-          /*request_count=*/1, /*requests=*/&parameter_requests[1]),
+          /*placement_id=*/0, /*binding_slot=*/1, storage_params,
+          /*byte_length=*/512, /*alignment=*/16),
+  };
+  const id4_pipeline_parameter_request_table_t parameter_request_tables[] = {
+      id4_pipeline_make_parameter_request_table(
+          /*count=*/1, /*values=*/&parameter_requests[0]),
+      id4_pipeline_make_parameter_request_table(
+          /*count=*/1, /*values=*/&parameter_requests[1]),
   };
   const id4_pipeline_parameter_load_source_t encoded_sources[] = {
       id4_pipeline_parameter_load_source(
@@ -214,6 +218,7 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   options.placements = &placement;
   options.parameter_slab_count = IREE_ARRAYSIZE(parameter_slabs);
   options.parameter_slabs = parameter_slabs;
+  options.parameter_request_tables = parameter_request_tables;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.constant_slab_count = 1;
@@ -305,8 +310,10 @@ TEST(PlanTest, ReportsParameterWindowStatistics) {
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slab =
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
-          storage_params, /*byte_length=*/600, /*alignment=*/16,
+          /*placement_id=*/0, /*binding_slot=*/0, storage_params,
+          /*byte_length=*/600, /*alignment=*/16);
+  const id4_pipeline_parameter_request_table_t parameter_request_table =
+      id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
   const id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
       id4_pipeline_parameter_gather_load_step(
@@ -417,6 +424,7 @@ TEST(PlanTest, ReportsParameterWindowStatistics) {
   options.placements = &placement;
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
+  options.parameter_request_tables = &parameter_request_table;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.region_count = IREE_ARRAYSIZE(regions);

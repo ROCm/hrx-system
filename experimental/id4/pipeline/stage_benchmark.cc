@@ -52,12 +52,12 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
 
     id4_pipeline_parameter_slab_plan_t slab =
         id4_pipeline_make_device_local_parameter_slab_plan(
-            IREE_SV("benchmark"), /*placement_id=*/0, /*binding_slot=*/0,
-            IREE_HAL_QUEUE_AFFINITY_ANY,
+            /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
             IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
-            /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
-            &request);
+            /*byte_length=*/16, /*alignment=*/16);
+    id4_pipeline_parameter_request_table_t request_table =
+        id4_pipeline_make_parameter_request_table(/*count=*/1, &request);
     id4_pipeline_parameter_load_step_t load_step =
         id4_pipeline_parameter_gather_load_step(
             IREE_SV("parameters.gather"), IREE_SV("benchmark"),
@@ -79,6 +79,7 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
     create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
+    create_options.parameter_request_tables = &request_table;
     create_options.parameter_load_step_count = 1;
     create_options.parameter_load_steps = &load_step;
     create_options.diagnostics_sink = &diagnostics_sink;

@@ -115,8 +115,10 @@ static PlanPtr MakeWindowPlan() {
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slab =
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
-          storage_params, /*byte_length=*/600, /*alignment=*/16,
+          /*placement_id=*/0, /*binding_slot=*/0, storage_params,
+          /*byte_length=*/600, /*alignment=*/16);
+  const id4_pipeline_parameter_request_table_t parameter_request_table =
+      id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
   const id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
       id4_pipeline_parameter_gather_load_step(
@@ -155,6 +157,7 @@ static PlanPtr MakeWindowPlan() {
   options.placements = &placement;
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
+  options.parameter_request_tables = &parameter_request_table;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.region_count = IREE_ARRAYSIZE(regions);
@@ -196,8 +199,10 @@ static PlanPtr MakeDenseTensorWindowPlan() {
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slab =
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
-          storage_params, /*byte_length=*/48, /*alignment=*/16,
+          /*placement_id=*/0, /*binding_slot=*/0, storage_params,
+          /*byte_length=*/48, /*alignment=*/16);
+  const id4_pipeline_parameter_request_table_t parameter_request_table =
+      id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
   const id4_pipeline_parameter_tensor_plan_t parameter_tensors[] = {
       {
@@ -260,6 +265,7 @@ static PlanPtr MakeDenseTensorWindowPlan() {
   options.placements = &placement;
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
+  options.parameter_request_tables = &parameter_request_table;
   options.parameter_tensor_count = IREE_ARRAYSIZE(parameter_tensors);
   options.parameter_tensors = parameter_tensors;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
@@ -308,8 +314,10 @@ static PlanPtr MakeSchedulePlan() {
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slab =
       id4_pipeline_make_parameter_slab_plan(
-          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
-          storage_params, /*byte_length=*/256, /*alignment=*/16,
+          /*placement_id=*/0, /*binding_slot=*/0, storage_params,
+          /*byte_length=*/256, /*alignment=*/16);
+  const id4_pipeline_parameter_request_table_t parameter_request_table =
+      id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
 
   const id4_pipeline_parameter_load_source_t encode1_sources[] = {
@@ -377,6 +385,7 @@ static PlanPtr MakeSchedulePlan() {
   options.placements = &placement;
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
+  options.parameter_request_tables = &parameter_request_table;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.region_count = IREE_ARRAYSIZE(regions);
@@ -548,19 +557,19 @@ TEST(ParameterWindowScheduleTest, RewritesLoadsAndStepsForWindow) {
   ASSERT_NE(loads, nullptr);
   EXPECT_EQ(loads[0].slab_index, 0u);
   ASSERT_NE(loads[0].slab, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(loads[0].slab->scope, IREE_SV("model")));
+  ASSERT_NE(loads[0].request_table, nullptr);
   EXPECT_EQ(loads[0].slab->binding_slot, 0u);
   EXPECT_EQ(loads[0].slab->byte_length, 192u);
-  ASSERT_EQ(loads[0].slab->request_count, 3u);
-  EXPECT_TRUE(iree_string_view_equal(loads[0].slab->requests[0].key,
+  ASSERT_EQ(loads[0].request_table->count, 3u);
+  EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[0].key,
                                      IREE_SV("layers.1.weight")));
-  EXPECT_EQ(loads[0].slab->requests[0].span.buffer_offset, 0u);
-  EXPECT_TRUE(iree_string_view_equal(loads[0].slab->requests[1].key,
+  EXPECT_EQ(loads[0].request_table->values[0].span.buffer_offset, 0u);
+  EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[1].key,
                                      IREE_SV("layers.2.weight")));
-  EXPECT_EQ(loads[0].slab->requests[1].span.buffer_offset, 64u);
-  EXPECT_TRUE(iree_string_view_equal(loads[0].slab->requests[2].key,
+  EXPECT_EQ(loads[0].request_table->values[1].span.buffer_offset, 64u);
+  EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[2].key,
                                      IREE_SV("layers.3.weight")));
-  EXPECT_EQ(loads[0].slab->requests[2].span.buffer_offset, 128u);
+  EXPECT_EQ(loads[0].request_table->values[2].span.buffer_offset, 128u);
 
   ASSERT_EQ(
       id4_pipeline_parameter_window_schedule_load_step_count(schedule.get()),

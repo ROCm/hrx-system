@@ -67,6 +67,7 @@ typedef uint32_t id4_pipeline_program_issue_wait_flags_t;
 
 enum {
   ID4_PIPELINE_PROGRAM_ISSUE_WAIT_FLAG_INCLUDE_BUNDLE_READINESS = 1u << 0,
+  ID4_PIPELINE_PROGRAM_ISSUE_WAIT_FLAG_INCLUDE_PARAMETER_READINESS = 1u << 1,
 };
 
 static iree_status_t id4_pipeline_program_emit_lifecycle(
@@ -648,7 +649,10 @@ id4_pipeline_program_prepare_resolve_window_parameter_tensor(
   const id4_pipeline_parameter_slab_plan_t* original_slab =
       id4_pipeline_plan_parameter_slab_at(
           plan, parameter_tensor->parameter_slab_index);
-  if (!original_slab) {
+  const id4_pipeline_parameter_request_table_t* original_request_table =
+      id4_pipeline_plan_parameter_request_table_at(
+          plan, parameter_tensor->parameter_slab_index);
+  if (!original_slab || !original_request_table) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program parameter tensor %" PRIhsz
                             " references missing original slab %" PRIhsz,
@@ -659,7 +663,7 @@ id4_pipeline_program_prepare_resolve_window_parameter_tensor(
     const iree_host_size_t slab_request_index =
         parameter_tensor->request_offset + i;
     const id4_pipeline_parameter_request_t* original_request =
-        &original_slab->requests[slab_request_index];
+        &original_request_table->values[slab_request_index];
     const id4_pipeline_parameter_window_request_t* window_request =
         id4_pipeline_parameter_window_resolve_request(
             parameter_window, parameter_tensor->global_request_offset + i);
@@ -1239,6 +1243,7 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
     id4_pipeline_parameter_slab_set_t* parameter_slabs,
     iree_hal_semaphore_list_t base_wait_list,
     iree_hal_semaphore_list_t explicit_parameter_wait_list,
+    id4_pipeline_program_issue_wait_flags_t flags,
     iree_hal_semaphore_t** semaphores, uint64_t* payload_values,
     iree_hal_semaphore_list_t* out_wait_list) {
   IREE_ASSERT_ARGUMENT(region);
@@ -1246,8 +1251,11 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
   *out_wait_list = iree_hal_semaphore_list_empty();
   const bool uses_explicit_parameter_waits =
       explicit_parameter_wait_list.count != 0;
+  const bool includes_retained_parameter_waits = iree_all_bits_set(
+      flags, ID4_PIPELINE_PROGRAM_ISSUE_WAIT_FLAG_INCLUDE_PARAMETER_READINESS);
   if (region->parameter_load_group_count != 0 &&
-      !uses_explicit_parameter_waits && !parameter_slabs) {
+      includes_retained_parameter_waits && !uses_explicit_parameter_waits &&
+      !parameter_slabs) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program issue region %.*s requires parameter load groups but has no "
@@ -1256,8 +1264,9 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
   }
 
   const iree_host_size_t parameter_wait_count =
-      uses_explicit_parameter_waits ? explicit_parameter_wait_list.count
-                                    : region->parameter_load_group_count;
+      uses_explicit_parameter_waits       ? explicit_parameter_wait_list.count
+      : includes_retained_parameter_waits ? region->parameter_load_group_count
+                                          : 0;
   iree_host_size_t wait_count = 0;
   if (!iree_host_size_checked_add(base_wait_list.count, parameter_wait_count,
                                   &wait_count)) {
@@ -1275,7 +1284,7 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
       payload_values[target_index] =
           explicit_parameter_wait_list.payload_values[i];
     }
-  } else {
+  } else if (includes_retained_parameter_waits) {
     for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
       const iree_host_size_t target_index = base_wait_list.count + i;
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_set_load_group_ready_at(
@@ -2623,17 +2632,19 @@ iree_status_t id4_pipeline_program_prepared_issue(
       prepared->plan, &planned_load_group_count));
   const iree_host_size_t slab_set_load_group_count =
       id4_pipeline_parameter_slab_set_load_group_count(parameter_slabs);
-  if (planned_load_group_count != slab_set_load_group_count) {
+  const bool uses_deferred_parameter_loads =
+      id4_pipeline_parameter_slab_set_has_deferred_load_context(
+          parameter_slabs);
+  if (uses_deferred_parameter_loads &&
+      planned_load_group_count != slab_set_load_group_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program issue parameter load group count mismatch: plan has %" PRIhsz
         " groups but slab set has %" PRIhsz,
         planned_load_group_count, slab_set_load_group_count);
   }
-  const bool uses_region_parameter_waits = slab_set_load_group_count != 0;
-  const bool uses_deferred_parameter_loads =
-      id4_pipeline_parameter_slab_set_has_deferred_load_context(
-          parameter_slabs);
+  const bool uses_region_parameter_waits =
+      uses_deferred_parameter_loads && slab_set_load_group_count != 0;
   if (prepared->uses_compact_parameter_windows &&
       !uses_deferred_parameter_loads) {
     return iree_make_status(
@@ -2927,8 +2938,11 @@ iree_status_t id4_pipeline_program_prepared_issue(
         iree_hal_semaphore_list_empty();
     status = id4_pipeline_program_prepared_make_region_wait_list(
         region, parameter_slabs, base_region_wait_list,
-        parameter_window_load_wait_list, region_wait_semaphores,
-        region_wait_payload_values, &region_wait_list);
+        parameter_window_load_wait_list,
+        uses_region_parameter_waits
+            ? ID4_PIPELINE_PROGRAM_ISSUE_WAIT_FLAG_INCLUDE_PARAMETER_READINESS
+            : 0,
+        region_wait_semaphores, region_wait_payload_values, &region_wait_list);
     if (!iree_status_is_ok(status)) break;
 
     iree_hal_semaphore_list_t region_signal_list =

@@ -392,11 +392,13 @@ static iree_status_t id4_smoke_stage_create_plan(
 
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("smoke"), /*placement_id=*/0,
-          ID4_SMOKE_STAGE_PARAMETER_BINDING_SLOT, options->queue_affinity,
+          /*placement_id=*/0, ID4_SMOKE_STAGE_PARAMETER_BINDING_SLOT,
+          options->queue_affinity,
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
-          /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
+          /*byte_length=*/16, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(/*count=*/1, &request);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("parameters.gather"), IREE_SV("smoke"),
@@ -463,6 +465,7 @@ static iree_status_t id4_smoke_stage_create_plan(
     create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
+    create_options.parameter_request_tables = &request_table;
     create_options.parameter_load_step_count = 1;
     create_options.parameter_load_steps = &load_step;
     create_options.memory_slab_count = 1;
@@ -720,9 +723,13 @@ static iree_status_t id4_smoke_stage_prepare(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage kernel library is required");
   }
-  if (!options->parameter_provider) {
+  if (options->parameter_source.kind !=
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT ||
+      options->parameter_source.residency !=
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "smoke stage parameter provider is required");
+                            "smoke stage requires resident checkpoint "
+                            "parameters");
   }
   if (!stage->kernel_cache) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -761,7 +768,7 @@ static iree_status_t id4_smoke_stage_prepare(
   load_options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   load_options.encoder_staging_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  load_options.provider = options->parameter_provider;
+  load_options.provider = options->parameter_source.storage.checkpoint.provider;
   load_options.kernel_library = options->kernel_library;
   load_options.kernel_cache = stage->kernel_cache;
   load_options.executable_cache = stage->base.services.executable_cache;

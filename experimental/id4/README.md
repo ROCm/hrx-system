@@ -345,6 +345,24 @@ reference. BF16 execution consumes prepared BF16 views derived from the FP8
 files; FP8 execution consumes the compact view plus scale metadata while
 producing outputs compared against the same semantic goldens.
 
+Preparation has an explicit parameter source and residency policy. Performance
+mode loads a baked execution-layout archive directly into long-lived resident
+slabs and reuses those slabs across requests. The archive stores immutable
+weights in the exact packed layout consumed by kernels, so ordinary server
+startup performs file-to-device gathers without rerunning RHS encoders. It also
+retains full logical source tensors when execution requires request-dependent
+slices, such as prompt-selected token embedding rows. Versioned physical-layout
+metadata ties every entry to its dtype, shape, encoding, alignment, and source
+schema before any bytes are loaded.
+
+Memory-constrained execution uses bounded parameter residency and accepts the
+additional refill submissions required to keep the live device window small.
+This is a distinct scheduling policy rather than an implicit fallback. Both
+policies preserve compact FP8 static weights; neither keeps a model-scale BF16
+expansion or a second encoded-weight cache resident. Loading from original
+checkpoint layouts remains the artifact-construction and bring-up path, while
+baked execution-layout archives are the normal steady-state server source.
+
 ### Loom Embedding
 
 `id4` should use the public `loomc` API directly. The Loom command-line tools

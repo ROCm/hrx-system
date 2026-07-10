@@ -148,53 +148,87 @@ static iree_status_t id4_pipeline_validate_prepare_options(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "prepare extension structures are not supported");
   }
-  const id4_pipeline_stage_prepare_flags_t allowed_flags =
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE |
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS;
-  if (iree_any_bit_set(options->flags, ~allowed_flags)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported prepare flags 0x%x", options->flags);
+  const id4_pipeline_stage_parameter_source_t* parameter_source =
+      &options->parameter_source;
+  switch (parameter_source->kind) {
+    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE:
+      if (parameter_source->residency !=
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter-free preparation cannot select parameter residency");
+      }
+      break;
+    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      if (!parameter_source->storage.checkpoint.provider) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "checkpoint parameter provider is required");
+      }
+      if (parameter_source->residency !=
+              ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT &&
+          parameter_source->residency !=
+              ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "checkpoint parameter residency policy is invalid");
+      }
+      break;
+    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      if (parameter_source->residency !=
+              ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT ||
+          !parameter_source->storage.execution_layout.index ||
+          !parameter_source->storage.execution_layout.provider ||
+          iree_string_view_is_empty(
+              parameter_source->storage.execution_layout.scope)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "baked execution-layout parameters require an index, provider, "
+            "scope, and resident policy");
+      }
+      break;
+    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT:
+      if (parameter_source->residency !=
+              ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT ||
+          !parameter_source->storage.resident.slabs) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "resident parameters require a slab set and resident policy");
+      }
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter source kind %u is invalid",
+                              parameter_source->kind);
   }
-  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
-      options->flags,
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
-  const bool reuse_parameter_slabs = iree_all_bits_set(
-      options->flags, ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
-  if (defer_parameter_loads_to_issue && reuse_parameter_slabs) {
+  const bool submits_parameter_work =
+      parameter_source->kind ==
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT ||
+      (parameter_source->kind ==
+           ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT &&
+       parameter_source->residency ==
+           ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+  const bool streams_parameters =
+      parameter_source->kind ==
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT &&
+      parameter_source->residency ==
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
+  if (submits_parameter_work && options->signal_semaphore_list.count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "deferred parameter loading cannot reuse parameter slabs");
+        "resident parameter loading requires a prepare signal");
   }
-  if (reuse_parameter_slabs && !options->parameter_slabs) {
+  if (!submits_parameter_work && !streams_parameters &&
+      options->wait_semaphore_list.count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slab reuse requires a parameter slab set");
+        "parameter-free or already resident preparation cannot wait on "
+        "parameter semaphores");
   }
-  if (!reuse_parameter_slabs && options->parameter_slabs) {
+  if (!submits_parameter_work && options->signal_semaphore_list.count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slabs require explicit parameter slab reuse");
-  }
-  if (reuse_parameter_slabs && options->parameter_provider) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slab reuse cannot also load from a parameter provider");
-  }
-  if (reuse_parameter_slabs && options->wait_semaphore_list.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slab reuse cannot wait on prepare semaphores");
-  }
-  if (reuse_parameter_slabs && options->signal_semaphore_list.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slab reuse cannot signal prepare readiness");
-  }
-  if (defer_parameter_loads_to_issue &&
-      options->signal_semaphore_list.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "deferred parameter loading cannot signal prepare readiness");
+        "preparation without resident parameter loading cannot signal "
+        "parameter readiness");
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("prepare wait")));

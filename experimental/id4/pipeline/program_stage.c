@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/parameter_layout.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/pipeline/program_plan.h"
 #include "experimental/id4/pipeline/program_prepare.h"
@@ -345,6 +346,41 @@ static iree_status_t id4_pipeline_program_stage_emit_lifecycle(
   return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
 }
 
+typedef struct id4_pipeline_program_stage_parameter_policy_name_t {
+  // Parameter source kind selected by the policy.
+  id4_pipeline_stage_parameter_source_kind_t kind;
+  // Parameter residency selected by the policy.
+  id4_pipeline_stage_parameter_residency_t residency;
+  // Stable diagnostic name for the complete policy.
+  iree_string_view_t name;
+} id4_pipeline_program_stage_parameter_policy_name_t;
+
+static iree_string_view_t id4_pipeline_program_stage_parameter_policy_name(
+    const id4_pipeline_stage_parameter_source_t* source) {
+  static const id4_pipeline_program_stage_parameter_policy_name_t names[] = {
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE, IREE_SVL("none")},
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+       IREE_SVL("checkpoint/resident")},
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
+       IREE_SVL("checkpoint/streaming")},
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+       IREE_SVL("execution_layout/resident")},
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, IREE_SVL("resident")},
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    if (names[i].kind == source->kind &&
+        names[i].residency == source->residency) {
+      return names[i].name;
+    }
+  }
+  return IREE_SV("invalid");
+}
+
 iree_status_t id4_pipeline_program_stage_create_plan(
     const id4_pipeline_program_stage_plan_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_plan_t** out_plan) {
@@ -369,6 +405,7 @@ iree_status_t id4_pipeline_program_stage_create_plan(
       id4_pipeline_parameter_slab_device_local_params(
           options->stage_options->queue_affinity,
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
           options->alignment);
 
@@ -465,61 +502,30 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
   }
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
-  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
-      options->stage_options->flags,
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
-  const bool reuse_parameter_slabs =
-      iree_all_bits_set(options->stage_options->flags,
-                        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
-  if (parameter_slab_count == 0 && options->stage_options->parameter_provider) {
+  const id4_pipeline_stage_parameter_source_t* parameter_source =
+      &options->stage_options->parameter_source;
+  if (parameter_slab_count == 0 &&
+      parameter_source->kind != ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "program stage parameter provider requires planned parameter slabs");
+        "program stage parameter source requires planned parameter slabs");
   }
-  if (parameter_slab_count != 0 && !reuse_parameter_slabs &&
-      !options->stage_options->parameter_provider) {
+  if (parameter_slab_count != 0 &&
+      parameter_source->kind == ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "program stage parameter provider is required by the plan");
+        "program stage parameter source is required by the plan");
   }
-  if (parameter_slab_count != 0 && reuse_parameter_slabs) {
+  if (parameter_source->kind ==
+      ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
     if (id4_pipeline_parameter_slab_set_has_deferred_load_context(
-            options->stage_options->parameter_slabs)) {
+            parameter_source->storage.resident.slabs)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "parameter slab reuse requires resident parameter slabs");
     }
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
-        options->plan, options->stage_options->parameter_slabs));
-  }
-  if (parameter_slab_count != 0 && !defer_parameter_loads_to_issue &&
-      !reuse_parameter_slabs &&
-      options->stage_options->signal_semaphore_list.count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "program stage prepare signal is required by parameter loading");
-  }
-  if (parameter_slab_count == 0 && defer_parameter_loads_to_issue) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "deferred parameter loading requires planned parameter slabs");
-  }
-  if (parameter_slab_count == 0 && reuse_parameter_slabs) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter slab reuse requires planned parameter slabs");
-  }
-  if (parameter_slab_count == 0 &&
-      options->stage_options->wait_semaphore_list.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "program stage prepare waits require planned parameter loading");
-  }
-  if (parameter_slab_count == 0 &&
-      options->stage_options->signal_semaphore_list.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "program stage prepare signals require planned parameter loading");
+        options->plan, parameter_source->storage.resident.slabs));
   }
   return iree_ok_status();
 }
@@ -533,25 +539,30 @@ iree_status_t id4_pipeline_program_stage_prepare(
       id4_pipeline_program_stage_validate_prepare_options(options));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_stage_validate_prepare_plan(options));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_stage_emit_lifecycle(
+      options->stage_name, options->stage_options->diagnostics_sink,
+      IREE_SV("stage.prepare.parameter_policy"),
+      id4_pipeline_program_stage_parameter_policy_name(
+          &options->stage_options->parameter_source)));
 
   id4_pipeline_parameter_slab_set_t* parameter_slabs = NULL;
   id4_pipeline_program_prepared_t* prepared_program = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
   bool parameter_load_submitted = false;
-  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
-      options->stage_options->flags,
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
-  const bool reuse_parameter_slabs =
-      iree_all_bits_set(options->stage_options->flags,
-                        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
-  const iree_host_size_t parameter_slab_count =
-      id4_pipeline_plan_parameter_slab_count(options->plan);
-
+  const id4_pipeline_stage_parameter_source_t* parameter_source =
+      &options->stage_options->parameter_source;
+  const bool streams_parameters =
+      parameter_source->kind ==
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT &&
+      parameter_source->residency ==
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
   iree_status_t status = iree_ok_status();
-  if (parameter_slab_count != 0 && reuse_parameter_slabs) {
-    parameter_slabs = options->stage_options->parameter_slabs;
+  if (parameter_source->kind ==
+      ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
+    parameter_slabs = parameter_source->storage.resident.slabs;
     id4_pipeline_parameter_slab_set_retain(parameter_slabs);
-  } else if (parameter_slab_count != 0) {
+  } else if (parameter_source->kind ==
+             ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
     id4_pipeline_parameter_slab_set_load_options_t load_options;
     memset(&load_options, 0, sizeof(load_options));
     load_options.structure_size = sizeof(load_options);
@@ -559,7 +570,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
         ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
     load_options.encoder_staging_memory_type =
         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    load_options.provider = options->stage_options->parameter_provider;
+    load_options.provider = parameter_source->storage.checkpoint.provider;
     load_options.kernel_library = options->stage_options->kernel_library;
     load_options.kernel_cache = options->kernel_cache;
     load_options.executable_cache = options->executable_cache;
@@ -572,7 +583,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     load_options.signal_semaphore_list =
         options->stage_options->signal_semaphore_list;
     load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
-    if (defer_parameter_loads_to_issue) {
+    if (streams_parameters) {
       status = id4_pipeline_plan_prepare_parameter_load_context(
           options->plan, &load_options, host_allocator, &parameter_slabs);
     } else {
@@ -580,12 +591,28 @@ iree_status_t id4_pipeline_program_stage_prepare(
           options->plan, &load_options, host_allocator, &parameter_slabs);
       parameter_load_submitted = iree_status_is_ok(status);
     }
+  } else if (parameter_source->kind ==
+             ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+    id4_pipeline_parameter_layout_load_options_t load_options;
+    memset(&load_options, 0, sizeof(load_options));
+    load_options.structure_size = sizeof(load_options);
+    load_options.index = parameter_source->storage.execution_layout.index;
+    load_options.provider = parameter_source->storage.execution_layout.provider;
+    load_options.scope = parameter_source->storage.execution_layout.scope;
+    load_options.wait_semaphore_list =
+        options->stage_options->wait_semaphore_list;
+    load_options.signal_semaphore_list =
+        options->stage_options->signal_semaphore_list;
+    load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
+    status = id4_pipeline_parameter_layout_load(
+        options->plan, &load_options, host_allocator, &parameter_slabs);
+    parameter_load_submitted = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_program_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
-    if (defer_parameter_loads_to_issue) {
+    if (streams_parameters) {
       prepare_options.flags =
           ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS;
     }

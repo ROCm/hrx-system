@@ -51,10 +51,11 @@ TEST(PipelineParameterSlab, MakeDeviceLocalPlanUsesSlabAlignment) {
                                   /*length=*/16));
   id4_pipeline_parameter_slab_plan_t plan =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/2, /*binding_slot=*/3,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/2, /*binding_slot=*/3, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/16,
-          /*alignment=*/64, /*request_count=*/1, &request);
+          /*alignment=*/64);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(/*count=*/1, &request);
   EXPECT_EQ(plan.placement_id, 2u);
   EXPECT_EQ(plan.binding_slot, 3u);
   EXPECT_EQ(plan.byte_length, 16u);
@@ -62,8 +63,8 @@ TEST(PipelineParameterSlab, MakeDeviceLocalPlanUsesSlabAlignment) {
   EXPECT_EQ(plan.target_params.type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
   EXPECT_EQ(plan.target_params.access, IREE_HAL_MEMORY_ACCESS_ALL);
   EXPECT_EQ(plan.target_params.min_alignment, 64u);
-  EXPECT_EQ(plan.request_count, 1u);
-  EXPECT_EQ(plan.requests, &request);
+  EXPECT_EQ(request_table.count, 1u);
+  EXPECT_EQ(request_table.values, &request);
 }
 
 TEST(PipelineParameterSlab, ValidateLoadStepRange) {
@@ -79,10 +80,12 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
   };
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/1, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/32,
-          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+          /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(requests),
+                                                requests);
 
   id4_pipeline_parameter_load_step_t step =
       id4_pipeline_parameter_gather_load_step(
@@ -90,24 +93,24 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
           /*target_slab_index=*/0, /*request_offset=*/1,
           /*request_count=*/1);
   IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
-      &step, /*slab_count=*/1, &slab));
+      &step, /*slab_count=*/1, &slab, &request_table));
 
   step.request_count = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_parameter_load_step_validate(
-                            &step, /*slab_count=*/1, &slab));
+                            &step, /*slab_count=*/1, &slab, &request_table));
 
   step.request_count = 2;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         id4_pipeline_parameter_load_step_validate(
-                            &step, /*slab_count=*/1, &slab));
+                            &step, /*slab_count=*/1, &slab, &request_table));
 
   step = id4_pipeline_parameter_gather_load_step(
       iree_string_view_empty(), IREE_SV("scope"), /*target_slab_index=*/0,
       /*request_offset=*/0, /*request_count=*/1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_parameter_load_step_validate(
-                            &step, /*slab_count=*/1, &slab));
+                            &step, /*slab_count=*/1, &slab, &request_table));
 }
 
 TEST(PipelineParameterSlab, ValidateIndexedGatherLoadStepRange) {
@@ -123,10 +126,12 @@ TEST(PipelineParameterSlab, ValidateIndexedGatherLoadStepRange) {
   };
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/1, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/32,
-          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+          /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(requests),
+                                                requests);
 
   const iree_host_size_t request_indices[] = {1, 0};
   id4_pipeline_parameter_load_step_t step =
@@ -135,13 +140,13 @@ TEST(PipelineParameterSlab, ValidateIndexedGatherLoadStepRange) {
           /*target_slab_index=*/0, IREE_ARRAYSIZE(request_indices),
           request_indices);
   IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
-      &step, /*slab_count=*/1, &slab));
+      &step, /*slab_count=*/1, &slab, &request_table));
 
   const iree_host_size_t bad_request_indices[] = {1, 2};
   step.request_indices = bad_request_indices;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         id4_pipeline_parameter_load_step_validate(
-                            &step, /*slab_count=*/1, &slab));
+                            &step, /*slab_count=*/1, &slab, &request_table));
 }
 
 TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
@@ -153,10 +158,12 @@ TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
   };
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/1, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/32,
-          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+          /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(requests),
+                                                requests);
   id4_pipeline_tensor_shape_t weight_shape = {
       /*.rank=*/2,
       /*.dims=*/{4, 4},
@@ -180,7 +187,7 @@ TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
           IREE_SV("parameters.encode_fp8"), IREE_ARRAYSIZE(sources), sources,
           /*target_slab_index=*/0, /*request_offset=*/0);
   IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
-      &step, /*slab_count=*/1, &slab));
+      &step, /*slab_count=*/1, &slab, &request_table));
 
   id4_pipeline_parameter_load_source_t bad_sources[] = {
       sources[0],
@@ -190,7 +197,7 @@ TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
   step.sources = bad_sources;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_parameter_load_step_validate(
-                            &step, /*slab_count=*/1, &slab));
+                            &step, /*slab_count=*/1, &slab, &request_table));
 }
 
 TEST(PipelineParameterSlab, GroupsDirectGathersAndContiguousEncoders) {
@@ -331,15 +338,12 @@ TEST(PipelineParameterSlab, EnumeratorCoversSelectedRequestRange) {
           id4_pipeline_parameter_span(/*parameter_offset=*/8,
                                       /*buffer_offset=*/16, /*length=*/32)),
   };
-  id4_pipeline_parameter_slab_plan_t slab =
-      id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
-          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/48,
-          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(requests),
+                                                requests);
   id4_pipeline_parameter_slab_enumerator_state_t state = {
-      // Slab containing the full request table.
-      /*.slab=*/&slab,
+      // Full provider request table.
+      /*.request_table=*/&request_table,
       // First selected request ordinal.
       /*.request_offset=*/1,
       // Number of selected requests.
@@ -372,16 +376,13 @@ TEST(PipelineParameterSlab, EnumeratorCoversExplicitRequestIndices) {
           id4_pipeline_parameter_span(/*parameter_offset=*/8,
                                       /*buffer_offset=*/16, /*length=*/32)),
   };
-  id4_pipeline_parameter_slab_plan_t slab =
-      id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
-          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/48,
-          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(requests),
+                                                requests);
   const iree_host_size_t request_indices[] = {1, 0};
   id4_pipeline_parameter_slab_enumerator_state_t state = {
-      // Slab containing the full request table.
-      /*.slab=*/&slab,
+      // Full provider request table.
+      /*.request_table=*/&request_table,
       // Contiguous offset ignored when explicit request indices are present.
       /*.request_offset=*/0,
       // Number of selected requests.

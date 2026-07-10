@@ -458,10 +458,11 @@ TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
                                       /*buffer_offset=*/0, /*length=*/16));
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
-          /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
-          &target_request);
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+          /*byte_length=*/16, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(/*count=*/1, &target_request);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("parameters.gather.weight"), IREE_SV("parameters"),
@@ -477,6 +478,7 @@ TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = 1;
   plan_options.parameter_load_steps = &load_step;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
@@ -549,13 +551,14 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   };
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
-          /*byte_length=*/2048, /*alignment=*/16,
-          IREE_ARRAYSIZE(target_requests), target_requests);
+          /*byte_length=*/2048, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(IREE_ARRAYSIZE(target_requests),
+                                                target_requests);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
@@ -607,6 +610,7 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = IREE_ARRAYSIZE(load_steps);
   plan_options.parameter_load_steps = load_steps;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
@@ -792,12 +796,13 @@ static void RunFileBackedDirectGatherManySmall(
   }
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
-          target_byte_length, /*alignment=*/16, kRequestCount, target_requests);
+          target_byte_length, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(kRequestCount, target_requests);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("parameters.gather.token_embedding"), IREE_SV("parameters"),
@@ -813,6 +818,7 @@ static void RunFileBackedDirectGatherManySmall(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = 1;
   plan_options.parameter_load_steps = &load_step;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
@@ -946,13 +952,15 @@ static void RunCompactLinearRhsTileEncoding(
   }
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
           /*byte_length=*/kTargetRequestCount * kCompactRhsTileByteLength,
-          /*alignment=*/16, kTargetRequestCount, target_requests);
+          /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(kTargetRequestCount,
+                                                target_requests);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
@@ -1021,6 +1029,7 @@ static void RunCompactLinearRhsTileEncoding(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = kTargetRequestCount;
   plan_options.parameter_load_steps = load_steps;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
@@ -1186,11 +1195,12 @@ static void RunCompactFp8LinearRhsTileEncoding(
                                                      /*length=*/kByteLength));
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-          kByteLength, /*alignment=*/16, /*request_count=*/1, &target_request);
+          kByteLength, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(/*count=*/1, &target_request);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
@@ -1217,6 +1227,7 @@ static void RunCompactFp8LinearRhsTileEncoding(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = 1;
   plan_options.parameter_load_steps = &load_step;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
@@ -1397,12 +1408,13 @@ static void RunFileBackedQwenRhsTileEncoding(
   }
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
-          IREE_HAL_QUEUE_AFFINITY_ANY,
+          /*placement_id=*/0, /*binding_slot=*/0, IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-          /*byte_length=*/load_step_count * kByteLength, /*alignment=*/16,
-          load_step_count, target_requests);
+          /*byte_length=*/load_step_count * kByteLength, /*alignment=*/16);
+  id4_pipeline_parameter_request_table_t request_table =
+      id4_pipeline_make_parameter_request_table(load_step_count,
+                                                target_requests);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
@@ -1442,6 +1454,7 @@ static void RunFileBackedQwenRhsTileEncoding(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
+  plan_options.parameter_request_tables = &request_table;
   plan_options.parameter_load_step_count = load_step_count;
   plan_options.parameter_load_steps = load_steps;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;

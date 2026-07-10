@@ -333,6 +333,8 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t parameter_slab_count;
   // Parameter slabs to copy into the plan.
   const id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Provider request tables parallel to |parameter_slabs|.
+  const id4_pipeline_parameter_request_table_t* parameter_request_tables;
   // Number of planned parameter tensors.
   iree_host_size_t parameter_tensor_count;
   // Planned parameter tensors in program parameter-operation order.
@@ -411,6 +413,12 @@ iree_host_size_t id4_pipeline_plan_parameter_slab_count(
 // Returns parameter slab |index| or NULL when out of range.
 const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the provider request table for parameter slab |index| or NULL when
+// out of range.
+const id4_pipeline_parameter_request_table_t*
+id4_pipeline_plan_parameter_request_table_at(const id4_pipeline_plan_t* plan,
+                                             iree_host_size_t index);
 
 // Returns the number of planned parameter tensors in |plan|.
 iree_host_size_t id4_pipeline_plan_parameter_tensor_count(

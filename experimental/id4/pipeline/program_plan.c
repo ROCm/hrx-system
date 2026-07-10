@@ -2571,14 +2571,17 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   id4_pipeline_parameter_slab_plan_t parameter_slab;
+  id4_pipeline_parameter_request_table_t parameter_request_table;
   memset(&parameter_slab, 0, sizeof(parameter_slab));
+  memset(&parameter_request_table, 0, sizeof(parameter_request_table));
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     parameter_slab = id4_pipeline_make_parameter_slab_plan(
-        options->parameter_scope, options->parameter_slab_placement_id,
+        options->parameter_slab_placement_id,
         options->parameter_slab_binding_slot,
         options->parameter_slab_target_params, parameter_slab_byte_length,
-        options->parameter_slab_alignment, counts.parameter_request_count,
-        parameter_requests);
+        options->parameter_slab_alignment);
+    parameter_request_table = id4_pipeline_make_parameter_request_table(
+        counts.parameter_request_count, parameter_requests);
   }
 
   iree_string_view_t constant_slab_name = iree_string_view_empty();
@@ -2707,6 +2710,8 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
     create_options.parameter_slabs =
         counts.parameter_count == 0 ? NULL : &parameter_slab;
+    create_options.parameter_request_tables =
+        counts.parameter_count == 0 ? NULL : &parameter_request_table;
     create_options.parameter_tensor_count = counts.parameter_count;
     create_options.parameter_tensors =
         counts.parameter_count == 0 ? NULL : parameter_tensors;

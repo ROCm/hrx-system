@@ -40,6 +40,8 @@ struct id4_pipeline_parameter_window_schedule_t {
   id4_pipeline_plan_t* plan;
   // Compact parameter slab plans in schedule load order.
   id4_pipeline_parameter_slab_plan_t* slabs;
+  // Compact provider request tables parallel to slabs.
+  id4_pipeline_parameter_request_table_t* request_tables;
   // Compact parameter slab loads in schedule load order.
   id4_pipeline_parameter_slab_load_t* loads;
   // Number of compact parameter slab loads.
@@ -155,14 +157,15 @@ static iree_status_t id4_pipeline_parameter_window_build_global_offsets(
   for (iree_host_size_t i = 0; i < slab_count && iree_status_is_ok(status);
        ++i) {
     offsets[i] = global_request_count;
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(plan, i);
-    if (!slab) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "parameter slab %" PRIhsz " is missing", i);
+    const id4_pipeline_parameter_request_table_t* request_table =
+        id4_pipeline_plan_parameter_request_table_at(plan, i);
+    if (!request_table) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "parameter request table %" PRIhsz " is missing", i);
       break;
     }
-    if (!iree_host_size_checked_add(global_request_count, slab->request_count,
+    if (!iree_host_size_checked_add(global_request_count, request_table->count,
                                     &global_request_count)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "parameter window request count overflow");
@@ -484,7 +487,10 @@ static iree_status_t id4_pipeline_parameter_window_pack_requests(
        original_slab_index < original_slab_count; ++original_slab_index) {
     const id4_pipeline_parameter_slab_plan_t* original_slab =
         id4_pipeline_plan_parameter_slab_at(state->plan, original_slab_index);
-    if (!original_slab) {
+    const id4_pipeline_parameter_request_table_t* original_request_table =
+        id4_pipeline_plan_parameter_request_table_at(state->plan,
+                                                     original_slab_index);
+    if (!original_slab || !original_request_table) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "parameter window original slab %" PRIhsz
                               " is missing",
@@ -504,13 +510,13 @@ static iree_status_t id4_pipeline_parameter_window_pack_requests(
     iree_host_size_t active_parameter_tensor_index = IREE_HOST_SIZE_MAX;
     iree_device_size_t active_parameter_tensor_offset = 0;
     for (iree_host_size_t original_request_index = 0;
-         original_request_index < original_slab->request_count;
+         original_request_index < original_request_table->count;
          ++original_request_index) {
       const iree_host_size_t global_request_index =
           global_request_offset + original_request_index;
       if (!state->request_used_bits[global_request_index]) continue;
       const id4_pipeline_parameter_request_t* original_request =
-          &original_slab->requests[original_request_index];
+          &original_request_table->values[original_request_index];
       iree_io_parameter_span_t compact_span;
       const iree_host_size_t parameter_tensor_index =
           state->parameter_tensor_indices_by_global_request
@@ -904,6 +910,11 @@ static iree_status_t id4_pipeline_parameter_window_schedule_create_empty(
                                          sizeof(schedule->loads[0]),
                                          (void**)&schedule->loads);
   }
+  if (iree_status_is_ok(status) && load_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, load_count,
+                                         sizeof(schedule->request_tables[0]),
+                                         (void**)&schedule->request_tables);
+  }
   if (iree_status_is_ok(status) && request_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, request_count,
                                          sizeof(schedule->requests[0]),
@@ -936,6 +947,10 @@ static iree_status_t id4_pipeline_parameter_window_schedule_create_empty(
   }
   if (iree_status_is_ok(status) && schedule->loads) {
     memset(schedule->loads, 0, load_count * sizeof(schedule->loads[0]));
+  }
+  if (iree_status_is_ok(status) && schedule->request_tables) {
+    memset(schedule->request_tables, 0,
+           load_count * sizeof(schedule->request_tables[0]));
   }
   if (iree_status_is_ok(status) && schedule->requests) {
     memset(schedule->requests, 0,
@@ -1091,7 +1106,10 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
     const id4_pipeline_parameter_slab_plan_t* original_slab =
         id4_pipeline_plan_parameter_slab_at(plan,
                                             window_slab->original_slab_index);
-    if (!original_slab) {
+    const id4_pipeline_parameter_request_table_t* original_request_table =
+        id4_pipeline_plan_parameter_request_table_at(
+            plan, window_slab->original_slab_index);
+    if (!original_slab || !original_request_table) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "parameter window original slab %" PRIhsz
                               " is missing",
@@ -1104,19 +1122,22 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
       const id4_pipeline_parameter_window_request_t* window_request =
           &window->requests[compact_request_index];
       const id4_pipeline_parameter_request_t* original_request =
-          &original_slab->requests[window_request->original_request_index];
+          &original_request_table
+               ->values[window_request->original_request_index];
       schedule->requests[compact_request_index] =
           id4_pipeline_parameter_request(original_request->key,
                                          window_request->span);
     }
     schedule->slabs[compact_slab_index] = id4_pipeline_make_parameter_slab_plan(
-        original_slab->scope, original_slab->placement_id,
-        window_slab->binding_slot, window_slab->target_params,
-        window_slab->byte_length, window_slab->alignment,
-        window_slab->request_count,
-        window_slab->request_count == 0
-            ? NULL
-            : &schedule->requests[window_slab->request_offset]);
+        original_slab->placement_id, window_slab->binding_slot,
+        window_slab->target_params, window_slab->byte_length,
+        window_slab->alignment);
+    schedule->request_tables[compact_slab_index] =
+        id4_pipeline_make_parameter_request_table(
+            window_slab->request_count,
+            window_slab->request_count == 0
+                ? NULL
+                : &schedule->requests[window_slab->request_offset]);
 
     const id4_pipeline_device_placement_t* placement =
         id4_pipeline_plan_placement_at(plan, original_slab->placement_id);
@@ -1139,6 +1160,8 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
         .slab_index = compact_slab_index,
         // Compact slab plan owned by the schedule.
         .slab = &schedule->slabs[compact_slab_index],
+        // Compact provider requests owned by the schedule.
+        .request_table = &schedule->request_tables[compact_slab_index],
         // Device index inherited from the original slab placement.
         .device_index = placement->device_index,
         // HAL device borrowed from the retained plan device group.
@@ -1333,6 +1356,7 @@ void id4_pipeline_parameter_window_schedule_release(
   iree_allocator_free(host_allocator, schedule->request_indices);
   iree_allocator_free(host_allocator, schedule->load_steps);
   iree_allocator_free(host_allocator, schedule->requests);
+  iree_allocator_free(host_allocator, schedule->request_tables);
   iree_allocator_free(host_allocator, schedule->loads);
   iree_allocator_free(host_allocator, schedule->slabs);
   iree_allocator_free(host_allocator, schedule);

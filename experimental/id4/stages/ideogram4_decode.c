@@ -260,11 +260,13 @@ static iree_status_t id4_ideogram4_decode_stage_prepare(
   id4_pipeline_stage_prepare_options_t wrapped_stage_options;
   const id4_pipeline_stage_prepare_options_t* stage_options = options;
   iree_status_t status = iree_ok_status();
-  if (options && options->parameter_provider) {
+  if (options && options->parameter_source.kind ==
+                     ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
     id4_vae_parameter_provider_create_options_t parameter_options;
     memset(&parameter_options, 0, sizeof(parameter_options));
     parameter_options.structure_size = sizeof(parameter_options);
-    parameter_options.source_provider = options->parameter_provider;
+    parameter_options.source_provider =
+        options->parameter_source.storage.checkpoint.provider;
     parameter_options.plan = plan;
     parameter_options.kernel_library = options->kernel_library;
     parameter_options.kernel_cache = stage->kernel_cache;
@@ -274,7 +276,9 @@ static iree_status_t id4_ideogram4_decode_stage_prepare(
         &parameter_options, stage->host_allocator, &parameter_provider);
     if (iree_status_is_ok(status)) {
       wrapped_stage_options = *options;
-      wrapped_stage_options.parameter_provider = parameter_provider;
+      wrapped_stage_options.parameter_source =
+          id4_pipeline_stage_checkpoint_parameters(
+              parameter_provider, options->parameter_source.residency);
       stage_options = &wrapped_stage_options;
     }
   }

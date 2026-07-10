@@ -762,11 +762,10 @@ static iree_status_t PrepareQwenBundle(QwenBenchmarkContext* context,
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.flags =
-      defers_parameter_loads
-          ? ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE
-          : 0;
-  prepare_options.parameter_provider = context->parameter_provider.get();
+  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
+      context->parameter_provider.get(),
+      defers_parameter_loads ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
+                             : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
   prepare_options.kernel_library = context->kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;

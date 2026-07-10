@@ -86,11 +86,12 @@ static const id4_pipeline_parameter_request_t* FindParameterSlabRequest(
     const id4_pipeline_plan_t* plan, iree_string_view_t key) {
   for (iree_host_size_t i = 0; i < id4_pipeline_plan_parameter_slab_count(plan);
        ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(plan, i);
-    if (!slab) continue;
-    for (iree_host_size_t j = 0; j < slab->request_count; ++j) {
-      const id4_pipeline_parameter_request_t* request = &slab->requests[j];
+    const id4_pipeline_parameter_request_table_t* request_table =
+        id4_pipeline_plan_parameter_request_table_at(plan, i);
+    if (!request_table) continue;
+    for (iree_host_size_t j = 0; j < request_table->count; ++j) {
+      const id4_pipeline_parameter_request_t* request =
+          &request_table->values[j];
       if (iree_string_view_equal(request->key, key)) return request;
     }
   }
@@ -101,10 +102,13 @@ static const id4_pipeline_parameter_request_t* LoadStepTargetRequest(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_load_step_t* load_step) {
   if (!load_step || load_step->request_count != 1) return nullptr;
-  const id4_pipeline_parameter_slab_plan_t* slab =
-      id4_pipeline_plan_parameter_slab_at(plan, load_step->target_slab_index);
-  if (!slab || load_step->request_offset >= slab->request_count) return nullptr;
-  return &slab->requests[load_step->request_offset];
+  const id4_pipeline_parameter_request_table_t* request_table =
+      id4_pipeline_plan_parameter_request_table_at(
+          plan, load_step->target_slab_index);
+  if (!request_table || load_step->request_offset >= request_table->count) {
+    return nullptr;
+  }
+  return &request_table->values[load_step->request_offset];
 }
 
 static const id4_pipeline_parameter_load_step_t* FindEncodedLoadStep(

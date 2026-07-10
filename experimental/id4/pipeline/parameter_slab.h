@@ -75,10 +75,8 @@ id4_pipeline_parameter_slab_device_local_params(
   return params;
 }
 
-// Planned parameter slab populated during prepare.
+// Planned resident parameter allocation populated during prepare.
 typedef struct id4_pipeline_parameter_slab_plan_t {
-  // Provider scope containing all request keys in this slab.
-  iree_string_view_t scope;
   // Placement where the slab is allocated.
   id4_pipeline_device_placement_id_t placement_id;
   // Issue-time binding-table slot used for this slab.
@@ -89,11 +87,15 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
   iree_device_size_t byte_length;
   // Required slab base alignment in bytes.
   iree_device_size_t alignment;
-  // Number of parameter requests.
-  iree_host_size_t request_count;
-  // Parameter requests in gather enumeration order.
-  const id4_pipeline_parameter_request_t* requests;
 } id4_pipeline_parameter_slab_plan_t;
+
+// Provider requests that populate one planned parameter slab.
+typedef struct id4_pipeline_parameter_request_table_t {
+  // Number of source-to-target requests in gather enumeration order.
+  iree_host_size_t count;
+  // Source-to-target requests in gather enumeration order.
+  const id4_pipeline_parameter_request_t* values;
+} id4_pipeline_parameter_request_table_t;
 
 // Prepare-time parameter loading step kind.
 typedef uint32_t id4_pipeline_parameter_load_step_kind_t;
@@ -361,45 +363,48 @@ id4_pipeline_parameter_encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_load
   return step;
 }
 
-// Returns a parameter slab plan value for |requests|.
+// Returns a parameter slab allocation plan.
 static inline id4_pipeline_parameter_slab_plan_t
 id4_pipeline_make_parameter_slab_plan(
-    iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
-    uint32_t binding_slot, iree_hal_buffer_params_t target_params,
-    iree_device_size_t byte_length, iree_device_size_t alignment,
-    iree_host_size_t request_count,
-    const id4_pipeline_parameter_request_t* requests) {
+    id4_pipeline_device_placement_id_t placement_id, uint32_t binding_slot,
+    iree_hal_buffer_params_t target_params, iree_device_size_t byte_length,
+    iree_device_size_t alignment) {
   id4_pipeline_parameter_slab_plan_t plan;
-  plan.scope = scope;
   plan.placement_id = placement_id;
   plan.binding_slot = binding_slot;
   plan.target_params = target_params;
   plan.byte_length = byte_length;
   plan.alignment = alignment;
-  plan.request_count = request_count;
-  plan.requests = requests;
   return plan;
 }
 
-// Returns a device-local parameter slab plan value for |requests|.
+// Returns a device-local parameter slab allocation plan.
 static inline id4_pipeline_parameter_slab_plan_t
 id4_pipeline_make_device_local_parameter_slab_plan(
-    iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
-    uint32_t binding_slot, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_buffer_usage_t usage, iree_device_size_t byte_length,
-    iree_device_size_t alignment, iree_host_size_t request_count,
-    const id4_pipeline_parameter_request_t* requests) {
+    id4_pipeline_device_placement_id_t placement_id, uint32_t binding_slot,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_usage_t usage,
+    iree_device_size_t byte_length, iree_device_size_t alignment) {
   return id4_pipeline_make_parameter_slab_plan(
-      scope, placement_id, binding_slot,
+      placement_id, binding_slot,
       id4_pipeline_parameter_slab_device_local_params(queue_affinity, usage,
                                                       alignment),
-      byte_length, alignment, request_count, requests);
+      byte_length, alignment);
+}
+
+// Returns a parameter request table over |values|.
+static inline id4_pipeline_parameter_request_table_t
+id4_pipeline_make_parameter_request_table(
+    iree_host_size_t count, const id4_pipeline_parameter_request_t* values) {
+  id4_pipeline_parameter_request_table_t table;
+  table.count = count;
+  table.values = values;
+  return table;
 }
 
 // State passed to the IREE parameter provider enumerator callback.
 typedef struct id4_pipeline_parameter_slab_enumerator_state_t {
-  // Slab plan being enumerated.
-  const id4_pipeline_parameter_slab_plan_t* slab;
+  // Request table being enumerated.
+  const id4_pipeline_parameter_request_table_t* request_table;
   // First request ordinal visible to the enumerator.
   iree_host_size_t request_offset;
   // Number of requests visible to the enumerator.
@@ -414,6 +419,8 @@ typedef struct id4_pipeline_parameter_slab_load_t {
   iree_host_size_t slab_index;
   // Planned slab metadata to load.
   const id4_pipeline_parameter_slab_plan_t* slab;
+  // Provider request table used to populate the slab.
+  const id4_pipeline_parameter_request_table_t* request_table;
   // Device index within the plan device group.
   iree_host_size_t device_index;
   // HAL device where the slab buffer is allocated and populated.
@@ -468,7 +475,8 @@ iree_status_t id4_pipeline_parameter_slab_validate(
 // Validates that |step| references a valid final slab request range.
 iree_status_t id4_pipeline_parameter_load_step_validate(
     const id4_pipeline_parameter_load_step_t* step, iree_host_size_t slab_count,
-    const id4_pipeline_parameter_slab_plan_t* slabs);
+    const id4_pipeline_parameter_slab_plan_t* slabs,
+    const id4_pipeline_parameter_request_table_t* request_tables);
 
 // Returns the number of readiness groups represented by |load_steps|.
 iree_status_t id4_pipeline_parameter_load_group_count(
@@ -500,6 +508,17 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
     iree_string_view_t stage_name, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
+// Allocates resident slab buffers without retaining or submitting a parameter
+// loading schedule. The caller must populate every byte and publish its own
+// readiness edge before issuing a bundle that owns the returned set.
+iree_status_t id4_pipeline_parameter_slab_set_create_uninitialized(
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
 // Allocates final slabs and retained readiness edges without submitting load
@@ -592,6 +611,12 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
 // range.
 const id4_pipeline_parameter_slab_plan_t*
 id4_pipeline_parameter_slab_set_plan_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index);
+
+// Returns the retained provider request table for |index| or NULL when out of
+// range.
+const id4_pipeline_parameter_request_table_t*
+id4_pipeline_parameter_slab_set_request_table_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index);
 
 // Returns the number of retained parameter load readiness groups.

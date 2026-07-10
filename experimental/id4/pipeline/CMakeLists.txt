@@ -86,6 +86,27 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_layout
+  HDRS
+    "parameter_layout.h"
+  SRCS
+    "parameter_layout.c"
+  DEPS
+    ::parameter_slab
+    ::plan
+    ::program
+    ::program_region
+    iree::base
+    iree::hal
+    iree::io::formats::irpa
+    iree::io::parameter_index
+    iree::io::parameter_provider
+    iree::schemas::parameter_archive
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_window
   HDRS
     "parameter_window.h"
@@ -180,6 +201,7 @@ iree_cc_library(
     "program_stage.c"
   DEPS
     ::kernel_cache
+    ::parameter_layout
     ::parameter_slab
     ::program
     ::program_plan
@@ -234,6 +256,7 @@ iree_cc_library(
     ::plan
     iree::base
     iree::hal
+    iree::io::parameter_index
     iree::io::parameter_provider
   PUBLIC
 )
@@ -287,6 +310,27 @@ iree_cc_test(
     ::parameter_slab
     iree::base
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    parameter_layout_test
+  SRCS
+    "parameter_layout_test.cc"
+  DEPS
+    ::parameter_layout
+    ::program_plan
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::io::file_handle
+    iree::io::formats::irpa
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -49,14 +49,14 @@ static iree_host_size_t FindParameterRequestIndex(
     ADD_FAILURE() << "expected one parameter slab";
     return IREE_HOST_SIZE_MAX;
   }
-  const id4_pipeline_parameter_slab_plan_t* slab =
-      id4_pipeline_plan_parameter_slab_at(plan, 0);
-  if (!slab) {
-    ADD_FAILURE() << "parameter slab not found";
+  const id4_pipeline_parameter_request_table_t* request_table =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
+  if (!request_table) {
+    ADD_FAILURE() << "parameter request table not found";
     return IREE_HOST_SIZE_MAX;
   }
-  for (iree_host_size_t i = 0; i < slab->request_count; ++i) {
-    if (iree_string_view_equal(slab->requests[i].key, key)) return i;
+  for (iree_host_size_t i = 0; i < request_table->count; ++i) {
+    if (iree_string_view_equal(request_table->values[i].key, key)) return i;
   }
   ADD_FAILURE() << "parameter request not found";
   return IREE_HOST_SIZE_MAX;
@@ -1505,14 +1505,17 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
   const id4_pipeline_parameter_slab_plan_t* parameter_slab =
       id4_pipeline_plan_parameter_slab_at(plan, 0);
+  const id4_pipeline_parameter_request_table_t* parameter_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
   ASSERT_NE(parameter_slab, nullptr);
+  ASSERT_NE(parameter_requests, nullptr);
   EXPECT_EQ(parameter_slab->byte_length, 32u);
   EXPECT_EQ(parameter_slab->binding_slot, 0u);
-  ASSERT_EQ(parameter_slab->request_count, 1u);
-  ExpectStringViewEqual(parameter_slab->requests[0].key,
+  ASSERT_EQ(parameter_requests->count, 1u);
+  ExpectStringViewEqual(parameter_requests->values[0].key,
                         IREE_SV("model.layers.0.linear.weight"));
-  EXPECT_EQ(parameter_slab->requests[0].span.buffer_offset, 0u);
-  EXPECT_EQ(parameter_slab->requests[0].span.length, 32u);
+  EXPECT_EQ(parameter_requests->values[0].span.buffer_offset, 0u);
+  EXPECT_EQ(parameter_requests->values[0].span.length, 32u);
   ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 1u);
   const id4_pipeline_parameter_load_step_t* load_step =
       id4_pipeline_plan_parameter_load_step_at(plan, 0);
@@ -1642,23 +1645,26 @@ TEST(PipelineProgramPlan, RetainsMultiSpanParameterTensorRanges) {
   ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
   const id4_pipeline_parameter_slab_plan_t* parameter_slab =
       id4_pipeline_plan_parameter_slab_at(plan, 0);
+  const id4_pipeline_parameter_request_table_t* parameter_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
   ASSERT_NE(parameter_slab, nullptr);
+  ASSERT_NE(parameter_requests, nullptr);
   EXPECT_EQ(parameter_slab->byte_length, 48u);
-  ASSERT_EQ(parameter_slab->request_count, 3u);
-  ExpectStringViewEqual(parameter_slab->requests[0].key,
+  ASSERT_EQ(parameter_requests->count, 3u);
+  ExpectStringViewEqual(parameter_requests->values[0].key,
                         IREE_SV("embedding.table"));
-  EXPECT_EQ(parameter_slab->requests[0].span.parameter_offset, 16u);
-  EXPECT_EQ(parameter_slab->requests[0].span.buffer_offset, 0u);
-  EXPECT_EQ(parameter_slab->requests[0].span.length, 8u);
-  ExpectStringViewEqual(parameter_slab->requests[1].key,
+  EXPECT_EQ(parameter_requests->values[0].span.parameter_offset, 16u);
+  EXPECT_EQ(parameter_requests->values[0].span.buffer_offset, 0u);
+  EXPECT_EQ(parameter_requests->values[0].span.length, 8u);
+  ExpectStringViewEqual(parameter_requests->values[1].key,
                         IREE_SV("embedding.table"));
-  EXPECT_EQ(parameter_slab->requests[1].span.parameter_offset, 40u);
-  EXPECT_EQ(parameter_slab->requests[1].span.buffer_offset, 8u);
-  EXPECT_EQ(parameter_slab->requests[1].span.length, 8u);
-  ExpectStringViewEqual(parameter_slab->requests[2].key,
+  EXPECT_EQ(parameter_requests->values[1].span.parameter_offset, 40u);
+  EXPECT_EQ(parameter_requests->values[1].span.buffer_offset, 8u);
+  EXPECT_EQ(parameter_requests->values[1].span.length, 8u);
+  ExpectStringViewEqual(parameter_requests->values[2].key,
                         IREE_SV("next.weight"));
-  EXPECT_EQ(parameter_slab->requests[2].span.buffer_offset, 16u);
-  EXPECT_EQ(parameter_slab->requests[2].span.length, 32u);
+  EXPECT_EQ(parameter_requests->values[2].span.buffer_offset, 16u);
+  EXPECT_EQ(parameter_requests->values[2].span.length, 32u);
 
   ASSERT_EQ(id4_pipeline_plan_parameter_tensor_count(plan), 2u);
   const id4_pipeline_parameter_tensor_plan_t* rows =
@@ -2144,12 +2150,15 @@ TEST(PipelineProgramPlan, PlansFp8ScaledParameterLoadStep) {
   ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
   const id4_pipeline_parameter_slab_plan_t* parameter_slab =
       id4_pipeline_plan_parameter_slab_at(plan, 0);
+  const id4_pipeline_parameter_request_table_t* parameter_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
   ASSERT_NE(parameter_slab, nullptr);
-  ASSERT_EQ(parameter_slab->request_count, 1u);
+  ASSERT_NE(parameter_requests, nullptr);
+  ASSERT_EQ(parameter_requests->count, 1u);
   EXPECT_EQ(parameter_slab->byte_length, 32u);
-  ExpectStringViewEqual(parameter_slab->requests[0].key,
+  ExpectStringViewEqual(parameter_requests->values[0].key,
                         IREE_SV("model.layers.0.linear.weight"));
-  EXPECT_EQ(parameter_slab->requests[0].span.length, 32u);
+  EXPECT_EQ(parameter_requests->values[0].span.length, 32u);
 
   ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 1u);
   const id4_pipeline_parameter_load_step_t* load_step =
@@ -2204,14 +2213,17 @@ TEST(PipelineProgramPlan, GroupsDirectParameterLoadsBySourceScope) {
   ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
   const id4_pipeline_parameter_slab_plan_t* parameter_slab =
       id4_pipeline_plan_parameter_slab_at(plan, 0);
+  const id4_pipeline_parameter_request_table_t* parameter_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
   ASSERT_NE(parameter_slab, nullptr);
+  ASSERT_NE(parameter_requests, nullptr);
   EXPECT_EQ(parameter_slab->byte_length, 96u);
-  ASSERT_EQ(parameter_slab->request_count, 3u);
-  ExpectStringViewEqual(parameter_slab->requests[0].key,
+  ASSERT_EQ(parameter_requests->count, 3u);
+  ExpectStringViewEqual(parameter_requests->values[0].key,
                         IREE_SV("model.layers.0.attn.q.weight"));
-  ExpectStringViewEqual(parameter_slab->requests[1].key,
+  ExpectStringViewEqual(parameter_requests->values[1].key,
                         IREE_SV("model.layers.0.mlp.w1.weight"));
-  ExpectStringViewEqual(parameter_slab->requests[2].key,
+  ExpectStringViewEqual(parameter_requests->values[2].key,
                         IREE_SV("model.layers.0.attn.o.weight"));
 
   ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 2u);

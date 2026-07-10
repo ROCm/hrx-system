@@ -12,6 +12,7 @@
 #include "experimental/id4/pipeline/plan.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/io/parameter_index.h"
 #include "iree/io/parameter_provider.h"
 
 #ifdef __cplusplus
@@ -79,16 +80,115 @@ typedef struct id4_pipeline_stage_plan_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;
 
-// Stage preparation behavior flags.
-typedef uint32_t id4_pipeline_stage_prepare_flags_t;
+// Source supplying one prepared stage's parameters.
+typedef uint32_t id4_pipeline_stage_parameter_source_kind_t;
 
-// Stage preparation behavior flag bits.
-typedef enum id4_pipeline_stage_prepare_flag_bits_e {
-  // Retains parameter loading work for submission by the issue path.
-  ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE = 1u << 0,
-  // Retains caller-provided resident parameter slabs instead of loading them.
-  ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS = 1u << 1,
-} id4_pipeline_stage_prepare_flag_bits_t;
+// Parameter source kind values.
+typedef enum id4_pipeline_stage_parameter_source_kind_e {
+  // Invalid or unspecified parameter source.
+  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_INVALID = 0,
+  // The plan has no parameters.
+  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE = 1,
+  // Framework-layout checkpoint tensors requiring plan-directed preparation.
+  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT = 2,
+  // Baked tensors already stored in the plan's execution layouts.
+  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT = 3,
+  // Caller-owned execution-layout slabs already resident on their devices.
+  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT = 4,
+} id4_pipeline_stage_parameter_source_kind_e;
+
+// Lifetime policy for prepared parameter storage.
+typedef uint32_t id4_pipeline_stage_parameter_residency_t;
+
+// Parameter residency policy values.
+typedef enum id4_pipeline_stage_parameter_residency_e {
+  // Invalid or unspecified residency policy.
+  ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_INVALID = 0,
+  // No residency policy applies to a parameter-free plan.
+  ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE = 1,
+  // Materializes complete execution-layout slabs and retains them in the
+  // prepared bundle for low-latency repeated issue.
+  ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT = 2,
+  // Retains a bounded parameter window and submits plan-directed refills while
+  // issuing the stage.
+  ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING = 3,
+} id4_pipeline_stage_parameter_residency_e;
+
+// Closed parameter source and residency selection for stage preparation.
+typedef struct id4_pipeline_stage_parameter_source_t {
+  // Active member of |storage|.
+  id4_pipeline_stage_parameter_source_kind_t kind;
+  // Storage lifetime policy selected for this source.
+  id4_pipeline_stage_parameter_residency_t residency;
+  // Source-specific handles borrowed for the duration of prepare.
+  union {
+    // Framework-layout checkpoint source.
+    struct {
+      // Provider supplying checkpoint tensors named by the plan.
+      iree_io_parameter_provider_t* provider;
+    } checkpoint;
+    // Baked execution-layout archive source.
+    struct {
+      // Index parsed from the same archive exposed by |provider|.
+      iree_io_parameter_index_t* index;
+      // Provider serving the validated baked archive.
+      iree_io_parameter_provider_t* provider;
+      // Provider scope assigned to the baked archive.
+      iree_string_view_t scope;
+    } execution_layout;
+    // Already resident execution-layout source.
+    struct {
+      // Slabs matching the plan's allocation and request identity.
+      id4_pipeline_parameter_slab_set_t* slabs;
+    } resident;
+  } storage;
+} id4_pipeline_stage_parameter_source_t;
+
+// Returns a parameter-free source selection.
+static inline id4_pipeline_stage_parameter_source_t
+id4_pipeline_stage_no_parameters(void) {
+  id4_pipeline_stage_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE;
+  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE;
+  return source;
+}
+
+// Returns a checkpoint source with an explicit residency policy.
+static inline id4_pipeline_stage_parameter_source_t
+id4_pipeline_stage_checkpoint_parameters(
+    iree_io_parameter_provider_t* provider,
+    id4_pipeline_stage_parameter_residency_t residency) {
+  id4_pipeline_stage_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT;
+  source.residency = residency;
+  source.storage.checkpoint.provider = provider;
+  return source;
+}
+
+// Returns a resident baked execution-layout archive source.
+static inline id4_pipeline_stage_parameter_source_t
+id4_pipeline_stage_execution_layout_parameters(
+    iree_io_parameter_index_t* index, iree_io_parameter_provider_t* provider,
+    iree_string_view_t scope) {
+  id4_pipeline_stage_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
+  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT;
+  source.storage.execution_layout.index = index;
+  source.storage.execution_layout.provider = provider;
+  source.storage.execution_layout.scope = scope;
+  return source;
+}
+
+// Returns an already resident execution-layout slab source.
+static inline id4_pipeline_stage_parameter_source_t
+id4_pipeline_stage_resident_parameters(
+    id4_pipeline_parameter_slab_set_t* slabs) {
+  id4_pipeline_stage_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT;
+  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT;
+  source.storage.resident.slabs = slabs;
+  return source;
+}
 
 // Options for preparing a reusable execution bundle from a plan.
 typedef struct id4_pipeline_stage_prepare_options_t {
@@ -96,17 +196,13 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Preparation behavior flags.
-  id4_pipeline_stage_prepare_flags_t flags;
-  // Parameter provider used to populate planned parameter slabs.
-  iree_io_parameter_provider_t* parameter_provider;
-  // Resident parameter slabs retained when reuse is explicitly requested.
-  id4_pipeline_parameter_slab_set_t* parameter_slabs;
+  // Exact source and residency policy for planned parameters.
+  id4_pipeline_stage_parameter_source_t parameter_source;
   // Kernel library used to resolve planned Loom module paths.
   id4_pipeline_kernel_library_t* kernel_library;
-  // Semaphores that parameter loading and command-buffer preparation wait on.
+  // Semaphores that submitted parameter loading waits on.
   iree_hal_semaphore_list_t wait_semaphore_list;
-  // Semaphores signaled when parameter loading and preparation complete.
+  // Semaphores signaled when submitted parameter loading completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
   // HAL command-buffer mode used when preparation records reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;

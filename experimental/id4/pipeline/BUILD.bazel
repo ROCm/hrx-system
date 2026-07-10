@@ -75,6 +75,24 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "parameter_layout",
+    srcs = ["parameter_layout.c"],
+    hdrs = ["parameter_layout.h"],
+    deps = [
+        ":parameter_slab",
+        ":plan",
+        ":program",
+        ":program_region",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/io/formats/irpa",
+        "//runtime/src/iree/schemas:parameter_archive",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "parameter_window",
     srcs = ["parameter_window.c"],
     hdrs = ["parameter_window.h"],
@@ -152,6 +170,7 @@ iree_runtime_cc_library(
     hdrs = ["program_stage.h"],
     deps = [
         ":kernel_cache",
+        ":parameter_layout",
         ":parameter_slab",
         ":program",
         ":program_plan",
@@ -197,6 +216,7 @@ iree_runtime_cc_library(
         ":plan",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_provider",
     ],
 )
@@ -245,6 +265,26 @@ iree_runtime_cc_test(
         ":parameter_slab",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_layout_test",
+    srcs = ["parameter_layout_test.cc"],
+    deps = [
+        ":parameter_layout",
+        ":program_plan",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/io/formats/irpa",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

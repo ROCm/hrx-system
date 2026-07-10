@@ -1298,7 +1298,9 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_provider = parameter_provider.get();
+  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
+      parameter_provider.get(),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
   prepare_options.kernel_library = kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = prepare_signal.list();
