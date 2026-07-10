@@ -6266,7 +6266,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
   if (!requires_full_selection) {
     for (uint32_t lane_index = 0; lane_index < plan->lane_count;
          lane_index += 8u) {
-      loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
+      loom_amdgpu_vector_fp8_octet_storage_t octet_storage = {0};
       if (!loom_amdgpu_vector_fp8_query_storage_octet(plan, lane_index,
                                                       &octet_storage)) {
         return iree_ok_status();
@@ -6285,7 +6285,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
   loom_string_id_t scale_sel_name_id = LOOM_STRING_ID_INVALID;
   for (uint32_t lane_index = 0; lane_index < plan->lane_count;
        lane_index += 8u) {
-    loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
+    loom_amdgpu_vector_fp8_octet_storage_t octet_storage = {0};
     IREE_ASSERT_TRUE(loom_amdgpu_vector_fp8_query_storage_octet(
         plan, lane_index, &octet_storage));
     if (low_e8m0_scale == LOOM_VALUE_ID_INVALID) {
