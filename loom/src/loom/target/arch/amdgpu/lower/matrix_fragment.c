@@ -1253,6 +1253,7 @@ static bool loom_amdgpu_fragment_memory_scalar_type_from_numeric(
       *out_element_type = LOOM_SCALAR_TYPE_F8E5M2;
       return true;
     case LOOM_AMDGPU_MATRIX_NUMERIC_F32:
+    case LOOM_AMDGPU_MATRIX_NUMERIC_XF32:
       *out_element_type = LOOM_SCALAR_TYPE_F32;
       return true;
     default:
@@ -1284,14 +1285,34 @@ static bool loom_amdgpu_fragment_memory_descriptor_payload(
   }
 }
 
-static bool loom_amdgpu_fragment_memory_descriptor_role_element_type(
+typedef struct loom_amdgpu_fragment_memory_role_storage_t {
+  // Matrix descriptor payload selected for the fragment role.
+  loom_amdgpu_matrix_payload_shape_t payload;
+  // Physical scalar type used to move each logical payload element.
+  loom_scalar_type_t element_type;
+} loom_amdgpu_fragment_memory_role_storage_t;
+
+static bool loom_amdgpu_fragment_memory_descriptor_role_storage(
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor,
-    loom_contract_operand_role_t role, loom_scalar_type_t* out_element_type) {
-  loom_amdgpu_matrix_payload_shape_t payload = {0};
-  return loom_amdgpu_fragment_memory_descriptor_payload(descriptor, role,
-                                                        &payload) &&
+    loom_contract_operand_role_t role,
+    loom_amdgpu_fragment_memory_role_storage_t* out_storage) {
+  *out_storage = (loom_amdgpu_fragment_memory_role_storage_t){0};
+  out_storage->element_type = LOOM_SCALAR_TYPE_COUNT_;
+  return loom_amdgpu_fragment_memory_descriptor_payload(
+             descriptor, role, &out_storage->payload) &&
          loom_amdgpu_fragment_memory_scalar_type_from_numeric(
-             payload.numeric_type, out_element_type);
+             out_storage->payload.numeric_type, &out_storage->element_type);
+}
+
+static bool loom_amdgpu_fragment_memory_numeric_schema_matches(
+    loom_amdgpu_matrix_numeric_type_t numeric_type,
+    const loom_value_fact_storage_schema_t* storage_schema) {
+  if (numeric_type != LOOM_AMDGPU_MATRIX_NUMERIC_XF32) {
+    return true;
+  }
+  return storage_schema != NULL &&
+         storage_schema->encoded_operand.element_format ==
+             LOOM_VALUE_FACT_NUMERIC_FORMAT_TF32;
 }
 
 static bool loom_amdgpu_fragment_memory_payload_matches_descriptor_storage(
@@ -1538,11 +1559,17 @@ static bool loom_amdgpu_fragment_memory_target_layout(
             wave_size)) {
       continue;
     }
-    loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
-    if (!loom_amdgpu_fragment_memory_descriptor_role_element_type(
-            descriptor, role, &expected_element_type)) {
+    loom_amdgpu_fragment_memory_role_storage_t role_storage = {0};
+    if (!loom_amdgpu_fragment_memory_descriptor_role_storage(descriptor, role,
+                                                             &role_storage)) {
       continue;
     }
+    if (!loom_amdgpu_fragment_memory_numeric_schema_matches(
+            role_storage.payload.numeric_type, view_storage_schema)) {
+      rejected_payload_layout = true;
+      continue;
+    }
+    const loom_scalar_type_t expected_element_type = role_storage.element_type;
     const loom_amdgpu_matrix_fragment_layout_t* layout =
         loom_amdgpu_matrix_contract_descriptor_fragment_layout(descriptor);
     if (layout == NULL) {
@@ -2009,12 +2036,12 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
       continue;
     }
 
-    loom_scalar_type_t source_element_type = LOOM_SCALAR_TYPE_COUNT_;
-    loom_scalar_type_t result_element_type = LOOM_SCALAR_TYPE_COUNT_;
-    if (!loom_amdgpu_fragment_memory_descriptor_role_element_type(
-            descriptor, plan->source_role, &source_element_type) ||
-        !loom_amdgpu_fragment_memory_descriptor_role_element_type(
-            descriptor, plan->result_role, &result_element_type)) {
+    loom_amdgpu_fragment_memory_role_storage_t source_storage = {0};
+    loom_amdgpu_fragment_memory_role_storage_t result_storage = {0};
+    if (!loom_amdgpu_fragment_memory_descriptor_role_storage(
+            descriptor, plan->source_role, &source_storage) ||
+        !loom_amdgpu_fragment_memory_descriptor_role_storage(
+            descriptor, plan->result_role, &result_storage)) {
       continue;
     }
 
@@ -2023,9 +2050,11 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
     const loom_amdgpu_matrix_fragment_role_layout_t* result_role_layout =
         loom_amdgpu_matrix_fragment_role_layout(layout, plan->result_role);
     if (!loom_amdgpu_fragment_memory_payload_matches_role_storage(
-            plan->source_type, source_element_type, source_role_layout) ||
+            plan->source_type, source_storage.element_type,
+            source_role_layout) ||
         !loom_amdgpu_fragment_memory_payload_matches_role_storage(
-            plan->result_type, result_element_type, result_role_layout)) {
+            plan->result_type, result_storage.element_type,
+            result_role_layout)) {
       continue;
     }
     found_storage_candidate = true;

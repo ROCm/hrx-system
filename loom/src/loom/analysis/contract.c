@@ -299,6 +299,8 @@ iree_string_view_t loom_contract_numeric_type_name(
       return IREE_SV("bf16");
     case LOOM_CONTRACT_NUMERIC_F32:
       return IREE_SV("f32");
+    case LOOM_CONTRACT_NUMERIC_TF32:
+      return IREE_SV("tf32");
     case LOOM_CONTRACT_NUMERIC_F64:
       return IREE_SV("f64");
     case LOOM_CONTRACT_NUMERIC_FP8:

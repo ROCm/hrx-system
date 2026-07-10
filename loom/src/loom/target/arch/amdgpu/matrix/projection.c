@@ -37,6 +37,9 @@ static bool loom_amdgpu_matrix_numeric_from_contract(
     case LOOM_CONTRACT_NUMERIC_F32:
       *out_numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_F32;
       return true;
+    case LOOM_CONTRACT_NUMERIC_TF32:
+      *out_numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_XF32;
+      return true;
     case LOOM_CONTRACT_NUMERIC_F64:
       *out_numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_F64;
       return true;

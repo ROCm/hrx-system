@@ -83,6 +83,11 @@ bool loom_contract_numeric_type_from_encoded_format(
                 *out_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
                 return true;
               }
+              if (info->exponent_bit_count == 8 &&
+                  info->mantissa_bit_count == 10) {
+                *out_numeric_type = LOOM_CONTRACT_NUMERIC_TF32;
+                return true;
+              }
               return false;
             case 64:
               if (info->exponent_bit_count == 11 &&

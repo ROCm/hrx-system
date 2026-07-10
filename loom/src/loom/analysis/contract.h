@@ -85,6 +85,8 @@ typedef enum loom_contract_numeric_type_e {
   LOOM_CONTRACT_NUMERIC_BF6 = 16,
   // The payload is interpreted as FP4 elements.
   LOOM_CONTRACT_NUMERIC_FP4 = 17,
+  // The payload is interpreted as TF32 elements stored in f32 lanes.
+  LOOM_CONTRACT_NUMERIC_TF32 = 18,
 } loom_contract_numeric_type_t;
 
 typedef enum loom_contract_scale_kind_e {

@@ -437,6 +437,7 @@ static bool loom_contract_vector_numeric_is_float(
     case LOOM_CONTRACT_NUMERIC_F16:
     case LOOM_CONTRACT_NUMERIC_BF16:
     case LOOM_CONTRACT_NUMERIC_F32:
+    case LOOM_CONTRACT_NUMERIC_TF32:
     case LOOM_CONTRACT_NUMERIC_F64:
     case LOOM_CONTRACT_NUMERIC_FP8:
     case LOOM_CONTRACT_NUMERIC_BF8:
