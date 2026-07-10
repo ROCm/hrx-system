@@ -31,6 +31,8 @@ bool ContainsKey(const std::vector<std::string>& keys, const char* key);
 
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 
+// Returns a retained reference to the process-wide local-sync test device
+// group. Callers must release the returned reference.
 iree_hal_device_group_t* CreateLocalSyncDeviceGroup();
 
 }  // namespace id4::test
