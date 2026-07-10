@@ -275,6 +275,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x2_f32",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.bf16",

@@ -87,7 +87,6 @@ _DEFERRED_CDNA_DENSE_MFMA_F32_FRAGMENT_LAYOUTS = (
     "mfma.f32.16x16x4.bf16.1k",
     "mfma.f32.32x32x1.f32",
     "mfma.f32.32x32x2.bf16",
-    "mfma.f32.32x32x2.f32",
     "mfma.f32.32x32x4.f16",
     "mfma.f32.32x32x4.bf16.1k",
     "mfma.f32.4x4x1.f32",
