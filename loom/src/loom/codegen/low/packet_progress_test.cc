@@ -291,7 +291,7 @@ TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
   EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
                 &index, /*start_packet_index=*/0, /*end_packet_index=*/5,
                 kSyntheticProgressPipe),
-            7u);
+            UINT32_MAX);
   EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
                 &index, /*start_packet_index=*/4, /*end_packet_index=*/7,
                 kSyntheticProgressPipe),

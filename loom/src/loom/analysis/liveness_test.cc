@@ -125,6 +125,16 @@ class LivenessTest : public ::testing::Test {
     return false;
   }
 
+  static loom_value_ordinal_t FindValueOrdinal(
+      const loom_liveness_analysis_t& analysis, loom_value_id_t value_id) {
+    for (iree_host_size_t i = 0; i < analysis.value_count; ++i) {
+      if (analysis.value_ids[i] == value_id) {
+        return static_cast<loom_value_ordinal_t>(i);
+      }
+    }
+    return LOOM_VALUE_ORDINAL_INVALID;
+  }
+
   static const loom_liveness_pressure_summary_t* FindRegisterPressure(
       const loom_liveness_analysis_t& analysis,
       uint64_t descriptor_set_stable_id, uint16_t class_id) {
@@ -298,6 +308,30 @@ func.def @cfg_loop(%cond: i1, %x: i32) -> (i32) {
   EXPECT_TRUE(ContainsValue(loop.live_in_values, loop.live_in_count, args[1]));
   EXPECT_TRUE(ContainsValue(body.live_in_values, body.live_in_count, args[1]));
   EXPECT_EQ(exit.live_in_count, 1u);
+
+  const loom_value_id_t iter = loom_block_arg_id(loop.block, 0);
+  const loom_op_t* add = loom_block_const_op(body.block, 0);
+  const loom_value_id_t next = loom_op_const_results(add)[0];
+  const loom_liveness_segment_range_t iter_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, iter));
+  const loom_liveness_segment_range_t next_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, next));
+  const loom_liveness_segment_range_t invariant_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(iter_segments.count, 3u);
+  EXPECT_EQ(next_segments.count, 1u);
+  EXPECT_FALSE(loom_liveness_segment_ranges_overlap(&analysis, iter_segments,
+                                                    next_segments));
+  EXPECT_TRUE(loom_liveness_segment_ranges_overlap(
+      &analysis, invariant_segments, next_segments));
+
+  const loom_liveness_pressure_summary_t* pressure =
+      FindScalarPressure(analysis, LOOM_SCALAR_TYPE_I32);
+  ASSERT_NE(pressure, nullptr);
+  EXPECT_EQ(pressure->peak_live_units, 2u);
 }
 
 TEST_F(LivenessTest, OperandTypeReferencesKeepDynamicDimsLive) {

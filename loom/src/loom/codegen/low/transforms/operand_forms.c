@@ -669,11 +669,11 @@ loom_low_select_operand_form_relation_source_has_dynamic_use_after_consume(
     return iree_ok_status();
   }
 
-  const uint16_t relation_count =
-      loom_low_storage_relation_count(state->module, defining_op);
-  for (uint16_t i = 0; i < relation_count; ++i) {
-    loom_low_storage_relation_t relation = {0};
-    loom_low_storage_relation_get(state->module, defining_op, i, &relation);
+  loom_low_storage_relation_iterator_t iterator;
+  loom_low_storage_relation_iterator_initialize(state->module, defining_op,
+                                                &iterator);
+  loom_low_storage_relation_t relation;
+  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
     if (relation.destination_value_id != value_id ||
         relation.source_value_id == value_id) {
       continue;

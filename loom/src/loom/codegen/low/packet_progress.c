@@ -262,7 +262,7 @@ uint32_t loom_low_packet_progress_class_index_observed_progress(
     if (record->packet_index <= start_packet_index) continue;
     if (record->packet_index >= end_packet_index) break;
     if (record->action == LOOM_LOW_PACKET_PROGRESS_ACTION_RESET) {
-      observed_progress = 0;
+      return UINT32_MAX;
     } else if (observed_progress <= UINT32_MAX - record->units) {
       observed_progress += record->units;
     } else {

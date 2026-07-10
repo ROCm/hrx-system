@@ -239,11 +239,10 @@ static void loom_low_placement_assert_storage_relation_units(
 
 static iree_status_t loom_low_placement_count_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
-  const uint16_t relation_count =
-      loom_low_storage_relation_count(state->module, op);
-  for (uint16_t i = 0; i < relation_count; ++i) {
-    loom_low_storage_relation_t relation = {0};
-    loom_low_storage_relation_get(state->module, op, i, &relation);
+  loom_low_storage_relation_iterator_t iterator;
+  loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
+  loom_low_storage_relation_t relation;
+  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
     IREE_RETURN_IF_ERROR(loom_low_placement_count_relation(
         state, relation.destination_value_id, relation.source_value_id));
   }
@@ -252,11 +251,11 @@ static iree_status_t loom_low_placement_count_op_relations(
 
 static iree_status_t loom_low_placement_append_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
-  const uint16_t relation_count =
-      loom_low_storage_relation_count(state->module, op);
-  for (uint16_t i = 0; i < relation_count; ++i) {
-    loom_low_storage_relation_t storage_relation = {0};
-    loom_low_storage_relation_get(state->module, op, i, &storage_relation);
+  loom_low_storage_relation_iterator_t iterator;
+  loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
+  loom_low_storage_relation_t storage_relation;
+  while (
+      loom_low_storage_relation_iterator_next(&iterator, &storage_relation)) {
     const loom_value_ordinal_t result_ordinal =
         loom_low_placement_value_ordinal(state,
                                          storage_relation.destination_value_id);

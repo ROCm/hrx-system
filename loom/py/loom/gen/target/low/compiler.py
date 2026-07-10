@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 
 from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.low import validation
@@ -30,6 +31,7 @@ from loom.target.low_descriptors import (
     DescriptorFlag,
     DescriptorSet,
     Effect,
+    EffectKind,
     EncodingFieldValue,
     EnumValue,
     Hazard,
@@ -48,6 +50,19 @@ from loom.target.low_descriptors import (
     StorageLease,
     descriptor_stable_id,
 )
+
+
+def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
+    has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
+    has_barrier_flag = DescriptorFlag.BARRIER in descriptor.flags
+    if has_barrier_flag and not has_barrier_effect:
+        raise ValueError(f"descriptor '{descriptor.key}' has the barrier flag without a barrier effect")
+    if has_barrier_effect and not has_barrier_flag:
+        return replace(
+            descriptor,
+            flags=(*descriptor.flags, DescriptorFlag.BARRIER),
+        )
+    return descriptor
 
 
 def _dedupe_by_name[T](items: Sequence[T], get_name: Callable[[T], str]) -> dict[str, T]:
@@ -565,7 +580,7 @@ def compile_descriptor_set(
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
-    selected_descriptors = _select_descriptors(spec, allowlist)
+    selected_descriptors = [_derive_descriptor_flags(descriptor) for descriptor in _select_descriptors(spec, allowlist)]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)

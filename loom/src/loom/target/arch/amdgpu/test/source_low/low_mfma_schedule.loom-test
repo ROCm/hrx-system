@@ -44,9 +44,9 @@ low.func.def target(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(
 // second decoded BF16 payload stays out of the live set until after the first
 // matrix packet.
 // ----
+  v_mov_b32 v4, 0
   v_and_b32 v2, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v4, 0
   s_mov_b32_m0_imm m0, 0
   v_lshlrev_b32 v3, 6, v2
   global_load_dwordx4 v[8:11], v3, s[0:1] offset:0
@@ -168,9 +168,9 @@ low.func.def target(@target) @gfx942_fp8_materialized_bf16_two_k_block_schedule(
 // Raw memory for both K blocks should issue before the first MFMA on CDNA3
 // even when the RHS needs native FP8-to-F32 conversion and manual BF16 packing.
 // ----
+  v_mov_b32 v4, 0
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v4, 0
   s_mov_b32_m0_imm m0, 0
   v_lshlrev_b32 v2, 5, v1
   global_load_dwordx2 v[8:9], v2, s[0:1] offset:0
@@ -297,9 +297,9 @@ low.func.def target(@target) @gfx942_bf16_two_k_block_loads_schedule_before_mfma
 // Raw memory for both K blocks should issue before the first MFMA on CDNA3 as
 // well as CDNA4, preserving VMEM latency hiding for BF16 GEMM schedules.
 // ----
+  v_mov_b32 v4, 0
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v4, 0
   s_mov_b32_m0_imm m0, 0
   v_lshlrev_b32 v1, 5, v1
   global_load_dwordx2 v[2:3], v1, s[0:1] offset:0
