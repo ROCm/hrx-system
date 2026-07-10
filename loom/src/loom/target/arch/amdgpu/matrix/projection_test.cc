@@ -131,6 +131,22 @@ TEST(MatrixContractProjectionTest, RejectsDynamicShapeValueRefs) {
   EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_SHAPE);
 }
 
+TEST(MatrixContractProjectionTest, ProjectsTf32AsAmdgpuXf32) {
+  loom_contract_request_t contract = MatrixRequest(
+      16, 16, 8, LOOM_CONTRACT_NUMERIC_TF32, LOOM_CONTRACT_NUMERIC_TF32,
+      LOOM_CONTRACT_NUMERIC_F32, LOOM_CONTRACT_NUMERIC_F32);
+
+  loom_amdgpu_matrix_contract_match_request_t amdgpu_request = {};
+  loom_contract_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(loom_amdgpu_matrix_contract_match_request_from_contract(
+      &contract, 0, 64, &amdgpu_request, &diagnostic));
+  EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_NONE);
+  EXPECT_EQ(amdgpu_request.lhs_payload.numeric_type,
+            LOOM_AMDGPU_MATRIX_NUMERIC_XF32);
+  EXPECT_EQ(amdgpu_request.rhs_payload.numeric_type,
+            LOOM_AMDGPU_MATRIX_NUMERIC_XF32);
+}
+
 TEST(MatrixContractProjectionTest, ProjectsRoleLocalScaleFacts) {
   loom_contract_request_t contract = MatrixRequest(
       16, 16, 16, LOOM_CONTRACT_NUMERIC_FP4, LOOM_CONTRACT_NUMERIC_FP4,

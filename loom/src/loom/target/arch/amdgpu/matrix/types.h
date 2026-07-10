@@ -243,6 +243,16 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16 = 28,
   // CDNA MFMA 32x32x16 packed fp8/bf8 input, f32 accumulator/result layout.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8 = 29,
+  // CDNA MFMA 16x16x8 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X8_PACKED16 = 30,
+  // CDNA MFMA 16x16x8 xf32 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X8_XF32 = 31,
+  // CDNA MFMA 32x32x4 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_PACKED16 = 32,
+  // CDNA MFMA 32x32x8 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X8_PACKED16 = 33,
+  // CDNA MFMA 32x32x4 xf32 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_XF32 = 34,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
