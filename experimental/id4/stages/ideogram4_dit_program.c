@@ -27,6 +27,8 @@ enum {
   ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_COMPACT_OUTPUT_ROW_BLOCK = 128,
   ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_MIN_TOKEN_CAPACITY = 128,
   ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TAIL_TOKEN_LIMIT = 64,
+  ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_STAGED_MIN_TOKEN_CAPACITY = 256,
+  ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_STAGED_MIN_INPUT_SIZE = 12288,
   ID4_IDEOGRAM4_DIT_ELEMENTWISE_MAX_ELEMENT_COUNT = 268435456,
   ID4_IDEOGRAM4_DIT_LINEAR_INPUT_PACK_MAX_ELEMENT_COUNT = 268435456,
   ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE = 8,
@@ -2498,15 +2500,26 @@ id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
     uint32_t output_size, id4_pipeline_program_tensor_t input,
     id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t output) {
+  const bool use_workgroup_staging =
+      token_capacity >=
+          ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_STAGED_MIN_TOKEN_CAPACITY ||
+      input_size >= ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_STAGED_MIN_INPUT_SIZE;
   const id4_ideogram4_dit_program_linear_body_t body = {
       .token_block = ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK,
       .output_row_block =
           ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_COMPACT_OUTPUT_ROW_BLOCK,
-      .module_path = IREE_SV(
-          "ideogram4/"
-          "linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant"),
-      .function_name = IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma_compact_"
-                               "rhs_tile_m128n128_4wave_quadrant"),
+      .module_path =
+          use_workgroup_staging
+              ? IREE_SV("ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_"
+                        "m128n128_4wave_workgroup_staged")
+              : IREE_SV("ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_"
+                        "m128n128_4wave_quadrant"),
+      .function_name =
+          use_workgroup_staging
+              ? IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_"
+                        "tile_m128n128_4wave_workgroup_staged")
+              : IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_"
+                        "tile_m128n128_4wave_quadrant"),
   };
   return id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_body(
       builder, name, token_count, token_capacity, input_size, output_size,
@@ -2733,9 +2746,9 @@ id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
       builder, name,
       IREE_SV("ideogram4/"
               "linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_"
-              "quadrant"),
+              "workgroup_staged"),
       IREE_SV("id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_"
-              "4wave_quadrant"),
+              "4wave_workgroup_staged"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
