@@ -87,6 +87,53 @@ low.func.def target(@target) abi(hal_kernel) @bf16_wmmar3_loop_carried_accumulat
 
 // ====
 
+amdgpu.target<gfx1100> @target
+func.def target(@target) @bf16_wmmar3_four_loop_carried_accumulators(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_wmmar3_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %two = s_mov_b32 2
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
+  %56 = s_cmp_lt_i32 %k_tile, %two
+  low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next0 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %57
+  %59 = copy %acc1 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next1 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %59
+  %61 = copy %acc2 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next2 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %61
+  %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next3 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %63
+  %65 = s_add_u32 %k_tile, %one
+  low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
+^_bb3:
+  return %acc0, %acc1, %acc2, %acc3
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 func.def target(@target) @f16_wmmar3_wave64(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
@@ -2528,6 +2575,53 @@ low.func.def target(@target) abi(hal_kernel) @f16_wmma_gfx12(%lhs: reg<amdgpu.vg
 // ====
 
 amdgpu.target<gfx1200> @target
+func.def target(@target) @f16_wmma_gfx12_four_loop_carried_accumulators(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %next0 = vector.mma %lhs, %rhs, %acc0 : vector<8xf16>, vector<8xf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<8xf16>, vector<8xf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<8xf16>, vector<8xf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<8xf16>, vector<8xf16>, vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_wmma_gfx12_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.core> {
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %two = s_mov_b32 2
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
+  %56 = s_cmp_lt_i32 %k_tile, %two
+  low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next0 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %57
+  %59 = copy %acc1 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next1 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %59
+  %61 = copy %acc2 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next2 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %61
+  %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next3 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %63
+  %65 = s_add_u32 %k_tile, %one
+  low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
+^_bb3:
+  return %acc0, %acc1, %acc2, %acc3
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
 
 kernel.def target(@target) @f16_wmma_gfx12_f32_acc_fragment_memory() {
   %unit = index.constant 1 : index
@@ -2867,6 +2961,54 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %72 = v_lshrrev_b32_src0_inline %71, 16
   global_store_short_saddr %37, %72, %out_view {offset = 224}
   return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @f16_wmma_gfx1250_four_loop_carried_accumulators(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_wmma_gfx1250_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %two = s_mov_b32 2
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
+  %56 = s_cmp_lt_i32 %k_tile, %two
+  low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next0 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %57
+  %59 = copy %acc1 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next1 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %59
+  %61 = copy %acc2 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next2 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %61
+  %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next3 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %63
+  %65 = s_add_u32 %k_tile, %one
+  low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
+^_bb3:
+  return %acc0, %acc1, %acc2, %acc3
 }
 
 // ====

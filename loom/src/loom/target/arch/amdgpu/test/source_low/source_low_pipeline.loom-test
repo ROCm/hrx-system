@@ -30,7 +30,6 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       canonicalize
       cse
       sink-single-use-reads
-      stage-loop-carried-fragments
       promote-private-fragments
       canonicalize
       cse
@@ -87,7 +86,6 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       canonicalize
       cse
       sink-single-use-reads
-      stage-loop-carried-fragments
       promote-private-fragments
       canonicalize
       cse
@@ -190,7 +188,6 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       canonicalize
       cse
       sink-single-use-reads
-      stage-loop-carried-fragments
       promote-private-fragments
       canonicalize
       cse
