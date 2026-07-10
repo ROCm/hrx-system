@@ -46,10 +46,10 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
 // backend can hide VMEM latency across the matrix pipe instead of preserving
 // source order.
 // ----
+  v_mov_b32 v8, 0
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v8, 0
-  s_delay_alu instid0(VALU_DEP_3)
+  s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v1, 6, v1
   global_load_b128 v[4:7], v1, s[0:1] offset:0
   global_load_b128 v[16:19], v1, s[0:1] offset:16
@@ -227,10 +227,10 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
 }
 
 // ----
+  v_mov_b32 v8, 0
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v8, 0
-  s_delay_alu instid0(VALU_DEP_3)
+  s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v2, 7, v1
   global_load_b128 v[4:7], v2, s[0:1] offset:0
   global_load_b128 v[16:19], v2, s[0:1] offset:16
@@ -402,10 +402,10 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
 // still allows it, giving the backend enough VMEM distance to hide latency in
 // unrolled BF16 contraction motifs.
 // ----
+  v_mov_b32 v8, 0
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v0, 2, v0
-  v_mov_b32 v8, 0
-  s_delay_alu instid0(VALU_DEP_3)
+  s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v1, 7, v1
   global_load_b128 v[4:7], v1, s[0:1] offset:0
   global_load_b128 v[16:19], v1, s[0:1] offset:16

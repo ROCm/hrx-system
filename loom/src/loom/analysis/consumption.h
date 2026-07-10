@@ -48,11 +48,30 @@ typedef struct loom_consumption_region_query_t {
   uint64_t* visited_bits;
   // Allocated word capacity of visited_bits.
   iree_host_size_t visited_word_capacity;
+  // Reusable bitset of blocks reachable before |value_id| is recreated.
+  uint64_t* reachable_bits;
+  // Allocated word capacity of reachable_bits.
+  iree_host_size_t reachable_word_capacity;
   // Reusable DFS stack of dense CFG block indices.
   uint16_t* block_stack;
   // Allocated element capacity of block_stack.
   iree_host_size_t block_stack_capacity;
 } loom_consumption_region_query_t;
+
+// Prepared dynamic-path query for uses after one consuming operation.
+//
+// The query borrows scratch from |region_query| and remains valid until the
+// next use-after query is prepared from that region query.
+typedef struct loom_consumption_use_after_query_t {
+  // Reusable region query owning CFG and reachability scratch.
+  const loom_consumption_region_query_t* region_query;
+  // Operation after which uses are queried.
+  const loom_op_t* consuming_op;
+  // Value whose dynamic instance is being followed.
+  loom_value_id_t value_id;
+  // Number of words populated in region_query->reachable_bits.
+  iree_host_size_t reachable_word_count;
+} loom_consumption_use_after_query_t;
 
 // Initializes reusable consumption query state for |region|. CFG extraction is
 // lazy: regions without tied-result consumption do not pay graph construction.
@@ -60,10 +79,23 @@ iree_status_t loom_consumption_region_query_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_consumption_region_query_t* out_query);
 
+// Prepares a reusable path query for uses of |value_id| that can dynamically
+// execute after |consuming_op|. This walks CFG edges once and does not scan IR
+// operations; individual uses can then be tested in constant time.
+iree_status_t loom_consumption_use_after_query_prepare(
+    loom_consumption_region_query_t* region_query,
+    const loom_op_t* consuming_op, loom_value_id_t value_id,
+    loom_consumption_use_after_query_t* out_query);
+
+// Returns true when |use| can dynamically execute after the consuming
+// operation represented by |query|. |use| must belong to the queried value.
+bool loom_consumption_use_after_query_contains(
+    const loom_consumption_use_after_query_t* query, loom_use_t use);
+
 // Finds a use of |value_id| that can dynamically execute after |consuming_op|.
-// |query| must describe |consuming_op|'s parent region. Non-CFG regions only
-// check later uses in the same block. CFG regions reuse the query's graph and
-// DFS scratch across calls.
+// |query| must describe |consuming_op|'s parent region. The value's use list
+// supplies candidates; non-CFG regions only check later uses in the same block,
+// while CFG regions reuse graph and reachability scratch across calls.
 iree_status_t loom_consumption_find_use_after(
     loom_consumption_region_query_t* query, const loom_op_t* consuming_op,
     loom_value_id_t value_id, loom_consumption_use_t* out_use, bool* out_found);

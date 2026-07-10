@@ -295,6 +295,12 @@ _CALL_EFFECT = Effect(
     flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
 )
 
+_BARRIER_EFFECT = Effect(
+    EffectKind.BARRIER,
+    memory_space=MemorySpace.GENERIC,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+)
+
 _CONTROL_EFFECT = Effect(
     EffectKind.CONTROL,
     flags=(EffectFlag.ORDERED,),
@@ -870,6 +876,17 @@ TEST_LOW_CALL_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_BARRIER_DESCRIPTOR = Descriptor(
+    key="test.barrier",
+    mnemonic="test.barrier",
+    semantic_tag="control.barrier",
+    operands=(),
+    asm_forms=_asm(),
+    effects=(_BARRIER_EFFECT,),
+    schedule_class=_SCHEDULE_CONTROL,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_BR_DESCRIPTOR = Descriptor(
     key="test.br",
     mnemonic="test.br",
@@ -1123,6 +1140,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_STORE_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_CALL_I32_DESCRIPTOR,
+        TEST_LOW_BARRIER_DESCRIPTOR,
         TEST_LOW_BR_DESCRIPTOR,
         TEST_LOW_COND_BR_I32_DESCRIPTOR,
         TEST_LOW_RETURN_I32_DESCRIPTOR,

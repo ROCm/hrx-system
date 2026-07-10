@@ -86,11 +86,26 @@ typedef struct loom_low_schedule_pair_affinity_record_t {
 typedef struct loom_low_schedule_storage_read_record_t {
   // Node that reads a value whose storage may later be consumed by a tied op.
   uint32_t reader_node;
+  // First register unit read relative to the tracked value.
+  uint32_t unit_offset;
+  // Number of contiguous register units read.
+  uint32_t unit_count;
   // Register part mask read by reader_node.
   loom_low_register_part_mask_t read_mask;
   // Next outstanding storage-read record for the same value ordinal.
   uint32_t next_record;
 } loom_low_schedule_storage_read_record_t;
+
+typedef struct loom_low_schedule_edge_source_record_t {
+  // Structural source value being traced toward a packet producer.
+  loom_value_ordinal_t value_ordinal;
+  // First relevant unit in value_ordinal.
+  uint32_t value_unit_offset;
+  // Corresponding first unit in the edge destination value.
+  uint32_t destination_unit_offset;
+  // Number of storage units mapped by this record.
+  uint32_t unit_count;
+} loom_low_schedule_edge_source_record_t;
 
 enum loom_low_schedule_value_flag_bits_e {
   // Value is live in the current simulated block schedule.
@@ -99,8 +114,6 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TOUCHED = 1u << 1,
   // Reads must be tracked because storage can be overwritten in-place.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED = 1u << 2,
-  // Value is present in the current edge-source traversal worklist.
-  LOOM_LOW_SCHEDULE_VALUE_FLAG_EDGE_SOURCE_VISITED = 1u << 3,
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
@@ -185,6 +198,10 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* node_ready_issue_cycles;
   // Longest same-block latency path starting at each node.
   uint32_t* node_critical_path_cycles;
+  // Downstream visible register demand reached through structural nodes.
+  uint32_t* node_pressure_demand_units;
+  // Maximum downstream register width needed to advance each node's value.
+  uint32_t* node_pressure_activation_units;
   // Per-node head of outgoing dependency lists during list scheduling.
   const uint32_t* outgoing_heads;
   // Per-dependency next link for outgoing dependency lists.
@@ -219,8 +236,16 @@ typedef struct loom_low_schedule_build_state_t {
     loom_low_schedule_storage_read_record_t* records;
     // Value ordinals whose heads were touched in the current block.
     loom_value_ordinal_t* touched_ordinals;
-    // Reusable worklist for edge sources composed from structural aliases.
-    loom_value_ordinal_t* edge_source_worklist;
+    // Reusable worklist for edge source ranges composed through aliases.
+    loom_low_schedule_edge_source_record_t* edge_source_worklist;
+    // Allocated edge-source worklist capacity.
+    iree_host_size_t edge_source_worklist_capacity;
+    // Reusable source-relation flags indexed by node operand.
+    uint8_t* operand_relation_flags;
+    // Allocated entries in |operand_relation_flags|.
+    iree_host_size_t operand_relation_flag_capacity;
+    // Total structural storage relations found while classifying nodes.
+    iree_host_size_t relation_count;
     // Number of populated read records.
     iree_host_size_t record_count;
     // Allocated read record capacity.

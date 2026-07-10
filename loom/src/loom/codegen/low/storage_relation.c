@@ -104,6 +104,7 @@ static void loom_low_storage_relation_get_tied_result(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = tied.operand_index,
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -129,6 +130,7 @@ static void loom_low_storage_relation_get_copy(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = 0,
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -159,6 +161,7 @@ static void loom_low_storage_relation_get_slice(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = 0,
       .destination_unit_offset = 0,
       .source_unit_offset = source_unit_offset,
       .unit_count = destination_unit_count,
@@ -168,21 +171,16 @@ static void loom_low_storage_relation_get_slice(
   };
 }
 
-static void loom_low_storage_relation_get_concat(
+static void loom_low_storage_relation_get_concat_at_offset(
     const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    uint32_t destination_unit_offset,
     loom_low_storage_relation_t* out_relation) {
   const loom_value_id_t destination_value_id = loom_low_concat_result(op);
   const uint32_t destination_unit_count =
       loom_low_storage_relation_value_unit_count(module, destination_value_id);
-  uint32_t destination_unit_offset = 0;
   loom_value_slice_t sources = loom_low_concat_sources(op);
   IREE_ASSERT(relation_index < sources.count,
               "low.concat storage relation index must be in range");
-  for (uint16_t i = 0; i < relation_index; ++i) {
-    destination_unit_offset = loom_low_storage_relation_checked_add_units(
-        destination_unit_offset,
-        loom_low_storage_relation_value_unit_count(module, sources.values[i]));
-  }
   const loom_value_id_t source_value_id = sources.values[relation_index];
   const uint32_t source_unit_count =
       loom_low_storage_relation_value_unit_count(module, source_value_id);
@@ -194,6 +192,7 @@ static void loom_low_storage_relation_get_concat(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = relation_index,
       .destination_unit_offset = destination_unit_offset,
       .source_unit_offset = 0,
       .unit_count = source_unit_count,
@@ -201,6 +200,22 @@ static void loom_low_storage_relation_get_concat(
       .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT,
       .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
   };
+}
+
+static void loom_low_storage_relation_get_concat(
+    const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    loom_low_storage_relation_t* out_relation) {
+  uint32_t destination_unit_offset = 0;
+  const loom_value_slice_t sources = loom_low_concat_sources(op);
+  IREE_ASSERT(relation_index < sources.count,
+              "low.concat storage relation index must be in range");
+  for (uint16_t i = 0; i < relation_index; ++i) {
+    destination_unit_offset = loom_low_storage_relation_checked_add_units(
+        destination_unit_offset,
+        loom_low_storage_relation_value_unit_count(module, sources.values[i]));
+  }
+  loom_low_storage_relation_get_concat_at_offset(
+      module, op, relation_index, destination_unit_offset, out_relation);
 }
 
 static void loom_low_storage_relation_get_branch(
@@ -225,6 +240,7 @@ static void loom_low_storage_relation_get_branch(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = relation_index,
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -258,6 +274,7 @@ static void loom_low_storage_relation_get_scf_for(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = (uint16_t)(relation_index + 3),
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -315,6 +332,7 @@ static void loom_low_storage_relation_get_scf_yield(
       .op = op,
       .destination_value_id = destination_value_id,
       .source_value_id = source_value_id,
+      .source_operand_index = value_index,
       .destination_unit_offset = 0,
       .source_unit_offset = 0,
       .unit_count = destination_unit_count,
@@ -371,4 +389,99 @@ void loom_low_storage_relation_get(const loom_module_t* module,
           "storage relation implementation");
       IREE_BUILTIN_UNREACHABLE();
   }
+}
+
+void loom_low_storage_relation_iterator_initialize(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_low_storage_relation_iterator_t* out_iterator) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(op);
+  IREE_ASSERT_ARGUMENT(out_iterator);
+  *out_iterator = (loom_low_storage_relation_iterator_t){
+      .module = module,
+      .op = op,
+      .relation_count = loom_low_storage_relation_count(module, op),
+  };
+}
+
+bool loom_low_storage_relation_iterator_next(
+    loom_low_storage_relation_iterator_t* iterator,
+    loom_low_storage_relation_t* out_relation) {
+  IREE_ASSERT_ARGUMENT(iterator);
+  IREE_ASSERT_ARGUMENT(iterator->module);
+  IREE_ASSERT_ARGUMENT(iterator->op);
+  IREE_ASSERT_ARGUMENT(out_relation);
+  if (iterator->relation_index >= iterator->relation_count) {
+    return false;
+  }
+
+  const uint16_t relation_index = iterator->relation_index++;
+  if (relation_index < iterator->op->tied_result_count) {
+    loom_low_storage_relation_get_tied_result(iterator->module, iterator->op,
+                                              relation_index, out_relation);
+    return true;
+  }
+
+  const uint16_t structural_relation_index =
+      (uint16_t)(relation_index - iterator->op->tied_result_count);
+  if (iterator->op->kind == LOOM_OP_LOW_CONCAT) {
+    loom_low_storage_relation_get_concat_at_offset(
+        iterator->module, iterator->op, structural_relation_index,
+        iterator->concat_destination_unit_offset, out_relation);
+    iterator->concat_destination_unit_offset =
+        loom_low_storage_relation_checked_add_units(
+            iterator->concat_destination_unit_offset, out_relation->unit_count);
+    return true;
+  }
+
+  loom_low_storage_relation_get(iterator->module, iterator->op, relation_index,
+                                out_relation);
+  return true;
+}
+
+static bool loom_low_storage_unit_ranges_overlap(uint32_t lhs_offset,
+                                                 uint32_t lhs_count,
+                                                 uint32_t rhs_offset,
+                                                 uint32_t rhs_count) {
+  const uint64_t lhs_end = (uint64_t)lhs_offset + lhs_count;
+  const uint64_t rhs_end = (uint64_t)rhs_offset + rhs_count;
+  return lhs_offset < rhs_end && rhs_offset < lhs_end;
+}
+
+bool loom_low_storage_operand_may_read_unit_range(const loom_module_t* module,
+                                                  const loom_op_t* op,
+                                                  uint16_t operand_index,
+                                                  uint32_t unit_offset,
+                                                  uint32_t unit_count) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(op);
+  IREE_ASSERT_LT(operand_index, op->operand_count);
+  const loom_value_id_t operand_value_id =
+      loom_op_const_operands(op)[operand_index];
+  const uint32_t operand_unit_count =
+      loom_low_storage_relation_value_unit_count(module, operand_value_id);
+  IREE_ASSERT(unit_offset <= operand_unit_count &&
+                  unit_count <= operand_unit_count - unit_offset,
+              "verified low storage query must fit operand units");
+  if (unit_count == 0) {
+    return false;
+  }
+
+  bool has_source_relation = false;
+  loom_low_storage_relation_iterator_t iterator;
+  loom_low_storage_relation_iterator_initialize(module, op, &iterator);
+  loom_low_storage_relation_t relation;
+  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
+    if (relation.source_operand_index != operand_index) {
+      continue;
+    }
+    IREE_ASSERT_EQ(relation.source_value_id, operand_value_id);
+    has_source_relation = true;
+    if (loom_low_storage_unit_ranges_overlap(unit_offset, unit_count,
+                                             relation.source_unit_offset,
+                                             relation.unit_count)) {
+      return true;
+    }
+  }
+  return !has_source_relation;
 }

@@ -80,9 +80,28 @@ typedef struct loom_low_storage_relation_t {
   loom_low_storage_relation_kind_t kind;
   // IR feature that created the relation.
   loom_low_storage_relation_cause_t cause;
+  // Operand index of |source_value_id| on |op|.
+  uint16_t source_operand_index;
   // Hard/soft relation behavior.
   loom_low_storage_relation_flags_t flags;
 } loom_low_storage_relation_t;
+
+// Sequential storage-relation iterator for one operation.
+//
+// Iteration preserves descriptor-tied relations followed by structural
+// relations. Sequential state keeps variable-width concat enumeration linear.
+typedef struct loom_low_storage_relation_iterator_t {
+  // Module owning the operation and relation value types.
+  const loom_module_t* module;
+  // Operation whose relations are being enumerated.
+  const loom_op_t* op;
+  // Next relation ordinal to return.
+  uint16_t relation_index;
+  // Total number of operation relations.
+  uint16_t relation_count;
+  // Running result-unit offset for low.concat structural relations.
+  uint32_t concat_destination_unit_offset;
+} loom_low_storage_relation_iterator_t;
 
 // Returns the number of storage relations introduced by |op|.
 //
@@ -92,13 +111,37 @@ typedef struct loom_low_storage_relation_t {
 uint16_t loom_low_storage_relation_count(const loom_module_t* module,
                                          const loom_op_t* op);
 
-// Returns storage relation |relation_index| for |op|.
+// Returns storage relation |relation_index| for |op|. Use the sequential
+// iterator when enumerating multiple relations so variable-width structural
+// relations are decoded once.
 //
 // |relation_index| must be less than loom_low_storage_relation_count(module,
 // op). Verified low IR is assumed.
 void loom_low_storage_relation_get(const loom_module_t* module,
                                    const loom_op_t* op, uint16_t relation_index,
                                    loom_low_storage_relation_t* out_relation);
+
+// Initializes |out_iterator| to enumerate all relations introduced by |op|.
+void loom_low_storage_relation_iterator_initialize(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_low_storage_relation_iterator_t* out_iterator);
+
+// Returns the next relation from |iterator| or false when exhausted.
+bool loom_low_storage_relation_iterator_next(
+    loom_low_storage_relation_iterator_t* iterator,
+    loom_low_storage_relation_t* out_relation);
+
+// Returns true when |op|'s |operand_index| may read any storage unit in the
+// queried operand-relative range. Structural storage relations narrow reads
+// such as low.slice to their exact source range; operands without a structural
+// relation conservatively read their full value.
+//
+// Verified low IR and an in-range operand unit span are assumed.
+bool loom_low_storage_operand_may_read_unit_range(const loom_module_t* module,
+                                                  const loom_op_t* op,
+                                                  uint16_t operand_index,
+                                                  uint32_t unit_offset,
+                                                  uint32_t unit_count);
 
 #ifdef __cplusplus
 }  // extern "C"

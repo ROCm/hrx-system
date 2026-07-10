@@ -50,6 +50,7 @@ from loom.target.low_descriptors import (
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_BARRIER_DESCRIPTOR,
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -342,6 +343,31 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
             )
             == descriptor.encoding_field_values
         )
+
+
+def test_compiler_derives_barrier_descriptor_flag() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_BARRIER_DESCRIPTOR,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.BARRIER in compiled.descriptors[0].flags
+
+
+def test_compiler_rejects_barrier_flag_without_effect() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        flags=(*TEST_LOW_ADD_I32_DESCRIPTOR.flags, DescriptorFlag.BARRIER),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has the barrier flag without a barrier effect"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 def test_allowlist_closes_over_operand_form_replacements() -> None:

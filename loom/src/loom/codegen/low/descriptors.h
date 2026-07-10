@@ -383,6 +383,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE ((uint16_t)1u << 2)
 // Descriptor is a Loom pseudo packet that requires target lowering.
 #define LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO ((uint16_t)1u << 3)
+// Descriptor carries a barrier effect and fences source-order scheduling.
+#define LOOM_LOW_DESCRIPTOR_FLAG_BARRIER ((uint16_t)1u << 4)
 
 typedef struct loom_low_reg_class_t {
   // String-table offset for the stable register-class name.

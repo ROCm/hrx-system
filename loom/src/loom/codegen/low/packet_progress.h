@@ -142,9 +142,10 @@ loom_low_packet_progress_class_index_lookup(
     const loom_low_packet_progress_class_index_t* index,
     uint16_t progress_class_id);
 
-// Returns progress units observed after |start_packet_index| and before
-// |end_packet_index| for |progress_class_id|. RESET events clear prior observed
-// units within the queried range. Missing progress/index/class data returns 0.
+// Returns progress units completed after |start_packet_index| and before
+// |end_packet_index| for |progress_class_id|. A RESET completes all progress
+// preceding it and returns UINT32_MAX. Missing progress/index/class data
+// returns 0.
 uint32_t loom_low_packet_progress_class_index_observed_progress(
     const loom_low_packet_progress_class_index_t* index,
     iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,

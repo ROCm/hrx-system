@@ -16,6 +16,8 @@
 namespace loom {
 namespace {
 
+constexpr loom_liveness_analysis_t kEmptyLiveness = {};
+
 class LowAllocationSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -213,7 +215,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      /*assignment_capacity=*/1, /*unit_capacity=*/8, &arena_, &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/1, /*unit_capacity=*/8, &arena_,
+      &active_set));
   loom_low_allocation_active_set_insert(
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
@@ -306,7 +309,8 @@ TEST_F(LowAllocationSearchTest, SelectsActiveSpillVictimSet) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      /*assignment_capacity=*/1, /*unit_capacity=*/8, &arena_, &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/1, /*unit_capacity=*/8, &arena_,
+      &active_set));
   loom_low_allocation_active_set_insert(
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
@@ -428,7 +432,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      /*assignment_capacity=*/2, /*unit_capacity=*/4, &arena_, &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/2, /*unit_capacity=*/4, &arena_,
+      &active_set));
   loom_low_allocation_active_set_insert(
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
@@ -562,7 +567,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      /*assignment_capacity=*/3, /*unit_capacity=*/4, &arena_, &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/3, /*unit_capacity=*/4, &arena_,
+      &active_set));
   loom_low_allocation_active_set_insert(
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
