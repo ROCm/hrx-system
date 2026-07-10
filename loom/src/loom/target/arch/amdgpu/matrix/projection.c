@@ -244,6 +244,7 @@ bool loom_amdgpu_matrix_contract_match_request_from_contract(
 
   loom_amdgpu_matrix_contract_match_request_t request = {0};
   request.family = LOOM_AMDGPU_MATRIX_FAMILY_UNKNOWN;
+  request.tile_shape.block_count = 1;
   request.tile_shape.result_row_count = (uint16_t)contract_request->shape.m;
   request.tile_shape.result_column_count = (uint16_t)contract_request->shape.n;
   request.tile_shape.reduction_count = (uint16_t)contract_request->shape.k;

@@ -1162,6 +1162,21 @@ typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE = 4,
 } loom_amdgpu_fragment_memory_epilogue_strategy_t;
 
+typedef struct loom_amdgpu_fragment_memory_address_layout_t {
+  // Logical payload elements stored in each 32-bit fragment register.
+  uint16_t payload_elements_per_register;
+  // Power-of-two lane divisor shared by the modulo and quotient terms.
+  uint16_t lane_divisor;
+  // Byte stride multiplied by lane modulo lane_divisor.
+  uint32_t lane_mod_byte_stride;
+  // Byte stride multiplied by lane divided by lane_divisor.
+  uint32_t lane_div_byte_stride;
+  // Byte stride between adjacent fragment registers.
+  uint32_t register_byte_stride;
+  // Byte stride between separately addressed elements in one register.
+  uint32_t packed_element_byte_stride;
+} loom_amdgpu_fragment_memory_address_layout_t;
+
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
   loom_amdgpu_memory_operation_kind_t operation_kind;
@@ -1181,12 +1196,12 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   uint16_t register_count;
   // Number of 32-bit registers used by the lowered payload storage value.
   uint16_t payload_register_count;
-  // Logical elements packed in each 32-bit fragment register.
-  uint16_t elements_per_register;
   // Byte count of one logical fragment element.
   uint16_t element_byte_count;
   // Element type stored in the source or destination view.
   loom_scalar_type_t view_element_type;
+  // Compiled lane, register, and packed-element address coefficients.
+  loom_amdgpu_fragment_memory_address_layout_t address_layout;
   // Direct memory packets emitted in increasing fragment-register order.
   loom_amdgpu_fragment_memory_packet_plan_t
       packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
@@ -1241,6 +1256,23 @@ typedef enum loom_amdgpu_fragment_repack_reason_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_PACKETS = 8,
 } loom_amdgpu_fragment_repack_reason_t;
 
+enum loom_amdgpu_fragment_repack_lane_transform_e {
+  // The transformed lane coordinate is statically zero.
+  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_ZERO = 0,
+  // Mask the lane coordinate with the immediate.
+  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_AND = 1,
+  // Shift the lane coordinate right by the immediate.
+  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_SHIFT_RIGHT = 2,
+};
+typedef uint8_t loom_amdgpu_fragment_repack_lane_transform_t;
+
+typedef struct loom_amdgpu_fragment_repack_lane_recipe_t {
+  // Arithmetic transform applied to the lane coordinate.
+  loom_amdgpu_fragment_repack_lane_transform_t transform;
+  // Mask or shift immediate interpreted by transform.
+  uint16_t immediate;
+} loom_amdgpu_fragment_repack_lane_recipe_t;
+
 typedef struct loom_amdgpu_fragment_repack_plan_t {
   // Source fragment value being repacked.
   loom_value_id_t source;
@@ -1268,8 +1300,10 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t source_lane_group_byte_shift;
   // Log2 byte spacing contributed by the target LHS lane-div reduction group.
   uint16_t result_lane_div_byte_shift;
-  // Source result-fragment layout map selected by the target contract.
-  loom_matrix_fragment_map_kind_t source_map_kind;
+  // Recipe selecting a source payload register from lane_mod.
+  loom_amdgpu_fragment_repack_lane_recipe_t source_register_selector;
+  // Recipe selecting the source lane group from lane_mod.
+  loom_amdgpu_fragment_repack_lane_recipe_t source_lane_group;
   // Source fragment role fact bitset.
   uint32_t source_role_flags;
   // Result fragment role fact bitset.

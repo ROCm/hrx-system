@@ -738,6 +738,7 @@ kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf16, %rhs_layout> -> vector<4xf16>
   %zero_acc = vector.constant 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
+  // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.target_layout"}
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<16x16xf32, #dense>

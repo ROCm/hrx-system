@@ -8,11 +8,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from loom.gen.target.arch.amdgpu.matrix import amdgpu_matrix_contract_tables
 from loom.target.arch.amdgpu.matrix_contracts import (
     AMDGPU_MATRIX_CONTRACTS,
     AmdgpuMatrixContract,
     payload,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
 from loom.target.low_descriptors import Immediate, ImmediateKind
 
@@ -192,6 +197,25 @@ def test_generation_resolves_gfx950_mfma_f32_fragment_layouts() -> None:
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8" in fp8_bf8_32x32
 
 
+def test_generation_emits_blocked_mfma_tile_shapes() -> None:
+    f32 = _contract_initializer(_contract("mfma.f32.16x16x4.f16"))
+    f64 = _contract_initializer(_contract("mfma.f64.4x4x4.f64"))
+    i32 = _contract_initializer(_contract("mfma.i32.4x4x4.i8"))
+    single_block = _contract_initializer(_contract("mfma.f32.16x16x16.f16"))
+
+    assert ".block_count = 4" in f32
+    assert ".block_count = 4" in f64
+    assert ".block_count = 16" in i32
+    assert ".block_count = 1" in single_block
+
+
+def test_generation_rejects_invalid_block_count() -> None:
+    contract = replace(_contract("mfma.f32.16x16x4.f16"), block_count=0)
+
+    with pytest.raises(ValueError, match="invalid tile shape"):
+        _contract_initializer(contract)
+
+
 def test_generation_audits_cdna_dense_mfma_16x16x32_f32_layout_surface() -> None:
     missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_16x16x32_f32_contract(contract) and contract.fragment_layout is None)
 
@@ -208,6 +232,14 @@ def test_generation_audits_cdna_dense_mfma_f32_layout_defer_set() -> None:
     missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_f32_contract(contract) and contract.fragment_layout is None)
 
     assert missing == _DEFERRED_CDNA_DENSE_MFMA_F32_FRAGMENT_LAYOUTS
+
+
+def test_generation_validates_every_referenced_fragment_layout() -> None:
+    referenced_layouts = {contract.fragment_layout for contract in AMDGPU_MATRIX_CONTRACTS if contract.fragment_layout is not None}
+
+    assert referenced_layouts == set(AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY)
+    for contract in AMDGPU_MATRIX_CONTRACTS:
+        amdgpu_matrix_contract_tables._validate_contract_fragment_layout(contract)
 
 
 def test_generation_audits_rdna4_float_fragment_layout_surface() -> None:

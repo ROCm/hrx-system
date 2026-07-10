@@ -1416,8 +1416,6 @@ static bool loom_amdgpu_fragment_store_plans_can_share_epilogue_loop(
          candidate_plan->register_count == first_plan->register_count &&
          candidate_plan->payload_register_count ==
              first_plan->payload_register_count &&
-         candidate_plan->elements_per_register ==
-             first_plan->elements_per_register &&
          candidate_plan->element_byte_count == first_plan->element_byte_count &&
          candidate_plan->view_element_type == first_plan->view_element_type &&
          candidate_plan->payload_form == first_plan->payload_form &&

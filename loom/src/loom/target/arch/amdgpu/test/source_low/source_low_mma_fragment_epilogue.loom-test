@@ -1542,52 +1542,52 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
     %23 = vector.extract %payload0[%20] : vector<8xf32> -> f32
     %24 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %22, %23 : f32
     %25 = scalar.fptrunc %24 : f32 to bf16
-    %90 = index.constant 15 : index
-    %91 = index.andi %21, %90 : index
-    %88 = index.constant 4 : index
-    %89 = index.shrui %21, %88 : index
-    %30 = index.constant 2 : index
-    %87 = index.madd %20, %30, %89 : index
-    view.store %25, %output_view[%87, %91] : bf16, view<16x64xbf16, #dense>
+    %90 = index.constant 4 : index
+    %91 = index.shrui %21, %90 : index
+    %28 = index.constant 2 : index
+    %89 = index.madd %20, %28, %91 : index
+    %87 = index.constant 15 : index
+    %88 = index.andi %21, %87 : index
+    view.store %25, %output_view[%89, %88] : bf16, view<16x64xbf16, #dense>
     %33 = vector.extract %payload1[%20] : vector<8xf32> -> f32
     %34 = vector.extract %payload1[%20] : vector<8xf32> -> f32
     %35 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %33, %34 : f32
     %36 = scalar.fptrunc %35 : f32 to bf16
-    %85 = index.constant 15 : index
-    %86 = index.andi %21, %85 : index
-    %83 = index.constant 4 : index
-    %84 = index.shrui %21, %83 : index
-    %41 = index.constant 2 : index
-    %82 = index.madd %20, %41, %84 : index
+    %85 = index.constant 4 : index
+    %86 = index.shrui %21, %85 : index
+    %39 = index.constant 2 : index
+    %84 = index.madd %20, %39, %86 : index
+    %82 = index.constant 15 : index
+    %83 = index.andi %21, %82 : index
     %44 = index.constant 16 : index
-    %45 = index.add %44, %86 : index
-    view.store %36, %output_view[%82, %45] : bf16, view<16x64xbf16, #dense>
+    %45 = index.add %44, %83 : index
+    view.store %36, %output_view[%84, %45] : bf16, view<16x64xbf16, #dense>
     %46 = vector.extract %payload2[%20] : vector<8xf32> -> f32
     %47 = vector.extract %payload2[%20] : vector<8xf32> -> f32
     %48 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %46, %47 : f32
     %49 = scalar.fptrunc %48 : f32 to bf16
-    %80 = index.constant 15 : index
-    %81 = index.andi %21, %80 : index
-    %78 = index.constant 4 : index
-    %79 = index.shrui %21, %78 : index
-    %54 = index.constant 2 : index
-    %77 = index.madd %20, %54, %79 : index
+    %80 = index.constant 4 : index
+    %81 = index.shrui %21, %80 : index
+    %52 = index.constant 2 : index
+    %79 = index.madd %20, %52, %81 : index
+    %77 = index.constant 15 : index
+    %78 = index.andi %21, %77 : index
     %57 = index.constant 32 : index
-    %58 = index.add %57, %81 : index
-    view.store %49, %output_view[%77, %58] : bf16, view<16x64xbf16, #dense>
+    %58 = index.add %57, %78 : index
+    view.store %49, %output_view[%79, %58] : bf16, view<16x64xbf16, #dense>
     %59 = vector.extract %payload3[%20] : vector<8xf32> -> f32
     %60 = vector.extract %payload3[%20] : vector<8xf32> -> f32
     %61 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %59, %60 : f32
     %62 = scalar.fptrunc %61 : f32 to bf16
-    %75 = index.constant 15 : index
-    %76 = index.andi %21, %75 : index
-    %73 = index.constant 4 : index
-    %74 = index.shrui %21, %73 : index
-    %67 = index.constant 2 : index
-    %72 = index.madd %20, %67, %74 : index
+    %75 = index.constant 4 : index
+    %76 = index.shrui %21, %75 : index
+    %65 = index.constant 2 : index
+    %74 = index.madd %20, %65, %76 : index
+    %72 = index.constant 15 : index
+    %73 = index.andi %21, %72 : index
     %70 = index.constant 48 : index
-    %71 = index.add %70, %76 : index
-    view.store %62, %output_view[%72, %71] : bf16, view<16x64xbf16, #dense>
+    %71 = index.add %70, %73 : index
+    view.store %62, %output_view[%74, %71] : bf16, view<16x64xbf16, #dense>
   }
   kernel.return
 }
@@ -1656,52 +1656,52 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
     %33 = vector.extract %payload0[%30] : vector<8xf32> -> f32
     %34 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %32, %33 : f32
     %35 = scalar.fptrunc %34 : f32 to bf16
-    %100 = index.constant 15 : index
-    %101 = index.andi %31, %100 : index
-    %98 = index.constant 4 : index
-    %99 = index.shrui %31, %98 : index
-    %40 = index.constant 2 : index
-    %97 = index.madd %30, %40, %99 : index
-    view.store %35, %output_view[%97, %101] : bf16, view<16x128xbf16, #dense>
+    %100 = index.constant 4 : index
+    %101 = index.shrui %31, %100 : index
+    %38 = index.constant 2 : index
+    %99 = index.madd %30, %38, %101 : index
+    %97 = index.constant 15 : index
+    %98 = index.andi %31, %97 : index
+    view.store %35, %output_view[%99, %98] : bf16, view<16x128xbf16, #dense>
     %43 = vector.extract %payload1[%30] : vector<8xf32> -> f32
     %44 = vector.extract %payload1[%30] : vector<8xf32> -> f32
     %45 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %43, %44 : f32
     %46 = scalar.fptrunc %45 : f32 to bf16
-    %95 = index.constant 15 : index
-    %96 = index.andi %31, %95 : index
-    %93 = index.constant 4 : index
-    %94 = index.shrui %31, %93 : index
-    %51 = index.constant 2 : index
-    %92 = index.madd %30, %51, %94 : index
+    %95 = index.constant 4 : index
+    %96 = index.shrui %31, %95 : index
+    %49 = index.constant 2 : index
+    %94 = index.madd %30, %49, %96 : index
+    %92 = index.constant 15 : index
+    %93 = index.andi %31, %92 : index
     %54 = index.constant 16 : index
-    %55 = index.add %54, %96 : index
-    view.store %46, %output_view[%92, %55] : bf16, view<16x128xbf16, #dense>
+    %55 = index.add %54, %93 : index
+    view.store %46, %output_view[%94, %55] : bf16, view<16x128xbf16, #dense>
     %56 = vector.extract %payload2[%30] : vector<8xf32> -> f32
     %57 = vector.extract %payload2[%30] : vector<8xf32> -> f32
     %58 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %56, %57 : f32
     %59 = scalar.fptrunc %58 : f32 to bf16
-    %90 = index.constant 15 : index
-    %91 = index.andi %31, %90 : index
-    %88 = index.constant 4 : index
-    %89 = index.shrui %31, %88 : index
-    %64 = index.constant 2 : index
-    %87 = index.madd %30, %64, %89 : index
+    %90 = index.constant 4 : index
+    %91 = index.shrui %31, %90 : index
+    %62 = index.constant 2 : index
+    %89 = index.madd %30, %62, %91 : index
+    %87 = index.constant 15 : index
+    %88 = index.andi %31, %87 : index
     %67 = index.constant 32 : index
-    %68 = index.add %67, %91 : index
-    view.store %59, %output_view[%87, %68] : bf16, view<16x128xbf16, #dense>
+    %68 = index.add %67, %88 : index
+    view.store %59, %output_view[%89, %68] : bf16, view<16x128xbf16, #dense>
     %69 = vector.extract %payload3[%30] : vector<8xf32> -> f32
     %70 = vector.extract %payload3[%30] : vector<8xf32> -> f32
     %71 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %69, %70 : f32
     %72 = scalar.fptrunc %71 : f32 to bf16
-    %85 = index.constant 15 : index
-    %86 = index.andi %31, %85 : index
-    %83 = index.constant 4 : index
-    %84 = index.shrui %31, %83 : index
-    %77 = index.constant 2 : index
-    %82 = index.madd %30, %77, %84 : index
+    %85 = index.constant 4 : index
+    %86 = index.shrui %31, %85 : index
+    %75 = index.constant 2 : index
+    %84 = index.madd %30, %75, %86 : index
+    %82 = index.constant 15 : index
+    %83 = index.andi %31, %82 : index
     %80 = index.constant 48 : index
-    %81 = index.add %80, %86 : index
-    view.store %72, %output_view[%82, %81] : bf16, view<16x128xbf16, #dense>
+    %81 = index.add %80, %83 : index
+    view.store %72, %output_view[%84, %81] : bf16, view<16x128xbf16, #dense>
   }
   vector.fragment.store<result> %epilogue4, %output_view[0, 64] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #dense>
   vector.fragment.store<result> %epilogue5, %output_view[0, 80] shape [%m, %n] : vector<8xf32>, view<16x128xbf16, #dense>
