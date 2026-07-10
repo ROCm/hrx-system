@@ -60,6 +60,31 @@ iree_py_library(
     matrix_contracts
   SRCS
     "matrix_contracts.py"
+  DEPS
+    loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    matrix_fragment_layouts
+  SRCS
+    "matrix_fragment_layouts.py"
+  DEPS
+    loom::py::loom::target::arch::package
+)
+
+iree_py_test(
+  NAME
+    matrix_fragment_layouts_test
+  SRCS
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.matrix_fragment_layouts_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
 )
 
 iree_py_library(

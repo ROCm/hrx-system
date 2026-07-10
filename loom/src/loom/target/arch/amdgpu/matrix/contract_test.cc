@@ -52,6 +52,7 @@ loom_amdgpu_matrix_contract_match_request_t MatchRequest(
     loom_amdgpu_matrix_contract_flags_t required_flags) {
   loom_amdgpu_matrix_contract_match_request_t request = {};
   request.family = family;
+  request.tile_shape.block_count = 1;
   request.tile_shape.result_row_count = result_row_count;
   request.tile_shape.result_column_count = result_column_count;
   request.tile_shape.reduction_count = reduction_count;
@@ -69,18 +70,15 @@ loom_amdgpu_matrix_contract_match_request_t MatchRequest(
 
 void ExpectFragmentRoleLayout(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, loom_matrix_fragment_map_kind_t map_kind,
-    uint16_t register_count, uint16_t elements_per_register,
-    uint16_t element_bit_count,
+    loom_contract_operand_role_t role, uint16_t register_count,
+    uint16_t payload_element_count, uint16_t element_bit_count,
     loom_amdgpu_matrix_fragment_coordinate_flags_t coordinate_flags) {
-  const loom_amdgpu_matrix_fragment_role_layout_t* role_layout =
-      loom_amdgpu_matrix_fragment_role_layout(layout, role);
+  const loom_matrix_fragment_role_layout_t* role_layout =
+      loom_matrix_fragment_role_layout(layout, role);
   ASSERT_NE(role_layout, nullptr);
   EXPECT_EQ(role_layout->role, role);
-  EXPECT_EQ(role_layout->map_kind,
-            static_cast<loom_matrix_fragment_map_kind_t>(map_kind));
   EXPECT_EQ(role_layout->register_count, register_count);
-  EXPECT_EQ(role_layout->elements_per_register, elements_per_register);
+  EXPECT_EQ(role_layout->payload_element_count, payload_element_count);
   EXPECT_EQ(role_layout->element_bit_count, element_bit_count);
   EXPECT_EQ(role_layout->coordinate_flags, coordinate_flags);
 }
@@ -91,9 +89,17 @@ void ExpectFragmentCoordinate(
     uint16_t element_index,
     loom_amdgpu_matrix_fragment_coordinate_flags_t coordinate_flags,
     uint16_t row, uint16_t column, uint16_t reduction) {
+  const loom_matrix_fragment_role_layout_t* role_layout =
+      loom_matrix_fragment_role_layout(layout, role);
+  ASSERT_NE(role_layout, nullptr);
+  ASSERT_LE(role_layout->element_bit_count, 32u);
+  const uint16_t elements_per_register =
+      static_cast<uint16_t>(32u / role_layout->element_bit_count);
+  const uint16_t payload_element_index = static_cast<uint16_t>(
+      register_index * elements_per_register + element_index);
   loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-  ASSERT_TRUE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, role, lane, register_index, element_index, &coordinate));
+  ASSERT_TRUE(loom_matrix_fragment_coordinate(
+      layout, role, lane, payload_element_index, &coordinate));
   EXPECT_EQ(coordinate.coordinate_flags, coordinate_flags);
   EXPECT_EQ(coordinate.row, row);
   EXPECT_EQ(coordinate.column, column);
@@ -242,11 +248,33 @@ TEST(MatrixContractTest, Gfx908SmallLegacyMfmaDescriptor) {
   EXPECT_EQ(descriptor->tile_shape.result_row_count, 4);
   EXPECT_EQ(descriptor->tile_shape.result_column_count, 4);
   EXPECT_EQ(descriptor->tile_shape.reduction_count, 2);
+  EXPECT_EQ(descriptor->tile_shape.block_count, 16);
   EXPECT_EQ(descriptor->lhs_payload.numeric_type,
             LOOM_AMDGPU_MATRIX_NUMERIC_BF16);
   EXPECT_EQ(descriptor->lhs_payload.register_count, 1);
   EXPECT_EQ(descriptor->lhs_payload.element_count, 2);
   EXPECT_EQ(descriptor->result_payload.register_count, 4);
+}
+
+TEST(MatrixContractTest, MatcherDistinguishesBlockedMfmaShape) {
+  loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
+      LOOM_AMDGPU_MATRIX_FAMILY_MFMA, 4, 4, 2, LOOM_AMDGPU_MATRIX_NUMERIC_BF16,
+      LOOM_AMDGPU_MATRIX_NUMERIC_BF16, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
+      LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_SCALE_NONE,
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A, 64, 0, 0);
+  loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(diagnostic.rejection_bits,
+            LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_TILE_SHAPE);
+
+  request.tile_shape.block_count = 16;
+  const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(ToString(descriptor->name), "mfma.f32.4x4x2.bf16");
+  EXPECT_EQ(descriptor->tile_shape.block_count, 16);
+  EXPECT_EQ(diagnostic.rejection_bits,
+            LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
 }
 
 TEST(MatrixContractTest, Gfx908LegacyIntegerMfmaDescriptor) {
@@ -1162,22 +1190,14 @@ TEST(MatrixContractTest, Rdna3Wmmar3F32F16LayoutMapsFragments) {
   constexpr loom_amdgpu_matrix_fragment_coordinate_flags_t
       kAccumulatorCoordinates = LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW |
                                 LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN;
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION, 8, 2, 16,
-      kLhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION, 8, 2, 16,
-      kRhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1, 32,
-      kAccumulatorCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1, 32,
-      kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 8, 16, 16,
+                           kLhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 8, 16, 16,
+                           kRhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 8, 8,
+                           32, kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 8, 8, 32,
+                           kAccumulatorCoordinates);
 
   ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
                            kLhsCoordinates, 0, 0, 0);
@@ -1203,10 +1223,10 @@ TEST(MatrixContractTest, Rdna3Wmmar3F32F16LayoutMapsFragments) {
                            kAccumulatorCoordinates, 15, 15, 0);
 
   loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 32, 0, 0, &coordinate));
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 8, 0, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 32, 0, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 16, &coordinate));
 }
 
 TEST(MatrixContractTest, Rdna3Wmmar3F16F16LayoutMapsLowSubwordFragments) {
@@ -1238,22 +1258,14 @@ TEST(MatrixContractTest, Rdna3Wmmar3F16F16LayoutMapsLowSubwordFragments) {
   constexpr loom_amdgpu_matrix_fragment_coordinate_flags_t
       kAccumulatorCoordinates = LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW |
                                 LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN;
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION, 8, 2, 16,
-      kLhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION, 8, 2, 16,
-      kRhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD, 8,
-      2, 16, kAccumulatorCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD, 8,
-      2, 16, kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 8, 16, 16,
+                           kLhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 8, 16, 16,
+                           kRhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 8,
+                           16, 16, kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 8, 16, 16,
+                           kAccumulatorCoordinates);
 
   ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0,
                            0, kAccumulatorCoordinates, 0, 0, 0);
@@ -1265,8 +1277,8 @@ TEST(MatrixContractTest, Rdna3Wmmar3F16F16LayoutMapsLowSubwordFragments) {
                            kAccumulatorCoordinates, 15, 15, 0);
 
   loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 7, 1, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 15, &coordinate));
 }
 
 TEST(MatrixContractTest, Rdna3Wmmar3Wave64LayoutsMapFragments) {
@@ -1288,14 +1300,10 @@ TEST(MatrixContractTest, Rdna3Wmmar3Wave64LayoutsMapFragments) {
       LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_F16_W64);
   EXPECT_EQ(f32_descriptor->wave_size_bits, LOOM_AMDGPU_MATRIX_WAVE_SIZE_64);
   EXPECT_EQ(f32_layout->wave_size, 64);
-  ExpectFragmentRoleLayout(
-      f32_layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION, 8, 2, 16,
-      kLhsCoordinates);
-  ExpectFragmentRoleLayout(
-      f32_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 4, 1, 32,
-      kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(f32_layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 8, 16,
+                           16, kLhsCoordinates);
+  ExpectFragmentRoleLayout(f32_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+                           4, 4, 32, kAccumulatorCoordinates);
   ExpectFragmentCoordinate(f32_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
                            0, 0, 0, kAccumulatorCoordinates, 0, 0, 0);
   ExpectFragmentCoordinate(f32_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
@@ -1316,10 +1324,8 @@ TEST(MatrixContractTest, Rdna3Wmmar3Wave64LayoutsMapFragments) {
       LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F16_16X16X16_F16_W64);
   EXPECT_EQ(f16_descriptor->wave_size_bits, LOOM_AMDGPU_MATRIX_WAVE_SIZE_64);
   EXPECT_EQ(f16_layout->wave_size, 64);
-  ExpectFragmentRoleLayout(
-      f16_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD, 4,
-      2, 16, kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(f16_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+                           4, 8, 16, kAccumulatorCoordinates);
   ExpectFragmentCoordinate(f16_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
                            0, 0, 0, kAccumulatorCoordinates, 0, 0, 0);
   ExpectFragmentCoordinate(f16_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
@@ -1330,8 +1336,8 @@ TEST(MatrixContractTest, Rdna3Wmmar3Wave64LayoutsMapFragments) {
                            0, kAccumulatorCoordinates, 15, 15, 0);
 
   loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      f16_layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 3, 1, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      f16_layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 7, &coordinate));
 }
 
 TEST(MatrixContractTest, Rdna4WmmaHalfLayoutsMapPackedFragments) {
@@ -1436,21 +1442,15 @@ TEST(MatrixContractTest, Rdna4WmmaHalfLayoutsMapPackedFragments) {
         << test_case.descriptor_name;
 
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, 2, 16, kLhsCoordinates);
+        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, test_case.source_register_count,
+        test_case.source_register_count * 2, 16, kLhsCoordinates);
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, 2, 16, kRhsCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN, 4, 2, 16,
-        kAccumulatorCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN, 4, 2, 16,
-        kAccumulatorCoordinates);
+        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, test_case.source_register_count,
+        test_case.source_register_count * 2, 16, kRhsCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 4,
+                             8, 16, kAccumulatorCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 4, 8,
+                             16, kAccumulatorCoordinates);
 
     ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
                              kLhsCoordinates, 0, 0, 0);
@@ -1583,23 +1583,19 @@ TEST(MatrixContractTest, Rdna4WmmaF32LayoutsMapFragments) {
         << test_case.descriptor_name;
 
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, test_case.source_elements_per_register,
+        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, test_case.source_register_count,
+        test_case.source_register_count *
+            test_case.source_elements_per_register,
         test_case.source_element_bit_count, kLhsCoordinates);
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, test_case.source_elements_per_register,
+        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, test_case.source_register_count,
+        test_case.source_register_count *
+            test_case.source_elements_per_register,
         test_case.source_element_bit_count, kRhsCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 8, 1, 32,
-        kAccumulatorCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 8, 1, 32,
-        kAccumulatorCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 8,
+                             8, 32, kAccumulatorCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 8, 8,
+                             32, kAccumulatorCoordinates);
 
     ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
                              kLhsCoordinates, 0, 0, 0);
@@ -1791,22 +1787,14 @@ TEST(MatrixContractTest, CdnaMfmaF32Bf16LayoutMapsFragments) {
   constexpr loom_amdgpu_matrix_fragment_coordinate_flags_t
       kAccumulatorCoordinates = LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW |
                                 LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN;
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION, 2, 2,
-      16, kLhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION, 2,
-      2, 16, kRhsCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1, 32,
-      kAccumulatorCoordinates);
-  ExpectFragmentRoleLayout(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1, 32,
-      kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 2, 4, 16,
+                           kLhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 2, 4, 16,
+                           kRhsCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 4, 4,
+                           32, kAccumulatorCoordinates);
+  ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 4, 4, 32,
+                           kAccumulatorCoordinates);
 
   ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
                            kLhsCoordinates, 0, 0, 0);
@@ -1836,10 +1824,10 @@ TEST(MatrixContractTest, CdnaMfmaF32Bf16LayoutMapsFragments) {
                            kAccumulatorCoordinates, 15, 15, 0);
 
   loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 64, 0, 0, &coordinate));
-  EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 2, 0, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 64, 0, &coordinate));
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 4, &coordinate));
 }
 
 TEST(MatrixContractTest, CdnaMfmaF32LayoutsMapFragments) {
@@ -2095,23 +2083,23 @@ TEST(MatrixContractTest, CdnaMfmaF32LayoutsMapFragments) {
         << test_case.descriptor_name;
 
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, test_case.source_elements_per_register,
+        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, test_case.source_register_count,
+        test_case.source_register_count *
+            test_case.source_elements_per_register,
         test_case.source_element_bit_count, kLhsCoordinates);
     ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-        test_case.source_register_count, test_case.source_elements_per_register,
+        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, test_case.source_register_count,
+        test_case.source_register_count *
+            test_case.source_elements_per_register,
         test_case.source_element_bit_count, kRhsCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-        test_case.result_register_count, 1, 32, kAccumulatorCoordinates);
-    ExpectFragmentRoleLayout(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-        LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-        test_case.result_register_count, 1, 32, kAccumulatorCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+                             test_case.result_register_count,
+                             test_case.result_register_count, 32,
+                             kAccumulatorCoordinates);
+    ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+                             test_case.result_register_count,
+                             test_case.result_register_count, 32,
+                             kAccumulatorCoordinates);
 
     ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
                              kLhsCoordinates, 0, 0, 0);
@@ -2169,12 +2157,15 @@ TEST(MatrixContractTest, CdnaMfmaF32LayoutsMapFragments) {
                              test_case.column_count - 1, 0);
 
     loom_amdgpu_matrix_fragment_coordinate_t coordinate = {};
-    EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0,
-        test_case.source_register_count, 0, &coordinate));
-    EXPECT_FALSE(loom_amdgpu_matrix_fragment_coordinate(
-        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 0, 0,
-        test_case.source_elements_per_register, &coordinate));
+    const uint16_t source_payload_element_count =
+        static_cast<uint16_t>(test_case.source_register_count *
+                              test_case.source_elements_per_register);
+    EXPECT_FALSE(loom_matrix_fragment_coordinate(
+        layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, source_payload_element_count,
+        &coordinate));
+    EXPECT_FALSE(loom_matrix_fragment_coordinate(
+        layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 0, source_payload_element_count,
+        &coordinate));
   }
 }
 

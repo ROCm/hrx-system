@@ -255,6 +255,8 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_XF32 = 34,
   // CDNA MFMA 32x32x2 f32 input, f32 accumulator/result layout.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X2_F32 = 35,
+  // Total number of fragment layout table slots, including UNKNOWN.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 36,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
@@ -297,7 +299,7 @@ typedef uint32_t loom_amdgpu_matrix_contract_source_requirement_flags_t;
 #define LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE \
   LOOM_AMDGPU_DESCRIPTOR_REF_NONE
 
-// AMDGPU descriptors use the generic M/N/K matrix tile shape record.
+// AMDGPU descriptors use the generic block/M/N/K matrix tile shape record.
 typedef loom_matrix_fragment_tile_shape_t loom_amdgpu_matrix_tile_shape_t;
 
 typedef struct loom_amdgpu_matrix_payload_shape_t {
