@@ -2877,6 +2877,43 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_input_unpack_bf16_f32(
       bindings);
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_packed_value_unpack_bf16_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t output) {
+  uint64_t element_count64 = 0;
+  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, input_size,
+                                                 &element_count64) ||
+      element_count64 > ID4_IDEOGRAM4_DIT_LINEAR_INPUT_PACK_MAX_ELEMENT_COUNT) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 DiT packed value unpack size overflow");
+  }
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.linear_input_unpack.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_input_unpack.token_capacity"),
+       token_capacity},
+      {IREE_SV("id4.ideogram4.linear_input_unpack.input_size"), input_size},
+      {IREE_SV("id4.ideogram4.linear_input_unpack.element_count"),
+       (uint32_t)element_count64},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/linear_input_unpack_bf16_f32"),
+      IREE_SV("id4_ideogram4_packed_value_unpack_bf16_f32"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_input_unpack_f32_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t input_size,
