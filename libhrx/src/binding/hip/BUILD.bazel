@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -76,6 +77,22 @@ hrx_cc_shared_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
     ],
+)
+
+# The installed-test registration runs while this file's generated CMake is
+# evaluated. Set the shared library's artifact name before the test records it
+# as data or expands its target-file environment value.
+iree_cmake_extra_content(
+    content = """
+set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
+  OUTPUT_NAME amdhip64
+  VERSION 7.9999.0
+  SOVERSION 7
+  POSITION_INDEPENDENT_CODE ON
+  INSTALL_RPATH "$ORIGIN"
+)
+""",
+    inline = True,
 )
 
 hrx_cc_test(

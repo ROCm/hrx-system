@@ -71,6 +71,13 @@ iree_cc_library(
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
+  OUTPUT_NAME amdhip64
+  VERSION 7.9999.0
+  SOVERSION 7
+  POSITION_INDEPENDENT_CODE ON
+  INSTALL_RPATH "$ORIGIN"
+)
 iree_cc_test(
   NAME
     hip_get_proc_address_test
@@ -124,14 +131,6 @@ endif()
 # generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
 # LINK_FLAGS here so the version script is not applied twice.
 if(TARGET libhrx_src_binding_hip_amdhip64)
-  set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
-    OUTPUT_NAME amdhip64
-    VERSION 7.9999.0
-    SOVERSION 7
-    POSITION_INDEPENDENT_CODE ON
-    INSTALL_RPATH "$ORIGIN"
-  )
-
   install(TARGETS libhrx_src_binding_hip_amdhip64
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
