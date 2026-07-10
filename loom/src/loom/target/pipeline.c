@@ -292,8 +292,6 @@ loom_target_pipeline_build_cfg_source_normalization_after_legalize(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("sink-single-use-reads")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
-      builder, IREE_SV("stage-loop-carried-fragments")));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
   IREE_RETURN_IF_ERROR(

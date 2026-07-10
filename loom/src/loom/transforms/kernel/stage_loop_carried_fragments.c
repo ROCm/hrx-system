@@ -52,8 +52,7 @@ static const loom_pass_info_t
     loom_stage_loop_carried_fragments_pass_info_storage = {
         .name = IREE_SVL("stage-loop-carried-fragments"),
         .description = IREE_SVL(
-            "Stage high-pressure loop-carried fragments through workgroup "
-            "memory."),
+            "Stage eligible loop-carried fragments through workgroup memory."),
         .kind = LOOM_PASS_FUNCTION,
         .statistic_layout =
             &loom_stage_loop_carried_fragments_statistics_layout,
@@ -66,8 +65,6 @@ const loom_pass_info_t* loom_stage_loop_carried_fragments_pass_info(void) {
 //===----------------------------------------------------------------------===//
 // Candidate model
 //===----------------------------------------------------------------------===//
-
-#define LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT 4
 
 typedef struct loom_stage_loop_carried_fragment_t {
   // Loop-carried result/iter_arg ordinal.
@@ -258,7 +255,7 @@ static bool loom_stage_loop_carried_fragments_match_structural_loop(
     loom_op_t* op, loom_op_t** out_yield) {
   if (out_yield) *out_yield = NULL;
   if (!loom_scf_for_isa(op) || op->tied_result_count != 0 ||
-      op->result_count < LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT) {
+      op->result_count == 0) {
     return false;
   }
 
@@ -485,10 +482,6 @@ static iree_status_t loom_stage_loop_carried_fragments_collect(
 
   out_list->values = candidates;
   out_list->candidate_count = candidate_count;
-  if (candidate_count < LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT) {
-    return iree_ok_status();
-  }
-
   out_list->count = candidate_count;
   return iree_ok_status();
 }
@@ -864,10 +857,6 @@ static iree_status_t loom_stage_loop_carried_fragments_try_rewrite(
   IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_collect(
       context, op, &yield, &staged_fragments));
   if (staged_fragments.count == 0) {
-    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_report(
-        context, loom_op_name(context->module, op), op->kind, &staged_fragments,
-        IREE_SV("declined"), IREE_SV("candidate_count_below_minimum"),
-        /*workgroup_memory_byte_count=*/0));
     return iree_ok_status();
   }
 

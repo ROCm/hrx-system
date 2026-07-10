@@ -71,6 +71,32 @@ func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_v
 // ====
 // RUN: pass-report stage-loop-carried-fragments,dce
 
+func.def @explicitly_stage_one_accumulator_fragment(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
+COMPILE-REPORT: source_low_transforms rows=1
+COMPILE-REPORT: source_low_transform[0] function=explicitly_stage_one_accumulator_fragment source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+
+// ====
+// RUN: pass-report stage-loop-carried-fragments,dce
+
 func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index

@@ -4,14 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Stages high-pressure loop-carried accumulator fragments through workgroup
-// memory.
+// Stages loop-carried accumulator fragments through workgroup memory.
 //
 // The pass recognizes scf.for carried values that are matrix accumulator
 // fragments and rewrites them into explicit vector.fragment.store/load traffic
-// against a dense workgroup view. This models the storage bridge an author
-// would otherwise write by hand while keeping the source-level loop
-// representation natural.
+// against a dense workgroup view. Invoking the pass explicitly requests this
+// storage strategy; profitability belongs to the pipeline selecting the pass,
+// not to source-shape thresholds inside the transform.
 
 #ifndef LOOM_TRANSFORMS_STAGE_LOOP_CARRIED_FRAGMENTS_H_
 #define LOOM_TRANSFORMS_STAGE_LOOP_CARRIED_FRAGMENTS_H_
