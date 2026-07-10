@@ -11,6 +11,13 @@
 
 from __future__ import annotations
 
+from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_ENCODING_FORMAT_NONE,
+    AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
+    amdgpu_encoding_format_id,
+    amdgpu_supplemental_encoding_format_names,
+)
+
 from .categories import *
 from .common import *
 from .control import _s_delay_alu_descriptor
@@ -68,6 +75,35 @@ def _validate_address_immediate_units(descriptor_set: DescriptorSet) -> None:
                     f"AMDGPU memory descriptor '{descriptor.key}' has "
                     "inconsistent split address offset units"
                 )
+
+
+def _validate_descriptor_encoding_formats(
+    target: str,
+    spec: AmdgpuIsaFactSource,
+    descriptor_set: DescriptorSet,
+) -> None:
+    supported_format_names = {
+        *(encoding.name for encoding in spec.encodings),
+        *amdgpu_supplemental_encoding_format_names(target),
+    }
+    supported_format_ids = {
+        amdgpu_encoding_format_id(format_name) for format_name in supported_format_names
+    }
+    for descriptor in descriptor_set.descriptors:
+        format_id = descriptor.encoding_format_id
+        if (
+            format_id == AMDGPU_ENCODING_FORMAT_NONE
+            or format_id in supported_format_ids
+        ):
+            continue
+        format_name = AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID.get(
+            format_id, f"id {format_id}"
+        )
+        raise ValueError(
+            f"AMDGPU descriptor target '{target}' descriptor "
+            f"'{descriptor.key}' uses unavailable encoding format "
+            f"'{format_name}'"
+        )
 
 
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
@@ -708,6 +744,7 @@ def build_amdgpu_core_descriptor_set_from_spec(
     if target == "rdna4_gfx125x":
         descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
     descriptor_set = _with_storage_lease_rows(descriptor_set)
+    _validate_descriptor_encoding_formats(target, spec, descriptor_set)
     return descriptor_set
 
 
@@ -730,6 +767,7 @@ __all__ = (
     "_with_gfx125x_vgpr_msb_address_state",
     "_with_gfx125x_vgpr_msb_address_states",
     "_validate_address_immediate_units",
+    "_validate_descriptor_encoding_formats",
     "_with_overlay_descriptors",
     "amdgpu_common_reg_class_ids",
     "amdgpu_descriptor_id_keys",

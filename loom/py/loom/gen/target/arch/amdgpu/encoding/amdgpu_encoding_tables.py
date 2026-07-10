@@ -32,6 +32,7 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+    amdgpu_supplemental_encoding_format_names,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaBitRange,
@@ -142,13 +143,13 @@ def _supplemental_fields_by_encoding(
     return fields_by_encoding
 
 
-def _supplemental_encodings(
-    target: str,
-    _encodings: tuple[AmdgpuIsaEncoding, ...],
-) -> tuple[AmdgpuIsaEncoding, ...]:
-    if target in ("rdna4", "rdna4_gfx125x"):
-        return (_rdna4_vop3px2_supplemental_encoding(),)
-    return ()
+_SUPPLEMENTAL_ENCODING_BUILDERS = {
+    "ENC_VOP3PX2": _rdna4_vop3px2_supplemental_encoding,
+}
+
+
+def _supplemental_encodings(target: str) -> tuple[AmdgpuIsaEncoding, ...]:
+    return tuple(_SUPPLEMENTAL_ENCODING_BUILDERS[format_name]() for format_name in amdgpu_supplemental_encoding_format_names(target))
 
 
 def _supplement_encoding_fields(
@@ -167,7 +168,7 @@ def _supplement_encoding_fields(
 
 def _with_supplemental_encodings(target: str, encodings: tuple[AmdgpuIsaEncoding, ...]) -> tuple[AmdgpuIsaEncoding, ...]:
     fields_by_encoding = _supplemental_fields_by_encoding(target)
-    supplemental_encodings = _supplemental_encodings(target, encodings)
+    supplemental_encodings = _supplemental_encodings(target)
     supplemental_names = {encoding.name for encoding in supplemental_encodings}
     output = []
     for encoding in encodings:

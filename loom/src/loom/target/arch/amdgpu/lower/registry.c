@@ -1546,15 +1546,17 @@ const loom_target_low_legality_provider_t* loom_amdgpu_low_legality_provider(
 
 void loom_amdgpu_low_lower_policy_registry_initialize(
     loom_low_lower_policy_registry_t* out_registry) {
-  // clang-format off
   static const loom_low_lower_policy_registry_entry_t kEntries[] = {
-    {.contract_set_key = IREE_SVL("amdgpu.cdna3.core"), .policy = &kAmdgpuLowLowerPolicy},
-    {.contract_set_key = IREE_SVL("amdgpu.cdna4.core"), .policy = &kAmdgpuLowLowerPolicy},
-    {.contract_set_key = IREE_SVL("amdgpu.rdna3.core"), .policy = &kAmdgpuLowLowerPolicy},
-    {.contract_set_key = IREE_SVL("amdgpu.rdna4.core"), .policy = &kAmdgpuLowLowerPolicy},
-    {.contract_set_key = IREE_SVL("amdgpu.rdna4.gfx125x.core"), .policy = &kAmdgpuLowLowerPolicy},
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,         \
+                                          snapshot_name, key, wavefront_size, \
+                                          workgroup_storage_byte_limit)       \
+  {                                                                           \
+      .contract_set_key = IREE_SVL(key),                                      \
+      .policy = &kAmdgpuLowLowerPolicy,                                       \
+  },
+#include "loom/target/arch/amdgpu/records/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
   };
-  // clang-format on
   loom_low_lower_policy_registry_initialize_from_entries(
       out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
 }

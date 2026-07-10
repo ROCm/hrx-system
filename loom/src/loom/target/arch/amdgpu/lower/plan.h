@@ -1071,6 +1071,8 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
                                                                            << 1,
   // Same-lane f32 result values are packed into one BF16 store packet.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE = 1u << 19,
+  // Packed FP8-to-BF16 decode uses exact F16 arithmetic for subnormals.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_EXACT_BF16_VIA_F16 = 1u << 20,
   // FP8 load payloads are decoded with native packed FP8-to-F32 conversion.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 2,
   // FP8 load payloads are decoded with native scale-f32 BF16 conversion using

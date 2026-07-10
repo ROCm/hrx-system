@@ -1844,7 +1844,9 @@ def _v_lshlrev_b64_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
-def _v_lshl_add_u32_shift_immediate_overlay() -> AmdgpuDescriptorOverlay:
+def _v_lshl_add_u32_shift_immediate_overlay(
+    *, include_literal_operand_form: bool = True
+) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_lshl_add_u32.shift_imm",
         instruction_name="V_LSHL_ADD_U32",
@@ -1864,10 +1866,14 @@ def _v_lshl_add_u32_shift_immediate_overlay() -> AmdgpuDescriptorOverlay:
             immediates=("shift",),
         ),
         operand_forms=(
-            _literal_operand_form(
-                replacement_descriptor="amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
-                source_operand="addend",
-            ),
+            (
+                _literal_operand_form(
+                    replacement_descriptor="amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+                    source_operand="addend",
+                ),
+            )
+            if include_literal_operand_form
+            else ()
         ),
         immediate_fields=("SRC1",),
         immediates=(_source_inline_u32_immediate("shift"),),
@@ -2057,7 +2063,9 @@ def _v_bfi_b32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
-def _v_perm_b32_overlay() -> AmdgpuDescriptorOverlay:
+def _v_perm_b32_overlay(
+    *, include_literal_operand_form: bool = True
+) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_perm_b32",
         instruction_name="V_PERM_B32",
@@ -2072,10 +2080,14 @@ def _v_perm_b32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("selectors")),
         ),
         operand_forms=(
-            _literal_operand_form(
-                replacement_descriptor="amdgpu.v_perm_b32.src2_lit",
-                source_operand="selectors",
-            ),
+            (
+                _literal_operand_form(
+                    replacement_descriptor="amdgpu.v_perm_b32.src2_lit",
+                    source_operand="selectors",
+                ),
+            )
+            if include_literal_operand_form
+            else ()
         ),
         asm_forms=_asm(
             results=("dst",),
@@ -2242,7 +2254,9 @@ def _v_ashrrev_i32_literal_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
-def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _integer_bitwise_shift_overlays(
+    *, include_vop3_literal_forms: bool = True
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _s_and_b32_overlay(),
         _s_or_b32_overlay(),
@@ -2277,13 +2291,19 @@ def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_lshlrev_b32_literal_overlay(),
         _v_lshlrev_b32_vop3_immediate_overlay(),
         _v_lshlrev_b64_overlay(),
-        _v_lshl_add_u32_shift_immediate_overlay(),
-        _v_lshl_add_u32_shift_immediate_src2_literal_overlay(),
+        _v_lshl_add_u32_shift_immediate_overlay(
+            include_literal_operand_form=include_vop3_literal_forms
+        ),
+        *(
+            (_v_lshl_add_u32_shift_immediate_src2_literal_overlay(),)
+            if include_vop3_literal_forms
+            else ()
+        ),
         _v_bfe_offset_width_inline_overlay(is_signed=False),
         _v_bfe_offset_width_inline_overlay(is_signed=True),
         _v_bfe_u32_offset_0_width_16_low16_overlay(),
         _v_bfi_b32_overlay(),
-        _v_bfi_b32_src0_literal_overlay(),
+        *((_v_bfi_b32_src0_literal_overlay(),) if include_vop3_literal_forms else ()),
         _v_lshrrev_b32_overlay(),
         _v_lshrrev_b32_src0_inline_overlay(),
         _v_lshrrev_b32_literal_overlay(),
@@ -2293,11 +2313,19 @@ def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
-def _integer_bitwise_permute_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _integer_bitwise_permute_overlays(
+    *, include_vop3_literal_forms: bool = True
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
-        _v_perm_b32_overlay(),
-        _v_perm_b32_src2_literal_overlay(),
-        _v_perm_b32_src1_zero_src2_literal_overlay(),
+        _v_perm_b32_overlay(include_literal_operand_form=include_vop3_literal_forms),
+        *(
+            (
+                _v_perm_b32_src2_literal_overlay(),
+                _v_perm_b32_src1_zero_src2_literal_overlay(),
+            )
+            if include_vop3_literal_forms
+            else ()
+        ),
     )
 
 
@@ -3925,6 +3953,15 @@ def _v_pk_fma_f16_literal_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _v_pk_mul_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_mul_f16",
+        instruction_name="V_PK_MUL_F16",
+        mnemonic="v_pk_mul_f16",
+        semantic_tag="float.mul.pk2.f16",
+    )
+
+
 def _v_pk_mul_bf16_overlay() -> AmdgpuDescriptorOverlay:
     return _v_pk_binary_overlay(
         descriptor_key="amdgpu.v_pk_mul_bf16",
@@ -5497,6 +5534,7 @@ __all__ = (
     "_v_pk_add_bf16_overlay",
     "_v_pk_fma_f16_overlay",
     "_v_pk_fma_f16_literal_overlays",
+    "_v_pk_mul_f16_overlay",
     "_v_pk_fma_bf16_overlay",
     "_v_pk_mul_bf16_overlay",
     "_v_pk_add_u16_overlay",
