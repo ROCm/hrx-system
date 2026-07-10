@@ -25,14 +25,20 @@ def test_fp8_decode_plan_descriptor_rows_emit_data_only() -> None:
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_BFE_U32_OFFSET_WIDTH_INLINE" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_LSHLREV_B16" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_LSHRREV_B16" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MUL_F16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MAD_U16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MAD_U16_SRC2_LIT" in source
     assert "bfe_u32_descriptor" in source
     assert "pk_lshlrev_b16_descriptor" in source
+    assert "pk_lshrrev_b16_descriptor" in source
+    assert "pk_mul_f16_descriptor" in source
     assert "pk_mad_u16_descriptor" in source
     assert "pk_mad_u16_src2_literal_descriptor" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHLREV_B16" in source
+    assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHRREV_B16" in source
+    assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_F16" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16_SRC2_LITERAL" in source
     assert "typedef " not in source
@@ -123,6 +129,32 @@ def test_fp8_subnormal_table_rows_emit_data_only() -> None:
     assert "switch " not in source
     assert "\ncase " not in source
     assert "\nreturn " not in source
+
+
+def test_f8e4m3_exact_bf16_via_f16_covers_every_finite_payload() -> None:
+    row = next(row for row in amdgpu_narrow_float_tables._FP8_FORMAT_ROWS if row.source_type == ScalarTypeKind.F8E4M3)
+    exponent_mask = (1 << row.exponent_bits) - 1
+    mantissa_mask = (1 << row.mantissa_bits) - 1
+
+    for payload in range(256):
+        magnitude = payload & 0x7F
+        exponent = (magnitude >> row.mantissa_bits) & exponent_mask
+        mantissa = magnitude & mantissa_mask
+        if exponent == exponent_mask and mantissa == mantissa_mask:
+            continue
+
+        sign = 0x8000 if payload & 0x80 else 0
+        if exponent == 0:
+            expected_magnitude = amdgpu_narrow_float_tables._fp8_subnormal_bf16_payload(row, mantissa)
+            f16_magnitude = amdgpu_narrow_float_tables._fp8_subnormal_f16_payload(row, mantissa)
+        else:
+            expected_magnitude = ((exponent - row.exponent_bias + 127) << 7) | (mantissa << (7 - row.mantissa_bits))
+            f16_magnitude = ((exponent - row.exponent_bias + 15) << 10) | (mantissa << (10 - row.mantissa_bits))
+
+        rebased_magnitude = f16_magnitude >> 3
+        if magnitude != 0:
+            rebased_magnitude += 0x3800
+        assert sign | rebased_magnitude == sign | expected_magnitude
 
 
 def test_fp8_packed_repair_reason_rows_emit_data_only() -> None:

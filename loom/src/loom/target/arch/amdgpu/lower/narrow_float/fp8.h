@@ -52,6 +52,8 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHLREV_B16 = 1u << 20,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16 = 1u << 21,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16_SRC2_LITERAL = 1u << 22,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHRREV_B16 = 1u << 23,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_F16 = 1u << 24,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -67,6 +69,7 @@ typedef enum loom_amdgpu_fp8_decode_plan_capability_bits_e {
                                                                          << 5,
   LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_F16_PAYLOAD = 1u << 6,
   LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_BF16_PAYLOAD = 1u << 7,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_EXACT_BF16_VIA_F16 = 1u << 8,
 } loom_amdgpu_fp8_decode_plan_capability_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_capabilities_t;
 
@@ -214,6 +217,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pk_add_u16_descriptor;
   // Packed 16-bit left-shift descriptor.
   loom_low_lower_resolved_descriptor_t pk_lshlrev_b16_descriptor;
+  // Packed logical 16-bit right-shift descriptor.
+  loom_low_lower_resolved_descriptor_t pk_lshrrev_b16_descriptor;
+  // Packed F16 multiply descriptor.
+  loom_low_lower_resolved_descriptor_t pk_mul_f16_descriptor;
   // Packed unsigned 16-bit multiply-add descriptor.
   loom_low_lower_resolved_descriptor_t pk_mad_u16_descriptor;
   // Packed unsigned 16-bit multiply-add descriptor with source-2 literal.
@@ -310,9 +317,14 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
-// Returns the structured report reason key for packed BF16 decode repairs.
-iree_string_view_t loom_amdgpu_fp8_packed_bf16_repair_reason_key(
-    loom_amdgpu_fp8_packed_u16_repairs_t repairs);
+// Returns true when packed BF16 decode uses the exact F16 arithmetic route.
+bool loom_amdgpu_fp8_selects_exact_bf16_via_f16(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Returns the structured report key for the selected packed BF16 strategy.
+iree_string_view_t loom_amdgpu_fp8_packed_bf16_strategy_key(
+    bool exact_via_f16, loom_amdgpu_fp8_packed_u16_repairs_t repairs);
 
 // Returns the zero/subnormal repairs emitted by the packed finite FP8-to-F16
 // pair decode path for |plan| and |value_flags|.

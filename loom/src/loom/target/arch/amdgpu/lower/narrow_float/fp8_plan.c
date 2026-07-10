@@ -184,6 +184,41 @@ static bool loom_amdgpu_fp8_decode_format_has_packed_exact_repair(
   }
 }
 
+// Returns whether finite values in |format| can be mapped through F16 without
+// losing FP8 subnormals. The raw unsigned FP8 payload is first placed in the
+// corresponding F16 exponent/mantissa fields and scaled by the bias delta. The
+// smallest FP8 subnormal must become a normal F16 value, and the largest finite
+// value must remain finite, so the resulting F16 payload can then be rebased to
+// BF16 with integer operations.
+static bool loom_amdgpu_fp8_decode_format_has_exact_bf16_via_f16(
+    const loom_scalar_type_fp8_format_t* format) {
+  if (format->exponent_bits + format->mantissa_bits != 7u ||
+      format->exponent_bits > 5u || format->mantissa_bits < 2u ||
+      format->mantissa_bits > 10u || format->exponent_bias > 15u) {
+    return false;
+  }
+
+  const int32_t minimum_unbiased_exponent =
+      1 - (int32_t)format->exponent_bias - (int32_t)format->mantissa_bits;
+  if (minimum_unbiased_exponent < -14) {
+    return false;
+  }
+
+  uint32_t maximum_finite_exponent =
+      (UINT32_C(1) << format->exponent_bits) - 1u;
+  if (format->special_policy == LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE) {
+    --maximum_finite_exponent;
+  } else if (format->special_policy !=
+             LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN) {
+    return false;
+  }
+  if (maximum_finite_exponent >= 31u) {
+    return false;
+  }
+  return (int32_t)maximum_finite_exponent - (int32_t)format->exponent_bias <=
+         15;
+}
+
 static bool loom_amdgpu_fp8_decode_flags_have_packed_normal_payload(
     loom_amdgpu_fp8_decode_plan_flags_t flags, uint32_t packed_exponent_bias) {
   if (packed_exponent_bias != 0 &&
@@ -206,7 +241,6 @@ static void loom_amdgpu_initialize_fp8_decode_plan_capabilities(
 
   const loom_amdgpu_fp8_decode_plan_flags_t packed_exact_repair_flags =
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32 |
-      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL |
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16 |
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16;
   if (loom_amdgpu_fp8_decode_format_has_packed_exact_repair(&plan->format) &&
@@ -271,6 +305,18 @@ static void loom_amdgpu_initialize_fp8_decode_plan_capabilities(
           plan->flags, packed_bf16_exponent_bias)) {
     plan->capabilities |=
         LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_BF16_PAYLOAD;
+  }
+
+  const loom_amdgpu_fp8_decode_plan_flags_t exact_bf16_via_f16_flags =
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32 |
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16 |
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHRREV_B16 |
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_F16 |
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16;
+  if (loom_amdgpu_fp8_decode_format_has_exact_bf16_via_f16(&plan->format) &&
+      iree_all_bits_set(plan->flags, exact_bf16_via_f16_flags)) {
+    plan->capabilities |=
+        LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_EXACT_BF16_VIA_F16;
   }
 }
 

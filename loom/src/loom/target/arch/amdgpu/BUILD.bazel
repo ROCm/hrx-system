@@ -176,6 +176,9 @@ loom_cc_library(
     name = "math_policy",
     srcs = ["math_policy.c"],
     hdrs = ["math_policy.h"],
+    textual_hdrs = [
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+    ],
     deps = [
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",

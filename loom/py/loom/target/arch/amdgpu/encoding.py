@@ -93,6 +93,18 @@ AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID = {
     format_id: name for name, format_id in _AMDGPU_ENCODING_FORMAT_ID_PAIRS
 }
 
+_AMDGPU_SUPPLEMENTAL_ENCODING_FORMAT_NAMES_BY_TARGET = {
+    "rdna4": ("ENC_VOP3PX2",),
+    "rdna4_gfx125x": ("ENC_VOP3PX2",),
+}
+
+
+def amdgpu_supplemental_encoding_format_names(target: str) -> tuple[str, ...]:
+    """Returns encoding formats supplied outside of the target ISA XML."""
+
+    return _AMDGPU_SUPPLEMENTAL_ENCODING_FORMAT_NAMES_BY_TARGET.get(target, ())
+
+
 AMDGPU_ENCODING_FORMAT_SOP1 = AMDGPU_ENCODING_FORMAT_IDS["ENC_SOP1"]
 AMDGPU_ENCODING_FORMAT_SOP2 = AMDGPU_ENCODING_FORMAT_IDS["ENC_SOP2"]
 AMDGPU_ENCODING_FORMAT_SOP2_LITERAL = AMDGPU_ENCODING_FORMAT_IDS["SOP2_INST_LITERAL"]

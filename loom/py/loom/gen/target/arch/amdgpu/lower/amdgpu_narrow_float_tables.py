@@ -256,6 +256,16 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHLREV_B16",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_pk_lshrrev_b16",
+        "pk_lshrrev_b16_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHRREV_B16",
+    ),
+    _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_pk_mul_f16",
+        "pk_mul_f16_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_F16",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_pk_mad_u16",
         "pk_mad_u16_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16",

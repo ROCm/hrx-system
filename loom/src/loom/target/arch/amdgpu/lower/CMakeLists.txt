@@ -224,6 +224,7 @@ loom_cc_library(
     "values.h"
     "workgroup.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
     "memory_descriptor_candidate_ranges.inl"

@@ -55,6 +55,7 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_ENCODING_FORMAT_VOP2,
     AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL,
+    AMDGPU_ENCODING_FORMAT_VOP3PX2,
     AMDGPU_MEMORY_DESCRIPTOR_CATEGORY,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
     AMDGPU_VECTOR_DESCRIPTOR_CATEGORY,
@@ -79,6 +80,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _predefined,
     _record_amdgpu_atomic_candidate,
     _validate_address_immediate_units,
+    _validate_descriptor_encoding_formats,
     _with_execution_mask_state_read,
     _with_gfx125x_vgpr_msb_address_state,
     _with_gfx125x_vgpr_msb_address_states,
@@ -99,6 +101,7 @@ from loom.target.arch.amdgpu.descriptors.memory import (
     _s_load_dwordx2_overlay,
     _s_load_dwordx4_overlay,
 )
+from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding, AmdgpuIsaSpec
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -177,6 +180,27 @@ def _descriptor(key: str, semantic_tag: str) -> Descriptor:
     )
 
 
+def _isa_spec(*encoding_names: str) -> AmdgpuIsaSpec:
+    return AmdgpuIsaSpec(
+        source_name="test.xml",
+        architecture_name="test",
+        architecture_id=0,
+        encodings=tuple(
+            AmdgpuIsaEncoding(
+                name=name,
+                order=0,
+                bit_count=64,
+                identifier_mask=0,
+                identifier_values=(0,),
+                fields=(),
+            )
+            for name in encoding_names
+        ),
+        instructions=(),
+        operand_types=(),
+    )
+
+
 def _expect_value_error_contains(
     expected_message: str, thunk: Callable[[], object]
 ) -> None:
@@ -198,6 +222,37 @@ def test_amdgpu_core_descriptor_set_rejects_lds_spill_slots() -> None:
             resources=(),
             schedule_classes=(),
         ),
+    )
+
+
+def test_descriptor_encoding_formats_must_exist_for_target() -> None:
+    descriptor = Descriptor(
+        key="amdgpu.test.literal",
+        mnemonic="test_literal",
+        semantic_tag="test.literal",
+        operands=(),
+        schedule_class="amdgpu.test",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
+    )
+    _expect_value_error_contains(
+        "uses unavailable encoding format 'VOP3_INST_LITERAL'",
+        lambda: _validate_descriptor_encoding_formats(
+            "cdna3", _isa_spec("ENC_VOP3"), _descriptor_set(descriptor)
+        ),
+    )
+
+
+def test_descriptor_encoding_formats_accept_target_supplements() -> None:
+    descriptor = Descriptor(
+        key="amdgpu.test.vop3px2",
+        mnemonic="test_vop3px2",
+        semantic_tag="test.vop3px2",
+        operands=(),
+        schedule_class="amdgpu.test",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3PX2,
+    )
+    _validate_descriptor_encoding_formats(
+        "rdna4", _isa_spec("ENC_VOP3"), _descriptor_set(descriptor)
     )
 
 
@@ -577,11 +632,9 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
         "amdgpu.v_lshlrev_b32.lit",
         "amdgpu.v_lshlrev_b32.vop3_imm",
         "amdgpu.v_lshl_add_u32.shift_imm",
-        "amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
         "amdgpu.v_bfe_u32.offset_width_inline",
         "amdgpu.v_bfe_i32.offset_width_inline",
         "amdgpu.v_bfi_b32",
-        "amdgpu.v_bfi_b32.src0_lit",
         "amdgpu.v_lshrrev_b32",
         "amdgpu.v_lshrrev_b32.src0_inline",
         "amdgpu.v_lshrrev_b32.lit",
@@ -596,6 +649,8 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
         "amdgpu.v_mad_u32_u24.src0_lit",
         "amdgpu.v_mad_u32_u24.src1_lit",
         "amdgpu.v_mad_u32_u24.src2_lit",
+        "amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+        "amdgpu.v_bfi_b32.src0_lit",
     )
     excluded_descriptor_keys = (
         "amdgpu.v_add_co_u32",
@@ -1717,6 +1772,25 @@ def test_v_perm_b32_literal_forms_cover_selector_and_zero_source() -> None:
     assert src2_value.operand_type == "OPR_SRC"
 
 
+def test_cdna_excludes_unsupported_vop3_literal_integer_forms() -> None:
+    unsupported_keys = {
+        "amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+        "amdgpu.v_bfi_b32.src0_lit",
+        "amdgpu.v_perm_b32.src2_lit",
+        "amdgpu.v_perm_b32.src1_zero_src2_lit",
+    }
+    for overlays in (_gfx940_core_overlays(), _gfx950_core_overlays()):
+        assert unsupported_keys.isdisjoint(
+            overlay.descriptor_key for overlay in overlays
+        )
+    for overlays in (
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+    ):
+        assert unsupported_keys.issubset(overlay.descriptor_key for overlay in overlays)
+
+
 def test_sop2_bfe_literal_forms_fix_control_to_literal_source() -> None:
     for descriptor_set in (
         _gfx940_core_overlays(),
@@ -2166,8 +2240,9 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
     assert fma_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
 
-def test_packed_i16_binary_descriptors_pin_lane_container_widths() -> None:
+def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
     packed_keys = (
+        "amdgpu.v_pk_mul_f16",
         "amdgpu.v_pk_add_u16",
         "amdgpu.v_pk_sub_i16",
         "amdgpu.v_pk_mul_lo_u16",

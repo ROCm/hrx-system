@@ -138,6 +138,8 @@ loom_cc_library(
     math_policy
   HDRS
     "math_policy.h"
+  TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
   SRCS
     "math_policy.c"
   DEPS

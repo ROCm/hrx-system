@@ -7753,7 +7753,9 @@ static bool loom_amdgpu_vector_fp8_try_packed_bf16_plan_key(
   }
   const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fp8_pair_to_packed_bf16_repairs(&decode_plan, value_flags);
-  *out_plan_key = loom_amdgpu_fp8_packed_bf16_repair_reason_key(repairs);
+  *out_plan_key = loom_amdgpu_fp8_packed_bf16_strategy_key(
+      loom_amdgpu_fp8_selects_exact_bf16_via_f16(&decode_plan, value_flags),
+      repairs);
   return true;
 }
 
