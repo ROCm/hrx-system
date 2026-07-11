@@ -1893,7 +1893,8 @@ iree_status_t loom_canonicalizer_run_function(
     iree_arena_initialize(canonicalizer->parent_arena->block_pool, &seed_arena);
     seed_facts_initialized = true;
     status = loom_value_fact_table_initialize(
-        &seed_facts, &seed_arena, canonicalizer->module->values.capacity);
+        &seed_facts, &seed_arena,
+        loom_value_table_capacity(&canonicalizer->module->values));
     if (iree_status_is_ok(status)) {
       loom_type_registry_configure_fact_context(&seed_facts.context);
       if (options && options->seed_facts) {

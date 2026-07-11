@@ -31,8 +31,8 @@ static const loom_encoding_vtable_t kDenseEncodingVtable = {
 class ModuleTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
-                                     &block_pool_);
+    IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
+        32 * 1024, iree_allocator_system(), &block_pool_));
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(
         loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
@@ -730,23 +730,33 @@ TEST_F(ModuleTest, DefineValueAlignment) {
   loom_module_free(module);
 }
 
-TEST_F(ModuleTest, DefineValueGrowth) {
+TEST_F(ModuleTest, DefineValueSegmentGrowthKeepsPointersStable) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       NULL, iree_allocator_system(), &module));
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
 
-  // Fill past the default capacity to trigger growth.
-  iree_host_size_t initial_capacity = module->values.capacity;
-  for (iree_host_size_t i = 0; i < initial_capacity + 100; ++i) {
+  EXPECT_EQ(loom_value_table_capacity(&module->values), 0u);
+  loom_value_id_t first_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, f32, &first_id));
+  loom_value_t* first_value = loom_module_value(module, first_id);
+  const iree_host_size_t initial_capacity =
+      loom_value_table_capacity(&module->values);
+  EXPECT_EQ(initial_capacity, LOOM_VALUE_SEGMENT_CAPACITY);
+
+  const iree_host_size_t value_count =
+      LOOM_SEGMENTED_STORAGE_INLINE_SEGMENT_COUNT *
+          LOOM_VALUE_SEGMENT_CAPACITY +
+      1;
+  for (iree_host_size_t i = 1; i < value_count; ++i) {
     loom_value_id_t id = LOOM_VALUE_ID_INVALID;
     IREE_ASSERT_OK(loom_module_define_value(module, f32, &id));
     EXPECT_EQ(id, (loom_value_id_t)i);
   }
-  EXPECT_GT(module->values.capacity, initial_capacity);
-  EXPECT_EQ(module->values.count, initial_capacity + 100);
+  EXPECT_GT(loom_value_table_capacity(&module->values), initial_capacity);
+  EXPECT_EQ(module->values.count, value_count);
+  EXPECT_EQ(loom_module_value(module, first_id), first_value);
 
-  // Verify all values are still accessible after growth.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
     EXPECT_EQ(
         loom_type_kind(loom_module_value_type(module, (loom_value_id_t)i)),
@@ -791,11 +801,12 @@ TEST_F(ModuleTest, ValueOrdinalScratchGrowsWithValueTable) {
                                       NULL, iree_allocator_system(), &module));
 
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  const iree_host_size_t initial_capacity = module->values.capacity;
-  ASSERT_EQ(module->scratch.values.capacity, initial_capacity);
-
   loom_value_id_t first_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(module, f32, &first_id));
+  const iree_host_size_t initial_capacity =
+      loom_value_table_capacity(&module->values);
+  ASSERT_EQ(initial_capacity, LOOM_VALUE_SEGMENT_CAPACITY);
+  ASSERT_EQ(module->scratch.values.value_table, &module->values);
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, first_id, 3);
 
@@ -804,8 +815,8 @@ TEST_F(ModuleTest, ValueOrdinalScratchGrowsWithValueTable) {
     IREE_ASSERT_OK(loom_module_define_value(module, f32, &last_id));
   }
 
-  EXPECT_GT(module->values.capacity, initial_capacity);
-  EXPECT_EQ(module->scratch.values.capacity, module->values.capacity);
+  EXPECT_GT(loom_value_table_capacity(&module->values), initial_capacity);
+  EXPECT_EQ(module->scratch.values.value_table, &module->values);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, first_id), 3u);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, last_id),
             LOOM_VALUE_ORDINAL_INVALID);
@@ -834,15 +845,25 @@ TEST_F(ModuleTest, ValueU32ScratchAliasesOrdinalAndZeroedModes) {
 
   loom_value_u32_scratch_acquire_zeroed(&module->scratch.values,
                                         module->values.count);
-  EXPECT_EQ(module->scratch.values.values_by_value_id[first_id], 0u);
-  EXPECT_EQ(module->scratch.values.values_by_value_id[second_id], 0u);
-  module->scratch.values.values_by_value_id[first_id] = 0x3u;
+  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, first_id), 0u);
+  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, second_id),
+            0u);
+  loom_value_u32_scratch_store(&module->scratch.values, first_id, 0x3u);
+  const iree_host_size_t initial_capacity =
+      loom_value_table_capacity(&module->values);
+  loom_value_id_t last_id = LOOM_VALUE_ID_INVALID;
+  for (iree_host_size_t i = module->values.count; i <= initial_capacity; ++i) {
+    IREE_ASSERT_OK(loom_module_define_value(module, f32, &last_id));
+  }
+  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, last_id), 0u);
   loom_value_u32_scratch_release_zeroed(&module->scratch.values);
 
   loom_module_value_ordinal_scratch_acquire(module);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, first_id),
             LOOM_VALUE_ORDINAL_INVALID);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, second_id),
+            LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, last_id),
             LOOM_VALUE_ORDINAL_INVALID);
   loom_module_value_ordinal_scratch_release(module);
 
@@ -879,6 +900,40 @@ TEST_F(ModuleTest, TypeUseTableTracksDynamicDims) {
   IREE_ASSERT_OK(loom_module_define_value(module, vector_type, &vector_id));
 
   EXPECT_TRUE(loom_module_value_has_type_uses(module, dim_id));
+  IREE_ASSERT_OK(loom_module_set_value_type(
+      module, vector_id,
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_static(4), 0)));
+  EXPECT_FALSE(loom_module_value_has_type_uses(module, dim_id));
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, TypeUseTableCrossesValueSegments) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t dim_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, index, &dim_id));
+  for (uint32_t i = 1; i < LOOM_VALUE_SEGMENT_CAPACITY; ++i) {
+    loom_value_id_t padding_id = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_define_value(module, f32, &padding_id));
+  }
+
+  loom_type_t vector_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(dim_id), 0);
+  loom_value_id_t vector_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, vector_type, &vector_id));
+  ASSERT_EQ(vector_id, LOOM_VALUE_SEGMENT_CAPACITY);
+  ASSERT_TRUE(loom_module_value_has_type_uses(module, dim_id));
+  loom_type_use_id_t use_id =
+      loom_module_value_first_incoming_type_use(module, dim_id);
+  ASSERT_NE(use_id, LOOM_TYPE_USE_ID_INVALID);
+  EXPECT_EQ(module->type_uses.records[use_id].user_value_id, vector_id);
+
   IREE_ASSERT_OK(loom_module_set_value_type(
       module, vector_id,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
@@ -1976,8 +2031,9 @@ TEST_F(ModuleTest, SizeHints) {
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       &hints, iree_allocator_system(),
                                       &module));
-  // Capacities should be at least hint * growth_factor.
-  EXPECT_GE(module->values.capacity, 100u);
+  // Stable value segments allocate lazily instead of reserving speculative
+  // headroom from the hint. Contiguous tables retain growth-factor sizing.
+  EXPECT_EQ(loom_value_table_capacity(&module->values), 0u);
   EXPECT_GE(module->strings.capacity, 50u);
   EXPECT_GE(module->types.capacity, 20u);
   EXPECT_GE(module->symbols.capacity, 10u);

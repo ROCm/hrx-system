@@ -16,9 +16,6 @@
 
 namespace {
 
-// Holds the default 128 KiB module value table and its 64-byte alignment slack.
-constexpr iree_host_size_t kAlignedModuleWorkspaceBlockSize = 128 * 1024 + 64;
-
 using loomc::bench::AddSourceToIndex;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateTextSource;
@@ -399,20 +396,14 @@ static void BM_TunerFlowWorkspaceSmoke(::benchmark::State& state) {
   RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
 }
 BENCHMARK(BM_TunerFlowWorkspaceSmoke)
-    ->ArgsProduct({{1},
-                   {2},
-                   {32 * 1024, 64 * 1024, 128 * 1024,
-                    kAlignedModuleWorkspaceBlockSize}})
+    ->ArgsProduct({{1}, {2}, {32 * 1024, 64 * 1024, 128 * 1024}})
     ->UseRealTime();
 
 static void BM_TunerFlowWorkspace(::benchmark::State& state) {
   RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
 }
 BENCHMARK(BM_TunerFlowWorkspace)
-    ->ArgsProduct({{1},
-                   {64},
-                   {32 * 1024, 64 * 1024, 128 * 1024,
-                    kAlignedModuleWorkspaceBlockSize}})
+    ->ArgsProduct({{1}, {64}, {32 * 1024, 64 * 1024, 128 * 1024}})
     ->UseRealTime();
 
 static std::unique_ptr<CompileScenario> CreateModelFlowScenario(

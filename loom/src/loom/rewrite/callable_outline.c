@@ -395,9 +395,8 @@ static bool loom_callable_outline_value_has_use_outside_range(
     }
   }
 
-  if (value_id >= state->module->type_uses.value_capacity) return false;
   loom_type_use_id_t use_id =
-      state->module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(state->module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &state->module->type_uses.records[use_id];
     const loom_value_t* user_value =

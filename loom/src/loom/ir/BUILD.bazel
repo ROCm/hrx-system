@@ -71,6 +71,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/util:bstring",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
