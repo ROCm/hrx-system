@@ -319,6 +319,22 @@ iree_string_view_t loom_contract_numeric_type_name(
   }
 }
 
+bool loom_contract_numeric_type_is_signed_integer(
+    loom_contract_numeric_type_t numeric_type) {
+  return numeric_type == LOOM_CONTRACT_NUMERIC_I4 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I8 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I16 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I32;
+}
+
+bool loom_contract_numeric_type_is_unsigned_integer(
+    loom_contract_numeric_type_t numeric_type) {
+  return numeric_type == LOOM_CONTRACT_NUMERIC_U4 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U8 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U16 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U32;
+}
+
 iree_string_view_t loom_contract_rejection_detail(
     loom_contract_rejection_bits_t rejection_bits) {
   if (iree_any_bit_set(rejection_bits,

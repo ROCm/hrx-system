@@ -145,8 +145,16 @@ _MATRIX_ATTR_IMMEDIATE_FIELDS = frozenset(
         "matrix_b_scale_fmt",
         "matrix_a_reuse",
         "matrix_b_reuse",
+        "neg_lo",
+        "neg_hi",
+        "clamp",
     )
 )
+
+_MATRIX_FLAG_REQUIRED_IMMEDIATE_FIELDS = {
+    "sign_select": frozenset(("neg_lo",)),
+    "clamp": frozenset(("clamp",)),
+}
 
 _FRAGMENT_LAYOUT_C_NAMES = {
     None: "LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN",
@@ -427,6 +435,14 @@ def _validate_contract_descriptor_immediates(
     immediates = descriptor_immediates_by_key.get(descriptor_key)
     if immediates is None:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' references low descriptor '{descriptor_key}' without matrix immediate metadata")
+    immediate_fields = frozenset(immediate.field_name for immediate in immediates)
+    for flag, required_fields in _MATRIX_FLAG_REQUIRED_IMMEDIATE_FIELDS.items():
+        if flag not in contract.flags:
+            continue
+        missing_fields = required_fields - immediate_fields
+        if missing_fields:
+            missing_text = ", ".join(sorted(missing_fields))
+            raise ValueError(f"AMDGPU matrix contract '{contract.name}' selects low descriptor '{descriptor_key}' without required immediate field(s): {missing_text}")
     for immediate in immediates:
         if immediate.field_name in _MATRIX_ATTR_IMMEDIATE_FIELDS:
             continue

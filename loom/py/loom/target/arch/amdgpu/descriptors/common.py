@@ -126,6 +126,9 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -957,6 +960,42 @@ def _native_amdgpu_dpp_bank_mask_immediate(field_name: str) -> NativeAsmValue:
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
         field_name=field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK,
+    )
+
+
+def _native_amdgpu_named_bit_list_immediate(
+    field_name: str, bit_width: int, *, name: str | None = None
+) -> NativeAsmValue:
+    if bit_width <= 0 or bit_width >= 64:
+        raise ValueError("AMDGPU named bit-list width must be in [1, 63]")
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        bit_width=bit_width,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+    )
+
+
+def _native_amdgpu_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+
+
+def _native_amdgpu_named_flag_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
     )
 
 
@@ -1870,6 +1909,33 @@ _MATRIX_B_REUSE_IMMEDIATE = Immediate(
     unsigned_max=1,
 )
 
+_MATRIX_SIGN_SELECT_IMMEDIATE = Immediate(
+    "neg_lo",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE = Immediate(
+    "neg_hi",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_CLAMP_IMMEDIATE = Immediate(
+    "clamp",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=1,
+    unsigned_max=1,
+    default_value=0,
+)
+
 _GLOBAL_LOAD_EFFECT = Effect(
     EffectKind.READ,
     memory_space=MemorySpace.GLOBAL,
@@ -2775,6 +2841,9 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
@@ -2959,6 +3028,9 @@ __all__ = (
     "_MATRIX_B_REUSE_IMMEDIATE",
     "_MATRIX_B_SCALE_FORMAT_IMMEDIATE",
     "_MATRIX_B_SCALE_IMMEDIATE",
+    "_MATRIX_CLAMP_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_IMMEDIATE",
     "_MUBUF_SOFFSET_INLINE_ZERO",
     "_MUBUF_VADDR_OFFSET_ONLY_SIZE_REASON",
     "_PC_RELATIVE_EFFECT",
@@ -3122,6 +3194,9 @@ __all__ = (
     "_mubuf_vaddr_operand",
     "_native_amdgpu_dpp_ctrl_immediate",
     "_native_amdgpu_dpp_bank_mask_immediate",
+    "_native_amdgpu_named_bit_list_immediate",
+    "_native_amdgpu_named_flag_immediate",
+    "_native_amdgpu_named_i64_immediate",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
     "_native_amdgpu_scale_sel_immediate",

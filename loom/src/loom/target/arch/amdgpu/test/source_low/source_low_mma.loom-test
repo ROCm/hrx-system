@@ -3288,6 +3288,29 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8_i8_wmma_gfx1100(%lhs_data: vector<4xi32>, %rhs_data: vector<4xi32>, %init_data: vector<8xi32>) -> (vector<8xi32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %rhs_schema = encoding.define #matrix_operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8_i8_wmma_gfx1100(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_i32_16x16x16_iu8 %lhs, %rhs, %17 {neg_lo = 3, neg_hi = 3}
+  return %result
+}
+
+// ====
+
 amdgpu.target<gfx1200> @target
 func.def target(@target) @fp8_bf8_wmma_gfx1200(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index

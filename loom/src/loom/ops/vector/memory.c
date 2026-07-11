@@ -7,6 +7,7 @@
 #include "loom/ops/vector/memory.h"
 
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/encoding/storage.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 
@@ -130,6 +131,55 @@ static bool loom_vector_memory_fragment_footprint_type(
   return true;
 }
 
+static loom_vector_memory_footprint_axis_scale_t
+loom_vector_memory_fragment_footprint_axis_scale(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t view_type, const loom_op_t* op) {
+  loom_vector_memory_footprint_axis_scale_t scale = {
+      .vector_axis = UINT8_MAX,
+  };
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, view_type,
+                                               &storage_schema)) {
+    return scale;
+  }
+  const loom_value_fact_encoded_operand_schema_t operand =
+      storage_schema.encoded_operand;
+  if (operand.sparsity_policy !=
+          LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED ||
+      !loom_value_fact_encoded_operand_schema_sparsity_is_complete(operand)) {
+    return scale;
+  }
+
+  loom_vector_role_t role = LOOM_VECTOR_ROLE_COUNT_;
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      role = loom_vector_fragment_load_role(op);
+      break;
+    case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      role = loom_vector_fragment_store_role(op);
+      break;
+    default:
+      return scale;
+  }
+  static const uint8_t kReductionVectorAxes[LOOM_VECTOR_ROLE_COUNT_] = {
+      [LOOM_VECTOR_ROLE_LHS] = 1,
+      [LOOM_VECTOR_ROLE_RHS] = 0,
+      [LOOM_VECTOR_ROLE_INIT] = UINT8_MAX,
+      [LOOM_VECTOR_ROLE_RESULT] = UINT8_MAX,
+  };
+  if ((iree_host_size_t)role >= IREE_ARRAYSIZE(kReductionVectorAxes)) {
+    return scale;
+  }
+  scale.vector_axis = kReductionVectorAxes[role];
+  if (scale.vector_axis == UINT8_MAX) {
+    return scale;
+  }
+  scale.storage_element_count = operand.sparsity_group.nonzero_element_count;
+  scale.logical_element_count = operand.sparsity_group.element_count;
+  return scale;
+}
+
 static loom_vector_memory_footprint_kind_t
 loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
                                            loom_memory_access_t access) {
@@ -185,6 +235,7 @@ bool loom_vector_memory_footprint_describe(
       .mask = LOOM_VALUE_ID_INVALID,
       .passthrough = LOOM_VALUE_ID_INVALID,
       .offsets = LOOM_VALUE_ID_INVALID,
+      .axis_scale.vector_axis = UINT8_MAX,
   };
   if (!module || !op || loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
     return false;
@@ -209,6 +260,7 @@ bool loom_vector_memory_footprint_describe(
       .static_indices = loom_memory_access_static_indices(access),
       .view_type = view_type,
       .vector_type = loom_type_none(),
+      .axis_scale.vector_axis = UINT8_MAX,
   };
 
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
@@ -224,6 +276,8 @@ bool loom_vector_memory_footprint_describe(
                                                     &footprint.vector_type)) {
       return false;
     }
+    footprint.axis_scale = loom_vector_memory_fragment_footprint_axis_scale(
+        context, module, view_type, op);
   } else if (!loom_vector_memory_value_type(module, op, access,
                                             &footprint.vector_type)) {
     return false;

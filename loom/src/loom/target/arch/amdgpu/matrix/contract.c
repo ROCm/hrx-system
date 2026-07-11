@@ -330,26 +330,40 @@ static bool loom_amdgpu_matrix_contract_tile_shape_matches(
              request->tile_shape.reduction_count;
 }
 
+static bool loom_amdgpu_matrix_contract_numeric_type_matches(
+    loom_amdgpu_matrix_numeric_type_t descriptor_numeric_type,
+    loom_amdgpu_matrix_numeric_type_t request_numeric_type,
+    loom_amdgpu_matrix_contract_flags_t descriptor_flags) {
+  if (descriptor_numeric_type == request_numeric_type) {
+    return true;
+  }
+  if (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4) {
+    return request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP8 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF8 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP6 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF6 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP4;
+  }
+  if (!iree_any_bit_set(descriptor_flags,
+                        LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SIGN_SELECT)) {
+    return false;
+  }
+  return (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_IU8 &&
+          request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_I8) ||
+         (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_IU4 &&
+          request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_I4);
+}
+
 static bool loom_amdgpu_matrix_contract_payload_matches(
     loom_amdgpu_matrix_payload_shape_t descriptor_payload,
-    loom_amdgpu_matrix_payload_shape_t request_payload) {
+    loom_amdgpu_matrix_payload_shape_t request_payload,
+    loom_amdgpu_matrix_contract_flags_t descriptor_flags) {
   if (request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN) {
     return false;
   }
-  bool numeric_type_matches =
-      descriptor_payload.numeric_type == request_payload.numeric_type;
-  if (descriptor_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4) {
-    // Selector-family descriptors accept exact low-bit requests when the
-    // request also proves that matrix-format selector operands are available.
-    numeric_type_matches =
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP8 ||
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF8 ||
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP6 ||
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF6 ||
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP4 ||
-        request_payload.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4;
-  }
-  if (!numeric_type_matches) {
+  if (!loom_amdgpu_matrix_contract_numeric_type_matches(
+          descriptor_payload.numeric_type, request_payload.numeric_type,
+          descriptor_flags)) {
     return false;
   }
   if (request_payload.register_count != 0 &&
@@ -371,20 +385,20 @@ loom_amdgpu_matrix_contract_payload_rejection_bits(
     const loom_amdgpu_matrix_contract_match_request_t* request) {
   loom_amdgpu_matrix_contract_rejection_bits_t rejection_bits =
       LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
-  if (!loom_amdgpu_matrix_contract_payload_matches(descriptor->lhs_payload,
-                                                   request->lhs_payload)) {
+  if (!loom_amdgpu_matrix_contract_payload_matches(
+          descriptor->lhs_payload, request->lhs_payload, descriptor->flags)) {
     rejection_bits |= LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_LHS_PAYLOAD;
   }
-  if (!loom_amdgpu_matrix_contract_payload_matches(descriptor->rhs_payload,
-                                                   request->rhs_payload)) {
+  if (!loom_amdgpu_matrix_contract_payload_matches(
+          descriptor->rhs_payload, request->rhs_payload, descriptor->flags)) {
     rejection_bits |= LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_RHS_PAYLOAD;
   }
   if (!loom_amdgpu_matrix_contract_payload_matches(
-          descriptor->accumulator_payload, request->accumulator_payload)) {
+          descriptor->accumulator_payload, request->accumulator_payload, 0)) {
     rejection_bits |= LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_ACCUMULATOR_PAYLOAD;
   }
-  if (!loom_amdgpu_matrix_contract_payload_matches(descriptor->result_payload,
-                                                   request->result_payload)) {
+  if (!loom_amdgpu_matrix_contract_payload_matches(
+          descriptor->result_payload, request->result_payload, 0)) {
     rejection_bits |= LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_RESULT_PAYLOAD;
   }
   return rejection_bits;

@@ -191,6 +191,111 @@ def _validate_dpp_control_fields(descriptor_set: DescriptorSet) -> None:
             )
 
 
+_MATRIX_HIGH_HALF_SELECT_FIELD_IDS = frozenset(
+    (
+        amdgpu_encoding_field_id("OPSEL_HI"),
+        amdgpu_encoding_field_id("OP_SEL_HI"),
+    )
+)
+
+
+def _validate_matrix_high_half_select_fields(
+    descriptor_set: DescriptorSet,
+) -> None:
+    for descriptor in descriptor_set.descriptors:
+        if descriptor.encoding_format_id != AMDGPU_ENCODING_FORMAT_VOP3P or not (
+            descriptor.semantic_tag.startswith("matrix.wmma.")
+            or descriptor.semantic_tag.startswith("matrix.swmmac.")
+        ):
+            continue
+        selectors = tuple(
+            field_value
+            for field_value in descriptor.encoding_field_values
+            if field_value.encoding_field_id in _MATRIX_HIGH_HALF_SELECT_FIELD_IDS
+        )
+        if len(selectors) != 1:
+            raise ValueError(
+                f"AMDGPU VOP3P matrix descriptor '{descriptor.key}' must define "
+                f"exactly one high-half selector; found {len(selectors)}"
+            )
+        if selectors[0].value not in (0x3, 0x7):
+            raise ValueError(
+                f"AMDGPU VOP3P matrix descriptor '{descriptor.key}' has "
+                f"non-canonical high-half selector {selectors[0].value}"
+            )
+
+
+_NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS = frozenset(
+    (
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+)
+
+
+def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
+    for descriptor in descriptor_set.descriptors:
+        immediate_by_name = {
+            immediate.field_name: immediate for immediate in descriptor.immediates
+        }
+        for form in descriptor.asm_forms:
+            saw_named_modifier = False
+            for value in form.native_assembly_values:
+                is_named_modifier = (
+                    value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
+                    and value.target_format_id in _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS
+                )
+                if not is_named_modifier:
+                    if saw_named_modifier:
+                        raise ValueError(
+                            f"AMDGPU descriptor '{descriptor.key}' native asm "
+                            "form has a positional value after a named modifier"
+                        )
+                    continue
+                saw_named_modifier = True
+                immediate = immediate_by_name.get(value.field_name)
+                if immediate is None:
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"modifier references unknown immediate '{value.field_name}'"
+                    )
+                if ImmediateFlag.DEFAULT_VALUE not in immediate.flags:
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"modifier '{value.field_name}' has no default value"
+                    )
+                if value.literal is None or value.literal == "":
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"modifier '{value.field_name}' has no spelling"
+                    )
+                if value.target_format_id == (
+                    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST
+                ):
+                    if value.bit_width <= 0 or value.bit_width >= 64:
+                        raise ValueError(
+                            f"AMDGPU descriptor '{descriptor.key}' native asm "
+                            f"bit-list modifier '{value.field_name}' has invalid width"
+                        )
+                elif value.bit_width != 0:
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"modifier '{value.field_name}' unexpectedly has a bit width"
+                    )
+                if value.target_format_id == (
+                    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG
+                ) and (
+                    immediate.kind is not ImmediateKind.UNSIGNED
+                    or immediate.default_value != 0
+                    or immediate.unsigned_max != 1
+                ):
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm flag "
+                        f"'{value.field_name}' is not a zero-default boolean"
+                    )
+
+
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     """Returns descriptor keys known to the AMDGPU target family."""
 
@@ -852,6 +957,8 @@ def build_amdgpu_core_descriptor_set_from_spec(
     descriptor_set = _with_storage_lease_rows(descriptor_set)
     _validate_descriptor_encoding_formats(target, spec, descriptor_set)
     _validate_dpp_control_fields(descriptor_set)
+    _validate_matrix_high_half_select_fields(descriptor_set)
+    _validate_native_asm_values(descriptor_set)
     return descriptor_set
 
 

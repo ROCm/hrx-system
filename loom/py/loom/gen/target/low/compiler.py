@@ -475,7 +475,7 @@ def _compile_native_asm_value(
         NativeAsmValueKind.IMMEDIATE_UNSIGNED_HEX,
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
     ):
-        if literal is not None:
+        if kind is not NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT and literal is not None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native immediate value {value_ordinal} unexpectedly specifies a literal")
         name = require_field_name()
         immediate_index = immediate_indices.get(name)
@@ -488,10 +488,15 @@ def _compile_native_asm_value(
             if bit_width <= 0 or bit_width > 32:
                 raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native unsigned-hex immediate '{name}' bit width must be in [1, 32]")
         elif kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT:
-            if bit_width != 0:
-                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' unexpectedly specifies a bit width")
+            if bit_width < 0 or bit_width > 0xFF:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' bit width must be in [0, 255]")
             if target_format_id <= 0 or target_format_id > 0xFF:
                 raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' target format must be in [1, 255]")
+            if literal is not None:
+                if literal == "":
+                    raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' has an empty literal")
+                if len(literal.encode()) > 255:
+                    raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' literal exceeds 255 bytes")
         if kind is not NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT and target_format_id != 0:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native immediate '{name}' unexpectedly specifies a target format")
         return CompiledNativeAsmValue(
@@ -499,8 +504,15 @@ def _compile_native_asm_value(
             index=immediate_index,
             bit_width=bit_width,
             target_format_id=target_format_id,
-            literal_label=None,
-            literal=None,
+            literal_label=(
+                string_pool.intern(
+                    scoped_label("asm_native_value", str(value_ordinal)),
+                    literal,
+                )
+                if literal is not None
+                else None
+            ),
+            literal=literal,
         )
 
     raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native value {value_ordinal} has unsupported kind {kind!r}")

@@ -655,11 +655,42 @@ static void loom_low_lower_mark_rule_storage_demands(
   }
 }
 
+static void loom_low_lower_mark_descriptor_matrix_storage_demands(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  const loom_low_lower_descriptor_matrix_plan_t* plan =
+      (const loom_low_lower_descriptor_matrix_plan_t*)
+          selected_plan->plan.target_data;
+  IREE_ASSERT(plan != NULL);
+  loom_low_lower_require_source_operands_storage(context,
+                                                 selected_plan->source_op);
+  const loom_contract_operand_t* operands[] = {
+      &plan->contract_request.lhs,
+      &plan->contract_request.rhs,
+      &plan->contract_request.accumulator,
+      &plan->contract_request.result,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(operands); ++i) {
+    const loom_contract_encoded_operand_t* encoded = &operands[i]->encoded;
+    for (uint8_t key = 0; key < LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_COUNT_;
+         ++key) {
+      if (!iree_any_bit_set(encoded->required_auxiliary_operands,
+                            loom_contract_auxiliary_operand_key_flag(key))) {
+        continue;
+      }
+      const loom_contract_value_ref_t ref = encoded->auxiliary_value_refs[key];
+      IREE_ASSERT(loom_contract_value_ref_is_present(ref));
+      loom_low_lower_mark_value_storage_required(
+          context, loom_contract_value_ref_value_id(ref));
+    }
+  }
+}
+
 static void loom_low_lower_mark_callback_plan_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_lower_selected_plan_t* selected_plan) {
-  if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK &&
-      context->policy->mark_plan_storage_demands.fn != NULL) {
+  IREE_ASSERT_EQ(selected_plan->kind, LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK);
+  if (context->policy->mark_plan_storage_demands.fn != NULL) {
     context->policy->mark_plan_storage_demands.fn(
         context->policy->mark_plan_storage_demands.user_data, context,
         selected_plan->source_op, selected_plan->plan);
@@ -796,6 +827,9 @@ static void loom_low_lower_mark_selected_plan_storage_demands(
       loom_low_lower_mark_rule_storage_demands(context, selected_plan);
       break;
     case LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX:
+      loom_low_lower_mark_descriptor_matrix_storage_demands(context,
+                                                            selected_plan);
+      break;
     case LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK:
       loom_low_lower_mark_callback_plan_storage_demands(context, selected_plan);
       break;
@@ -2675,9 +2709,9 @@ static iree_status_t loom_low_lower_emit_elided_selected_plan(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_lower_descriptor_matrix_sparse_source_value(
-    const loom_contract_request_t* request, loom_value_id_t* out_source_value) {
-  *out_source_value = LOOM_VALUE_ID_INVALID;
+static loom_value_id_t loom_low_lower_descriptor_matrix_sparse_source_value(
+    const loom_contract_request_t* request) {
+  loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
   const loom_contract_operand_t* operands[] = {
       &request->lhs,
       &request->rhs,
@@ -2691,37 +2725,28 @@ static iree_status_t loom_low_lower_descriptor_matrix_sparse_source_value(
     if (!loom_contract_value_ref_is_present(ref)) {
       continue;
     }
-    const loom_value_id_t source_value = loom_contract_value_ref_value_id(ref);
-    if (*out_source_value == LOOM_VALUE_ID_INVALID) {
-      *out_source_value = source_value;
+    const loom_value_id_t operand_source_value =
+        loom_contract_value_ref_value_id(ref);
+    if (source_value == LOOM_VALUE_ID_INVALID) {
+      source_value = operand_source_value;
       continue;
     }
-    if (*out_source_value != source_value) {
-      IREE_ASSERT_UNREACHABLE(
-          "descriptor-matrix selected sparse source is ambiguous");
-      IREE_BUILTIN_UNREACHABLE();
-    }
+    IREE_ASSERT_EQ(source_value, operand_source_value,
+                   "descriptor-matrix selected sparse source is ambiguous");
   }
-  if (*out_source_value == LOOM_VALUE_ID_INVALID) {
-    IREE_ASSERT_UNREACHABLE(
-        "descriptor-matrix selected sparse source is unavailable");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  return iree_ok_status();
+  IREE_ASSERT_NE(source_value, LOOM_VALUE_ID_INVALID,
+                 "descriptor-matrix selected sparse source is unavailable");
+  return source_value;
 }
 
-static iree_status_t loom_low_lower_descriptor_matrix_auxiliary_source_value(
+static loom_value_id_t loom_low_lower_descriptor_matrix_auxiliary_source_value(
     const loom_contract_operand_t* operand,
-    loom_contract_auxiliary_operand_key_t key, iree_string_view_t field_name,
-    loom_value_id_t* out_source_value) {
-  *out_source_value = LOOM_VALUE_ID_INVALID;
+    loom_contract_auxiliary_operand_key_t key) {
   const loom_contract_value_ref_t ref =
       operand->encoded.auxiliary_value_refs[key];
-  (void)field_name;
   IREE_ASSERT(loom_contract_value_ref_is_present(ref),
               "descriptor-matrix selected auxiliary operand is unavailable");
-  *out_source_value = loom_contract_value_ref_value_id(ref);
-  return iree_ok_status();
+  return loom_contract_value_ref_value_id(ref);
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_packet_value(
@@ -2745,27 +2770,23 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_value(
   if (iree_string_view_equal(field_name, IREE_SV("index")) ||
       iree_string_view_equal(field_name, IREE_SV("metadata")) ||
       iree_string_view_equal(field_name, IREE_SV("sparsity"))) {
-    loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_sparse_source_value(
-        &plan->contract_request, &source_value));
+    const loom_value_id_t source_value =
+        loom_low_lower_descriptor_matrix_sparse_source_value(
+            &plan->contract_request);
     return loom_low_lower_lookup_value(context, source_value, out_low_value);
   }
   if (iree_string_view_equal(field_name, IREE_SV("scale_src0"))) {
-    loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
+    const loom_value_id_t source_value =
         loom_low_lower_descriptor_matrix_auxiliary_source_value(
             &plan->contract_request.lhs,
-            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE, field_name,
-            &source_value));
+            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
     return loom_low_lower_lookup_value(context, source_value, out_low_value);
   }
   if (iree_string_view_equal(field_name, IREE_SV("scale_src1"))) {
-    loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
+    const loom_value_id_t source_value =
         loom_low_lower_descriptor_matrix_auxiliary_source_value(
             &plan->contract_request.rhs,
-            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE, field_name,
-            &source_value));
+            LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE);
     return loom_low_lower_lookup_value(context, source_value, out_low_value);
   }
   IREE_ASSERT_UNREACHABLE(

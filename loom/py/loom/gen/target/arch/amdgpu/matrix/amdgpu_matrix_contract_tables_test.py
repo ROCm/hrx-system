@@ -342,6 +342,19 @@ def test_generation_rejects_unmapped_matrix_descriptor_immediates() -> None:
         raise AssertionError("expected unmapped immediate validation to fail")
 
 
+def test_generation_requires_integer_matrix_control_immediates() -> None:
+    contract = _contract("swmmac.i32.16x16x32.iu8")
+
+    with pytest.raises(ValueError, match=r"required immediate field.*clamp"):
+        amdgpu_matrix_contract_tables._validate_contract_descriptor_immediates(
+            contract,
+            "amdgpu.v_swmmac_i32_16x16x32_iu8",
+            descriptor_immediates_by_key={
+                "amdgpu.v_swmmac_i32_16x16x32_iu8": (Immediate("neg_lo", ImmediateKind.UNSIGNED),),
+            },
+        )
+
+
 def test_generation_rejects_unsupported_wait_state_result_payload_count() -> None:
     contract = replace(
         _contract("mfma.f32.16x16x16.f16"),

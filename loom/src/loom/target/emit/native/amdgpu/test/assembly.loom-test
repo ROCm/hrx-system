@@ -1831,7 +1831,7 @@ low.func.def target(@gfx942_target) @gfx942_extended_mfma_assembly(%lhs_f16: reg
 // ----
   v_mfma_f32_32x32x8_f16 v[16:31], v[0:1], v[2:3], v[16:31]
   v_mfma_i32_16x16x32_i8 v[8:11], v[4:5], v[6:7], v[8:11]
-  v_smfmac_f32_16x16x64_bf8_bf8 v[8:11], v[8:11], v[12:13], v[32:35], v14
+  v_smfmac_f32_16x16x64_bf8_bf8 v[8:11], v[12:13], v[32:35], v14
   s_endpgm
 
 // ====
@@ -1850,7 +1850,7 @@ low.func.def target(@gfx950_target) @gfx950_extended_mfma_assembly(%lhs_f16: reg
   v_mfma_i32_32x32x32_i8 v[16:31], v[0:3], v[4:7], v[16:31]
   v_mfma_f32_16x16x32_f16 v[32:35], v[8:11], v[12:15], v[32:35]
   v_mfma_scale_f32_16x16x128_f8f6f4 v[32:35], v[40:47], v[48:55], v[32:35], v36, v37
-  v_smfmac_f32_16x16x128_fp8_fp8 v[32:35], v[32:35], v[56:59], v[64:71], v38
+  v_smfmac_f32_16x16x128_fp8_fp8 v[32:35], v[56:59], v[64:71], v38
   s_endpgm
 
 // ====
@@ -1895,13 +1895,13 @@ low.func.def target(@gfx1200_target) @gfx1200_s_delay_alu() asm<amdgpu.rdna4.cor
 amdgpu.target<gfx1200> @gfx1200_target
 low.func.def target(@gfx1200_target) @gfx1200_swmmac_assembly(%lhs_f16: reg<amdgpu.vgpr x4>, %rhs_f16: reg<amdgpu.vgpr x8>, %acc_f32: reg<amdgpu.vgpr x8>, %lhs_iu4: reg<amdgpu.vgpr x2>, %rhs_iu4: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
   %f16 = v_swmmac_f32_16x16x32_f16 %acc_f32, %lhs_f16, %rhs_f16, %index
-  %iu4 = v_swmmac_i32_16x16x64_iu4 %f16, %lhs_iu4, %rhs_iu4, %index
+  %iu4 = v_swmmac_i32_16x16x64_iu4 %f16, %lhs_iu4, %rhs_iu4, %index {neg_lo = 1, clamp = 1}
   return
 }
 
 // ----
-  v_swmmac_f32_16x16x32_f16 v[16:23], v[16:23], v[0:3], v[8:15], v6
-  v_swmmac_i32_16x16x64_iu4 v[16:23], v[16:23], v[4:5], v[24:27], v6
+  v_swmmac_f32_16x16x32_f16 v[16:23], v[0:3], v[8:15], v6
+  v_swmmac_i32_16x16x64_iu4 v[16:23], v[4:5], v[24:27], v6 neg_lo:[1,0,0] clamp
   s_endpgm
 
 // ====
@@ -3022,10 +3022,10 @@ low.func.def target(@gfx942_target) @gfx942_smfmac_srcc_overlap_wait_state(%lhs:
 }
 
 // ----
-  v_smfmac_f32_32x32x16_bf16 v[0:15], v[0:15], v[16:17], v[20:23], v18
+  v_smfmac_f32_32x32x16_bf16 v[0:15], v[16:17], v[20:23], v18
   s_nop 15
   s_nop 0
-  v_smfmac_f32_16x16x32_bf16 v[4:7], v[4:7], v[16:17], v[20:23], v18
+  v_smfmac_f32_16x16x32_bf16 v[4:7], v[16:17], v[20:23], v18
   s_endpgm
 
 // ====

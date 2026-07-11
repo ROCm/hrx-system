@@ -462,7 +462,8 @@ static iree_status_t loom_low_verify_native_asm_values(
       }
       continue;
     }
-    if (value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+    if (value->kind != LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
+        value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm form for descriptor %" PRIu32
                               " non-literal native value has a literal string",
@@ -590,19 +591,19 @@ static iree_status_t loom_low_verify_native_asm_values(
               " but descriptor has only %" PRIu16 " immediates",
               descriptor_index, value->index, descriptor->immediate_count);
         }
-        if (value->bit_width != 0) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "low asm form for descriptor %" PRIu32
-              " native target-format immediate must not set bit width",
-              descriptor_index);
-        }
         if (value->target_format_id == 0) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "low asm form for descriptor %" PRIu32
               " native target-format immediate must set target format",
               descriptor_index);
+        }
+        if (value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+          iree_string_view_t literal = iree_string_view_empty();
+          IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
+              descriptor_set, value->literal_string_offset,
+              "native_asm_value.literal", &literal));
+          (void)literal;
         }
         break;
       default:

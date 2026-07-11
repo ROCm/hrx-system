@@ -29,6 +29,12 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3,
   // Target-format ID for a four-bit DPP destination bank mask.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4,
+  // Target-format ID for an omitted-at-default named bit-list modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5,
+  // Target-format ID for an omitted-at-default named integer modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6,
+  // Target-format ID for an omitted-at-default named presence modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -610,6 +616,68 @@ static iree_status_t loom_amdgpu_append_packet_immediate_scale_sel(
                                            "scale_sel:%" PRId64, value);
 }
 
+static bool loom_amdgpu_native_asm_format_is_named_modifier(
+    uint8_t target_format_id) {
+  return target_format_id >=
+             LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST &&
+         target_format_id <= LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG;
+}
+
+static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
+    const loom_native_assembly_packet_context_t* context,
+    const loom_low_native_asm_value_t* native_value) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  IREE_ASSERT_LT(native_value->index, descriptor->immediate_count);
+  const uint32_t immediate_row =
+      descriptor->immediate_start + native_value->index;
+  IREE_ASSERT_LT(immediate_row, descriptor_set->immediate_count);
+  IREE_ASSERT(descriptor_set->immediates != NULL);
+  const loom_low_immediate_t* immediate =
+      &descriptor_set->immediates[immediate_row];
+
+  int64_t value = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_read_packet_immediate_i64(context, immediate, &value));
+  if (value == immediate->default_value) {
+    return iree_ok_status();
+  }
+
+  iree_string_view_t name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+      descriptor_set, native_value->literal_string_offset, &name));
+  switch (native_value->target_format_id) {
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST: {
+      IREE_ASSERT(native_value->bit_width > 0 && native_value->bit_width < 64);
+      IREE_ASSERT(value >= 0 &&
+                  (uint64_t)value < (UINT64_C(1) << native_value->bit_width));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, " %.*s:[", (int)name.size, name.data));
+      for (uint8_t bit = 0; bit < native_value->bit_width; ++bit) {
+        if (bit > 0) {
+          IREE_RETURN_IF_ERROR(
+              iree_string_builder_append_cstring(context->builder, ","));
+        }
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            context->builder, "%u", (unsigned)(((uint64_t)value >> bit) & 1)));
+      }
+      return iree_string_builder_append_cstring(context->builder, "]");
+    }
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+      return iree_string_builder_append_format(
+          context->builder, " %.*s:%" PRId64, (int)name.size, name.data, value);
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
+      IREE_ASSERT_EQ(immediate->default_value, 0);
+      IREE_ASSERT_EQ(value, 1);
+      return iree_string_builder_append_format(context->builder, " %.*s",
+                                               (int)name.size, name.data);
+    default:
+      IREE_ASSERT_UNREACHABLE("not a named AMDGPU assembly modifier");
+      return iree_ok_status();
+  }
+}
+
 static iree_status_t loom_amdgpu_append_dpp_control(
     const loom_native_assembly_packet_context_t* context, uint16_t value) {
   loom_amdgpu_dpp_control_decoding_t decoding = {0};
@@ -1080,6 +1148,11 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK:
           return loom_amdgpu_append_packet_immediate_dpp_bank_mask(
               context, value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
+          return loom_amdgpu_append_packet_immediate_named_modifier(context,
+                                                                    value);
         default:
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
@@ -1105,8 +1178,14 @@ static iree_status_t loom_amdgpu_append_native_asm_form_values(
     IREE_ASSERT(descriptor_set->native_asm_values != NULL);
     const loom_low_native_asm_value_t* value =
         &descriptor_set->native_asm_values[native_value_index];
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_append_asm_form_separator(context, in_list));
+    const bool is_named_modifier =
+        value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
+        loom_amdgpu_native_asm_format_is_named_modifier(
+            value->target_format_id);
+    if (!is_named_modifier) {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_append_asm_form_separator(context, in_list));
+    }
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_native_asm_form_value(context, descriptor, value));
   }
