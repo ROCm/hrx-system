@@ -144,6 +144,24 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    function_model
+  HDRS
+    "function_model.h"
+  SRCS
+    "function_model.c"
+  DEPS
+    ::descriptors
+    ::function
+    ::target_binding
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     storage_layout
   HDRS
     "storage_layout.h"
@@ -257,6 +275,7 @@ loom_cc_library(
     ::descriptors
     ::diagnostics
     ::function
+    ::function_model
     ::placement
     ::storage_lease
     ::target_binding
@@ -586,6 +605,7 @@ loom_cc_library(
     ::allocation_rematerialization
     ::diagnostics
     ::function
+    ::function_model
     ::memory_access
     ::packet
     ::planning_statistics

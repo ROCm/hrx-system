@@ -42,6 +42,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low:memory_access",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:pressure",

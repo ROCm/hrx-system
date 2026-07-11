@@ -157,6 +157,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_model",
+    srcs = ["function_model.c"],
+    hdrs = ["function_model.h"],
+    deps = [
+        ":descriptors",
+        ":function",
+        ":target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "storage_layout",
     srcs = ["storage_layout.c"],
     hdrs = ["storage_layout.h"],
@@ -251,6 +266,7 @@ loom_cc_library(
         ":descriptors",
         ":diagnostics",
         ":function",
+        ":function_model",
         ":placement",
         ":storage_lease",
         ":target_binding",
@@ -536,6 +552,7 @@ loom_cc_library(
         ":allocation_rematerialization",
         ":diagnostics",
         ":function",
+        ":function_model",
         ":memory_access",
         ":packet",
         ":planning_statistics",

@@ -15,6 +15,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet_json.h"
 #include "loom/codegen/low/schedule/json.h"
 #include "loom/codegen/low/schedule/run.h"
@@ -1092,7 +1093,6 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
         &pressure_cliffs));
   }
   loom_low_schedule_options_t options = {
-      .descriptor_registry = descriptor_registry,
       .pressure_cliffs = pressure_cliffs,
       .allocation_budgets = budgets,
       .allocation_budget_count = budget_count,
@@ -1102,10 +1102,20 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
                LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
       .strategy = strategy,
   };
+  loom_low_function_model_t model = {0};
   loom_low_schedule_table_t table = {0};
-  IREE_RETURN_IF_ERROR(loom_low_schedule_function(
-      module, low_function, &options, analysis_arena, &table));
-  return loom_low_schedule_format_json(&table, &result->actual_output);
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function, descriptor_registry, loom_target_selection_empty(),
+      emitter, /*flags=*/0, analysis_arena, &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_schedule_function(&model, &options, analysis_arena, &table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_format_json(&table, &result->actual_output);
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static const char* loom_check_emit_low_allocation_mode_name(
@@ -1187,7 +1197,6 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
     return iree_ok_status();
   }
   loom_low_allocation_options_t options = {
-      .descriptor_registry = descriptor_registry,
       .budgets = budgets,
       .budget_count = budget_count,
       .fixed_values = fixed_values,
@@ -1195,10 +1204,18 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
   };
-  IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-      module, low_function, &options, analysis_arena, out_table));
-  *out_built = true;
-  return iree_ok_status();
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function, descriptor_registry, loom_target_selection_empty(),
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena,
+      &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_allocate_function(&model, &options, analysis_arena, out_table);
+  }
+  if (iree_status_is_ok(status)) *out_built = true;
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static iree_status_t loom_check_emit_write_low_allocation_json(
