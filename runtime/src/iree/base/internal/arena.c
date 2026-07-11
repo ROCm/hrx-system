@@ -63,6 +63,27 @@ void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
   IREE_TRACE_ZONE_END(z0);
 }
 
+iree_status_t iree_arena_block_pool_initialize_with_usable_size(
+    iree_host_size_t usable_block_size, iree_allocator_t block_allocator,
+    iree_arena_block_pool_t* out_block_pool) {
+  IREE_ASSERT_ARGUMENT(out_block_pool);
+  memset(out_block_pool, 0, sizeof(*out_block_pool));
+  if (IREE_UNLIKELY(usable_block_size == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "usable block size must be non-zero");
+  }
+
+  iree_host_size_t total_block_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(
+          usable_block_size, sizeof(iree_arena_block_t), &total_block_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "usable block size is too large");
+  }
+  iree_arena_block_pool_initialize(total_block_size, block_allocator,
+                                   out_block_pool);
+  return iree_ok_status();
+}
+
 void iree_arena_block_pool_deinitialize(iree_arena_block_pool_t* block_pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
 

@@ -94,6 +94,13 @@ void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
                                       iree_allocator_t block_allocator,
                                       iree_arena_block_pool_t* out_block_pool);
 
+// Initializes a new block pool with at least |usable_block_size| payload bytes
+// available in each block. The block trailer is added to the system allocation
+// size instead of consuming the requested payload capacity.
+iree_status_t iree_arena_block_pool_initialize_with_usable_size(
+    iree_host_size_t usable_block_size, iree_allocator_t block_allocator,
+    iree_arena_block_pool_t* out_block_pool);
+
 // Deinitializes a block pool and frees all allocations.
 // All blocks that were acquired from the pool must have already been released
 // back to it.
