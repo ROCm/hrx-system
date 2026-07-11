@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "loomc/target/amdgpu.h"
@@ -28,6 +30,7 @@ using loomc::bench::ModulePtr;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmarkDirect;
+using loomc::bench::RunCompileBenchmarkDirectCold;
 using loomc::bench::SourcePtr;
 using loomc::bench::TargetCompileScenario;
 using loomc::bench::TargetEnvironmentPtr;
@@ -47,13 +50,18 @@ constexpr AmdgpuBenchmarkTarget kGfx1200Target = {"gfx1200"};
 
 class AmdgpuI32ChainScenario final : public TargetCompileScenario {
  public:
-  AmdgpuI32ChainScenario(iree_host_size_t job_count,
-                         iree_host_size_t operation_count,
-                         AmdgpuBenchmarkTarget target)
-      : job_count_(std::max<iree_host_size_t>(job_count, 1)),
-        operation_count_(std::max<iree_host_size_t>(operation_count, 1)),
-        operation_count_value_(std::to_string(operation_count_)),
-        target_(target) {}
+  AmdgpuI32ChainScenario(
+      iree_host_size_t job_count,
+      std::initializer_list<iree_host_size_t> operation_counts,
+      AmdgpuBenchmarkTarget target)
+      : job_count_(std::max<iree_host_size_t>(job_count, 1)), target_(target) {
+    operation_counts_.reserve(operation_counts.size());
+    for (iree_host_size_t operation_count : operation_counts) {
+      operation_count = std::max<iree_host_size_t>(operation_count, 1);
+      operation_counts_.push_back(
+          {operation_count, std::to_string(operation_count)});
+    }
+  }
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     TargetEnvironmentPtr target_environment;
@@ -90,10 +98,22 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
 
   iree_host_size_t job_count() const override { return job_count_; }
 
+  iree_status_t WarmUp(iree_host_size_t worker_count) override {
+    for (iree_host_size_t worker_ordinal = 0; worker_ordinal < worker_count;
+         ++worker_ordinal) {
+      for (iree_host_size_t pattern_ordinal = 0;
+           pattern_ordinal < operation_counts_.size(); ++pattern_ordinal) {
+        IREE_RETURN_IF_ERROR(RunJob(worker_ordinal, pattern_ordinal));
+      }
+    }
+    return iree_ok_status();
+  }
+
   iree_status_t RunJob(iree_host_size_t worker_ordinal,
                        iree_host_size_t job_ordinal) override {
-    (void)job_ordinal;
     WorkspacePtr& workspace = workspace_at(worker_ordinal);
+    const OperationCount& operation_count =
+        operation_counts_[job_ordinal % operation_counts_.size()];
 
     ModulePtr module;
     IREE_RETURN_IF_ERROR(
@@ -106,8 +126,8 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
         {
             /*.key=*/loomc_make_cstring_view("@benchmark.operation_count"),
             /*.value=*/
-            loomc_make_string_view(operation_count_value_.data(),
-                                   operation_count_value_.size()),
+            loomc_make_string_view(operation_count.text.data(),
+                                   operation_count.text.size()),
         },
     };
     const loomc_config_options_t config_options = {
@@ -124,10 +144,25 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
   }
 
   void SetExtraCounters(::benchmark::State& state) const override {
-    state.counters["operation_count"] = (double)operation_count_;
+    iree_host_size_t minimum = operation_counts_.front().value;
+    iree_host_size_t maximum = minimum;
+    for (const OperationCount& operation_count : operation_counts_) {
+      minimum = std::min(minimum, operation_count.value);
+      maximum = std::max(maximum, operation_count.value);
+    }
+    state.counters["operation_count_min"] = (double)minimum;
+    state.counters["operation_count_max"] = (double)maximum;
   }
 
  private:
+  struct OperationCount {
+    // Numeric operation count reported by the benchmark.
+    iree_host_size_t value;
+
+    // Stable config spelling borrowed by each invocation.
+    std::string text;
+  };
+
   iree_status_t EmitAmdgpuArtifact(WorkspacePtr& workspace, ModulePtr& module) {
     loomc_target_selection_options_t target_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
@@ -182,11 +217,8 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
   // Number of kernels compiled by each benchmark iteration.
   iree_host_size_t job_count_ = 0;
 
-  // Arithmetic operations materialized into each kernel.
-  iree_host_size_t operation_count_ = 0;
-
-  // Stable config spelling of operation_count_ borrowed by each invocation.
-  std::string operation_count_value_;
+  // Cyclic sequence of arithmetic-chain sizes compiled by each iteration.
+  std::vector<OperationCount> operation_counts_;
 
   // Immutable target row selected by this benchmark registration.
   AmdgpuBenchmarkTarget target_;
@@ -205,7 +237,18 @@ static std::unique_ptr<CompileScenario> CreateAmdgpuI32ChainScenario(
     const ::benchmark::State& state, const void* user_data) {
   const auto* target = static_cast<const AmdgpuBenchmarkTarget*>(user_data);
   return std::make_unique<AmdgpuI32ChainScenario>(
-      (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),
+      (iree_host_size_t)state.range(1),
+      std::initializer_list<iree_host_size_t>{(iree_host_size_t)state.range(2)},
+      *target);
+}
+
+static std::unique_ptr<CompileScenario> CreateAmdgpuI32AlternatingChainScenario(
+    const ::benchmark::State& state, const void* user_data) {
+  const auto* target = static_cast<const AmdgpuBenchmarkTarget*>(user_data);
+  return std::make_unique<AmdgpuI32ChainScenario>(
+      (iree_host_size_t)state.range(1),
+      std::initializer_list<iree_host_size_t>{(iree_host_size_t)state.range(2),
+                                              (iree_host_size_t)state.range(3)},
       *target);
 }
 
@@ -221,6 +264,41 @@ BENCHMARK_CAPTURE(BM_AmdgpuI32ChainSmoke, Gfx942, &kGfx942Target)
     ->UseRealTime();
 BENCHMARK_CAPTURE(BM_AmdgpuI32ChainSmoke, Gfx1200, &kGfx1200Target)
     ->Args({1, 1, 16})
+    ->UseRealTime();
+
+static void BM_AmdgpuI32ChainCold(::benchmark::State& state,
+                                  const AmdgpuBenchmarkTarget* target) {
+  RunCompileBenchmarkDirectCold(state, CreateAmdgpuI32ChainScenario, target);
+}
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainCold, Gfx1100, &kGfx1100Target)
+    ->Args({1, 1, 16})
+    ->Args({1, 1, 1024})
+    ->Iterations(1)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainCold, Gfx942, &kGfx942Target)
+    ->Args({1, 1, 16})
+    ->Args({1, 1, 1024})
+    ->Iterations(1)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainCold, Gfx1200, &kGfx1200Target)
+    ->Args({1, 1, 16})
+    ->Args({1, 1, 1024})
+    ->Iterations(1)
+    ->UseRealTime();
+
+static void BM_AmdgpuI32ChainAlternating(::benchmark::State& state,
+                                         const AmdgpuBenchmarkTarget* target) {
+  RunCompileBenchmarkDirect(state, CreateAmdgpuI32AlternatingChainScenario,
+                            target);
+}
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainAlternating, Gfx1100, &kGfx1100Target)
+    ->Args({1, 2, 16, 1024})
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainAlternating, Gfx942, &kGfx942Target)
+    ->Args({1, 2, 16, 1024})
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_AmdgpuI32ChainAlternating, Gfx1200, &kGfx1200Target)
+    ->Args({1, 2, 16, 1024})
     ->UseRealTime();
 
 static void BM_AmdgpuI32Chain(::benchmark::State& state,

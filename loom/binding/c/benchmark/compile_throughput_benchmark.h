@@ -66,6 +66,9 @@ class CompileScenario {
 
   virtual iree_host_size_t job_count() const = 0;
 
+  // Prepares every worker-owned state and workload shape needed by timed jobs.
+  virtual iree_status_t WarmUp(iree_host_size_t worker_count);
+
   virtual iree_status_t RunJob(iree_host_size_t worker_ordinal,
                                iree_host_size_t job_ordinal) = 0;
 
@@ -157,6 +160,12 @@ void RunCompileBenchmark(::benchmark::State& state,
 void RunCompileBenchmarkDirect(::benchmark::State& state,
                                CompileScenarioFactory factory,
                                const void* user_data);
+
+// Runs without compile warmup. Registrations must use Iterations(1) so the
+// counters and timing describe first growth rather than a cold/warm mixture.
+void RunCompileBenchmarkDirectCold(::benchmark::State& state,
+                                   CompileScenarioFactory factory,
+                                   const void* user_data);
 
 iree_status_t RequireSucceededResult(const loomc_result_t* result,
                                      const char* operation);
