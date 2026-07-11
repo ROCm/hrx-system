@@ -173,6 +173,7 @@
               "unordered": [
                 "\"target_export\":null",
                 "\"entries\":{\"count\":2,\"rows\":[",
+                { "regex": "\"planning\":\\{\"frame_build_count\":[1-9][0-9]*,\"allocation_run_count\":[1-9][0-9]*,\"repair\":\\{" },
                 "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\"",
                 "\"target_capability_rows\":{\"count\":",
                 "\"target_capability_row_count\":",

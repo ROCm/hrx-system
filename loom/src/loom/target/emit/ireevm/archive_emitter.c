@@ -431,12 +431,14 @@ static iree_status_t loom_ireevm_archive_emit_function(
       state, function->op, &fixed_values, &fixed_value_count));
 
   loom_low_emission_frame_t frame = {0};
+  loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &state->low_registry.registry,
       .memory_access_table = loom_low_memory_access_table_empty(),
       .allocation_fixed_values = fixed_values,
       .allocation_fixed_value_count = fixed_value_count,
       .emitter = loom_target_entry_emitter(&state->diagnostic_emitter),
+      .statistics = state->report != NULL ? &planning_statistics : NULL,
   };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
@@ -454,13 +456,19 @@ static iree_status_t loom_ireevm_archive_emit_function(
       state->module, function->op, &frame_options, &spill_free_options,
       &state->table_arena, &frame));
   if (state->diagnostic_emitter.error_count != 0) {
-    if (state->report != NULL && frame.allocation.function_op != NULL) {
-      IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
-          state->report, &frame.allocation));
+    if (state->report != NULL) {
+      loom_target_compile_report_record_low_planning(state->report,
+                                                     &planning_statistics);
+      if (frame.allocation.function_op != NULL) {
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
+            state->report, &frame.allocation));
+      }
     }
     return iree_ok_status();
   }
   if (state->report != NULL) {
+    loom_target_compile_report_record_low_planning(state->report,
+                                                   &planning_statistics);
     IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_emission_frame(
         state->report, &frame));
     loom_ireevm_archive_emit_accumulate_frame_report(state, &frame);

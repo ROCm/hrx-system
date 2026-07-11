@@ -1042,6 +1042,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       descriptor_set, table_arena, &schedule_state_reads));
 
   loom_low_emission_frame_t frame = {0};
+  loom_low_planning_statistics_t planning_statistics = {0};
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
@@ -1060,6 +1061,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       .allocation_fixed_value_count = plan->fixed_value_count,
       .storage_lease_provider = &storage_lease_provider,
       .emitter = loom_target_entry_emitter(diagnostic_emitter),
+      .statistics = report != NULL ? &planning_statistics : NULL,
   };
   if (report != NULL) {
     loom_target_compile_report_record_low_kernel_workload(
@@ -1096,9 +1098,13 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       module, plan->low_function_op, &frame_options, &spill_free_options,
       table_arena, &frame));
   if (diagnostic_emitter->error_count != 0) {
-    if (report != NULL && frame.allocation.function_op != NULL) {
-      IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
-          report, &frame.allocation));
+    if (report != NULL) {
+      loom_target_compile_report_record_low_planning(report,
+                                                     &planning_statistics);
+      if (frame.allocation.function_op != NULL) {
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
+            report, &frame.allocation));
+      }
     }
     return iree_ok_status();
   }
@@ -1111,6 +1117,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     return iree_ok_status();
   }
   if (report != NULL) {
+    loom_target_compile_report_record_low_planning(report,
+                                                   &planning_statistics);
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_low_emission_frame(report, &frame));
   }
@@ -1386,8 +1394,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
         table_arena, target_listing_initialized ? &target_listing : NULL,
         entry_reports != NULL ? &entry_reports[i] : NULL, &contributions[i]);
   }
-  if (iree_status_is_ok(status) && !diagnostics_failed &&
-      diagnostic_emitter->error_count == 0) {
+  if (iree_status_is_ok(status) && !diagnostics_failed) {
     for (uint16_t i = 0; i < entries.count && entry_reports != NULL &&
                          iree_status_is_ok(status);
          ++i) {

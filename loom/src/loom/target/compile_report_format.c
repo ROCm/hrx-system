@@ -11,6 +11,7 @@
 
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
+#include "loom/target/compile_report_planning_format.h"
 #include "loom/target/math_policy.h"
 #include "loom/util/json.h"
 
@@ -1133,6 +1134,17 @@ static iree_status_t loom_target_compile_report_format_summary(
   }
 
   if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+        builder, IREE_SV("COMPILE-REPORT: planning")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_append_low_planning_text_fields(
+            &report->low_planning, builder));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(builder, IREE_SV("\n")));
+  }
+
+  if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
         builder, IREE_SV("COMPILE-REPORT: workload")));
@@ -1521,6 +1533,16 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           row->spill_row_count, row->allocation_high_water_row_count,
           row->wait_counter_row_count, row->wait_reason_summary_row_count,
           row->wait_action_row_count, row->target_capability_row_count));
+      if (iree_any_bit_set(row->detail_flags,
+                           LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, "COMPILE-REPORT: entry[%" PRIhsz "].planning", row_index));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_low_planning_text_fields(
+                &row->low_planning, builder));
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_string(builder, IREE_SV("\n")));
+      }
     }
   }
   return iree_ok_status();
@@ -4074,6 +4096,13 @@ static iree_status_t loom_target_compile_report_format_entry_json(
           stream, &first_field, "target_config", row->target_config_name));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "detail_flags", row->detail_flags));
+  if (iree_any_bit_set(row->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "planning"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_low_planning_json(
+        &row->low_planning, stream));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "schedule_node_count", row->schedule_node_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
@@ -6568,6 +6597,13 @@ iree_status_t loom_target_compile_report_format_json(
       stream, &first_field, "entries"));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_entries_json(
       report, options->mode, stream));
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "planning"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_low_planning_json(
+        &report->low_planning, stream));
+  }
   if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
