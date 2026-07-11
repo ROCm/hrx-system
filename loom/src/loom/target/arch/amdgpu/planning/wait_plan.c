@@ -1674,13 +1674,15 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
           consumer_node, visit_epoch));
     }
   }
-  for (iree_host_size_t i = 0; i < schedule->dependency_count; ++i) {
+  for (uint32_t i = 0; i < schedule->dependencies.ordering.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_visit_effect_dependency_link(
-        builder, &schedule->dependencies[i]));
+        builder, loom_low_schedule_dependency_graph_ordering_at(
+                     &schedule->dependencies, i)));
   }
-  for (iree_host_size_t i = 0; i < schedule->visibility_dependency_count; ++i) {
+  for (uint32_t i = 0; i < schedule->dependencies.visibility.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_visit_visibility_dependency_link(
-        builder, &schedule->visibility_dependencies[i]));
+        builder, loom_low_schedule_dependency_graph_visibility_at(
+                     &schedule->dependencies, i)));
   }
   return iree_ok_status();
 }

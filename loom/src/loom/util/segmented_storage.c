@@ -21,7 +21,7 @@ static iree_status_t loom_segmented_storage_allocate_pointer_page(
 
 static iree_status_t loom_segmented_storage_expand_primary_page(
     loom_segmented_storage_t* storage, iree_arena_allocator_t* arena) {
-  if (storage->primary_page != storage->inline_segments) {
+  if (storage->primary_page != NULL) {
     return iree_ok_status();
   }
   void** primary_page = NULL;
@@ -69,7 +69,14 @@ void loom_segmented_storage_initialize(iree_host_size_t segment_size,
   memset(out_storage, 0, sizeof(*out_storage));
   out_storage->segment_size = segment_size;
   out_storage->segment_alignment = segment_alignment;
-  out_storage->primary_page = out_storage->inline_segments;
+}
+
+void loom_segmented_storage_move(loom_segmented_storage_t* source,
+                                 loom_segmented_storage_t* out_storage) {
+  IREE_ASSERT_ARGUMENT(source);
+  IREE_ASSERT_ARGUMENT(out_storage);
+  *out_storage = *source;
+  *source = (loom_segmented_storage_t){0};
 }
 
 iree_status_t loom_segmented_storage_append(loom_segmented_storage_t* storage,
@@ -90,7 +97,8 @@ iree_status_t loom_segmented_storage_append(loom_segmented_storage_t* storage,
   const uint32_t segment_index = storage->segment_count;
   const uint32_t page_index =
       segment_index >> LOOM_SEGMENTED_STORAGE_PAGE_SHIFT;
-  void** page = storage->primary_page;
+  void** page = storage->primary_page != NULL ? storage->primary_page
+                                              : storage->inline_segments;
   if (segment_index >= LOOM_SEGMENTED_STORAGE_INLINE_SEGMENT_COUNT) {
     IREE_RETURN_IF_ERROR(
         loom_segmented_storage_ensure_page(storage, arena, page_index, &page));

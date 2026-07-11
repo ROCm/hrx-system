@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
 )
 
 package(
@@ -19,6 +20,7 @@ loom_cc_library(
     name = "schedule",
     srcs = [
         "context.h",
+        "dependencies.c",
         "descriptor_rows.c",
         "descriptor_rows.h",
         "diagnostics.c",
@@ -29,6 +31,7 @@ loom_cc_library(
         "run.c",
     ],
     hdrs = [
+        "dependencies.h",
         "json.h",
         "run.h",
         "types.h",
@@ -56,9 +59,20 @@ loom_cc_library(
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:math",
+        "//loom/src/loom/util:segmented_storage",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "dependencies_test",
+    srcs = ["dependencies_test.cc"],
+    deps = [
+        ":schedule",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

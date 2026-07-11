@@ -76,6 +76,75 @@ TEST_F(SegmentedStorageTest, SecondaryPointerPage) {
   }
 }
 
+TEST_F(SegmentedStorageTest, MoveInlineDirectory) {
+  loom_segmented_storage_t source;
+  loom_segmented_storage_initialize(sizeof(uint32_t), alignof(uint32_t),
+                                    &source);
+  for (uint32_t i = 0; i < 8; ++i) {
+    void* segment = nullptr;
+    IREE_ASSERT_OK(loom_segmented_storage_append(&source, &arena_, &segment));
+    *static_cast<uint32_t*>(segment) = i;
+  }
+
+  loom_segmented_storage_t storage;
+  loom_segmented_storage_move(&source, &storage);
+
+  EXPECT_EQ(source.segment_count, 0u);
+  EXPECT_EQ(source.primary_page, nullptr);
+  EXPECT_EQ(storage.primary_page, nullptr);
+  for (uint32_t i = 0; i < storage.segment_count; ++i) {
+    EXPECT_EQ(*static_cast<const uint32_t*>(
+                  loom_segmented_storage_const_segment(&storage, i)),
+              i);
+  }
+}
+
+TEST_F(SegmentedStorageTest, InlineDirectoryCopyIsSelfContained) {
+  loom_segmented_storage_t source;
+  loom_segmented_storage_initialize(sizeof(uint32_t), alignof(uint32_t),
+                                    &source);
+  for (uint32_t i = 0; i < 8; ++i) {
+    void* segment = nullptr;
+    IREE_ASSERT_OK(loom_segmented_storage_append(&source, &arena_, &segment));
+    *static_cast<uint32_t*>(segment) = i;
+  }
+
+  loom_segmented_storage_t copy = source;
+  source.inline_segments[0] = nullptr;
+
+  EXPECT_NE(loom_segmented_storage_const_segment(&copy, 0), nullptr);
+  for (uint32_t i = 0; i < copy.segment_count; ++i) {
+    EXPECT_EQ(*static_cast<const uint32_t*>(
+                  loom_segmented_storage_const_segment(&copy, i)),
+              i);
+  }
+}
+
+TEST_F(SegmentedStorageTest, MoveExpandedDirectory) {
+  loom_segmented_storage_t source;
+  loom_segmented_storage_initialize(sizeof(uint32_t), alignof(uint32_t),
+                                    &source);
+  constexpr uint32_t kSegmentCount =
+      LOOM_SEGMENTED_STORAGE_INLINE_SEGMENT_COUNT + 1;
+  for (uint32_t i = 0; i < kSegmentCount; ++i) {
+    void* segment = nullptr;
+    IREE_ASSERT_OK(loom_segmented_storage_append(&source, &arena_, &segment));
+    *static_cast<uint32_t*>(segment) = i;
+  }
+  void** source_primary_page = source.primary_page;
+
+  loom_segmented_storage_t storage;
+  loom_segmented_storage_move(&source, &storage);
+
+  EXPECT_EQ(source.segment_count, 0u);
+  EXPECT_EQ(storage.primary_page, source_primary_page);
+  for (uint32_t i = 0; i < storage.segment_count; ++i) {
+    EXPECT_EQ(*static_cast<const uint32_t*>(
+                  loom_segmented_storage_const_segment(&storage, i)),
+              i);
+  }
+}
+
 TEST_F(SegmentedStorageTest, OveralignedPayloads) {
   loom_segmented_storage_t storage;
   loom_segmented_storage_initialize(/*segment_size=*/192,

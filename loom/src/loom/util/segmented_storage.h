@@ -48,7 +48,9 @@ static_assert((1u << LOOM_SEGMENTED_STORAGE_PAGE_SHIFT) ==
 //
 // The storage object does not own or reset its arena. Every pointer becomes
 // invalid when the owner resets that arena, after which the owner must
-// reinitialize the storage object before reuse.
+// reinitialize the storage object before reuse. Initialized storage may be
+// copied for read-only use; appends must continue through one authoritative
+// instance.
 typedef struct loom_segmented_storage_t {
   // Number of initialized segment pointers.
   uint32_t segment_count;
@@ -56,7 +58,8 @@ typedef struct loom_segmented_storage_t {
   iree_host_size_t segment_size;
   // Minimum power-of-two alignment of every segment payload.
   iree_host_size_t segment_alignment;
-  // Segment pointer page covering the first page of segment indexes.
+  // Allocated segment pointer page covering the first page of segment indexes,
+  // or NULL while the inline pointer directory is active.
   void** primary_page;
   // Lazily allocated pointer-page directory, or NULL while one page suffices.
   void*** page_directory;
@@ -70,6 +73,12 @@ void loom_segmented_storage_initialize(iree_host_size_t segment_size,
                                        iree_host_size_t segment_alignment,
                                        loom_segmented_storage_t* out_storage);
 
+// Moves initialized |source| storage into uninitialized |out_storage| without
+// moving segment payloads. |source| is left uninitialized and must be
+// initialized again before reuse.
+void loom_segmented_storage_move(loom_segmented_storage_t* source,
+                                 loom_segmented_storage_t* out_storage);
+
 // Appends one uninitialized segment allocated from |arena| and returns it.
 // Existing segment payload pointers remain stable.
 iree_status_t loom_segmented_storage_append(loom_segmented_storage_t* storage,
@@ -80,11 +89,13 @@ iree_status_t loom_segmented_storage_append(loom_segmented_storage_t* storage,
 static inline void* loom_segmented_storage_segment(
     loom_segmented_storage_t* storage, uint32_t segment_index) {
   IREE_ASSERT(segment_index < storage->segment_count);
+  if (IREE_LIKELY(storage->primary_page == NULL)) {
+    return storage->inline_segments[segment_index];
+  }
   const uint32_t page_index =
       segment_index >> LOOM_SEGMENTED_STORAGE_PAGE_SHIFT;
-  void** page = IREE_LIKELY(page_index == 0)
-                    ? storage->primary_page
-                    : storage->page_directory[page_index];
+  void** page = page_index == 0 ? storage->primary_page
+                                : storage->page_directory[page_index];
   return page[segment_index & LOOM_SEGMENTED_STORAGE_PAGE_MASK];
 }
 
@@ -92,11 +103,13 @@ static inline void* loom_segmented_storage_segment(
 static inline const void* loom_segmented_storage_const_segment(
     const loom_segmented_storage_t* storage, uint32_t segment_index) {
   IREE_ASSERT(segment_index < storage->segment_count);
+  if (IREE_LIKELY(storage->primary_page == NULL)) {
+    return storage->inline_segments[segment_index];
+  }
   const uint32_t page_index =
       segment_index >> LOOM_SEGMENTED_STORAGE_PAGE_SHIFT;
-  void* const* page = IREE_LIKELY(page_index == 0)
-                          ? storage->primary_page
-                          : storage->page_directory[page_index];
+  void* const* page = page_index == 0 ? storage->primary_page
+                                      : storage->page_directory[page_index];
   return page[segment_index & LOOM_SEGMENTED_STORAGE_PAGE_MASK];
 }
 

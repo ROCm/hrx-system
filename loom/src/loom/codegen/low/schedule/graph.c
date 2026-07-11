@@ -229,7 +229,8 @@ static iree_status_t loom_low_schedule_dependency_set_insert_reserved(
         "low schedule dependency set exceeds uint32_t index capacity");
   }
   const loom_low_schedule_dependency_t* dependency =
-      &state->dependencies[dependency_index];
+      loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                     dependency_index);
   const iree_host_size_t mask = state->dependency_set_capacity - 1;
   iree_host_size_t slot =
       (iree_host_size_t)loom_low_schedule_dependency_hash(
@@ -259,7 +260,8 @@ static bool loom_low_schedule_dependency_set_contains(
       return false;
     }
     const loom_low_schedule_dependency_t* dependency =
-        &state->dependencies[dependency_index_plus_one - 1];
+        loom_low_schedule_dependency_graph_ordering_at(
+            &state->dependencies, dependency_index_plus_one - 1);
     if (loom_low_schedule_dependency_equal(
             dependency, producer_node, consumer_node, kind, operand_index)) {
       return true;
@@ -305,7 +307,7 @@ static iree_status_t loom_low_schedule_dependency_set_reserve(
   memset(new_indices, 0, new_capacity * sizeof(*new_indices));
   state->dependency_set_indices = new_indices;
   state->dependency_set_capacity = new_capacity;
-  for (iree_host_size_t i = 0; i < state->dependency_count; ++i) {
+  for (iree_host_size_t i = 0; i < state->dependencies.ordering.count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_low_schedule_dependency_set_insert_reserved(state, (uint32_t)i));
   }
@@ -316,28 +318,20 @@ static iree_status_t loom_low_schedule_append_dependency(
     loom_low_schedule_build_state_t* state, uint32_t producer_node,
     uint32_t consumer_node, loom_low_schedule_dependency_kind_t kind,
     uint32_t operand_index) {
-  if (state->dependency_count >= UINT32_MAX) {
+  if (state->dependencies.ordering.count >= UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "low schedule dependency count exceeds uint32_t index capacity");
   }
-  if (state->dependency_count >= state->dependency_capacity) {
-    iree_host_size_t new_capacity =
-        state->dependency_capacity == 0 ? 16 : state->dependency_capacity * 2;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_grow_array(state->arena, state->dependency_count,
-                              new_capacity, sizeof(*state->dependencies),
-                              &new_capacity, (void**)&state->dependencies));
-    state->dependency_capacity = new_capacity;
-  }
-  state->dependencies[state->dependency_count++] =
+  return loom_low_schedule_dependency_graph_append_ordering(
+      &state->dependencies,
       (loom_low_schedule_dependency_t){
           .producer_node = producer_node,
           .consumer_node = consumer_node,
           .kind = kind,
           .operand_index = operand_index,
-      };
-  return iree_ok_status();
+      },
+      state->arena);
 }
 
 static iree_status_t loom_low_schedule_append_visibility_dependency(
@@ -346,31 +340,20 @@ static iree_status_t loom_low_schedule_append_visibility_dependency(
   if (producer_node == consumer_node) {
     return iree_ok_status();
   }
-  if (state->visibility_dependency_count >= UINT32_MAX) {
+  if (state->dependencies.visibility.count >= UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "low schedule visibility dependency count exceeds uint32_t index "
         "capacity");
   }
-  if (state->visibility_dependency_count >=
-      state->visibility_dependency_capacity) {
-    iree_host_size_t new_capacity =
-        state->visibility_dependency_capacity == 0
-            ? 16
-            : state->visibility_dependency_capacity * 2;
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->arena, state->visibility_dependency_count, new_capacity,
-        sizeof(*state->visibility_dependencies), &new_capacity,
-        (void**)&state->visibility_dependencies));
-    state->visibility_dependency_capacity = new_capacity;
-  }
-  state->visibility_dependencies[state->visibility_dependency_count++] =
+  return loom_low_schedule_dependency_graph_append_visibility(
+      &state->dependencies,
       (loom_low_schedule_visibility_dependency_t){
           .producer_node = producer_node,
           .consumer_node = consumer_node,
           .kind = kind,
-      };
-  return iree_ok_status();
+      },
+      state->arena);
 }
 
 static iree_status_t loom_low_schedule_add_dependency(
@@ -381,22 +364,24 @@ static iree_status_t loom_low_schedule_add_dependency(
     return iree_ok_status();
   }
   if (state->dependency_set_capacity == 0 &&
-      state->dependency_count < LOOM_LOW_SCHEDULE_DEPENDENCY_SET_LINEAR_LIMIT) {
-    for (iree_host_size_t i = 0; i < state->dependency_count; ++i) {
-      if (loom_low_schedule_dependency_equal(&state->dependencies[i],
-                                             producer_node, consumer_node, kind,
-                                             operand_index)) {
+      state->dependencies.ordering.count <
+          LOOM_LOW_SCHEDULE_DEPENDENCY_SET_LINEAR_LIMIT) {
+    for (uint32_t i = 0; i < state->dependencies.ordering.count; ++i) {
+      if (loom_low_schedule_dependency_equal(
+              loom_low_schedule_dependency_graph_ordering_at(
+                  &state->dependencies, i),
+              producer_node, consumer_node, kind, operand_index)) {
         return iree_ok_status();
       }
     }
-    if (state->dependency_count + 1 ==
+    if (state->dependencies.ordering.count + 1 ==
         LOOM_LOW_SCHEDULE_DEPENDENCY_SET_LINEAR_LIMIT) {
       IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_set_reserve(
-          state, state->dependency_count + 1));
+          state, state->dependencies.ordering.count + 1));
       IREE_RETURN_IF_ERROR(loom_low_schedule_append_dependency(
           state, producer_node, consumer_node, kind, operand_index));
       IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_set_insert_reserved(
-          state, (uint32_t)(state->dependency_count - 1)));
+          state, (uint32_t)(state->dependencies.ordering.count - 1)));
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_low_schedule_append_dependency(
@@ -404,13 +389,13 @@ static iree_status_t loom_low_schedule_add_dependency(
     return iree_ok_status();
   }
 
-  if (state->dependency_count >= UINT32_MAX) {
+  if (state->dependencies.ordering.count >= UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "low schedule dependency count exceeds uint32_t index capacity");
   }
   IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_set_reserve(
-      state, state->dependency_count + 1));
+      state, state->dependencies.ordering.count + 1));
   if (loom_low_schedule_dependency_set_contains(
           state, producer_node, consumer_node, kind, operand_index)) {
     return iree_ok_status();
@@ -418,7 +403,7 @@ static iree_status_t loom_low_schedule_add_dependency(
   IREE_RETURN_IF_ERROR(loom_low_schedule_append_dependency(
       state, producer_node, consumer_node, kind, operand_index));
   IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_set_insert_reserved(
-      state, (uint32_t)(state->dependency_count - 1)));
+      state, (uint32_t)(state->dependencies.ordering.count - 1)));
   return iree_ok_status();
 }
 

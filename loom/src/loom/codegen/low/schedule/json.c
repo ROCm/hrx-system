@@ -157,7 +157,7 @@ iree_status_t loom_low_schedule_format_json(
       ",\"hazard_use_count\":%zu"
       ",\"hazard_gap_count\":%zu"
       ",\"model_summary_count\":%zu,\"resource_summary_count\":%zu",
-      table->block_count, table->node_count, table->dependency_count,
+      table->block_count, table->node_count, table->dependencies.ordering.count,
       table->candidate_decision_count, table->resource_use_count,
       table->effect_use_count, table->hazard_use_count, table->hazard_gap_count,
       table->model_summary_count, table->resource_summary_count));
@@ -291,11 +291,12 @@ iree_status_t loom_low_schedule_format_json(
 
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(&stream, ",\"dependencies\":["));
-  for (iree_host_size_t i = 0; i < table->dependency_count; ++i) {
+  for (uint32_t i = 0; i < table->dependencies.ordering.count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
     }
-    const loom_low_schedule_dependency_t* dependency = &table->dependencies[i];
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_ordering_at(&table->dependencies, i);
     IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
         &stream, "{\"from\":%" PRIu32 ",\"to\":%" PRIu32 ",\"kind\":",
         dependency->producer_node, dependency->consumer_node));
