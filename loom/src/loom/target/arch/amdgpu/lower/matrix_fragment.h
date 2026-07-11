@@ -20,6 +20,8 @@ extern "C" {
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 enum {
+  // Logical rank of a matrix-fragment source or destination view.
+  LOOM_AMDGPU_FRAGMENT_VIEW_RANK = 2,
   // Physical byte width of one matrix-fragment register.
   LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT = 4,
   // Number of packed 16-bit elements carried by one fragment register.
@@ -57,8 +59,35 @@ typedef struct loom_amdgpu_matrix_fragment_lane_ids_t {
   loom_value_id_t lane_div;
 } loom_amdgpu_matrix_fragment_lane_ids_t;
 
+// Returns true when |rows| and |columns| match |role| in |shape|.
+bool loom_amdgpu_matrix_fragment_tile_shape_matches(
+    const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_matrix_tile_shape_t shape, loom_contract_operand_role_t role,
+    loom_value_id_t rows, loom_value_id_t columns);
+
+// Returns true when |role| carries a matrix accumulator or result fragment.
+bool loom_amdgpu_matrix_fragment_role_is_result_like(
+    loom_contract_operand_role_t role);
+
 // Returns the physical elements carried by each register in |role_layout|.
 uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
+    const loom_matrix_fragment_role_layout_t* role_layout);
+
+// Returns true when one logical role element occupies a low register subword.
+bool loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
+    const loom_matrix_fragment_role_layout_t* role_layout);
+
+// Returns the semantic axis containing packed elements in |role_layout|.
+bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
+    const loom_matrix_fragment_role_layout_t* role_layout,
+    loom_matrix_fragment_axis_t* out_axis);
+
+// Returns true when one result-role register stores two semantic b16 elements.
+bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+    const loom_matrix_fragment_role_layout_t* role_layout);
+
+// Returns true when |role_layout| requires scalar 16-bit memory packets.
+bool loom_amdgpu_matrix_fragment_role_layout_uses_scalar_b16_packets(
     const loom_matrix_fragment_role_layout_t* role_layout);
 
 // Returns true when |rows| and |columns| match the logical shape of |role| in
@@ -103,79 +132,6 @@ loom_amdgpu_matrix_fragment_contract_candidate_at(
 loom_amdgpu_matrix_feature_bits_t
 loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
     const loom_module_t* module, loom_symbol_ref_t target_ref);
-
-// Returns the function-local target-compatible matrix contract candidates.
-iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_matrix_fragment_contract_candidates_t** out_candidates);
-
-// Emits or reuses the subgroup lane id for a matrix-fragment operation.
-iree_status_t loom_amdgpu_emit_matrix_fragment_lane_ids(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint16_t lane_divisor, loom_type_t vgpr_type,
-    loom_amdgpu_matrix_fragment_lane_ids_t* out_lane_ids);
-
-// Materializes the lane id modulo |lane_divisor| when not already available.
-iree_status_t loom_amdgpu_ensure_matrix_fragment_lane_mod(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint16_t lane_divisor, loom_type_t vgpr_type,
-    loom_amdgpu_matrix_fragment_lane_ids_t* inout_lane_ids);
-
-// Materializes the lane id divided by |lane_divisor| when not already
-// available.
-iree_status_t loom_amdgpu_ensure_matrix_fragment_lane_div(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint16_t lane_divisor, loom_type_t vgpr_type,
-    loom_amdgpu_matrix_fragment_lane_ids_t* inout_lane_ids);
-
-// Selects the AMDGPU matrix-fragment memory plan for a source op without
-// requiring a low-lowering context.
-iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_view_region_table_t* view_regions,
-    const loom_target_bundle_t* bundle,
-    const loom_low_descriptor_set_t* descriptor_set,
-    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
-    const loom_op_t* source_op,
-    loom_amdgpu_memory_operation_kind_t operation_kind,
-    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected);
-
-// Selects an AMDGPU matrix-fragment load plan.
-iree_status_t loom_amdgpu_select_vector_fragment_load_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected);
-
-// Selects an AMDGPU matrix-fragment store plan.
-iree_status_t loom_amdgpu_select_vector_fragment_store_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected);
-
-// Lowers a source vector.fragment.load op to lane-owned memory packets.
-iree_status_t loom_amdgpu_lower_vector_fragment_load(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_memory_plan_t* plan);
-
-// Lowers a source vector.fragment.store op to lane-owned memory packets.
-iree_status_t loom_amdgpu_lower_vector_fragment_store(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_memory_plan_t* plan);
-
-// Returns the compile-report plan key for a selected fragment memory plan.
-iree_string_view_t loom_amdgpu_fragment_memory_plan_key(
-    const loom_amdgpu_fragment_memory_plan_t* plan);
-
-// Marks the physical source values needed by a selected AMDGPU fragment memory
-// plan.
-void loom_amdgpu_mark_fragment_memory_plan_storage_demands(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_memory_plan_t* plan);
-
-// Verifies source vector.fragment.load/store legality for AMDGPU target-low
-// selection.
-iree_status_t loom_amdgpu_low_legality_verify_vector_fragment_memory(
-    const loom_target_low_legality_provider_t* provider,
-    loom_target_low_legality_context_t* context, const loom_op_t* op,
-    bool* out_handled);
 
 #ifdef __cplusplus
 }  // extern "C"
