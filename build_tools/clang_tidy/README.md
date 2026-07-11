@@ -62,6 +62,22 @@ ctest --test-dir .tmp/iree-clang-tidy-plugin --output-on-failure
 
 ## Checks
 
+### `iree-assert-output-call`
+
+`iree-assert-output-call` diagnoses calls with writable `out_*` parameters
+inside `IREE_ASSERT*` conditions. IREE assertions are compiled out of release
+builds, so any output produced by such a call would otherwise be left
+uninitialized or stale:
+
+```c
+descriptor_t descriptor = {0};
+IREE_ASSERT(resolve_descriptor(kind, &descriptor));
+use_descriptor(descriptor);
+```
+
+Evaluate the query unconditionally and use the assertion only to document the
+trusted invariant.
+
 ### `iree-status-discarded`
 
 `iree-status-discarded` diagnoses calls returning `iree_status_t` when the call

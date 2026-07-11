@@ -317,9 +317,9 @@ static bool loom_amdgpu_fragment_memory_payload_form_select(
   return false;
 }
 
-static bool loom_amdgpu_fragment_memory_role_view_axis(
+static uint8_t loom_amdgpu_fragment_memory_role_view_axis(
     const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_matrix_fragment_axis_t semantic_axis, uint8_t* out_axis) {
+    loom_matrix_fragment_axis_t semantic_axis) {
   static const uint8_t kViewAxes[][LOOM_MATRIX_FRAGMENT_AXIS_COUNT] = {
       [LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN] = {UINT8_MAX, UINT8_MAX, UINT8_MAX,
                                               UINT8_MAX},
@@ -328,26 +328,21 @@ static bool loom_amdgpu_fragment_memory_role_view_axis(
       [LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR] = {UINT8_MAX, 0, 1, UINT8_MAX},
       [LOOM_CONTRACT_OPERAND_ROLE_RESULT] = {UINT8_MAX, 0, 1, UINT8_MAX},
   };
-  *out_axis = UINT8_MAX;
   if (role_layout == NULL ||
       (iree_host_size_t)role_layout->role >= IREE_ARRAYSIZE(kViewAxes) ||
       semantic_axis >= LOOM_MATRIX_FRAGMENT_AXIS_COUNT) {
-    return false;
+    return UINT8_MAX;
   }
   const bool blocked = iree_any_bit_set(role_layout->coordinate_flags,
                                         LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK);
   if (semantic_axis == LOOM_MATRIX_FRAGMENT_AXIS_BLOCK) {
-    if (blocked) {
-      *out_axis = 0;
-      return true;
-    }
-    return false;
+    return blocked ? 0 : UINT8_MAX;
   }
-  *out_axis = kViewAxes[role_layout->role][semantic_axis];
-  if (*out_axis != UINT8_MAX && blocked) {
-    ++*out_axis;
+  uint8_t view_axis = kViewAxes[role_layout->role][semantic_axis];
+  if (view_axis != UINT8_MAX && blocked) {
+    ++view_axis;
   }
-  return *out_axis != UINT8_MAX;
+  return view_axis;
 }
 
 static bool loom_amdgpu_fragment_memory_role_packed_element_axis(
@@ -361,8 +356,9 @@ static bool loom_amdgpu_fragment_memory_role_packed_element_axis(
           role_layout, &semantic_axis)) {
     return false;
   }
-  return loom_amdgpu_fragment_memory_role_view_axis(role_layout, semantic_axis,
-                                                    out_axis);
+  *out_axis =
+      loom_amdgpu_fragment_memory_role_view_axis(role_layout, semantic_axis);
+  return *out_axis != UINT8_MAX;
 }
 
 static bool loom_amdgpu_fragment_memory_requires_native_payload_storage(
@@ -1164,9 +1160,9 @@ static bool loom_amdgpu_fragment_memory_register_byte_offset(
     const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
     const loom_matrix_fragment_axis_layout_t* axis_layout =
         &role_layout->axes[i];
-    uint8_t view_axis = UINT8_MAX;
-    IREE_ASSERT_TRUE(loom_amdgpu_fragment_memory_role_view_axis(
-        role_layout, axis, &view_axis));
+    const uint8_t view_axis =
+        loom_amdgpu_fragment_memory_role_view_axis(role_layout, axis);
+    IREE_ASSERT_NE(view_axis, UINT8_MAX);
     inner_stride /= axis_layout->element_count;
     outer_stride /= axis_layout->outer_count;
     const uint32_t element_coordinate =
@@ -1268,9 +1264,9 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
       continue;
     }
     const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
-    uint8_t view_axis = UINT8_MAX;
-    IREE_ASSERT_TRUE(loom_amdgpu_fragment_memory_role_view_axis(
-        role_layout, axis, &view_axis));
+    const uint8_t view_axis =
+        loom_amdgpu_fragment_memory_role_view_axis(role_layout, axis);
+    IREE_ASSERT_NE(view_axis, UINT8_MAX);
     IREE_ASSERT_LT(view_axis, view_rank);
     const loom_matrix_fragment_axis_layout_t* axis_layout =
         &role_layout->axes[axis];

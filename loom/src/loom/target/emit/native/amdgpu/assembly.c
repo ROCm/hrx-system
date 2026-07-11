@@ -681,7 +681,10 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
 static iree_status_t loom_amdgpu_append_dpp_control(
     const loom_native_assembly_packet_context_t* context, uint16_t value) {
   loom_amdgpu_dpp_control_decoding_t decoding = {0};
-  IREE_ASSERT(loom_amdgpu_dpp_control_decode(value, &decoding));
+  if (!loom_amdgpu_dpp_control_decode(value, &decoding)) {
+    IREE_ASSERT_UNREACHABLE("generated AMDGPU DPP control immediate");
+    IREE_BUILTIN_UNREACHABLE();
+  }
   switch (decoding.syntax) {
     case LOOM_AMDGPU_DPP_CONTROL_SYNTAX_QUAD_PERM:
       return iree_string_builder_append_format(

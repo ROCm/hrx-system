@@ -44,7 +44,7 @@ typedef struct loom_vector_to_scalar_encoded_matrix_operand_t {
 // hierarchical-scale, sparse, or static-codebook schemas return false so a
 // later legality diagnostic can report one final unsupported op.
 bool loom_vector_to_scalar_encoded_matrix_operand_is_supported(
-    loom_vector_to_scalar_state_t* state,
+    const loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
     loom_type_t raw_lane_type, loom_type_t result_type);
 
@@ -55,7 +55,7 @@ uint32_t loom_vector_to_scalar_decode_rejection_bits(
 // Returns contract rejection bits for encoded matrix operand forms the generic
 // scalar lane builder cannot decode.
 uint32_t loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
-    loom_vector_to_scalar_state_t* state,
+    const loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
     loom_type_t raw_lane_type, loom_type_t result_type);
 
