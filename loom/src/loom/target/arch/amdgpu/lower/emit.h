@@ -141,6 +141,14 @@ bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate);
 
+// Returns true when a VGPR compare against |immediate| can use either the
+// supplied RHS-inline form or a materialized VGPR immediate.
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
+    uint32_t immediate);
+
 // Returns true when a descriptor row has an implicit resource operand.
 bool loom_amdgpu_descriptor_has_implicit_resource_operand(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -333,6 +341,33 @@ iree_status_t loom_amdgpu_emit_vgpr_unary(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
     loom_type_t lane_type, loom_value_id_t* out_value);
+
+// Emits a VGPR compare against an immediate using an already-resolved inline
+// form when available and otherwise materializing the immediate in a VGPR.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_compare_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* src1_inline_descriptor,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
+    uint32_t immediate, loom_type_t vgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_mask);
+
+// Emits a VGPR compare against an immediate, resolving the supplied RHS-inline
+// descriptor form when the immediate is encodable.
+iree_status_t loom_amdgpu_emit_vgpr_compare_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
+    loom_value_id_t value, uint32_t immediate, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t* out_mask);
+
+// Emits a VGPR select using a lane-mask condition.
+iree_status_t loom_amdgpu_emit_vgpr_select(loom_low_lower_context_t* context,
+                                           const loom_op_t* source_op,
+                                           loom_value_id_t false_value,
+                                           loom_value_id_t true_value,
+                                           loom_value_id_t condition,
+                                           loom_type_t vgpr_type,
+                                           loom_value_id_t* out_value);
 
 // Emits one VGPR descriptor op with one VGPR operand and one imm32 immediate.
 iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
