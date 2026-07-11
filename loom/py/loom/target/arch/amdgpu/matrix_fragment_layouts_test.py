@@ -15,6 +15,7 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
     MatrixFragmentAxisLayout,
+    MatrixFragmentReductionGroup,
     role_coordinate,
     role_has_contiguous_lane_xor1_columns,
     validate_matrix_fragment_layout,
@@ -55,6 +56,44 @@ def test_validation_rejects_missing_and_extraneous_role_axes() -> None:
     for malformed_layout in (missing_row_layout, extraneous_block_layout):
         with pytest.raises(ValueError, match="semantic axes"):
             validate_matrix_fragment_layout(malformed_layout)
+
+
+def test_compressed_reduction_layout_separates_storage_and_logical_k() -> None:
+    dense = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f32_16x16x32_packed8"]
+    rhs_reduction = dense.rhs.axes[3]
+    assert rhs_reduction is not None
+    sparse = replace(
+        dense,
+        key="test_sparse_16x16x64_packed8",
+        tile_shape=(*dense.tile_shape[:3], 64),
+        lhs=replace(
+            dense.lhs,
+            reduction_group=MatrixFragmentReductionGroup(2, 4),
+        ),
+        rhs=replace(
+            dense.rhs,
+            payload_element_count=16,
+            axes=(*dense.rhs.axes[:3], replace(rhs_reduction, element_count=16)),
+        ),
+    )
+
+    validate_matrix_fragment_layout(sparse)
+    assert role_coordinate(sparse, sparse.lhs, 0, 0) is None
+    assert role_coordinate(sparse, sparse.rhs, 0, 0) == (None, None, 0, 0)
+
+
+def test_validation_rejects_noncompressing_reduction_group() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f32_16x16x32_packed8"]
+    malformed = replace(
+        layout,
+        lhs=replace(
+            layout.lhs,
+            reduction_group=MatrixFragmentReductionGroup(4, 4),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="reduction storage group"):
+        validate_matrix_fragment_layout(malformed)
 
 
 def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:

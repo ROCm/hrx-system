@@ -102,6 +102,14 @@ typedef struct loom_matrix_fragment_role_layout_t {
   loom_matrix_fragment_role_layout_flags_t flags;
   // Coordinate axes produced by this role layout.
   loom_matrix_fragment_coordinate_flags_t coordinate_flags;
+  // Physical-to-logical grouping for a compressed reduction axis.
+  struct {
+    // Number of elements physically stored in each reduction group.
+    uint16_t storage_element_count;
+
+    // Number of logical reduction elements represented by each group.
+    uint16_t logical_element_count;
+  } reduction_group;
   // Semantic factorization indexed by loom_matrix_fragment_axis_t.
   loom_matrix_fragment_axis_layout_t axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
 } loom_matrix_fragment_role_layout_t;
@@ -151,9 +159,10 @@ const loom_matrix_fragment_role_layout_t* loom_matrix_fragment_role_layout(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role);
 
-// Maps a lane-local payload element to a logical matrix coordinate.
-// Returns false when |layout| is absent, the role is unmodeled, or the
-// lane/payload element is outside the layout domain or names padding.
+// Maps a lane-local payload element to a logical matrix coordinate. Returns
+// false when |layout| is absent, the role is unmodeled, the lane/payload
+// element is outside the layout domain or names padding, or runtime metadata
+// is required to expand a compressed reduction coordinate.
 bool loom_matrix_fragment_coordinate(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role, uint16_t lane,

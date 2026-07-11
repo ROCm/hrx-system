@@ -136,6 +136,10 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
       payload_element_index < role_layout->coordinate_element_offset) {
     return false;
   }
+  if (role_layout->reduction_group.storage_element_count != 0 ||
+      role_layout->reduction_group.logical_element_count != 0) {
+    return false;
+  }
 
   const uint32_t relative_payload_element =
       payload_element_index - role_layout->coordinate_element_offset;

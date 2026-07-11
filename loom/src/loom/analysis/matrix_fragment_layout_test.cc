@@ -58,6 +58,7 @@ loom_matrix_fragment_role_layout_t SemanticRoleLayout(
       /*.coordinate_element_stride=*/coordinate_element_stride,
       /*.flags=*/0,
       /*.coordinate_flags=*/coordinate_flags,
+      /*.reduction_group=*/{},
       /*.axes=*/{},
   };
 }
@@ -385,6 +386,20 @@ TEST(MatrixFragmentLayoutTest, FindsRoleLayouts) {
   EXPECT_EQ(
       loom_matrix_fragment_role_layout(nullptr, LOOM_CONTRACT_OPERAND_ROLE_LHS),
       nullptr);
+}
+
+TEST(MatrixFragmentLayoutTest, RejectsMetadataDependentLogicalCoordinates) {
+  loom_matrix_fragment_layout_t layout = CdnaLayout();
+  layout.tile_shape.reduction_count = 32;
+  layout.lhs.reduction_group = {
+      /*.storage_element_count=*/2,
+      /*.logical_element_count=*/4,
+  };
+
+  loom_matrix_fragment_coordinate_t coordinate = {};
+  EXPECT_FALSE(loom_matrix_fragment_coordinate(
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, /*lane=*/0,
+      /*payload_element_index=*/0, &coordinate));
 }
 
 TEST(MatrixFragmentLayoutTest, MapsLaneModPackedReductionCoordinates) {
