@@ -268,6 +268,7 @@ def loom_generated_cc_library(
         generator,
         source = None,
         srcs = [],
+        textual_hdrs = [],
         generated_src_flags = [],
         generated_srcs = [],
         hdrs = [],
@@ -295,6 +296,7 @@ def loom_generated_cc_library(
       source: Generated C source filename. Defaults to <name>.c when no
         generated_srcs are specified.
       srcs: Checked-in C source filenames compiled into the same library.
+      textual_hdrs: Checked-in or separately generated textual includes.
       generated_src_flags: Generator flags paired with generated_srcs.
       generated_srcs: Additional generated C source filenames.
       hdrs: Checked-in public/private headers for the C library.
@@ -363,6 +365,7 @@ def loom_generated_cc_library(
         name = name,
         srcs = srcs + generated_sources,
         hdrs = hdrs + generated_headers,
+        textual_hdrs = textual_hdrs,
         deps = deps,
         testonly = testonly,
         visibility = visibility,
