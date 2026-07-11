@@ -1385,9 +1385,14 @@ static void loom_target_compile_report_merge_entry_summary(
   const bool report_had_dynamic_instruction_mix = iree_any_bit_set(
       report->detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool report_had_low_planning = iree_any_bit_set(
+      report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
   const bool entry_has_dynamic_instruction_mix = iree_any_bit_set(
       entry_report->detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool entry_has_low_planning =
+      iree_any_bit_set(entry_report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
   const bool entry_has_source_low_data =
       entry_report->source_low_selected_op_count != 0 ||
       entry_report->source_low_emitted_op_count != 0 ||
@@ -1452,6 +1457,9 @@ static void loom_target_compile_report_merge_entry_summary(
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
+    if (entry_has_low_planning) {
+      report->low_planning = entry_report->low_planning;
+    }
     if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
       report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
     }
@@ -1549,6 +1557,13 @@ static void loom_target_compile_report_merge_entry_summary(
     report->dynamic_instruction_mix =
         (loom_target_compile_report_static_instruction_mix_t){0};
   }
+  if (report_had_low_planning && entry_has_low_planning) {
+    loom_low_planning_statistics_accumulate(&report->low_planning,
+                                            &entry_report->low_planning);
+  } else {
+    report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
+    report->low_planning = (loom_low_planning_statistics_t){0};
+  }
   report->math_legalization_rewritten_op_count +=
       entry_report->math_legalization_rewritten_op_count;
   report->math_legalization_rejected_op_count +=
@@ -1641,6 +1656,7 @@ loom_target_compile_report_entry_from_report(
       .target_resources = entry_report->target_resources,
       .wait_plan = entry_report->wait_plan,
       .workload = entry_report->workload,
+      .low_planning = entry_report->low_planning,
       .pressure_row_count = entry_report->pressure_rows.count,
       .pressure_origin_row_count = entry_report->pressure_origin_rows.count,
       .schedule_band_row_count = entry_report->schedule_band_rows.count,

@@ -3296,6 +3296,20 @@ iree_status_t loom_target_compile_report_record_low_allocation(
       report, allocation, /*schedule=*/NULL, /*dynamic_context=*/NULL);
 }
 
+void loom_target_compile_report_record_low_planning(
+    loom_target_compile_report_t* report,
+    const loom_low_planning_statistics_t* statistics) {
+  if (statistics->frame_build_count == 0) return;
+  const bool first_record = !iree_any_bit_set(
+      report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
+  if (first_record) {
+    report->low_planning = *statistics;
+  } else {
+    loom_low_planning_statistics_accumulate(&report->low_planning, statistics);
+  }
+}
+
 iree_status_t loom_target_compile_report_record_low_emission_frame(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {

@@ -193,6 +193,7 @@ loom_cc_library(
     hdrs = ["compile_report.h"],
     deps = [
         ":types",
+        "//loom/src/loom/codegen/low:planning_statistics",
         "//runtime/src/iree/base",
     ],
 )
@@ -203,9 +204,21 @@ loom_cc_library(
     hdrs = ["compile_report_format.h"],
     deps = [
         ":compile_report",
+        ":compile_report_planning_format",
         ":math_policy",
         "//loom/src/loom/ir",
         "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "compile_report_planning_format",
+    srcs = ["compile_report_planning_format.c"],
+    hdrs = ["compile_report_planning_format.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:planning_statistics",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],

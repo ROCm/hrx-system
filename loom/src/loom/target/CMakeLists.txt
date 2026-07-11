@@ -215,6 +215,7 @@ loom_cc_library(
   DEPS
     ::types
     iree::base
+    loom::codegen::low::planning_statistics
   PUBLIC
 )
 
@@ -227,10 +228,25 @@ loom_cc_library(
     "compile_report_format.c"
   DEPS
     ::compile_report
+    ::compile_report_planning_format
     ::math_policy
     iree::base
     loom::ir
     loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    compile_report_planning_format
+  HDRS
+    "compile_report_planning_format.h"
+  SRCS
+    "compile_report_planning_format.c"
+  DEPS
+    iree::base
+    loom::codegen::low::planning_statistics
     loom::util::stream
   PUBLIC
 )

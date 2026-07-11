@@ -560,6 +560,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    planning_statistics
+  HDRS
+    "planning_statistics.h"
+  SRCS
+    "planning_statistics.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     frame
   HDRS
     "frame.h"
@@ -575,6 +588,7 @@ loom_cc_library(
     ::function
     ::memory_access
     ::packet
+    ::planning_statistics
     ::storage_lease
     iree::base
     iree::base::internal::arena

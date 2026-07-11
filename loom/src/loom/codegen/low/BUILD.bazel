@@ -515,6 +515,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "planning_statistics",
+    srcs = ["planning_statistics.c"],
+    hdrs = ["planning_statistics.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_library(
     name = "frame",
     srcs = ["frame.c"],
     hdrs = ["frame.h"],
@@ -528,6 +538,7 @@ loom_cc_library(
         ":function",
         ":memory_access",
         ":packet",
+        ":planning_statistics",
         ":storage_lease",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",

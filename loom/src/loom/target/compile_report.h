@@ -10,6 +10,7 @@
 #define LOOM_TARGET_COMPILE_REPORT_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/planning_statistics.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -81,6 +82,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS = 1u << 22,
   // Invocation config bindings materialized before compilation.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS = 1u << 23,
+  // Coarse target-low planning work and memory statistics were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING = 1u << 24,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -610,6 +613,8 @@ typedef struct loom_target_compile_report_entry_t {
   loom_target_compile_report_wait_plan_t wait_plan;
   // Static launch workload facts for this entry.
   loom_target_compile_report_workload_t workload;
+  // Coarse target-low planning work and memory statistics for this entry.
+  loom_low_planning_statistics_t low_planning;
   // Number of detailed register-pressure rows copied for this entry.
   iree_host_size_t pressure_row_count;
   // Number of detailed pressure-origin rows copied for this entry.
@@ -1713,6 +1718,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_wait_plan_t wait_plan;
   // Static launch workload facts shared by all entries in this report.
   loom_target_compile_report_workload_t workload;
+  // Coarse target-low planning work and memory statistics across entries.
+  loom_low_planning_statistics_t low_planning;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned register-class pressure summaries used by target resources.

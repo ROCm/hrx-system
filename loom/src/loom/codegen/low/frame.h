@@ -22,6 +22,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation_materialization.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/planning_statistics.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/error/emitter.h"
@@ -71,6 +72,9 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Structured diagnostic emitter shared by scheduling and allocation.
   iree_diagnostic_emitter_t emitter;
+  // Optional caller-owned coarse planning statistics output. The build resets
+  // and populates this record without scanning completed tables.
+  loom_low_planning_statistics_t* statistics;
 } loom_low_emission_frame_options_t;
 
 // Emission-ready production frame for one prepared target-low function. The

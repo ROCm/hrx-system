@@ -3233,6 +3233,71 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  for (uint64_t i = 1; i <= 2; ++i) {
+    loom_target_compile_report_t entry;
+    loom_target_compile_report_initialize(&entry, iree_allocator_system());
+    entry.detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
+    loom_low_planning_statistics_t* planning = &entry.low_planning;
+    planning->flags = LOOM_LOW_PLANNING_STATISTICS_FLAG_SYSTEM_ALLOCATIONS;
+    planning->frame_build_count = i;
+    planning->allocation_run_count = i + 1;
+    planning->repair.iteration_count = i + 2;
+    planning->repair.diagnostic_replay_count = i + 3;
+    planning->memory.frame_arena.used_bytes_high_water = i * 100;
+    planning->memory.frame_arena.owned_bytes_high_water = i * 200;
+    planning->memory.block_system_allocation_count = i;
+    planning->memory.block_system_allocation_bytes = i * 32768;
+    planning->memory.oversized_allocation_count = i + 4;
+    planning->memory.oversized_allocation_bytes = i * 4096;
+    IREE_ASSERT_OK(
+        loom_target_compile_report_record_entry_report(&report, &entry));
+    loom_target_compile_report_deinitialize(&entry);
+  }
+
+  EXPECT_EQ(report.low_planning.frame_build_count, 3u);
+  EXPECT_EQ(report.low_planning.allocation_run_count, 5u);
+  EXPECT_EQ(report.low_planning.repair.iteration_count, 7u);
+  EXPECT_EQ(report.low_planning.memory.frame_arena.used_bytes_high_water, 200u);
+  EXPECT_EQ(report.low_planning.memory.block_system_allocation_count, 3u);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+  const iree_string_view_t output = iree_string_builder_view(&builder);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("\"planning\":{\"frame_build_count\":3,"
+                                    "\"allocation_run_count\":5,\"repair\":{"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"frame_arena\":{\"used_bytes_high_water\":200,"
+                        "\"owned_bytes_high_water\":400}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"system_allocations\":{\"block_count\":3,"
+                        "\"block_bytes\":98304,\"oversized_count\":11,"
+                        "\"oversized_bytes\":12288}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());

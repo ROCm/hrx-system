@@ -23,6 +23,12 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame);
 
+// Records coarse planning work and memory statistics for one low function.
+// This accepts partial frames returned with user-facing diagnostics.
+void loom_target_compile_report_record_low_planning(
+    loom_target_compile_report_t* report,
+    const loom_low_planning_statistics_t* statistics);
+
 // Records allocation, pressure-row, spill-row, and allocation-failure summaries
 // for one low allocation table. This accepts partial tables produced when
 // allocation emitted user-facing diagnostics.
