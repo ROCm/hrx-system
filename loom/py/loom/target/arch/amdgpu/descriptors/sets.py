@@ -1319,7 +1319,12 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
             )
         ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu8_overlay(operand_units=4)),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu8_overlay(
+                operand_units=4,
+                mirrors_sign_select_to_high_halves=True,
+            )
+        ),
         *_with_zero_accumulator_form(
             _v_wmma_i32_16x16x16_iu8_overlay(
                 descriptor_key_suffix=".w64",
@@ -1327,9 +1332,15 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 operand_units=4,
                 accumulator_units=4,
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
+                mirrors_sign_select_to_high_halves=True,
             )
         ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu4_overlay(operand_units=2)),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu4_overlay(
+                operand_units=2,
+                mirrors_sign_select_to_high_halves=True,
+            )
+        ),
         *_with_zero_accumulator_form(
             _v_wmma_i32_16x16x16_iu4_overlay(
                 descriptor_key_suffix=".w64",
@@ -1337,6 +1348,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 operand_units=2,
                 accumulator_units=4,
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
+                mirrors_sign_select_to_high_halves=True,
             )
         ),
         _s_barrier_overlay(),
@@ -1716,23 +1728,43 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="fp8"),
         _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="fp8"),
         _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="bf8"),
-        *_with_zero_accumulator_form(_v_wmma_f32_16x16x16_f16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_f32_16x16x16_bf16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_f16_16x16x16_f16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_bf16_16x16x16_bf16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu8_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu4_overlay()),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="fp8", rhs_type="fp8")
+            _v_wmma_f32_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="fp8", rhs_type="bf8")
+            _v_wmma_f32_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="bf8", rhs_type="fp8")
+            _v_wmma_f16_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="bf8", rhs_type="bf8")
+            _v_wmma_bf16_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu8_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu4_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+            )
         ),
         *_with_zero_accumulator_form(_v_wmma_i32_16x16x32_iu4_overlay()),
         *_rdna4_swmmac_overlays(),

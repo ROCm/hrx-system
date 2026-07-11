@@ -887,6 +887,8 @@ def test_generator_emits_target_native_asm_immediate_values() -> None:
                     NativeAsmValue(
                         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
                         field_name="delay",
+                        literal="delay_bits",
+                        bit_width=16,
                         target_format_id=1,
                     ),
                 ),
@@ -899,10 +901,12 @@ def test_generator_emits_target_native_asm_immediate_values() -> None:
 
     assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT" in generated.source
     assert ".index = 0," in generated.source
+    assert ".bit_width = 16," in generated.source
     assert ".target_format_id = 1," in generated.source
+    assert '"delay_bits"' in generated.source
 
 
-def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
+def test_generator_rejects_target_native_asm_immediate_oversized_bit_width() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         immediates=(
@@ -919,7 +923,7 @@ def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
                     NativeAsmValue(
                         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
                         field_name="delay",
-                        bit_width=16,
+                        bit_width=256,
                         target_format_id=1,
                     ),
                 ),
@@ -930,7 +934,7 @@ def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' native target-format immediate 'delay' unexpectedly specifies a bit width"),
+        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' native target-format immediate 'delay' bit width must be in [0, 255]"),
     ):
         generate_descriptor_set(descriptor_set)
 

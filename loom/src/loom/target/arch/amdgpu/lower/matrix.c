@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/contract_vector.h"
 #include "loom/ir/context.h"
+#include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
@@ -356,26 +357,36 @@ static int64_t loom_amdgpu_matrix_scale_format_selector_attr(
 
 static int64_t loom_amdgpu_descriptor_matrix_attr_value(
     const loom_contract_request_t* contract_request,
-    const loom_low_immediate_t* immediate, iree_string_view_t field_name) {
-  if (iree_string_view_equal(field_name, IREE_SV("matrix_a_fmt"))) {
-    return loom_amdgpu_matrix_format_selector_attr(&contract_request->lhs);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("matrix_b_fmt"))) {
-    return loom_amdgpu_matrix_format_selector_attr(&contract_request->rhs);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("matrix_a_scale_fmt"))) {
-    return loom_amdgpu_matrix_scale_format_selector_attr(
-        &contract_request->lhs);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("matrix_b_scale_fmt"))) {
-    return loom_amdgpu_matrix_scale_format_selector_attr(
-        &contract_request->rhs);
-  }
-  if (iree_string_view_equal(field_name, IREE_SV("matrix_a_scale")) ||
-      iree_string_view_equal(field_name, IREE_SV("matrix_b_scale")) ||
-      iree_string_view_equal(field_name, IREE_SV("matrix_a_reuse")) ||
-      iree_string_view_equal(field_name, IREE_SV("matrix_b_reuse"))) {
-    return 0;
+    const loom_low_immediate_t* immediate) {
+  switch (immediate->encoding_field_id) {
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_FMT:
+      return loom_amdgpu_matrix_format_selector_attr(&contract_request->lhs);
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_B_FMT:
+      return loom_amdgpu_matrix_format_selector_attr(&contract_request->rhs);
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_SCALE_FMT:
+      return loom_amdgpu_matrix_scale_format_selector_attr(
+          &contract_request->lhs);
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_B_SCALE_FMT:
+      return loom_amdgpu_matrix_scale_format_selector_attr(
+          &contract_request->rhs);
+    case LOOM_AMDGPU_ENCODING_FIELD_NEG:
+    case LOOM_AMDGPU_ENCODING_FIELD_NEG_HI:
+      return (loom_contract_numeric_type_is_signed_integer(
+                  contract_request->lhs.numeric_type)
+                  ? 1
+                  : 0) |
+             (loom_contract_numeric_type_is_signed_integer(
+                  contract_request->rhs.numeric_type)
+                  ? 2
+                  : 0);
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_SCALE:
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_B_SCALE:
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_REUSE:
+    case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_B_REUSE:
+    case LOOM_AMDGPU_ENCODING_FIELD_CLAMP:
+      return 0;
+    default:
+      break;
   }
   if (iree_any_bit_set(immediate->flags,
                        LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
@@ -491,8 +502,8 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
         descriptor_set, immediate->field_name_string_offset);
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
         loom_low_lower_context_module(context), field_name, &attrs[i].name_id));
-    attrs[i].value = loom_attr_i64(loom_amdgpu_descriptor_matrix_attr_value(
-        contract_request, immediate, field_name));
+    attrs[i].value = loom_attr_i64(
+        loom_amdgpu_descriptor_matrix_attr_value(contract_request, immediate));
   }
 
   *out_attrs = loom_make_named_attr_slice(attrs, descriptor->immediate_count);

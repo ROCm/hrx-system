@@ -58,6 +58,8 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_ENCODING_FORMAT_VOP3PX2,
     AMDGPU_MEMORY_DESCRIPTOR_CATEGORY,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
     AMDGPU_VECTOR_DESCRIPTOR_CATEGORY,
     AmdgpuAtomicDescriptorCandidate,
     AmdgpuAtomicKind,
@@ -915,12 +917,54 @@ def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
         zero_form = zero_descriptor.asm_forms[0]
         assert zero_form.mnemonic == f"{low_mnemonic}_acc_zero"
         assert zero_form.native_assembly_mnemonic == native_mnemonic
-        assert zero_form.native_assembly_values == (
+        expected_native_values = (
             NativeAsmValue(NativeAsmValueKind.RESULT, field_name="dst"),
             NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="a"),
             NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="b"),
             NativeAsmValue(NativeAsmValueKind.LITERAL, literal="0"),
         )
+        if ".v_wmma_i32_" in descriptor_key:
+            expected_native_values = (
+                *expected_native_values,
+                NativeAsmValue(
+                    NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+                    field_name="neg_lo",
+                    literal="neg_lo",
+                    bit_width=3,
+                    target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+                ),
+                NativeAsmValue(
+                    NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+                    field_name="neg_hi",
+                    literal="neg_hi",
+                    bit_width=3,
+                    target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+                ),
+                NativeAsmValue(
+                    NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+                    field_name="clamp",
+                    literal="clamp",
+                    target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
+                ),
+            )
+        assert zero_form.native_assembly_values == expected_native_values
+
+
+def test_rdna_matrix_descriptors_pin_canonical_high_half_selectors() -> None:
+    for overlays, field_name in (
+        (_gfx11_core_overlays(), "OP_SEL_HI"),
+        (_gfx12_core_overlays(), "OPSEL_HI"),
+        (_gfx1250_core_overlays(), "OPSEL_HI"),
+    ):
+        matrix_descriptors = tuple(
+            descriptor
+            for descriptor in overlays
+            if descriptor.semantic_tag.startswith("matrix.wmma.")
+            or descriptor.semantic_tag.startswith("matrix.swmmac.")
+        )
+        assert matrix_descriptors
+        for descriptor in matrix_descriptors:
+            assert (field_name, 0x7) in descriptor.fixed_encoding_fields
 
 
 def test_wmma_zero_accumulator_asm_forms_print_native_base_mnemonic() -> None:

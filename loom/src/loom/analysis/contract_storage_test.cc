@@ -164,6 +164,21 @@ TEST(ContractStorageTest, MapsEncodedTf32ToContractNumeric) {
   EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_TF32);
 }
 
+TEST(ContractStorageTest, MapsEncodedIntegerSemanticsToCapabilities) {
+  loom_value_fact_storage_schema_t schema =
+      EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_I8, 0,
+                    LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, 4, 16);
+
+  loom_contract_operand_t operand = {};
+  ASSERT_TRUE(loom_contract_operand_from_storage_schema(
+      LOOM_CONTRACT_OPERAND_ROLE_LHS, schema, &operand));
+  EXPECT_EQ(operand.numeric_type, LOOM_CONTRACT_NUMERIC_I8);
+  EXPECT_TRUE(iree_all_bits_set(
+      operand.encoded.available_capability_flags,
+      LOOM_CONTRACT_CAPABILITY_SIGN_SELECT | LOOM_CONTRACT_CAPABILITY_REUSE |
+          LOOM_CONTRACT_CAPABILITY_OPERAND_MODIFIERS));
+}
+
 TEST(ContractStorageTest, RejectsUnknownMatrixFormat) {
   loom_value_fact_storage_schema_t schema = {};
 

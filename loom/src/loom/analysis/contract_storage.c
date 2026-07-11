@@ -214,6 +214,10 @@ loom_contract_available_capability_flags_from_storage_schema(
   if (loom_contract_numeric_type_from_encoded_format(operand.element_format,
                                                      &numeric_type)) {
     flags |= LOOM_CONTRACT_CAPABILITY_FORMAT_SELECTORS;
+    if (loom_contract_numeric_type_is_signed_integer(numeric_type) ||
+        loom_contract_numeric_type_is_unsigned_integer(numeric_type)) {
+      flags |= LOOM_CONTRACT_CAPABILITY_SIGN_SELECT;
+    }
   }
   if (loom_value_fact_encoded_operand_schema_has_scale(operand) &&
       operand.scale_operand_count != 0) {
@@ -263,7 +267,8 @@ bool loom_contract_operand_from_storage_schema(
   out_operand->encoded.required_auxiliary_operands =
       loom_contract_required_auxiliary_operands_from_storage_schema(schema);
   out_operand->encoded.available_capability_flags =
-      loom_contract_available_capability_flags_from_storage_schema(schema);
+      loom_contract_available_capability_flags_from_storage_schema(schema) |
+      loom_contract_plain_fragment_available_capability_flags(role);
   out_operand->encoded.required_capability_flags =
       loom_contract_required_capability_flags_from_storage_schema(schema);
   loom_value_fact_encoded_operand_schema_t operand = schema.encoded_operand;

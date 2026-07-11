@@ -30,6 +30,94 @@ func.def @fragment_load_in_bounds(%buffer: buffer, %base: offset) {
 
 // ====
 
+func.def @sparse_lhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x32xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x32xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_sparse_lhs_fragment_load_proves_compact_physical_extent(%buffer: buffer, %base: offset, %group_count0: index, %metadata: vector<1xi32>) {
+  %group_count = index.assume %group_count0 [range(%group_count0, 1, 4096)] : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %physical_k = index.mul %group_count, %two : index
+  %logical_k = index.mul %group_count, %four : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x[%physical_k]xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %logical_k] using {sparsity = %metadata : vector<1xi32>} : view<16x[%physical_k]xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_lhs_fragment_load_rejects_compact_physical_tail(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x31xf8E5M2, %storage>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="32", view_bound="31", required_origin_upper_bound="-1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x31xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_lhs_fragment_load_uses_physical_origin(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x64xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 32] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x64xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @dense_lhs_fragment_load_retains_logical_extent(%buffer: buffer, %base: offset) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x32xf8E5M2, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="64", view_bound="32", required_origin_upper_bound="-32", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] : view<16x32xf8E5M2, %layout> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_rhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %k = index.constant 64 : index
+  %n = index.constant 16 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.strided [1, 32] : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<32x16xf8E4M3, %storage>
+  %loaded = vector.fragment.load<rhs> %view[0, 0] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<32x16xf8E4M3, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
 func.def @fragment_store_in_bounds(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %m = index.constant 16 : index

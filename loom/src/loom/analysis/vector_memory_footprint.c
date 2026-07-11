@@ -74,6 +74,9 @@ typedef struct loom_vector_memory_footprint_access_t {
   // Vector payload type loaded, stored, or atomically updated.
   loom_type_t vector_type;
 
+  // Optional physical storage scaling for one logical footprint axis.
+  loom_vector_memory_footprint_axis_scale_t axis_scale;
+
   // Full-rank logical origin indices with INT64_MIN entries for dynamic axes.
   loom_attribute_t static_indices;
 
@@ -759,6 +762,81 @@ static iree_status_t loom_vector_memory_footprint_axis_extent_expr(
                                                vector_axis, out_expression);
 }
 
+static bool loom_vector_memory_footprint_axis_scale_applies(
+    const loom_vector_memory_footprint_access_t* access,
+    const loom_vector_memory_access_t* memory_access, uint8_t view_axis) {
+  return view_axis >= memory_access->first_vector_axis &&
+         access->axis_scale.vector_axis ==
+             view_axis - memory_access->first_vector_axis;
+}
+
+static bool loom_vector_memory_footprint_axis_extent_is_group_aligned(
+    const loom_vector_memory_footprint_state_t* state,
+    const loom_vector_memory_access_t* memory_access, uint8_t view_axis,
+    uint16_t logical_element_count) {
+  const uint8_t vector_axis = view_axis - memory_access->first_vector_axis;
+  if (!loom_type_dim_is_dynamic_at(memory_access->vector_type, vector_axis)) {
+    return loom_type_dim_static_size_at(memory_access->vector_type,
+                                        vector_axis) %
+               logical_element_count ==
+           0;
+  }
+  const loom_value_id_t extent =
+      loom_type_dim_value_id_at(memory_access->vector_type, vector_axis);
+  if (extent == LOOM_VALUE_ID_INVALID || state->fact_table == NULL) {
+    return false;
+  }
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(state->fact_table, extent);
+  return facts.known_divisor > 0 &&
+         facts.known_divisor % logical_element_count == 0;
+}
+
+static iree_status_t loom_vector_memory_footprint_scale_axis_proof(
+    loom_vector_memory_footprint_state_t* state,
+    const loom_vector_memory_footprint_access_t* access,
+    const loom_vector_memory_access_t* memory_access, uint8_t view_axis,
+    const loom_symbolic_expr_t* origin, const loom_symbolic_expr_t* extent,
+    const loom_symbolic_expr_t* bound, loom_symbolic_expr_t* out_end,
+    loom_symbolic_expr_t* out_bound,
+    loom_symbolic_expr_t* out_diagnostic_extent) {
+  const int64_t storage_element_count =
+      access->axis_scale.storage_element_count;
+  const int64_t logical_element_count =
+      access->axis_scale.logical_element_count;
+
+  int64_t exact_extent = 0;
+  int64_t rounded_extent = 0;
+  int64_t physical_extent = 0;
+  if (loom_vector_memory_footprint_expr_exact_i64(extent, &exact_extent) &&
+      exact_extent >= 0 &&
+      iree_checked_add_i64(exact_extent, logical_element_count - 1,
+                           &rounded_extent) &&
+      iree_checked_mul_i64(rounded_extent / logical_element_count,
+                           storage_element_count, &physical_extent)) {
+    loom_symbolic_expr_constant(physical_extent, out_diagnostic_extent);
+    *out_bound = *bound;
+    return loom_vector_memory_footprint_expr_add(
+        state, origin, out_diagnostic_extent, out_end);
+  }
+
+  loom_symbolic_expr_t grouped_extent = *extent;
+  if (!loom_vector_memory_footprint_axis_extent_is_group_aligned(
+          state, memory_access, view_axis, (uint16_t)logical_element_count)) {
+    IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_expr_add_i64(
+        state, extent, logical_element_count - 1, &grouped_extent));
+  }
+  loom_symbolic_expr_t scaled_origin = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_expr_mul_i64(
+      state, origin, logical_element_count, &scaled_origin));
+  IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_expr_mul_i64(
+      state, &grouped_extent, storage_element_count, out_diagnostic_extent));
+  IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_expr_add(
+      state, &scaled_origin, out_diagnostic_extent, out_end));
+  return loom_vector_memory_footprint_expr_mul_i64(
+      state, bound, logical_element_count, out_bound);
+}
+
 static iree_status_t
 loom_vector_memory_footprint_prove_axis_upper_bound_from_origin_relation(
     loom_vector_memory_footprint_state_t* state,
@@ -842,10 +920,19 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
   loom_symbolic_expr_t bound = {0};
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_dim_expr(
       state, memory_access->view_type, view_axis, &bound));
+  loom_symbolic_expr_t proof_bound = bound;
+  loom_symbolic_expr_t diagnostic_extent = extent;
+  const bool axis_is_scaled = loom_vector_memory_footprint_axis_scale_applies(
+      access, memory_access, view_axis);
+  if (axis_is_scaled && !has_tail_end) {
+    IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_scale_axis_proof(
+        state, access, memory_access, view_axis, &origin, &extent, &bound, &end,
+        &proof_bound, &diagnostic_extent));
+  }
   bool upper_proven = false;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_prove_le(
-      state, &end, &bound, &upper_proven));
-  if (!upper_proven) {
+      state, &end, &proof_bound, &upper_proven));
+  if (!upper_proven && !axis_is_scaled) {
     IREE_RETURN_IF_ERROR(
         loom_vector_memory_footprint_prove_axis_upper_bound_from_origin_relation(
             state, access, memory_access, view_axis, &extent, &upper_proven));
@@ -858,7 +945,7 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
     return loom_vector_memory_footprint_fail_upper_axis(
         state, access, view_axis,
         loom_vector_memory_footprint_vector_axis(memory_access, view_axis),
-        &extent, &bound,
+        &diagnostic_extent, &bound,
         unit_extent ? LOOM_ERR_SUBRANGE_011 : LOOM_ERR_SUBRANGE_010,
         unit_extent ? IREE_SV("vector_footprint.scalar_axis_upper_bound")
                     : IREE_SV("vector_footprint.full_vector_upper_bound"));
@@ -1461,6 +1548,7 @@ static bool loom_vector_memory_footprint_describe_op(
       .view = LOOM_VALUE_ID_INVALID,
       .mask = LOOM_VALUE_ID_INVALID,
       .offsets = LOOM_VALUE_ID_INVALID,
+      .axis_scale.vector_axis = UINT8_MAX,
   };
   const loom_fact_context_t* fact_context =
       state->fact_table ? &state->fact_table->context : NULL;
@@ -1469,6 +1557,7 @@ static bool loom_vector_memory_footprint_describe_op(
                                             &footprint)) {
     out_access->view = footprint.view;
     out_access->vector_type = footprint.vector_type;
+    out_access->axis_scale = footprint.axis_scale;
     out_access->static_indices = footprint.static_indices;
     out_access->dynamic_indices = footprint.dynamic_indices;
     out_access->mask = footprint.mask;

@@ -2385,15 +2385,27 @@ TEST(MatrixContractTest, MatcherSelectsRdnaIntegerWmmaLowDescriptors) {
   const Case cases[] = {
       {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU8, 4, 16, 8, 8, 32,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8},
+      {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_I8, 4, 16, 8, 8, 32,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8},
       {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU4, 2, 16, 8, 8, 32,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4},
+      {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_I4, 2, 16, 8, 8, 32,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4},
       {gfx12_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU8, 4, 16, 8, 8, 32,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8},
+      {gfx12_features, LOOM_AMDGPU_MATRIX_NUMERIC_I8, 4, 16, 8, 8, 32,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8},
       {gfx12_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU4, 2, 16, 8, 8, 32,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4},
+      {gfx12_features, LOOM_AMDGPU_MATRIX_NUMERIC_I4, 2, 16, 8, 8, 32,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4},
       {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU8, 4, 16, 4, 4, 64,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8_W64},
+      {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_I8, 4, 16, 4, 4, 64,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8_W64},
       {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_IU4, 2, 16, 4, 4, 64,
+       LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4_W64},
+      {gfx11_features, LOOM_AMDGPU_MATRIX_NUMERIC_I4, 2, 16, 4, 4, 64,
        LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4_W64},
   };
   for (const Case& test_case : cases) {
@@ -2418,8 +2430,14 @@ TEST(MatrixContractTest, MatcherSelectsRdnaIntegerWmmaLowDescriptors) {
         loom_amdgpu_matrix_contract_select(&request, &diagnostic);
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->family, LOOM_AMDGPU_MATRIX_FAMILY_WMMA);
-    EXPECT_EQ(descriptor->lhs_payload.numeric_type, test_case.numeric_type);
-    EXPECT_EQ(descriptor->rhs_payload.numeric_type, test_case.numeric_type);
+    const loom_amdgpu_matrix_numeric_type_t descriptor_numeric_type =
+        test_case.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_I8
+            ? LOOM_AMDGPU_MATRIX_NUMERIC_IU8
+        : test_case.numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_I4
+            ? LOOM_AMDGPU_MATRIX_NUMERIC_IU4
+            : test_case.numeric_type;
+    EXPECT_EQ(descriptor->lhs_payload.numeric_type, descriptor_numeric_type);
+    EXPECT_EQ(descriptor->rhs_payload.numeric_type, descriptor_numeric_type);
     EXPECT_EQ(descriptor->low_descriptor_ref,
               test_case.expected_low_descriptor_ref);
     EXPECT_EQ(diagnostic.rejection_bits,

@@ -749,7 +749,7 @@ kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
 
 amdgpu.target<gfx942> @target
 
-kernel.def target(@target) @fragment_sparse_memory_layout_rejected() {
+kernel.def target(@target) @fragment_sparse_density_layout_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
@@ -757,13 +757,13 @@ kernel.def target(@target) @fragment_sparse_memory_layout_rejected() {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %k = index.constant 64 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %lhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=8, sparsity_group_nonzero_elements=2> : encoding<schema>
   %lhs_layout = encoding.layout.dense : encoding<layout>
   %lhs_storage = encoding.define #physical_storage {layout = %lhs_layout : encoding<layout>, schema = %lhs_schema : encoding<schema>} : encoding<storage>
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x64xf8E5M2, %lhs_storage>
   %metadata_value = scalar.constant 0 : i32
   %metadata = vector.splat %metadata_value : vector<1xi32>
-  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.sparse_layout"}
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.sparsity_layout"}
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x64xf8E5M2, %lhs_storage> -> vector<2xi32>
   kernel.return
 }

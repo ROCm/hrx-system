@@ -103,6 +103,18 @@ enum loom_vector_memory_footprint_flag_bits_e {
 // Bitfield of loom_vector_memory_footprint_flag_bits_e values.
 typedef uint32_t loom_vector_memory_footprint_flags_t;
 
+// Physical storage scaling applied to one logical vector footprint axis.
+typedef struct loom_vector_memory_footprint_axis_scale_t {
+  // Vector axis whose logical extent is scaled, or UINT8_MAX when absent.
+  uint8_t vector_axis;
+
+  // Physical elements stored for each logical group.
+  uint16_t storage_element_count;
+
+  // Logical elements represented by each physical group.
+  uint16_t logical_element_count;
+} loom_vector_memory_footprint_axis_scale_t;
+
 // Classified vector memory footprint. This is a semantic description of legal
 // vector memory IR, not a second verifier for malformed operations.
 typedef struct loom_vector_memory_footprint_t {
@@ -142,6 +154,9 @@ typedef struct loom_vector_memory_footprint_t {
   // Vector payload type that describes the logical footprint. Fragment memory
   // ops use the logical matrix shape, not the physical fragment payload shape.
   loom_type_t vector_type;
+
+  // Optional physical storage scaling for one logical footprint axis.
+  loom_vector_memory_footprint_axis_scale_t axis_scale;
 
   // Decomposed view/vector relationship for the logical footprint.
   loom_vector_memory_access_t vector_access;

@@ -474,6 +474,14 @@ bool loom_contract_numeric_type_from_scalar(
 iree_string_view_t loom_contract_numeric_type_name(
     loom_contract_numeric_type_t numeric_type);
 
+// Returns true when |numeric_type| is a signed integer interpretation.
+bool loom_contract_numeric_type_is_signed_integer(
+    loom_contract_numeric_type_t numeric_type);
+
+// Returns true when |numeric_type| is an unsigned integer interpretation.
+bool loom_contract_numeric_type_is_unsigned_integer(
+    loom_contract_numeric_type_t numeric_type);
+
 // Returns a diagnostic detail string for generic contract rejection flags.
 iree_string_view_t loom_contract_rejection_detail(
     loom_contract_rejection_bits_t rejection_bits);

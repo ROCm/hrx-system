@@ -297,7 +297,7 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_cvt_pk_bf16_f32 v30, v2, v3
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_bf16_f32 v31, v4, v5
-  v_wmma_f32_16x16x32_bf16 v[8:15], v[40:47], v[24:31], v[8:15], matrix_a_reuse(0), matrix_b_reuse(0)
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[40:47], v[24:31], v[8:15]
   s_wait_loadcnt loadcnt(0)
   v_lshrrev_b32 v1, 16, v32
   v_cvt_pk_f32_fp8 v[2:3], v32
@@ -331,7 +331,7 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_cvt_pk_bf16_f32 v30, v2, v3
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_bf16_f32 v31, v4, v5
-  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15], matrix_a_reuse(0), matrix_b_reuse(0)
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   global_store_b32 v0, v8, s[4:5] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
