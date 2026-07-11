@@ -364,13 +364,13 @@ class ModelFlowScenario final : public CompileScenario {
 };
 
 static std::unique_ptr<CompileScenario> CreateTunerFlowScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1));
 }
 
 static std::unique_ptr<CompileScenario> CreateTunerFlowWorkspaceScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1),
                                              (iree_host_size_t)state.range(2));
@@ -416,7 +416,7 @@ BENCHMARK(BM_TunerFlowWorkspace)
     ->UseRealTime();
 
 static std::unique_ptr<CompileScenario> CreateModelFlowScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<ModelFlowScenario>((iree_host_size_t)state.range(1),
                                              (iree_host_size_t)state.range(2));

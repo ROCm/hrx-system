@@ -330,7 +330,7 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
 };
 
 static std::unique_ptr<CompileScenario> CreateSpirvTunerFlowParseScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<SpirvTunerFlowScenario>(
       (iree_host_size_t)state.range(1),
@@ -338,7 +338,7 @@ static std::unique_ptr<CompileScenario> CreateSpirvTunerFlowParseScenario(
 }
 
 static std::unique_ptr<CompileScenario> CreateSpirvTunerFlowCloneScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<SpirvTunerFlowScenario>(
       (iree_host_size_t)state.range(1),
@@ -346,7 +346,7 @@ static std::unique_ptr<CompileScenario> CreateSpirvTunerFlowCloneScenario(
 }
 
 static std::unique_ptr<CompileScenario> CreateSpirvI32ChainParseScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<SpirvI32ChainScenario>(
       (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),
@@ -354,7 +354,7 @@ static std::unique_ptr<CompileScenario> CreateSpirvI32ChainParseScenario(
 }
 
 static std::unique_ptr<CompileScenario> CreateSpirvI32ChainCloneScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<SpirvI32ChainScenario>(
       (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),
@@ -362,7 +362,7 @@ static std::unique_ptr<CompileScenario> CreateSpirvI32ChainCloneScenario(
 }
 
 static std::unique_ptr<CompileScenario> CreateSpirvI32ChainWorkspaceScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<SpirvI32ChainScenario>(
       (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),

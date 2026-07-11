@@ -143,7 +143,7 @@ class TargetCompileScenario : public CompileScenario {
 };
 
 using CompileScenarioFactory = std::unique_ptr<CompileScenario> (*)(
-    const ::benchmark::State& state, void* user_data);
+    const ::benchmark::State& state, const void* user_data);
 
 iree_allocator_t host_allocator();
 
@@ -152,10 +152,11 @@ loomc_allocator_t loom_allocator();
 iree_status_t to_iree_status(loomc_status_t status);
 
 void RunCompileBenchmark(::benchmark::State& state,
-                         CompileScenarioFactory factory, void* user_data);
+                         CompileScenarioFactory factory, const void* user_data);
 
 void RunCompileBenchmarkDirect(::benchmark::State& state,
-                               CompileScenarioFactory factory, void* user_data);
+                               CompileScenarioFactory factory,
+                               const void* user_data);
 
 iree_status_t RequireSucceededResult(const loomc_result_t* result,
                                      const char* operation);
