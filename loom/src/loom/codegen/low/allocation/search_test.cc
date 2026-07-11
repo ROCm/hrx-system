@@ -455,10 +455,12 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   loom_module_free(module);
 }
 
-TEST_F(LowAllocationSearchTest, SelectsActiveSpillVictimSet) {
+TEST_F(LowAllocationSearchTest,
+       SelectsActiveSpillVictimSetAfterPressureLeaseRelease) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t candidate_value = DefineValue(module);
   const loom_value_id_t active_value = DefineValue(module);
+  const loom_value_id_t leased_value = DefineValue(module);
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, candidate_value,
                                         /*ordinal=*/0);
@@ -527,7 +529,44 @@ TEST_F(LowAllocationSearchTest, SelectsActiveSpillVictimSet) {
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
 
+  loom_low_schedule_block_t schedule_blocks[] = {{}};
+  schedule_blocks[0].scheduled_node_start = 0;
+  schedule_blocks[0].scheduled_node_count = 3;
+  loom_low_schedule_node_t schedule_nodes[3] = {};
+  uint32_t scheduled_node_indices[] = {0, 1, 2};
+  loom_low_schedule_table_t schedule = {};
+  schedule.blocks = schedule_blocks;
+  schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
+  schedule.nodes = schedule_nodes;
+  schedule.node_count = IREE_ARRAYSIZE(schedule_nodes);
+  schedule.scheduled_node_indices = scheduled_node_indices;
+  schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
+  loom_low_storage_lease_record_t lease_records[] = {{}};
+  lease_records[0].packet_index = 0;
+  lease_records[0].release_scope =
+      LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS;
+  lease_records[0].flags = LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
+  loom_low_storage_lease_table_t lease_table = {};
+  lease_table.schedule = &schedule;
+  lease_table.records = lease_records;
+  lease_table.record_count = IREE_ARRAYSIZE(lease_records);
+  loom_low_allocation_storage_lease_t lease_instances[] = {{}};
+  lease_instances[0].lease_record_index = 0;
+  lease_instances[0].value_id = leased_value;
+  lease_instances[0].start_point = 0;
+  lease_instances[0].end_point = 12;
+  lease_instances[0].release_action_index =
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  lease_instances[0].descriptor_reg_class_id = 0;
+  lease_instances[0].location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  lease_instances[0].location_base = 0;
+  lease_instances[0].location_count = 1;
+  uint8_t lease_instance_written[] = {1};
   loom_low_allocation_storage_lease_state_t storage_leases = {};
+  storage_leases.lease_table = &lease_table;
+  storage_leases.instances = lease_instances;
+  storage_leases.instance_written = lease_instance_written;
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
