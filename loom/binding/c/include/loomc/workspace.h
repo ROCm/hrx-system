@@ -69,9 +69,32 @@ typedef struct loomc_workspace_options_t {
   /// Extension chain for future workspace options.
   const void* next;
 
-  /// Arena block size used for transient compiler/linker storage.
-  loomc_host_size_t block_size;
+  /// Usable arena payload bytes retained per fixed-size block. The workspace
+  /// adds its internal block trailer outside this capacity.
+  loomc_host_size_t usable_block_size;
 } loomc_workspace_options_t;
+
+/// Monotonic allocation statistics for a workspace block pool.
+typedef struct loomc_workspace_statistics_t {
+  /// Total bytes acquired from the host allocator for each fixed-size block.
+  loomc_host_size_t total_block_size;
+
+  /// Payload bytes available to arena allocations in each fixed-size block.
+  loomc_host_size_t usable_block_size;
+
+  /// Number of fixed-size blocks acquired from the host allocator.
+  uint64_t block_system_allocation_count;
+
+  /// Total bytes acquired from the host allocator in fixed-size blocks.
+  uint64_t block_system_allocation_bytes;
+
+  /// Number of oversized allocations acquired directly from the host
+  /// allocator.
+  uint64_t oversized_allocation_count;
+
+  /// Total bytes acquired from the host allocator for oversized allocations.
+  uint64_t oversized_allocation_bytes;
+} loomc_workspace_statistics_t;
 
 /// Creates a mutable workspace for one worker at a time.
 ///
@@ -97,6 +120,20 @@ typedef struct loomc_workspace_options_t {
 LOOMC_API_EXPORT loomc_status_t loomc_workspace_create(
     const loomc_workspace_options_t* options, loomc_allocator_t allocator,
     loomc_workspace_t** out_workspace);
+
+/// Queries a monotonic snapshot of workspace allocation statistics.
+///
+/// @param workspace Workspace to inspect. Passing `NULL` returns zeroed
+/// statistics.
+/// @param out_statistics Receives the snapshot. Passing `NULL` is allowed.
+///
+/// @thread_safety
+/// This query is safe while other threads use the workspace. Fields may be
+/// sampled at adjacent instants and are exact when the workspace is quiescent.
+/// Allocation counters are zero when statistics are disabled at build time.
+LOOMC_API_EXPORT void loomc_workspace_query_statistics(
+    const loomc_workspace_t* workspace,
+    loomc_workspace_statistics_t* out_statistics);
 
 /// Retains `workspace` for another owner.
 ///
