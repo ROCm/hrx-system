@@ -1,3 +1,40 @@
+// RUN: emit amdgpu-allocation-json @spill_retry_requires_progress strategy=source amdgpu.vgpr=16
+
+amdgpu.target<gfx1100> @gfx11_target
+
+// ERROR@+1: BACKEND/021 {function_name="spill_retry_requires_progress", failure_code="spill-materialization-iteration-limit", iteration_count="8", iteration_limit="8"}
+low.func.def target(@gfx11_target) @spill_retry_requires_progress(
+    %addr: reg<amdgpu.vgpr>,
+    %v0: reg<amdgpu.vgpr>, %v1: reg<amdgpu.vgpr>,
+    %v2: reg<amdgpu.vgpr>, %v3: reg<amdgpu.vgpr>,
+    %v4: reg<amdgpu.vgpr>, %v5: reg<amdgpu.vgpr>,
+    %v6: reg<amdgpu.vgpr>, %v7: reg<amdgpu.vgpr>,
+    %v8: reg<amdgpu.vgpr>, %v9: reg<amdgpu.vgpr>,
+    %v10: reg<amdgpu.vgpr>, %v11: reg<amdgpu.vgpr>,
+    %v12: reg<amdgpu.vgpr>, %v13: reg<amdgpu.vgpr>,
+    %v14: reg<amdgpu.vgpr>, %v15: reg<amdgpu.vgpr>,
+    %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %sum01 = v_add_u32 %v0, %v1
+  %sum02 = v_add_u32 %sum01, %v2
+  %sum03 = v_add_u32 %sum02, %v3
+  %sum04 = v_add_u32 %sum03, %v4
+  %sum05 = v_add_u32 %sum04, %v5
+  %sum06 = v_add_u32 %sum05, %v6
+  %sum07 = v_add_u32 %sum06, %v7
+  %sum08 = v_add_u32 %sum07, %v8
+  %sum09 = v_add_u32 %sum08, %v9
+  %sum10 = v_add_u32 %sum09, %v10
+  %sum11 = v_add_u32 %sum10, %v11
+  %sum12 = v_add_u32 %sum11, %v12
+  %sum13 = v_add_u32 %sum12, %v13
+  %sum14 = v_add_u32 %sum13, %v14
+  %sum = v_add_u32 %sum14, %v15
+  global_store_b32_saddr %addr, %sum, %output
+  return
+}
+
+// ====
+
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_allocation_json_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

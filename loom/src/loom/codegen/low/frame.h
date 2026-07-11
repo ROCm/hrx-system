@@ -179,6 +179,7 @@ iree_status_t loom_low_emission_frame_build(
 // emitter before consuming the frame. Allocation diagnostics may return a
 // partial frame containing the schedule and allocation failure table for
 // reporting; later emission stages have not validated that frame.
+// |frame_options->emitter| must be initialized.
 iree_status_t loom_low_emission_frame_build_spill_free(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,
