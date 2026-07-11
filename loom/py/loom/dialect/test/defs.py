@@ -643,9 +643,10 @@ test_fact_encoding_matrix_field = Op(
         "Exposes an encoded-operand storage-schema summary field as an i64 "
         "constant. Supported fields are element_format, payload_packing, "
         "scale_topology, scale_format, secondary_scale_format, affine, "
-        "rounding, codebook, sparsity, payload_registers, payload_elements, "
-        "scale_group_elements, scale_operands, zero_scale_fallback, and "
-        "static_spec."
+        "rounding, codebook, sparsity, sparsity_group_elements, "
+        "sparsity_group_nonzero_elements, payload_registers, "
+        "payload_elements, scale_group_elements, scale_operands, "
+        "zero_scale_fallback, and static_spec."
     ),
     operands=[Operand("value", ANY_ENCODING)],
     attrs=[AttrDef("field", "string", doc="Matrix schema field to inspect.")],

@@ -106,6 +106,16 @@ static iree_string_view_t loom_encoding_sparsity_param_name(void) {
   return IREE_SV("sparsity");
 }
 
+static iree_string_view_t loom_encoding_sparsity_group_elements_param_name(
+    void) {
+  return IREE_SV("sparsity_group_elements");
+}
+
+static iree_string_view_t
+loom_encoding_sparsity_group_nonzero_elements_param_name(void) {
+  return IREE_SV("sparsity_group_nonzero_elements");
+}
+
 static iree_string_view_t loom_encoding_zero_scale_fallback_param_name(void) {
   return IREE_SV("zero_scale_fallback");
 }
@@ -320,6 +330,8 @@ static bool loom_encoding_static_matrix_operand_schema(
   uint16_t payload_registers = 0;
   uint16_t scale_group_elements = 0;
   uint16_t scale_operands = 0;
+  uint16_t sparsity_group_elements = 0;
+  uint16_t sparsity_group_nonzero_elements = 0;
   bool zero_scale_fallback = false;
   uint64_t payload_packing_value = 0;
   uint64_t scale_topology_value = 0;
@@ -377,6 +389,13 @@ static bool loom_encoding_static_matrix_operand_schema(
           module, encoding, loom_encoding_sparsity_param_name(),
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
           LOOM_VALUE_FACT_SPARSITY_POLICY_NONE, &sparsity_policy_value) ||
+      !loom_encoding_static_nonnegative_u16_param_or_default(
+          module, encoding, loom_encoding_sparsity_group_elements_param_name(),
+          /*default_value=*/0, &sparsity_group_elements) ||
+      !loom_encoding_static_nonnegative_u16_param_or_default(
+          module, encoding,
+          loom_encoding_sparsity_group_nonzero_elements_param_name(),
+          /*default_value=*/0, &sparsity_group_nonzero_elements) ||
       !loom_encoding_static_bool_param_or_default(
           module, encoding, loom_encoding_zero_scale_fallback_param_name(),
           /*default_value=*/false, &zero_scale_fallback)) {
@@ -399,6 +418,11 @@ static bool loom_encoding_static_matrix_operand_schema(
       .rounding_policy = rounding_policy,
       .codebook_policy = codebook_policy,
       .sparsity_policy = sparsity_policy,
+      .sparsity_group =
+          {
+              .nonzero_element_count = sparsity_group_nonzero_elements,
+              .element_count = sparsity_group_elements,
+          },
       .payload_register_count = payload_registers,
       .payload_element_count = payload_elements,
       .scale_group_element_count = scale_group_elements,
@@ -413,6 +437,10 @@ static bool loom_encoding_static_matrix_operand_schema(
   }
 
   if (!loom_value_fact_encoded_operand_schema_scale_is_complete(
+          encoded_operand)) {
+    return true;
+  }
+  if (!loom_value_fact_encoded_operand_schema_sparsity_is_complete(
           encoded_operand)) {
     return true;
   }

@@ -673,7 +673,7 @@ func.def target(@target) @bf16_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vecto
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
+  %lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
@@ -696,7 +696,7 @@ func.def target(@target) @fp8_bf8_smfmac(%lhs_data: vector<2xi32>, %rhs_data: ve
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
-  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
+  %lhs_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>

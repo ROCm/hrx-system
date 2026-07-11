@@ -405,6 +405,19 @@ bool loom_value_fact_encoded_operand_schema_scale_is_complete(
          schema.scale_operand_count != 0;
 }
 
+bool loom_value_fact_encoded_operand_schema_sparsity_is_complete(
+    loom_value_fact_encoded_operand_schema_t schema) {
+  const bool is_structured =
+      schema.sparsity_policy == LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED;
+  const uint16_t nonzero_element_count =
+      schema.sparsity_group.nonzero_element_count;
+  const uint16_t element_count = schema.sparsity_group.element_count;
+  if (!is_structured) {
+    return nonzero_element_count == 0 && element_count == 0;
+  }
+  return nonzero_element_count > 0 && nonzero_element_count < element_count;
+}
+
 static bool loom_value_fact_storage_schema_equal(
     loom_value_fact_storage_schema_t lhs,
     loom_value_fact_storage_schema_t rhs) {

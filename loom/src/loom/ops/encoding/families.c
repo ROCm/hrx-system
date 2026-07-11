@@ -88,6 +88,10 @@ static bool loom_encoding_matrix_static_param_name_is_supported(
          loom_encoding_string_id_equal(module, name_id, IREE_SV("codebook")) ||
          loom_encoding_string_id_equal(module, name_id, IREE_SV("sparsity")) ||
          loom_encoding_string_id_equal(module, name_id,
+                                       IREE_SV("sparsity_group_elements")) ||
+         loom_encoding_string_id_equal(
+             module, name_id, IREE_SV("sparsity_group_nonzero_elements")) ||
+         loom_encoding_string_id_equal(module, name_id,
                                        IREE_SV("zero_scale_fallback"));
 }
 
@@ -496,6 +500,28 @@ static iree_status_t loom_encoding_matrix_verify_define(
       &sparsity, &param_ok));
   if (!param_ok) return iree_ok_status();
 
+  int64_t sparsity_group_elements = 0;
+  IREE_RETURN_IF_ERROR(loom_encoding_matrix_verify_optional_static_i64(
+      module, op, params, emitter, IREE_SV("sparsity_group_elements"),
+      /*default_value=*/0, &sparsity_group_elements, &param_ok));
+  if (!param_ok) return iree_ok_status();
+  if (sparsity_group_elements > UINT16_MAX) {
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op, IREE_SV("sparsity_group_elements"),
+        sparsity_group_elements, IREE_SV("non-negative and <= 65535"));
+  }
+
+  int64_t sparsity_group_nonzero_elements = 0;
+  IREE_RETURN_IF_ERROR(loom_encoding_matrix_verify_optional_static_i64(
+      module, op, params, emitter, IREE_SV("sparsity_group_nonzero_elements"),
+      /*default_value=*/0, &sparsity_group_nonzero_elements, &param_ok));
+  if (!param_ok) return iree_ok_status();
+  if (sparsity_group_nonzero_elements > UINT16_MAX) {
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op, IREE_SV("sparsity_group_nonzero_elements"),
+        sparsity_group_nonzero_elements, IREE_SV("non-negative and <= 65535"));
+  }
+
   bool zero_scale_fallback = false;
   IREE_RETURN_IF_ERROR(loom_encoding_matrix_static_bool(
       module, op, params, emitter, IREE_SV("zero_scale_fallback"),
@@ -508,6 +534,13 @@ static iree_status_t loom_encoding_matrix_verify_define(
       .scale_topology = (uint32_t)scale_topology,
       .scale_group_element_count = (uint16_t)scale_group_elements,
       .scale_operand_count = (uint16_t)scale_operands,
+      .sparsity_policy = (uint32_t)sparsity,
+      .sparsity_group =
+          {
+              .nonzero_element_count =
+                  (uint16_t)sparsity_group_nonzero_elements,
+              .element_count = (uint16_t)sparsity_group_elements,
+          },
       .flags = zero_scale_fallback
                    ? LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK
                    : 0,
@@ -518,6 +551,24 @@ static iree_status_t loom_encoding_matrix_verify_define(
         emitter, op, IREE_SV("scale"), 1,
         IREE_SV("all-zero for none or topology/group/operand count for "
                 "scaled"));
+  }
+  if (!loom_value_fact_encoded_operand_schema_sparsity_is_complete(
+          encoded_operand)) {
+    const bool is_structured = encoded_operand.sparsity_policy ==
+                               LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED;
+    const bool has_group_elements = sparsity_group_elements != 0;
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op,
+        is_structured
+            ? IREE_SV("sparsity_group_nonzero_elements")
+            : (has_group_elements ? IREE_SV("sparsity_group_elements")
+                                  : IREE_SV("sparsity_group_nonzero_elements")),
+        is_structured ? sparsity_group_nonzero_elements
+                      : (has_group_elements ? sparsity_group_elements
+                                            : sparsity_group_nonzero_elements),
+        is_structured
+            ? IREE_SV("positive and less than sparsity_group_elements")
+            : IREE_SV("zero unless sparsity is n_m_structured"));
   }
   return iree_ok_status();
 }

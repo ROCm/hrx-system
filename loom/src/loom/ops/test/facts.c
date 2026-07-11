@@ -315,6 +315,12 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
   } else if (loom_test_string_id_equal(module, field, IREE_SV("sparsity"))) {
     value = (int64_t)encoded.sparsity_policy;
   } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("sparsity_group_elements"))) {
+    value = (int64_t)encoded.sparsity_group.element_count;
+  } else if (loom_test_string_id_equal(
+                 module, field, IREE_SV("sparsity_group_nonzero_elements"))) {
+    value = (int64_t)encoded.sparsity_group.nonzero_element_count;
+  } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("payload_registers"))) {
     value = (int64_t)encoded.payload_register_count;
   } else if (loom_test_string_id_equal(module, field,

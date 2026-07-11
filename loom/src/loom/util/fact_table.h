@@ -386,8 +386,14 @@ typedef struct loom_value_fact_encoded_operand_schema_t {
   // Bitset of loom_value_fact_encoded_operand_flag_bits_t values.
   loom_value_fact_encoded_operand_flags_t flags;
 
-  // Reserved zero bits keep the descriptor padding-free for raw equality.
-  uint32_t reserved;
+  // Structured sparsity density within one logical reduction group.
+  struct {
+    // Number of physically stored nonzero elements in each group.
+    uint16_t nonzero_element_count;
+
+    // Number of logical elements represented by each group.
+    uint16_t element_count;
+  } sparsity_group;
 
   // Number of 32-bit payload registers in a prepared fragment, or zero when
   // not target-fragment-shaped.
@@ -435,6 +441,11 @@ bool loom_value_fact_encoded_operand_schema_has_scale(
 // Returns true when the scale subdescriptor is either all-zero or complete
 // enough to identify explicit scale topology and operands.
 bool loom_value_fact_encoded_operand_schema_scale_is_complete(
+    loom_value_fact_encoded_operand_schema_t schema);
+
+// Returns true when structured sparsity density is either absent or complete
+// and valid for the selected sparsity policy.
+bool loom_value_fact_encoded_operand_schema_sparsity_is_complete(
     loom_value_fact_encoded_operand_schema_t schema);
 
 // Summary of an SSA encoding value.
