@@ -19,7 +19,7 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
-#include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_plan.h"
 #include "loom/target/arch/amdgpu/lower/values.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"

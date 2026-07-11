@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_MATRIX_FRAGMENT_REPACK_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_MATRIX_FRAGMENT_REPACK_H_
 
-#include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_state.h"
 
 #ifdef __cplusplus
 extern "C" {
