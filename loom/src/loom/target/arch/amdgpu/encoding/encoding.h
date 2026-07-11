@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU target-owned low descriptor encoding format identifiers.
+// AMDGPU target-owned low descriptor encoding identifiers and immediate values.
 //
 // These values are written into loom_low_descriptor_t::encoding_format_id by
 // AMDGPU descriptor overlays. They are intentionally compact and stable within
@@ -24,6 +24,34 @@ extern "C" {
 // Sentinel passed to loom_amdgpu_encoding_pack when the descriptor supplies all
 // opcode-like fields through explicit encoding field values.
 #define LOOM_AMDGPU_ENCODING_OPCODE_NONE UINT16_MAX
+
+// Architectural DPP lane-control encodings shared by lowering and native
+// assembly formatting.
+typedef enum loom_amdgpu_dpp_control_e {
+  LOOM_AMDGPU_DPP_CTRL_QUAD_PERM_FIRST = 0x000u,
+  LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_2 = 0x04Eu,
+  LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_1 = 0x0B1u,
+  LOOM_AMDGPU_DPP_CTRL_QUAD_PERM_LAST = 0x0FFu,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHL_FIRST = 0x101u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHL_LAST = 0x10Fu,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHR_FIRST = 0x111u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHR_LAST = 0x11Fu,
+  LOOM_AMDGPU_DPP_CTRL_ROW_ROR_FIRST = 0x121u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_ROR_LAST = 0x12Fu,
+  LOOM_AMDGPU_DPP_CTRL_WAVE_SHL_1 = 0x130u,
+  LOOM_AMDGPU_DPP_CTRL_WAVE_ROL_1 = 0x134u,
+  LOOM_AMDGPU_DPP_CTRL_WAVE_SHR_1 = 0x138u,
+  LOOM_AMDGPU_DPP_CTRL_WAVE_ROR_1 = 0x13Cu,
+  LOOM_AMDGPU_DPP_CTRL_ROW_MIRROR = 0x140u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_HALF_MIRROR = 0x141u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_BCAST_15 = 0x142u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_BCAST_31 = 0x143u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHARE_FIRST = 0x150u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_SHARE_LAST = 0x15Fu,
+  LOOM_AMDGPU_DPP_CTRL_ROW_XMASK_BASE = 0x160u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_XMASK_FIRST = 0x160u,
+  LOOM_AMDGPU_DPP_CTRL_ROW_XMASK_LAST = 0x16Fu,
+} loom_amdgpu_dpp_control_t;
 
 typedef enum loom_amdgpu_encoding_format_e {
   // Descriptor does not carry an AMDGPU machine encoding format.
@@ -90,17 +118,29 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP16 = 44,
   // Vector one-source 32-bit instruction format with CDNA SDWA modifiers.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP1_SDWA = 46,
+  // Vector two-source instruction format with legacy DPP lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP = 47,
+  // Vector two-source instruction format with DPP16 lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP16 = 48,
   // Packed vector three-source 96-bit instruction format with mandatory
   // literal.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL = 52,
   // CDNA MFMA packed vector three-source instruction format.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_MFMA = 53,
+  // Packed vector three-source instruction format with DPP16 lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP16 = 54,
   // Vector three-source 64-bit instruction format with mandatory literal.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_LITERAL = 56,
+  // Vector three-source instruction format with DPP16 lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP16 = 61,
   // Vector three-source 64-bit instruction format with scalar carry result.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST = 57,
   // VOP3 scalar-destination form with a mandatory literal payload.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_LITERAL = 58,
+  // VOP3 scalar-destination form with DPP16 lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP16 = 59,
+  // Vector compare instruction format with DPP16 lane control.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP16 = 64,
   // Wave32 dual-VALU packet format without a literal payload.
   LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY = 67,
   // Wave32 dual-VALU packet format with a shared literal payload.
@@ -118,9 +158,29 @@ enum loom_amdgpu_encoding_format_flag_bits_e {
   LOOM_AMDGPU_ENCODING_FORMAT_FLAG_DATA_SHARE_ADDRESS = 1u << 2,
   // Format consumes a buffer resource address.
   LOOM_AMDGPU_ENCODING_FORMAT_FLAG_BUFFER_ADDRESS = 1u << 3,
-  // Format uses VOP source/destination VGPR-MSB selector slots.
-  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_VOP_VGPR_MSB = 1u << 4,
+  // Format consumes an architectural DPP lane-control immediate.
+  LOOM_AMDGPU_ENCODING_FORMAT_FLAG_DPP_CONTROL = 1u << 4,
 };
+
+typedef enum loom_amdgpu_dpp_control_syntax_e {
+  // Reserved or otherwise invalid DPP control value.
+  LOOM_AMDGPU_DPP_CONTROL_SYNTAX_INVALID = 0,
+  // Four packed two-bit lane selectors.
+  LOOM_AMDGPU_DPP_CONTROL_SYNTAX_QUAD_PERM = 1,
+  // Named control followed by a decimal selector.
+  LOOM_AMDGPU_DPP_CONTROL_SYNTAX_INDEXED = 2,
+  // Complete fixed native assembly spelling.
+  LOOM_AMDGPU_DPP_CONTROL_SYNTAX_FIXED = 3,
+} loom_amdgpu_dpp_control_syntax_t;
+
+typedef struct loom_amdgpu_dpp_control_decoding_t {
+  // Native assembly syntax class selected by the encoded value.
+  loom_amdgpu_dpp_control_syntax_t syntax;
+  // Quad permutation bits or indexed-control selector.
+  uint16_t selector;
+  // Indexed-control prefix or complete fixed spelling.
+  iree_string_view_t text;
+} loom_amdgpu_dpp_control_decoding_t;
 
 // Stable target-owned encoding field identifiers used in
 // loom_amdgpu_encoding_field_value_t arrays.
@@ -253,7 +313,7 @@ enum {
   LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE = 256,
 };
 
-// Returns the two-bit S_SET_VGPR_MSB mode shift for |slot|.
+// Returns the two-bit S_SET_VGPR_MSB mode shift for a non-NONE |slot|.
 uint8_t loom_amdgpu_vgpr_msb_slot_shift(loom_amdgpu_vgpr_msb_slot_t slot);
 
 typedef struct loom_amdgpu_encoding_vopdxy_fields_t {
@@ -282,6 +342,11 @@ iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format);
 loom_amdgpu_encoding_format_flags_t loom_amdgpu_encoding_format_flags(
     uint16_t encoding_format);
 
+// Decodes an architectural DPP lane-control value for verification and native
+// assembly formatting. Returns false for reserved encodings.
+bool loom_amdgpu_dpp_control_decode(
+    uint16_t value, loom_amdgpu_dpp_control_decoding_t* out_decoding);
+
 // Returns true when |table| has a generated bit-layout row for
 // |encoding_format|.
 bool loom_amdgpu_encoding_table_has_format(
@@ -302,12 +367,6 @@ bool loom_amdgpu_encoding_field_is_literal(uint16_t field_id);
 
 // Returns true when |selector| writes a sub-DWORD destination through SDWA.
 bool loom_amdgpu_sdwa_dst_selector_writes_subdword(uint32_t selector);
-
-// Returns the S_SET_VGPR_MSB selector slot controlling |encoding_field_id| in
-// |encoding_format_id|, or NONE when the field does not read the MODE VGPR-MSB
-// state.
-loom_amdgpu_vgpr_msb_slot_t loom_amdgpu_encoding_vgpr_msb_slot(
-    uint16_t encoding_format_id, uint16_t encoding_field_id);
 
 // Maps a verified inline unsigned integer into the target's scalar/vector
 // source selector domain.

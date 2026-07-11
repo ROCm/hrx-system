@@ -25,6 +25,10 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1,
   // Target-format ID for RDNA4 scale-select immediate suffixes.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2,
+  // Target-format ID for DPP lane-control immediate syntax.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3,
+  // Target-format ID for a four-bit DPP destination bank mask.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -606,6 +610,51 @@ static iree_status_t loom_amdgpu_append_packet_immediate_scale_sel(
                                            "scale_sel:%" PRId64, value);
 }
 
+static iree_status_t loom_amdgpu_append_dpp_control(
+    const loom_native_assembly_packet_context_t* context, uint16_t value) {
+  loom_amdgpu_dpp_control_decoding_t decoding = {0};
+  IREE_ASSERT(loom_amdgpu_dpp_control_decode(value, &decoding));
+  switch (decoding.syntax) {
+    case LOOM_AMDGPU_DPP_CONTROL_SYNTAX_QUAD_PERM:
+      return iree_string_builder_append_format(
+          context->builder, "quad_perm:[%u,%u,%u,%u]",
+          (unsigned)(decoding.selector & 0x3u),
+          (unsigned)((decoding.selector >> 2) & 0x3u),
+          (unsigned)((decoding.selector >> 4) & 0x3u),
+          (unsigned)((decoding.selector >> 6) & 0x3u));
+    case LOOM_AMDGPU_DPP_CONTROL_SYNTAX_INDEXED:
+      return iree_string_builder_append_format(
+          context->builder, "%.*s%u", (int)decoding.text.size,
+          decoding.text.data, (unsigned)decoding.selector);
+    case LOOM_AMDGPU_DPP_CONTROL_SYNTAX_FIXED:
+      return iree_string_builder_append_string(context->builder, decoding.text);
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid decoded AMDGPU DPP control syntax");
+      return iree_ok_status();
+  }
+}
+
+static iree_status_t loom_amdgpu_append_packet_immediate_dpp_control(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  int64_t value = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &value));
+  IREE_ASSERT(value >= 0 && value <= UINT16_MAX);
+  return loom_amdgpu_append_dpp_control(context, (uint16_t)value);
+}
+
+static iree_status_t loom_amdgpu_append_packet_immediate_dpp_bank_mask(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  int64_t value = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &value));
+  IREE_ASSERT(value >= 0 && value <= 0xF);
+  return iree_string_builder_append_format(context->builder, "bank_mask:0x%x",
+                                           (unsigned)value);
+}
+
 static iree_status_t loom_amdgpu_find_packet_immediate(
     const loom_native_assembly_packet_context_t* context,
     iree_string_view_t field_name, const loom_low_immediate_t** out_immediate) {
@@ -1025,6 +1074,12 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL:
           return loom_amdgpu_append_packet_immediate_scale_sel(context,
                                                                value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL:
+          return loom_amdgpu_append_packet_immediate_dpp_control(context,
+                                                                 value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK:
+          return loom_amdgpu_append_packet_immediate_dpp_bank_mask(
+              context, value->index);
         default:
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,

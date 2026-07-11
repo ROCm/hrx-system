@@ -157,11 +157,17 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             operand.addressable_unit_count,
             f"descriptor '{descriptor.key}' operand '{operand.field_name}' addressable unit count",
         )
+        validate_u16(
+            operand.address_state_slot,
+            f"descriptor '{descriptor.key}' operand '{operand.field_name}' address state slot",
+        )
         is_explicit_packet_value = operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags
         has_addressable_assignment = is_result or is_explicit_packet_value
         if operand.address_map_kind is OperandAddressMapKind.DIRECT:
             if operand.addressable_unit_count != 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an addressable unit count")
+            if operand.address_state_slot != 0:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an address state slot")
         elif operand.address_map_kind in (OperandAddressMapKind.LOW_SUBSET, OperandAddressMapKind.TARGET_STATE):
             if not has_addressable_assignment:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an explicit value operand")
@@ -171,6 +177,11 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map covers fewer units than the operand consumes")
             if not any(reg_alt.reg_class is not None for reg_alt in operand.reg_alts):
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map requires a concrete register-class alternative")
+            if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+                if operand.address_state_slot != 0:
+                    raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' low-subset address map must not set an address state slot")
+            elif operand.address_state_slot == 0:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' target-state address map must set an address state slot")
         else:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has unknown address map kind '{operand.address_map_kind}'")
         state_flags = {

@@ -81,6 +81,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _record_amdgpu_atomic_candidate,
     _validate_address_immediate_units,
     _validate_descriptor_encoding_formats,
+    _validate_dpp_control_fields,
     _with_execution_mask_state_read,
     _with_gfx125x_vgpr_msb_address_state,
     _with_gfx125x_vgpr_msb_address_states,
@@ -101,6 +102,14 @@ from loom.target.arch.amdgpu.descriptors.memory import (
     _s_load_dwordx2_overlay,
     _s_load_dwordx4_overlay,
 )
+from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_ENCODING_FORMAT_IDS,
+    AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
+    AMDGPU_GFX125X_VOP_VGPR_MSB_FORMAT_NAMES,
+    AmdgpuVgprMsbSlot,
+    amdgpu_dpp_control_is_valid,
+    amdgpu_gfx125x_vgpr_msb_slot,
+)
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding, AmdgpuIsaSpec
 from loom.target.low_descriptors import (
     Constraint,
@@ -111,7 +120,9 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    EncodingFieldValue,
     Immediate,
+    ImmediateFlag,
     ImmediateKind,
     IssueUse,
     LatencyKind,
@@ -176,6 +187,24 @@ def _descriptor(key: str, semantic_tag: str) -> Descriptor:
         mnemonic=None,
         semantic_tag=semantic_tag,
         operands=(),
+        schedule_class="amdgpu.test",
+    )
+
+
+def _dpp_descriptor(
+    *,
+    immediates: tuple[Immediate, ...] = (),
+    encoding_field_values: tuple[EncodingFieldValue, ...] = (),
+    encoding_format_id: int = AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
+) -> Descriptor:
+    return Descriptor(
+        key="amdgpu.test.dpp",
+        mnemonic="v_test_dpp",
+        semantic_tag="test.dpp",
+        operands=(),
+        immediates=immediates,
+        encoding_field_values=encoding_field_values,
+        encoding_format_id=encoding_format_id,
         schedule_class="amdgpu.test",
     )
 
@@ -1031,10 +1060,16 @@ def test_gfx125x_vop_operands_use_mode_address_state() -> None:
     descriptor = _with_gfx125x_vgpr_msb_address_state(descriptor)
     operands = {operand.field_name: operand for operand in descriptor.operands}
 
-    for field_name in ("dst", "lhs", "rhs"):
+    expected_slots = {
+        "dst": AmdgpuVgprMsbSlot.DST,
+        "lhs": AmdgpuVgprMsbSlot.SRC0,
+        "rhs": AmdgpuVgprMsbSlot.SRC1,
+    }
+    for field_name, expected_slot in expected_slots.items():
         operand = operands[field_name]
         assert operand.address_map_kind is OperandAddressMapKind.TARGET_STATE
         assert operand.addressable_unit_count == 256
+        assert operand.address_state_slot == int(expected_slot)
 
     mode_operand = operands["mode_in"]
     assert mode_operand.role is OperandRole.IMPLICIT
@@ -1068,6 +1103,56 @@ def test_gfx125x_uncontrolled_vgpr_operands_use_low_subset() -> None:
         operand = operands[field_name]
         assert operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET
         assert operand.addressable_unit_count == 256
+        assert operand.address_state_slot == 0
+
+
+def test_gfx125x_vop_format_family_uses_mode_address_state() -> None:
+    for format_name in AMDGPU_GFX125X_VOP_VGPR_MSB_FORMAT_NAMES:
+        assert (
+            amdgpu_gfx125x_vgpr_msb_slot(
+                "amdgpu.test.vop",
+                AMDGPU_ENCODING_FORMAT_IDS[format_name],
+                "VDST",
+            )
+            is AmdgpuVgprMsbSlot.DST
+        )
+
+
+def test_gfx125x_fmamk_routes_second_source_through_src2_mode_slot() -> None:
+    descriptor = Descriptor(
+        key="amdgpu.v_fmamk_f32",
+        mnemonic="v_fmamk_f32",
+        semantic_tag="float.fmamk.f32",
+        operands=(
+            Operand(
+                "dst",
+                OperandRole.RESULT,
+                (RegClassAlt("amdgpu.vgpr"),),
+                encoding_field_id=amdgpu_encoding_field_id("VDST"),
+            ),
+            Operand(
+                "a",
+                OperandRole.OPERAND,
+                (RegClassAlt("amdgpu.vgpr"),),
+                encoding_field_id=amdgpu_encoding_field_id("SRC0"),
+            ),
+            Operand(
+                "c",
+                OperandRole.OPERAND,
+                (RegClassAlt("amdgpu.vgpr"),),
+                encoding_field_id=amdgpu_encoding_field_id("VSRC1"),
+            ),
+        ),
+        schedule_class=_SCHEDULE_VALU,
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_IDS["VOP2_INST_LITERAL"],
+    )
+
+    descriptor = _with_gfx125x_vgpr_msb_address_state(descriptor)
+    operands = {operand.field_name: operand for operand in descriptor.operands}
+
+    assert operands["dst"].address_state_slot == int(AmdgpuVgprMsbSlot.DST)
+    assert operands["a"].address_state_slot == int(AmdgpuVgprMsbSlot.SRC0)
+    assert operands["c"].address_state_slot == int(AmdgpuVgprMsbSlot.SRC2)
 
 
 def test_gfx125x_target_state_validation_requires_mode_control_descriptor() -> None:
@@ -1136,6 +1221,7 @@ def test_gfx125x_target_state_validation_requires_window_size() -> None:
                     encoding_field_id=amdgpu_encoding_field_id("VDST"),
                     address_map_kind=OperandAddressMapKind.TARGET_STATE,
                     addressable_unit_count=128,
+                    address_state_slot=int(AmdgpuVgprMsbSlot.DST),
                 ),
             ),
             schedule_class=_SCHEDULE_VALU,
@@ -2790,6 +2876,82 @@ def test_scalar_memory_loads_early_clobber_results() -> None:
         assert tuple(
             constraint.lhs_operand_index for constraint in descriptor.constraints
         ) == (0,)
+
+
+def test_dpp_control_domain_covers_only_architectural_encodings() -> None:
+    expected_values = {
+        *range(0x100),
+        *range(0x101, 0x110),
+        *range(0x111, 0x120),
+        *range(0x121, 0x130),
+        0x130,
+        0x134,
+        0x138,
+        0x13C,
+        *range(0x140, 0x144),
+        *range(0x150, 0x160),
+        *range(0x160, 0x170),
+    }
+    for value in range(-1, 0x201):
+        assert amdgpu_dpp_control_is_valid(value) == (value in expected_values)
+
+
+def test_dpp_control_validation_accepts_direct_immediate() -> None:
+    dpp_control_field_id = amdgpu_encoding_field_id("DPP_CTRL")
+    descriptor = _dpp_descriptor(
+        immediates=(
+            Immediate(
+                "dpp_ctrl",
+                ImmediateKind.UNSIGNED,
+                bit_width=9,
+                encoding_field_id=dpp_control_field_id,
+                unsigned_max=0x1FF,
+            ),
+        )
+    )
+
+    _validate_dpp_control_fields(_descriptor_set(descriptor))
+
+
+def test_dpp_control_validation_rejects_missing_source() -> None:
+    _expect_value_error_contains(
+        "exactly one DPP_CTRL source; found 0",
+        lambda: _validate_dpp_control_fields(_descriptor_set(_dpp_descriptor())),
+    )
+
+
+def test_dpp_control_validation_rejects_reserved_fixed_value() -> None:
+    dpp_control_field_id = amdgpu_encoding_field_id("DPP_CTRL")
+    descriptor = _dpp_descriptor(
+        encoding_field_values=(EncodingFieldValue(dpp_control_field_id, 0x100),)
+    )
+
+    _expect_value_error_contains(
+        "reserved value 256",
+        lambda: _validate_dpp_control_fields(_descriptor_set(descriptor)),
+    )
+
+
+def test_dpp_control_validation_rejects_reserved_default_value() -> None:
+    dpp_control_field_id = amdgpu_encoding_field_id("DPP_CTRL")
+    descriptor = _dpp_descriptor(
+        immediates=(
+            Immediate(
+                "dpp_ctrl",
+                ImmediateKind.UNSIGNED,
+                flags=(ImmediateFlag.DEFAULT_VALUE,),
+                bit_width=9,
+                encoding_field_id=dpp_control_field_id,
+                unsigned_max=0x1FF,
+                default_value=0x110,
+            ),
+        )
+    )
+
+    _expect_value_error_contains(
+        "reserved default value 272",
+        lambda: _validate_dpp_control_fields(_descriptor_set(descriptor)),
+    )
 
 
 def test_address_immediate_validation_rejects_missing_unit_metadata() -> None:

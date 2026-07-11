@@ -426,6 +426,7 @@ def emit_source_for_views(
                 f".unit_count = {operand.unit_count},",
                 f".address_map_kind = {operand.address_map_kind.c_name},",
                 f".addressable_unit_count = {operand.addressable_unit_count},",
+                f".address_state_slot = {operand.address_state_slot},",
                 f".encoding_field_id = {operand.encoding_field_id},",
                 f".data_format_id = {operand.data_format_id},",
                 f".register_part_id = {_register_part_id_expr(compiled, operand.register_part)},",

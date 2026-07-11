@@ -446,6 +446,9 @@ typedef struct loom_low_operand_t {
   // Directly addressable low units for bounded address maps, or zero when the
   // map directly addresses the selected register class.
   uint16_t addressable_unit_count;
+  // Target-owned state slot selecting the active address window, or zero when
+  // the address map does not depend on target state.
+  uint16_t address_state_slot;
   // Target-owned data-format identifier.
   uint16_t data_format_id;
   // Register part read or written by this operand, or NONE for full register.

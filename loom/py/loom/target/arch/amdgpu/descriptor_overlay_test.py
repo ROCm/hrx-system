@@ -148,6 +148,18 @@ _BUFFER_ATOMIC_XML = SAMPLE_XML.replace(
     </Instructions>""",
 )
 
+_FIELDLESS_EXPLICIT_SCC_XML = SAMPLE_XML.replace(
+    '<Operand Input="false" Output="true" IsImplicit="true" '
+    'IsBinaryMicrocodeRequired="true" Order="4">\n'
+    "                <DataFormatName>FMT_NUM_B1</DataFormatName>\n"
+    "                <OperandType>OPR_SSRC_SPECIAL_SCC</OperandType>",
+    '<Operand Input="false" Output="true" IsImplicit="false" '
+    'IsBinaryMicrocodeRequired="true" Order="4">\n'
+    "                <DataFormatName>FMT_NUM_B1</DataFormatName>\n"
+    "                <OperandType>OPR_SSRC_SPECIAL_SCC</OperandType>",
+    1,
+)
+
 
 def _result(field_name: str, reg_alts: tuple[RegClassAlt, ...]) -> Operand:
     return Operand(field_name, OperandRole.RESULT, reg_alts)
@@ -915,7 +927,39 @@ def test_materialize_rejects_uncovered_implicit_xml_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="does not cover implicit XML operand\\(s\\): "
+        match="does not cover architectural XML operand\\(s\\): "
+        "order=4,type=OPR_SSRC_SPECIAL_SCC",
+    ):
+        materialize_amdgpu_descriptor_overlay(spec, overlay)
+
+
+def test_materialize_covers_fieldless_explicit_xml_operand() -> None:
+    spec = parse_amdgpu_isa_xml_text(
+        _FIELDLESS_EXPLICIT_SCC_XML, source_name="sample.xml"
+    )
+    overlay = _s_add_u32_overlay(
+        "amdgpu.s_add_u32.fieldless_scc",
+        implicit_operands=(_IGNORE_SCC_OUTPUT,),
+    )
+
+    descriptor = materialize_amdgpu_descriptor_overlay(spec, overlay)
+
+    assert tuple(operand.field_name for operand in descriptor.operands) == (
+        "dst",
+        "lhs",
+        "rhs",
+    )
+
+
+def test_materialize_rejects_uncovered_fieldless_explicit_xml_operand() -> None:
+    spec = parse_amdgpu_isa_xml_text(
+        _FIELDLESS_EXPLICIT_SCC_XML, source_name="sample.xml"
+    )
+    overlay = _s_add_u32_overlay("amdgpu.incomplete_fieldless_scc")
+
+    with pytest.raises(
+        AmdgpuDescriptorOverlayError,
+        match="does not cover architectural XML operand\\(s\\): "
         "order=4,type=OPR_SSRC_SPECIAL_SCC",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
@@ -935,7 +979,7 @@ def test_materialize_rejects_implicit_decision_without_xml_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"has implicit operand decision\(s\).*has no implicit operands",
+        match=r"has implicit operand decision\(s\).*has no architectural operands",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -954,7 +998,7 @@ def test_materialize_rejects_missing_implicit_xml_operand_reference() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="references missing implicit XML operand 'type=OPR_MISSING'",
+        match="references missing architectural XML operand 'type=OPR_MISSING'",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -974,7 +1018,7 @@ def test_materialize_rejects_implicit_ignore_without_reason() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"ignores implicit XML operand .* without a named reason",
+        match=r"ignores architectural XML operand .* without a named reason",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -988,7 +1032,7 @@ def test_materialize_rejects_repeated_implicit_xml_operand_decision() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="repeats implicit XML operand order=4,type=OPR_SSRC_SPECIAL_SCC",
+        match="repeats architectural XML operand order=4,type=OPR_SSRC_SPECIAL_SCC",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -1071,7 +1115,7 @@ def test_materialize_rejects_implicit_xml_output_as_packet_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"maps output-only implicit XML operand .* to packet operand",
+        match=r"maps output-only architectural XML operand .* to packet operand",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 

@@ -1399,9 +1399,9 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_dpp_row_tree(
       }
       IREE_ASSERT(plan->dpp_descriptor.descriptor != NULL);
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_dpp_register(
-          context, source_op, &plan->dpp_descriptor, accumulator, dpp_ctrl,
-          lane_type, &peer));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_direct_crosslane_register(
+          context, source_op, &plan->dpp_descriptor, LOOM_AMDGPU_CROSSLANE_DPP,
+          accumulator, dpp_ctrl, lane_type, &peer));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
           lane_type, &accumulator));

@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 
+#include <iomanip>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -158,6 +160,25 @@ iree_status_t PackVMovB32Sdwa(const loom_amdgpu_encoding_table_t* table,
                                    IREE_ARRAYSIZE(field_values), out_packet);
 }
 
+TEST(AmdgpuEncodingTest, DecodesExactlyArchitecturalDppControls) {
+  bool expected[0x200] = {};
+  for (uint16_t value = 0x000; value <= 0x0FF; ++value) expected[value] = true;
+  for (uint16_t value = 0x101; value <= 0x10F; ++value) expected[value] = true;
+  for (uint16_t value = 0x111; value <= 0x11F; ++value) expected[value] = true;
+  for (uint16_t value = 0x121; value <= 0x12F; ++value) expected[value] = true;
+  for (uint16_t value = 0x130; value <= 0x13C; value += 4) {
+    expected[value] = true;
+  }
+  for (uint16_t value = 0x140; value <= 0x143; ++value) expected[value] = true;
+  for (uint16_t value = 0x150; value <= 0x16F; ++value) expected[value] = true;
+
+  for (uint16_t value = 0; value < IREE_ARRAYSIZE(expected); ++value) {
+    loom_amdgpu_dpp_control_decoding_t decoding = {};
+    EXPECT_EQ(loom_amdgpu_dpp_control_decode(value, &decoding), expected[value])
+        << "DPP control 0x" << std::hex << value;
+  }
+}
+
 TEST(AmdgpuEncodingTest, VMovB32UsesInlineSourceForSmallU32) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, "amdgpu.rdna3.core");
@@ -302,64 +323,6 @@ TEST(AmdgpuEncodingTest, ScaleSourcesUseUnifiedSourceSelectors) {
       LOOM_AMDGPU_ENCODING_FIELD_SCALE_SRC0));
   EXPECT_TRUE(loom_amdgpu_encoding_field_uses_unified_source(
       LOOM_AMDGPU_ENCODING_FIELD_SCALE_SRC1));
-}
-
-TEST(AmdgpuEncodingTest, MapsVopFieldsToVgprMsbSlots) {
-  EXPECT_EQ(loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VOP3,
-                                               LOOM_AMDGPU_ENCODING_FIELD_SRC0),
-            LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VOP3,
-                                         LOOM_AMDGPU_ENCODING_FIELD_VSRC1),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_SRC1);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VOP3,
-                                         LOOM_AMDGPU_ENCODING_FIELD_VSRC2),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_SRC2);
-  EXPECT_EQ(loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VOP1,
-                                               LOOM_AMDGPU_ENCODING_FIELD_VDST),
-            LOOM_AMDGPU_VGPR_MSB_SLOT_DST);
-}
-
-TEST(AmdgpuEncodingTest, MapsMemoryFieldsToVgprMsbSlots) {
-  EXPECT_EQ(loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VDS,
-                                               LOOM_AMDGPU_ENCODING_FIELD_ADDR),
-            LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VDS,
-                                         LOOM_AMDGPU_ENCODING_FIELD_DATA0),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_SRC1);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VDS,
-                                         LOOM_AMDGPU_ENCODING_FIELD_DATA1),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_SRC2);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VGLOBAL,
-                                         LOOM_AMDGPU_ENCODING_FIELD_VDST),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_DST);
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VBUFFER,
-                                         LOOM_AMDGPU_ENCODING_FIELD_VDATA),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_DST);
-}
-
-TEST(AmdgpuEncodingTest, LeavesUncontrolledFieldsWithoutVgprMsbSlot) {
-  EXPECT_EQ(
-      loom_amdgpu_encoding_vgpr_msb_slot(LOOM_AMDGPU_ENCODING_FORMAT_VOP3PX2,
-                                         LOOM_AMDGPU_ENCODING_FIELD_SCALE_SRC0),
-      LOOM_AMDGPU_VGPR_MSB_SLOT_NONE);
-}
-
-TEST(AmdgpuEncodingTest, MapsVgprMsbSlotsToModeShifts) {
-  EXPECT_EQ(loom_amdgpu_vgpr_msb_slot_shift(LOOM_AMDGPU_VGPR_MSB_SLOT_NONE),
-            0u);
-  EXPECT_EQ(loom_amdgpu_vgpr_msb_slot_shift(LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0),
-            0u);
-  EXPECT_EQ(loom_amdgpu_vgpr_msb_slot_shift(LOOM_AMDGPU_VGPR_MSB_SLOT_SRC1),
-            2u);
-  EXPECT_EQ(loom_amdgpu_vgpr_msb_slot_shift(LOOM_AMDGPU_VGPR_MSB_SLOT_SRC2),
-            4u);
-  EXPECT_EQ(loom_amdgpu_vgpr_msb_slot_shift(LOOM_AMDGPU_VGPR_MSB_SLOT_DST), 6u);
 }
 
 TEST(AmdgpuEncodingTest, PacksRdna3VMovB32Dpp16LaneControl) {

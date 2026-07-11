@@ -57,7 +57,7 @@ low.func.def target(@gfx11_target) @gfx11_control_messages() asm<amdgpu.rdna3.co
   s_mov_b32 s2, 1024
   s_and_b32 s0, s0, s1
   s_or_b32 s0, s0, s2
-  s_mov_b32_m0 m0, s0
+  s_mov_b32 m0, s0
   s_sendmsg message(1)
   s_endpgm
 
@@ -1429,7 +1429,7 @@ low.func.def target(@gfx11_target) @gfx11_v_mov_b32_dpp16(%resource: reg<amdgpu.
 }
 
 // ----
-  v_mov_b32_dpp16 v0, v0, dpp_ctrl(177)
+  v_mov_b32_dpp v0, v0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
   s_endpgm
 
@@ -2712,9 +2712,9 @@ low.func.def target(@gfx942_target) @gfx942_m0_state_reuse(%value0: reg<amdgpu.v
 }
 
 // ----
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   ds_write_addtid_b32 v0 offset:0
-  s_mov_b32_m0_imm m0, 1024
+  s_mov_b32 m0, 1024
   ds_write_addtid_b32 v1 offset:0
   s_endpgm
 

@@ -12,9 +12,14 @@
 from __future__ import annotations
 
 from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_NONE,
     AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
+    AmdgpuVgprMsbSlot,
+    amdgpu_dpp_control_is_valid,
+    amdgpu_encoding_field_id,
     amdgpu_encoding_format_id,
+    amdgpu_gfx125x_vgpr_msb_slot,
     amdgpu_supplemental_encoding_format_names,
 )
 
@@ -104,6 +109,86 @@ def _validate_descriptor_encoding_formats(
             f"'{descriptor.key}' uses unavailable encoding format "
             f"'{format_name}'"
         )
+
+
+def _validate_dpp_control_fields(descriptor_set: DescriptorSet) -> None:
+    dpp_control_field_id = amdgpu_encoding_field_id("DPP_CTRL")
+    for descriptor in descriptor_set.descriptors:
+        dpp_operands = tuple(
+            operand
+            for operand in descriptor.operands
+            if operand.encoding_field_id == dpp_control_field_id
+        )
+        dpp_immediates = tuple(
+            immediate
+            for immediate in descriptor.immediates
+            if immediate.encoding_field_id == dpp_control_field_id
+            or any(
+                encoding_slice.encoding_field_id == dpp_control_field_id
+                for encoding_slice in immediate.encoding_slices
+            )
+        )
+        dpp_fixed_values = tuple(
+            field_value.value
+            for field_value in descriptor.encoding_field_values
+            if field_value.encoding_field_id == dpp_control_field_id
+        )
+        source_count = len(dpp_operands) + len(dpp_immediates) + len(dpp_fixed_values)
+        is_dpp_control_format = (
+            descriptor.encoding_format_id in AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS
+        )
+        if not is_dpp_control_format:
+            if source_count != 0:
+                raise ValueError(
+                    f"AMDGPU descriptor '{descriptor.key}' maps DPP_CTRL through "
+                    "a non-DPP encoding format"
+                )
+            continue
+        if source_count != 1:
+            raise ValueError(
+                f"AMDGPU DPP descriptor '{descriptor.key}' must define exactly "
+                f"one DPP_CTRL source; found {source_count}"
+            )
+        if dpp_operands:
+            raise ValueError(
+                f"AMDGPU DPP descriptor '{descriptor.key}' maps DPP_CTRL from "
+                "a register operand instead of an immediate or fixed value"
+            )
+        if dpp_fixed_values:
+            if not amdgpu_dpp_control_is_valid(dpp_fixed_values[0]):
+                raise ValueError(
+                    f"AMDGPU DPP descriptor '{descriptor.key}' fixes DPP_CTRL "
+                    f"to reserved value {dpp_fixed_values[0]}"
+                )
+            continue
+        immediate = dpp_immediates[0]
+        if (
+            immediate.encoding_field_id != dpp_control_field_id
+            or immediate.encoding_slices
+        ):
+            raise ValueError(
+                f"AMDGPU DPP descriptor '{descriptor.key}' immediate "
+                f"'{immediate.field_name}' must map DPP_CTRL directly"
+            )
+        if (
+            immediate.kind is not ImmediateKind.UNSIGNED
+            or immediate.bit_width != 9
+            or immediate.unsigned_max != 0x1FF
+        ):
+            raise ValueError(
+                f"AMDGPU DPP descriptor '{descriptor.key}' immediate "
+                f"'{immediate.field_name}' must expose the unsigned 9-bit "
+                "DPP_CTRL encoding domain"
+            )
+        if (
+            ImmediateFlag.DEFAULT_VALUE in immediate.flags
+            and not amdgpu_dpp_control_is_valid(immediate.default_value)
+        ):
+            raise ValueError(
+                f"AMDGPU DPP descriptor '{descriptor.key}' immediate "
+                f"'{immediate.field_name}' has reserved default value "
+                f"{immediate.default_value}"
+            )
 
 
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
@@ -196,41 +281,6 @@ def _with_overlay_descriptors(
 
 _GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT = 256
 
-_GFX125X_VOP_MODE_FIELDS = frozenset(
-    ("VDST", "SRC0", "VSRC0", "SRC1", "VSRC1", "SRC2", "VSRC2")
-)
-_GFX125X_DS_MODE_FIELDS = frozenset(("ADDR", "DATA0", "DATA1", "VDST"))
-_GFX125X_FLAT_MODE_FIELDS = frozenset(
-    ("ADDR", "VADDR", "DATA", "VDATA", "VSRC", "VDST")
-)
-_GFX125X_BUFFER_MODE_FIELDS = frozenset(("VADDR", "VDATA", "VSRC", "VDST"))
-
-_GFX125X_VGPR_MSB_FIELDS_BY_FORMAT = {
-    AMDGPU_ENCODING_FORMAT_VOP1: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP1_LITERAL: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP1_DPP: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP1_DPP16: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP1_SDWA: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP2: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP2_DPP: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP2_DPP16: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP2_LITERAL: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3_LITERAL: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3P: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3PX2: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VOP3_SDST: _GFX125X_VOP_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_DS: _GFX125X_DS_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VDS: _GFX125X_DS_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_FLAT: _GFX125X_FLAT_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VFLAT: _GFX125X_FLAT_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VGLOBAL: _GFX125X_FLAT_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VSCRATCH: _GFX125X_FLAT_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_MUBUF: _GFX125X_BUFFER_MODE_FIELDS,
-    AMDGPU_ENCODING_FORMAT_VBUFFER: _GFX125X_BUFFER_MODE_FIELDS,
-}
-
 
 def _operand_has_vgpr_alt(operand: Operand) -> bool:
     return any(reg_alt.reg_class == _REG_VGPR for reg_alt in operand.reg_alts)
@@ -252,15 +302,21 @@ def _gfx125x_operand_encoding_field_name(operand: Operand) -> str | None:
     return amdgpu_encoding_field_name(operand.encoding_field_id)
 
 
+def _gfx125x_operand_vgpr_msb_slot(
+    descriptor: Descriptor, operand: Operand
+) -> AmdgpuVgprMsbSlot:
+    field_name = _gfx125x_operand_encoding_field_name(operand)
+    if field_name is None:
+        return AmdgpuVgprMsbSlot.NONE
+    return amdgpu_gfx125x_vgpr_msb_slot(
+        descriptor.key, descriptor.encoding_format_id, field_name
+    )
+
+
 def _gfx125x_operand_uses_vgpr_msb_state(
     descriptor: Descriptor, operand: Operand
 ) -> bool:
-    field_name = _gfx125x_operand_encoding_field_name(operand)
-    if field_name is None:
-        return False
-    return field_name in _GFX125X_VGPR_MSB_FIELDS_BY_FORMAT.get(
-        descriptor.encoding_format_id, frozenset()
-    )
+    return _gfx125x_operand_vgpr_msb_slot(descriptor, operand) != AmdgpuVgprMsbSlot.NONE
 
 
 def _with_gfx125x_operand_address_state(
@@ -270,11 +326,13 @@ def _with_gfx125x_operand_address_state(
         return operand
     if operand.address_map_kind is not OperandAddressMapKind.DIRECT:
         return operand
-    if _gfx125x_operand_uses_vgpr_msb_state(descriptor, operand):
+    address_state_slot = _gfx125x_operand_vgpr_msb_slot(descriptor, operand)
+    if address_state_slot != AmdgpuVgprMsbSlot.NONE:
         return replace(
             operand,
             address_map_kind=OperandAddressMapKind.TARGET_STATE,
             addressable_unit_count=_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT,
+            address_state_slot=int(address_state_slot),
         )
     return replace(
         operand,
@@ -320,6 +378,29 @@ def _descriptor_writes_mode_state(descriptor: Descriptor) -> bool:
     )
 
 
+def _descriptor_tied_operand_roots(descriptor: Descriptor) -> tuple[int, ...]:
+    roots = list(range(len(descriptor.operands)))
+
+    def find_root(operand_index: int) -> int:
+        while roots[operand_index] != operand_index:
+            roots[operand_index] = roots[roots[operand_index]]
+            operand_index = roots[operand_index]
+        return operand_index
+
+    for constraint in descriptor.constraints:
+        if constraint.kind is not ConstraintKind.TIED:
+            continue
+        if constraint.rhs_operand_index is None:
+            raise ValueError(
+                f"gfx125x descriptor '{descriptor.key}' has a tied constraint "
+                "without a right-hand operand"
+            )
+        lhs_root = find_root(constraint.lhs_operand_index)
+        rhs_root = find_root(constraint.rhs_operand_index)
+        roots[rhs_root] = lhs_root
+    return tuple(find_root(i) for i in range(len(roots)))
+
+
 def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> None:
     descriptors_by_key = {
         descriptor.key: descriptor for descriptor in descriptor_set.descriptors
@@ -336,16 +417,41 @@ def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> N
         )
     for descriptor in descriptor_set.descriptors:
         has_target_state_operand = False
-        for operand in descriptor.operands:
+        tied_operand_roots = _descriptor_tied_operand_roots(descriptor)
+        address_state_slot_operands: dict[int, int] = {}
+        for operand_index, operand in enumerate(descriptor.operands):
             if operand.address_map_kind is not OperandAddressMapKind.TARGET_STATE:
                 continue
             has_target_state_operand = True
-            if not _gfx125x_operand_uses_vgpr_msb_state(descriptor, operand):
+            expected_slot = _gfx125x_operand_vgpr_msb_slot(descriptor, operand)
+            if expected_slot == AmdgpuVgprMsbSlot.NONE:
                 raise ValueError(
                     f"gfx125x descriptor '{descriptor.key}' marks operand "
                     f"'{operand.field_name}' as VGPR-MSB target-state, but "
                     "the operand encoding field has no S_SET_VGPR_MSB slot"
                 )
+            if operand.address_state_slot != int(expected_slot):
+                raise ValueError(
+                    f"gfx125x descriptor '{descriptor.key}' marks operand "
+                    f"'{operand.field_name}' with S_SET_VGPR_MSB slot "
+                    f"{operand.address_state_slot}; expected {int(expected_slot)}"
+                )
+            previous_operand_index = address_state_slot_operands.get(
+                operand.address_state_slot
+            )
+            if (
+                previous_operand_index is not None
+                and tied_operand_roots[previous_operand_index]
+                != tied_operand_roots[operand_index]
+            ):
+                raise ValueError(
+                    f"gfx125x descriptor '{descriptor.key}' assigns multiple "
+                    f"untied operands to S_SET_VGPR_MSB slot "
+                    f"{operand.address_state_slot}"
+                )
+            address_state_slot_operands.setdefault(
+                operand.address_state_slot, operand_index
+            )
             if (
                 operand.addressable_unit_count
                 != _GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT
@@ -745,6 +851,7 @@ def build_amdgpu_core_descriptor_set_from_spec(
         descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
     descriptor_set = _with_storage_lease_rows(descriptor_set)
     _validate_descriptor_encoding_formats(target, spec, descriptor_set)
+    _validate_dpp_control_fields(descriptor_set)
     return descriptor_set
 
 
@@ -768,6 +875,7 @@ __all__ = (
     "_with_gfx125x_vgpr_msb_address_states",
     "_validate_address_immediate_units",
     "_validate_descriptor_encoding_formats",
+    "_validate_dpp_control_fields",
     "_with_overlay_descriptors",
     "amdgpu_common_reg_class_ids",
     "amdgpu_descriptor_id_keys",

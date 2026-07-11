@@ -80,32 +80,22 @@ static iree_status_t loom_amdgpu_address_state_initialize_context(
                                    &out_context->mode_attr_id);
 }
 
-static iree_status_t loom_amdgpu_vgpr_msb_insert_slot_bank(
+static void loom_amdgpu_vgpr_msb_insert_slot_bank(
     loom_amdgpu_vgpr_msb_mode_requirement_t* requirement,
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank) {
-  IREE_ASSERT(slot != LOOM_AMDGPU_VGPR_MSB_SLOT_NONE,
-              "generated target-state VGPR operand must have an "
-              "S_SET_VGPR_MSB slot");
-  if (bank > 3) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU target-state VGPR operand requires VGPR MSB bank %" PRIu32,
-        bank);
-  }
+  IREE_ASSERT_GE(slot, LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0);
+  IREE_ASSERT_LE(slot, LOOM_AMDGPU_VGPR_MSB_SLOT_DST);
+  IREE_ASSERT_LE(bank, 3u);
   const uint8_t shift = loom_amdgpu_vgpr_msb_slot_shift(slot);
   const uint8_t slot_mask = (uint8_t)(0x3u << shift);
   const uint8_t slot_value = (uint8_t)(bank << shift);
-  if ((requirement->mask & slot_mask) != 0 &&
-      (requirement->value & slot_mask) != slot_value) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target-state packet requires conflicting VGPR MSB banks for "
-        "one encoding slot");
+  if ((requirement->mask & slot_mask) != 0) {
+    IREE_ASSERT_EQ(requirement->value & slot_mask, slot_value);
+    return;
   }
   requirement->mask |= slot_mask;
   requirement->value =
       (uint8_t)((requirement->value & ~slot_mask) | slot_value);
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_target_state_operand_assignment(
@@ -188,24 +178,16 @@ static iree_status_t loom_amdgpu_collect_vgpr_msb_mode_requirement(
         assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       continue;
     }
-    if (assignment->location_count != operand->unit_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target-state value %" PRIu32 " has %" PRIu32
-          " assigned registers but descriptor field needs %" PRIu16,
-          assignment->value_id, assignment->location_count,
-          operand->unit_count);
-    }
+    IREE_ASSERT_EQ(assignment->location_count, operand->unit_count);
     IREE_ASSERT(
         operand->addressable_unit_count == LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE,
         "generated target-state VGPR operand must use the "
         "S_SET_VGPR_MSB addressable window");
     const uint32_t bank =
         assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
-    const loom_amdgpu_vgpr_msb_slot_t slot = loom_amdgpu_encoding_vgpr_msb_slot(
-        descriptor->encoding_format_id, operand->encoding_field_id);
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_vgpr_msb_insert_slot_bank(out_requirement, slot, bank));
+    loom_amdgpu_vgpr_msb_insert_slot_bank(
+        out_requirement,
+        (loom_amdgpu_vgpr_msb_slot_t)operand->address_state_slot, bank);
   }
   return iree_ok_status();
 }
