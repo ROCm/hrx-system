@@ -401,12 +401,30 @@ static bool id4_vae_parameter_is_packed_conv3x3_bf16_tensor(
                                                            out_source_key);
 }
 
+static bool id4_vae_parameter_rhs_packed_conv3x3_shape_channels(
+    id4_pipeline_program_shape_t shape, uint64_t* out_input_channel_count,
+    uint64_t* out_output_channel_count) {
+  if (shape.rank == 4 && shape.dims[1] == 3 && shape.dims[2] == 3) {
+    *out_input_channel_count = shape.dims[3];
+    *out_output_channel_count = shape.dims[0];
+    return true;
+  }
+  if (shape.rank == 2 && shape.dims[1] % 9 == 0) {
+    *out_input_channel_count = shape.dims[1] / 9;
+    *out_output_channel_count = shape.dims[0];
+    return true;
+  }
+  return false;
+}
+
 static bool id4_vae_parameter_is_rhs_packed_conv3x3_bf16_tensor(
     const id4_pipeline_program_tensor_record_t* tensor,
     iree_string_view_t* out_source_key) {
+  uint64_t input_channel_count = 0;
+  uint64_t output_channel_count = 0;
   if (!tensor || tensor->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16 ||
-      tensor->shape.rank != 4 || tensor->shape.dims[1] != 3 ||
-      tensor->shape.dims[2] != 3) {
+      !id4_vae_parameter_rhs_packed_conv3x3_shape_channels(
+          tensor->shape, &input_channel_count, &output_channel_count)) {
     return false;
   }
   iree_string_view_t packed_key = iree_string_view_empty();
@@ -586,15 +604,30 @@ static iree_status_t id4_vae_parameter_populate_packed_conv3x3_bf16_mapping(
 static iree_status_t id4_vae_parameter_populate_rhs_packed_conv3x3_bf16_mapping(
     const id4_pipeline_program_tensor_record_t* tensor,
     iree_string_view_t source_key, id4_vae_parameter_mapping_t* out_mapping) {
+  uint64_t input_channel_count = 0;
+  uint64_t output_channel_count = 0;
+  if (!id4_vae_parameter_rhs_packed_conv3x3_shape_channels(
+          tensor->shape, &input_channel_count, &output_channel_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "VAE RHS-packed BF16 conv3x3 parameter %.*s has an invalid shape",
+        (int)tensor->name.size, tensor->name.data);
+  }
   uint64_t element_count = 0;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_shape_element_count(tensor->shape, &element_count));
-  if (tensor->shape.dims[0] > UINT32_MAX ||
-      tensor->shape.dims[3] > UINT32_MAX) {
+  if (input_channel_count > UINT32_MAX || output_channel_count > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "VAE RHS-packed BF16 conv3x3 parameter %.*s channel count is out of "
         "range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  if (input_channel_count == 0 || output_channel_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VAE RHS-packed BF16 conv3x3 parameter %.*s channel count must be "
+        "non-zero",
         (int)tensor->name.size, tensor->name.data);
   }
   *out_mapping = (id4_vae_parameter_mapping_t){
@@ -612,9 +645,9 @@ static iree_status_t id4_vae_parameter_populate_rhs_packed_conv3x3_bf16_mapping(
       // Scalar element count.
       .element_count = element_count,
       // Input channel dimension in OCxKYxKXxIC layout.
-      .input_channel_count = (uint32_t)tensor->shape.dims[3],
+      .input_channel_count = (uint32_t)input_channel_count,
       // Output channel dimension in OCxKYxKXxIC layout.
-      .output_channel_count = (uint32_t)tensor->shape.dims[0],
+      .output_channel_count = (uint32_t)output_channel_count,
   };
   return iree_ok_status();
 }

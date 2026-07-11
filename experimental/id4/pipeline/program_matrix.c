@@ -179,6 +179,45 @@ static const id4_pipeline_program_matrix_composition_candidate_t
 };
 
 static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix_candidates[] = {
+    // Dense BF16 contractions with row-major F32 results.
+    {
+        .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+        .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .source_weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .source_scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_INVALID,
+        .source_scale_layout = ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_NONE,
+        .weight_encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+        .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_INVALID,
+        .scale_layout = ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_NONE,
+        .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
+        .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .minimum_m_capacity = 32,
+        .m_multiple = 32,
+        .minimum_n = 64,
+        .n_multiple = 64,
+        .k_multiple = 16,
+        .selection_priority = 1,
+        .kernel =
+            {
+                IREE_SVL("matrix/bf16_f32_wmma_m32n64"),
+                IREE_SVL("id4_matrix_bf16_f32_wmma_m32n64"),
+            },
+        .config =
+            {
+                .dispatch_m_key =
+                    IREE_SVL("id4.matrix.bf16_f32_wmma.dispatch_token_count"),
+                .k_key = IREE_SVL("id4.matrix.bf16_f32_wmma.input_size"),
+                .n_key = IREE_SVL("id4.matrix.bf16_f32_wmma.output_size"),
+            },
+    },
     // Qwen block-scaled plain contractions, fastest schedule first.
     {
         .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,

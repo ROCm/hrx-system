@@ -1,0 +1,139 @@
+config.decl @id4.vae.conv_bias_epilogue.row_count : %value: index where [range(%value, 1, 4194304)]
+
+config.decl @id4.vae.conv_bias_epilogue.column_count : %value: index where [range(%value, 1, 4096)]
+
+kernel.def export("id4_vae_conv_bias_epilogue_f32_bf16") @id4_vae_conv_bias_epilogue_f32_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %row_count = config.get @id4.vae.conv_bias_epilogue.row_count : index
+  %column_count = config.get @id4.vae.conv_bias_epilogue.column_count : index
+  %element_count = index.mul %row_count, %column_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %row_count = config.get @id4.vae.conv_bias_epilogue.row_count : index
+  %column_count = config.get @id4.vae.conv_bias_epilogue.column_count : index
+  %element_count = index.mul %row_count, %column_count : index
+  %element = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %element_valid = index.cmp ult, %element, %element_count : index
+  %input_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %bias, %output : buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%column_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  scf.if %element_valid {
+    %element_in_bounds = index.assume %element [ge(%element, 0), lt(%element, %element_count)] : index
+    %column0 = index.rem %element_in_bounds, %column_count : index
+    %column = index.assume %column0 [ge(%column0, 0), lt(%column0, %column_count)] : index
+    %input_value = view.load %input_view[%element_in_bounds] : view<[%element_count]xf32, #dense> -> f32
+    %bias_bf16 = view.load %bias_view[%column] : view<[%column_count]xbf16, #dense> -> bf16
+    %bias_value = scalar.extf %bias_bf16 : bf16 to f32
+    %biased = scalar.addf<reassoc|nnan|ninf|nsz> %input_value, %bias_value : f32
+    %output_value = scalar.fptrunc %biased : f32 to bf16
+    view.store %output_value, %output_view[%element_in_bounds] : bf16, view<[%element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_conv_bias_add_epilogue_f32_bf16") @id4_vae_conv_bias_add_epilogue_f32_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %row_count = config.get @id4.vae.conv_bias_epilogue.row_count : index
+  %column_count = config.get @id4.vae.conv_bias_epilogue.column_count : index
+  %element_count = index.mul %row_count, %column_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %bias: buffer, %addend: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %row_count = config.get @id4.vae.conv_bias_epilogue.row_count : index
+  %column_count = config.get @id4.vae.conv_bias_epilogue.column_count : index
+  %element_count = index.mul %row_count, %column_count : index
+  %element = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %element_valid = index.cmp ult, %element, %element_count : index
+  %input_noalias, %bias_noalias, %addend_noalias, %output_noalias = buffer.assume.noalias %input, %bias, %addend, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %addend_global = buffer.assume.memory_space<global> %addend_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%column_count]xbf16, #dense>
+  %addend_view = buffer.view %addend_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  scf.if %element_valid {
+    %element_in_bounds = index.assume %element [ge(%element, 0), lt(%element, %element_count)] : index
+    %column0 = index.rem %element_in_bounds, %column_count : index
+    %column = index.assume %column0 [ge(%column0, 0), lt(%column0, %column_count)] : index
+    %input_value = view.load %input_view[%element_in_bounds] : view<[%element_count]xf32, #dense> -> f32
+    %bias_bf16 = view.load %bias_view[%column] : view<[%column_count]xbf16, #dense> -> bf16
+    %bias_value = scalar.extf %bias_bf16 : bf16 to f32
+    %addend_bf16 = view.load %addend_view[%element_in_bounds] : view<[%element_count]xbf16, #dense> -> bf16
+    %addend_value = scalar.extf %addend_bf16 : bf16 to f32
+    %biased = scalar.addf<reassoc|nnan|ninf|nsz> %input_value, %bias_value : f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %biased, %addend_value : f32
+    %output_value = scalar.fptrunc %value : f32 to bf16
+    view.store %output_value, %output_view[%element_in_bounds] : bf16, view<[%element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_small_case {
+  %input = check.generate.fill value(1.0) : tensor<2x64xf32>
+  %bias = check.generate.fill value(2.0) : tensor<64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x64xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<2x64xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<2x64xf32>, tensor<64xbf16>, tensor<2x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x64xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_add_epilogue_f32_bf16_small_case {
+  %input = check.generate.fill value(1.0) : tensor<2x64xf32>
+  %bias = check.generate.fill value(2.0) : tensor<64xbf16>
+  %addend = check.generate.fill value(4.0) : tensor<2x64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x64xbf16>
+  %expected = check.generate.fill value(7.0) : tensor<2x64xbf16>
+  func.call @id4_vae_conv_bias_add_epilogue_f32_bf16(%input, %bias, %addend, %output) : (tensor<2x64xf32>, tensor<64xbf16>, tensor<2x64xbf16>, tensor<2x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x64xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<256x512xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<256x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x512xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<256x512xf32>, tensor<512xbf16>, tensor<256x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x512xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<1024x512xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x512xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<1024x512xf32>, tensor<512xbf16>, tensor<1024x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x512xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_small_case> @id4_vae_conv_bias_epilogue_f32_bf16_small
+
+check.benchmark<@id4_vae_conv_bias_add_epilogue_f32_bf16_small_case> @id4_vae_conv_bias_add_epilogue_f32_bf16_small
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512_case> @id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512_case> @id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512

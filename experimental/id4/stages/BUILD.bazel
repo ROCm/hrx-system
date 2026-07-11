@@ -175,6 +175,7 @@ iree_runtime_cc_library(
         ":vae_parameters",
         "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_matrix",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

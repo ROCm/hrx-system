@@ -1,0 +1,185 @@
+config.decl @id4.vae.im2col3x3.width : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.im2col3x3.height : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.im2col3x3.input_channel_count : %value: index where [range(%value, 1, 4096)]
+
+kernel.def export("id4_vae_im2col3x3_bf16") @id4_vae_im2col3x3_bf16() {
+  %unit = index.constant 1 : index
+  %nine = index.constant 9 : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.im2col3x3.width : index
+  %height = config.get @id4.vae.im2col3x3.height : index
+  %input_channel_count = config.get @id4.vae.im2col3x3.input_channel_count : index
+  %pixel_count = index.mul %width, %height : index
+  %tap_element_count = index.mul %pixel_count, %nine : index
+  %output_element_count = index.mul %tap_element_count, %input_channel_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %output_element_count, %rounding : index
+  %workgroup_count = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %nine = index.constant 9 : index
+  %kernel_center = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = config.get @id4.vae.im2col3x3.width : index
+  %height = config.get @id4.vae.im2col3x3.height : index
+  %input_channel_count = config.get @id4.vae.im2col3x3.input_channel_count : index
+  %pixel_count = index.mul %width, %height : index
+  %input_element_count = index.mul %pixel_count, %input_channel_count : index
+  %tap_count = index.mul %pixel_count, %nine : index
+  %output_element_count = index.mul %tap_count, %input_channel_count : index
+  %element = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %element_valid = index.cmp ult, %element, %output_element_count : index
+  %last_x = index.sub %width, %unit : index
+  %last_y = index.sub %height, %unit : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
+  scf.if %element_valid {
+    %output_element = index.assume %element [ge(%element, 0), lt(%element, %output_element_count)] : index
+    %channel0 = index.rem %output_element, %input_channel_count : index
+    %channel = index.assume %channel0 [ge(%channel0, 0), lt(%channel0, %input_channel_count)] : index
+    %tap_pixel = index.div %output_element, %input_channel_count : index
+    %pixel0 = index.div %tap_pixel, %nine : index
+    %pixel = index.assume %pixel0 [ge(%pixel0, 0), lt(%pixel0, %pixel_count)] : index
+    %tap0 = index.rem %tap_pixel, %nine : index
+    %tap = index.assume %tap0 [range(%tap0, 0, 8)] : index
+    %kernel_y0 = index.div %tap, %three : index
+    %kernel_y = index.assume %kernel_y0 [range(%kernel_y0, 0, 2)] : index
+    %kernel_x0 = index.rem %tap, %three : index
+    %kernel_x = index.assume %kernel_x0 [range(%kernel_x0, 0, 2)] : index
+    %y0 = index.rem %pixel, %height : index
+    %y = index.assume %y0 [ge(%y0, 0), lt(%y0, %height)] : index
+    %x0 = index.div %pixel, %height : index
+    %x = index.assume %x0 [ge(%x0, 0), lt(%x0, %width)] : index
+    %x_is_left = index.cmp eq, %x, %zero : index
+    %x_is_right = index.cmp eq, %x, %last_x : index
+    %y_is_top = index.cmp eq, %y, %zero : index
+    %y_is_bottom = index.cmp eq, %y, %last_y : index
+    %kernel_x_is_zero = index.cmp eq, %kernel_x, %zero : index
+    %kernel_x_is_two = index.cmp eq, %kernel_x, %two : index
+    %kernel_y_is_zero = index.cmp eq, %kernel_y, %zero : index
+    %kernel_y_is_two = index.cmp eq, %kernel_y, %two : index
+    %invalid_left = scalar.andi %x_is_left, %kernel_x_is_zero : i1
+    %invalid_right = scalar.andi %x_is_right, %kernel_x_is_two : i1
+    %invalid_top = scalar.andi %y_is_top, %kernel_y_is_zero : i1
+    %invalid_bottom = scalar.andi %y_is_bottom, %kernel_y_is_two : i1
+    %invalid_x = scalar.ori %invalid_left, %invalid_right : i1
+    %invalid_y = scalar.ori %invalid_top, %invalid_bottom : i1
+    %invalid_tap = scalar.ori %invalid_x, %invalid_y : i1
+    %value = scf.if %invalid_tap -> (bf16) {
+      scf.yield %zero_bf16 : bf16
+    } else {
+      %input_y_with_kernel = index.add %y, %kernel_y : index
+      %input_y_with_kernel_valid = index.assume %input_y_with_kernel [ge(%input_y_with_kernel, 1), le(%input_y_with_kernel, %height)] : index
+      %input_y0 = index.sub %input_y_with_kernel_valid, %kernel_center : index
+      %input_y = index.assume %input_y0 [ge(%input_y0, 0), lt(%input_y0, %height)] : index
+      %input_x_with_kernel = index.add %x, %kernel_x : index
+      %input_x_with_kernel_valid = index.assume %input_x_with_kernel [ge(%input_x_with_kernel, 1), le(%input_x_with_kernel, %width)] : index
+      %input_x0 = index.sub %input_x_with_kernel_valid, %kernel_center : index
+      %input_x = index.assume %input_x0 [ge(%input_x0, 0), lt(%input_x0, %width)] : index
+      %input_x_row_base = index.mul %input_x, %height : index
+      %input_pixel = index.add %input_x_row_base, %input_y : index
+      %input_pixel_base = index.mul %input_pixel, %input_channel_count : index
+      %input_element0 = index.add %input_pixel_base, %channel : index
+      %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %input_element_count)] : index
+      %loaded = view.load %input_view[%input_element] : view<[%input_element_count]xbf16, #dense> -> bf16
+      scf.yield %loaded : bf16
+    }
+    view.store %value, %output_view[%output_element] : bf16, view<[%output_element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+kernel.def @id4_vae_im2col3x3_bf16_1x1_expected() {
+  %unit = index.constant 1 : index
+  %nine = index.constant 9 : index
+  %workgroup_size_x = index.constant 256 : index
+  %input_channel_count = config.get @id4.vae.im2col3x3.input_channel_count : index
+  %element_count = index.mul %input_channel_count, %nine : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %nine = index.constant 9 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %input_channel_count = config.get @id4.vae.im2col3x3.input_channel_count : index
+  %element_count = index.mul %input_channel_count, %nine : index
+  %element = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %element_valid = index.cmp ult, %element, %element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_channel_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  scf.if %element_valid {
+    %element_in_bounds = index.assume %element [ge(%element, 0), lt(%element, %element_count)] : index
+    %channel0 = index.rem %element_in_bounds, %input_channel_count : index
+    %channel = index.assume %channel0 [ge(%channel0, 0), lt(%channel0, %input_channel_count)] : index
+    %tap_pixel = index.div %element_in_bounds, %input_channel_count : index
+    %tap0 = index.rem %tap_pixel, %nine : index
+    %tap = index.assume %tap0 [range(%tap0, 0, 8)] : index
+    %is_center = index.cmp eq, %tap, %four : index
+    %value = scf.if %is_center -> (bf16) {
+      %loaded = view.load %input_view[%channel] : view<[%input_channel_count]xbf16, #dense> -> bf16
+      scf.yield %loaded : bf16
+    } else {
+      scf.yield %zero_bf16 : bf16
+    }
+    view.store %value, %output_view[%element_in_bounds] : bf16, view<[%element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_im2col3x3_bf16_1x1_layout_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32xbf16>
+  %actual = check.generate.fill value(-1.0) : tensor<288xbf16>
+  %expected = check.generate.fill value(-2.0) : tensor<288xbf16>
+  func.call @id4_vae_im2col3x3_bf16(%input, %actual) : (tensor<32xbf16>, tensor<288xbf16>)
+  func.call @id4_vae_im2col3x3_bf16_1x1_expected(%input, %expected) : (tensor<32xbf16>, tensor<288xbf16>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288xbf16>
+  check.return
+}
+
+check.case public @id4_vae_im2col3x3_bf16_16x16_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<256x512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x4608xbf16>
+  func.call @id4_vae_im2col3x3_bf16(%input, %output) : (tensor<256x512xbf16>, tensor<256x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x4608xbf16>
+  check.return
+}
+
+check.case public @id4_vae_im2col3x3_bf16_32x32_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<1024x512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x4608xbf16>
+  func.call @id4_vae_im2col3x3_bf16(%input, %output) : (tensor<1024x512xbf16>, tensor<1024x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_im2col3x3_bf16_1x1_layout_case> @id4_vae_im2col3x3_bf16_1x1_layout
+
+check.benchmark<@id4_vae_im2col3x3_bf16_16x16_c512_case> @id4_vae_im2col3x3_bf16_16x16_c512
+
+check.benchmark<@id4_vae_im2col3x3_bf16_32x32_c512_case> @id4_vae_im2col3x3_bf16_32x32_c512

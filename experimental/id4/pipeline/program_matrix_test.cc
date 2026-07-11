@@ -170,6 +170,48 @@ class ProgramMatrixTest : public ::testing::Test {
     return options;
   }
 
+  id4_pipeline_program_matrix_options_t MakeBf16Options() {
+    id4_pipeline_program_matrix_options_t options = {
+        /*.structure_size=*/sizeof(options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("vae.conv"),
+        /*.problem=*/
+        {
+            /*.valid_m=*/256,
+            /*.m_capacity=*/256,
+            /*.n=*/512,
+            /*.k=*/4608,
+            /*.input_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            /*.input_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            /*.accumulator_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.epilogue=*/ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
+            /*.output_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.output_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        },
+    };
+    options.operands.input =
+        Import(IREE_SV("im2col"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+               id4_pipeline_program_make_shape_rank2(256, 4608));
+    options.operands.parameter = {
+        /*.weight=*/
+        {
+            /*.source_scope=*/IREE_SV("vae"),
+            /*.key=*/IREE_SV("conv.weight.packed_oc_ky_kx_ic.bf16"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(512, 4608),
+        },
+        /*.weight_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        /*.scale=*/{},
+        /*.scale_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_NONE,
+    };
+    options.operands.output =
+        Acquire(IREE_SV("contraction"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                id4_pipeline_program_make_shape_rank2(256, 512));
+    options.operands.addend = id4_pipeline_program_tensor_invalid();
+    return options;
+  }
+
   id4_pipeline_program_swiglu_options_t MakeSwiGLUOptions(
       id4_pipeline_program_matrix_scale_layout_t scale_layout,
       id4_pipeline_program_shape_t scale_shape) {
@@ -250,6 +292,12 @@ TEST_F(ProgramMatrixTest, AcceptsBlockScaledParameterContraction) {
 
 TEST_F(ProgramMatrixTest, AcceptsRowScaledParameterContraction) {
   id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+  SealAndRelease();
+}
+
+TEST_F(ProgramMatrixTest, AcceptsBf16ParameterContractionToF32) {
+  id4_pipeline_program_matrix_options_t options = MakeBf16Options();
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
   SealAndRelease();
 }
