@@ -157,6 +157,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::ir
+    loom::util::cfg_graph
   PUBLIC
 )
 

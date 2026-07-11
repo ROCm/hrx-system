@@ -1789,10 +1789,12 @@ static iree_status_t loom_low_schedule_build_visibility_dependencies(
     memcpy(block_outgoing, block_writes, word_count * sizeof(*block_outgoing));
   }
 
-  loom_cfg_graph_t graph = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_graph_build(state->module, state->body, state->arena, &graph));
-  if (graph.malformed) {
+  const loom_cfg_graph_t* graph = state->cfg_graph;
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT(graph->module == state->module);
+  IREE_ASSERT(graph->region == state->body);
+  IREE_ASSERT_EQ(graph->block_count, state->body->block_count);
+  if (graph->malformed) {
     return iree_ok_status();
   }
 
@@ -1802,10 +1804,10 @@ static iree_status_t loom_low_schedule_build_visibility_dependencies(
     for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
       memset(next_incoming_bits, 0, word_count * sizeof(*next_incoming_bits));
       loom_cfg_block_index_span_t predecessors =
-          loom_cfg_graph_predecessors(&graph, block_index);
+          loom_cfg_graph_predecessors(graph, block_index);
       for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
         const uint16_t predecessor_index = predecessors.values[i];
-        if (!loom_cfg_graph_block_is_reachable(&graph, predecessor_index)) {
+        if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index)) {
           continue;
         }
         const uint64_t* predecessor_outgoing = loom_low_schedule_block_bitset(
@@ -1837,7 +1839,7 @@ static iree_status_t loom_low_schedule_build_visibility_dependencies(
   }
 
   for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
-    if (!loom_cfg_graph_block_is_reachable(&graph, block_index)) {
+    if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
       continue;
     }
     const uint64_t* block_incoming =

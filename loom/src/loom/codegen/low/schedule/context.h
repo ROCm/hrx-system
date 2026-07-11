@@ -18,6 +18,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,6 +171,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_register_type_resolver_t register_type_resolver;
   // Active function-local value domain for this scheduling run.
   const loom_local_value_domain_t* value_domain;
+  // Shared read-only control-flow graph for the function body.
+  const loom_cfg_graph_t* cfg_graph;
   // Dense per-local-value scheduler records indexed by value ordinal.
   loom_low_schedule_value_record_t* values;
   // Schedule block records indexed by region block ordinal.

@@ -1845,6 +1845,26 @@ iree_status_t loom_liveness_analyze_local_value_domain(
     const loom_local_value_domain_t* value_domain, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
+  const loom_region_t* region = value_domain->region;
+  loom_cfg_graph_t cfg_graph = {
+      .module = value_domain->module,
+      .region = region,
+      .block_count = region->block_count,
+  };
+  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
+    IREE_RETURN_IF_ERROR(
+        loom_cfg_graph_build(value_domain->module, region, arena, &cfg_graph));
+  }
+  return loom_liveness_analyze_local_value_domain_with_cfg_graph(
+      value_domain, &cfg_graph, order, arena, out_analysis);
+}
+
+iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
+    iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis) {
+  IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
+  IREE_ASSERT_ARGUMENT(cfg_graph);
   memset(out_analysis, 0, sizeof(*out_analysis));
   loom_module_t* module = value_domain->module;
   const loom_region_t* region = value_domain->region;
@@ -1896,19 +1916,18 @@ iree_status_t loom_liveness_analyze_local_value_domain(
   }
 
   bool is_cfg = iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
-  loom_cfg_graph_t graph = {0};
   if (iree_status_is_ok(status) && is_cfg) {
-    status = loom_cfg_graph_build(module, region, arena, &graph);
-  }
-  if (iree_status_is_ok(status) && is_cfg) {
-    if (graph.malformed) {
+    IREE_ASSERT(cfg_graph->module == module);
+    IREE_ASSERT(cfg_graph->region == region);
+    IREE_ASSERT_EQ(cfg_graph->block_count, region->block_count);
+    if (cfg_graph->malformed) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "CFG graph is malformed; run Loom verification "
                                 "before liveness analysis");
     }
   }
   if (iree_status_is_ok(status) && is_cfg) {
-    status = loom_liveness_run_dataflow(&state, &graph);
+    status = loom_liveness_run_dataflow(&state, cfg_graph);
   } else if (iree_status_is_ok(status)) {
     loom_liveness_initialize_local_liveness(&state, region->block_count);
   }

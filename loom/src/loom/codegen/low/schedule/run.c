@@ -3703,6 +3703,7 @@ iree_status_t loom_low_schedule_function(
       .body = model->body,
       .target = model->target,
       .value_domain = &model->value_domain,
+      .cfg_graph = &model->cfg_graph,
   };
   loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
@@ -3748,8 +3749,9 @@ iree_status_t loom_low_schedule_function(
     status = loom_low_schedule_build_dependencies(&state);
   }
   if (iree_status_is_ok(status) && needs_liveness) {
-    status = loom_liveness_analyze_local_value_domain(
-        &model->value_domain, loom_liveness_order_empty(), arena, &liveness);
+    status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
+        &model->value_domain, &model->cfg_graph, loom_liveness_order_empty(),
+        arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_run_list_scheduler(&state, node_count);

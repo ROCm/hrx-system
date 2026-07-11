@@ -338,12 +338,20 @@ loom_low_allocation_interval_assignment_value_ordinal_for_interval(
 static iree_status_t loom_low_allocation_interval_assignment_consumption_query(
     loom_low_allocation_interval_assignment_state_t* state,
     const loom_region_t* region, loom_consumption_region_query_t** out_query) {
-  loom_consumption_region_query_t* query =
-      region == state->context->body ? &state->function_consumption_query
-                                     : &state->nested_consumption_query;
+  if (region == state->context->body) {
+    loom_consumption_region_query_t* query = &state->function_consumption_query;
+    if (query->region != region) {
+      loom_consumption_region_query_initialize_with_cfg_graph(
+          state->context->module, region, state->context->function_cfg_graph,
+          state->context->arena, query);
+    }
+    *out_query = query;
+    return iree_ok_status();
+  }
+  loom_consumption_region_query_t* query = &state->nested_consumption_query;
   if (query->region != region) {
-    IREE_RETURN_IF_ERROR(loom_consumption_region_query_initialize(
-        state->context->module, region, state->context->arena, query));
+    loom_consumption_region_query_initialize(state->context->module, region,
+                                             state->context->arena, query);
   }
   *out_query = query;
   return iree_ok_status();

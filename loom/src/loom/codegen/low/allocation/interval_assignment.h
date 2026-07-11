@@ -21,6 +21,7 @@
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +48,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   loom_low_allocation_storage_lease_state_t* storage_leases;
   // Arena owning returned assignment, spill, and remark arrays.
   iree_arena_allocator_t* arena;
+  // Shared read-only control-flow graph for |body|.
+  const loom_cfg_graph_t* function_cfg_graph;
 } loom_low_allocation_interval_assignment_context_t;
 
 typedef struct loom_low_allocation_interval_assignment_result_t {
