@@ -155,6 +155,9 @@ typedef struct loom_vector_memory_footprint_t {
   // ops use the logical matrix shape, not the physical fragment payload shape.
   loom_type_t vector_type;
 
+  // Inline backing for synthetic rank-3 fragment footprint dimensions.
+  loom_overflow_dim_t fragment_dimensions[3];
+
   // Optional physical storage scaling for one logical footprint axis.
   loom_vector_memory_footprint_axis_scale_t axis_scale;
 

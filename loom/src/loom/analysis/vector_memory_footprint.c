@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "loom/analysis/cfg_condition_facts.h"
 #include "loom/analysis/condition_facts.h"
@@ -73,6 +74,9 @@ typedef struct loom_vector_memory_footprint_access_t {
 
   // Vector payload type loaded, stored, or atomically updated.
   loom_type_t vector_type;
+
+  // Inline backing for a copied rank-3 fragment footprint type.
+  loom_overflow_dim_t fragment_dimensions[3];
 
   // Optional physical storage scaling for one logical footprint axis.
   loom_vector_memory_footprint_axis_scale_t axis_scale;
@@ -1557,6 +1561,13 @@ static bool loom_vector_memory_footprint_describe_op(
                                             &footprint)) {
     out_access->view = footprint.view;
     out_access->vector_type = footprint.vector_type;
+    if (footprint.kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT &&
+        loom_type_rank(footprint.vector_type) > 2) {
+      memcpy(out_access->fragment_dimensions, footprint.fragment_dimensions,
+             sizeof(out_access->fragment_dimensions));
+      out_access->vector_type.dims[0] =
+          (uint64_t)(uintptr_t)out_access->fragment_dimensions;
+    }
     out_access->axis_scale = footprint.axis_scale;
     out_access->static_indices = footprint.static_indices;
     out_access->dynamic_indices = footprint.dynamic_indices;

@@ -69,7 +69,75 @@ func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_v
 }
 
 // ====
+func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %blocks = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [blocks(%blocks), %m, %k] : vector<4xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [blocks(%blocks), %k, %n] : vector<4xf16>
+  %init = vector.fragment<init> %accumulator shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<16xf32>) -> (vector<16xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<16xf32>
+    scf.yield %next : vector<16xf32>
+  }
+  func.return %result : vector<16xf32>
+}
+
+// ----
+func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %blocks = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [blocks(%blocks), %m, %k] : vector<4xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [blocks(%blocks), %k, %n] : vector<4xf16>
+  %init = vector.fragment<init> %accumulator shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %18 = index.constant 4096 : offset
+  %19 = index.constant 0 : offset
+  %20 = index.constant 0 : index
+  %21 = encoding.layout.dense : encoding<layout>
+  %22 = buffer.alloca %18 {base_alignment = 16, memory_space = workgroup} : buffer
+  %23 = buffer.view %22[%19] : buffer -> view<4x16x16xf32, %21>
+  %24 = index.constant 0 : index
+  vector.fragment.store<result> %init, %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %21>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  scf.for %25 = [%zero to %four step %one] {
+    %26 = vector.fragment.load<init> %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %21> -> vector<16xf32>
+    %next = vector.mma %lhs, %rhs, %26 : vector<4xf16>, vector<4xf16>, vector<16xf32>
+    vector.fragment.store<result> %next, %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %21>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  %result = vector.fragment.load<init> %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %21> -> vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ====
 // RUN: pass-report stage-loop-carried-fragments,dce
+
+func.def @report_blocked_accumulator_fragment_staging(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %blocks = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [blocks(%blocks), %m, %k] : vector<4xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [blocks(%blocks), %k, %n] : vector<4xf16>
+  %init = vector.fragment<init> %accumulator shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<16xf32>) -> (vector<16xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<16xf32>
+    scf.yield %next : vector<16xf32>
+  }
+  func.return %result : vector<16xf32>
+}
 
 func.def @explicitly_stage_one_accumulator_fragment(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
   %zero = index.constant 0 : index
@@ -87,15 +155,6 @@ func.def @explicitly_stage_one_accumulator_fragment(%lhs_values: vector<16xbf16>
   }
   func.return %result : vector<8xf32>
 }
-
-// ----
-COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
-COMPILE-REPORT: source_low_transforms rows=1
-COMPILE-REPORT: source_low_transform[0] function=explicitly_stage_one_accumulator_fragment source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
-
-// ====
-// RUN: pass-report stage-loop-carried-fragments,dce
 
 func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
   %zero = index.constant 0 : index
@@ -120,8 +179,10 @@ func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
-COMPILE-REPORT: source_low_transforms rows=1
-COMPILE-REPORT: source_low_transform[0] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
+COMPILE-REPORT: source_low_transforms rows=3
+COMPILE-REPORT: source_low_transform[0] function=report_blocked_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=16 shape=4x16x16 workgroup_bytes=4096 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[1] function=explicitly_stage_one_accumulator_fragment source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[2] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
 
 // ====
 // RUN: pass-report sink-single-use-reads,stage-loop-carried-fragments,dce
@@ -158,7 +219,6 @@ COMPILE-REPORT: source_low_transforms rows=1
 COMPILE-REPORT: source_low_transform[0] function=stage_after_sinking_single_use_fragment_read source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
 
 // ====
-// RUN: pass stage-loop-carried-fragments,dce
 
 amdgpu.target<gfx1100> @target
 

@@ -34,7 +34,9 @@ static bool loom_contract_shape_is_valid(
     loom_contract_shape_t shape, loom_contract_shape_value_refs_t value_refs) {
   return loom_contract_shape_dimension_is_valid(shape.m, value_refs.m) &&
          loom_contract_shape_dimension_is_valid(shape.n, value_refs.n) &&
-         loom_contract_shape_dimension_is_valid(shape.k, value_refs.k);
+         loom_contract_shape_dimension_is_valid(shape.k, value_refs.k) &&
+         loom_contract_shape_dimension_is_valid(shape.block_count,
+                                                value_refs.block_count);
 }
 
 static bool loom_contract_k_group_size_is_valid(
@@ -156,6 +158,7 @@ loom_contract_plain_fragment_available_capability_flags(
 
 void loom_contract_request_initialize(loom_contract_request_t* out_request) {
   *out_request = (loom_contract_request_t){
+      .shape.block_count = 1,
       .policy = LOOM_LOWERING_POLICY_REFERENCE_ALLOWED,
   };
 }

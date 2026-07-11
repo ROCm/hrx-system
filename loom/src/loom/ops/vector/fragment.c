@@ -55,13 +55,34 @@ bool loom_vector_fragment_fact_is_accumulator_like(
   const loom_vector_fragment_role_flags_t accumulator_roles =
       LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
       LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  return fact.shape_rank == 2 && fact.role_flags != 0 &&
-         (fact.role_flags & ~accumulator_roles) == 0;
+  return (fact.shape_rank == 2 || fact.shape_rank == 3) &&
+         fact.role_flags != 0 && (fact.role_flags & ~accumulator_roles) == 0;
 }
 
 bool loom_vector_fragment_fact_has_matrix_shape(
     loom_vector_fragment_fact_t fact) {
-  return fact.shape_rank == 2 && fact.role_flags != 0;
+  return (fact.shape_rank == 2 || fact.shape_rank == 3) && fact.role_flags != 0;
+}
+
+loom_value_id_t loom_vector_fragment_fact_block_value(
+    loom_vector_fragment_fact_t fact) {
+  return fact.shape_rank == 3 ? fact.shape_value_ids[0] : LOOM_VALUE_ID_INVALID;
+}
+
+loom_value_id_t loom_vector_fragment_fact_row_value(
+    loom_vector_fragment_fact_t fact) {
+  if (fact.shape_rank != 2 && fact.shape_rank != 3) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  return fact.shape_value_ids[fact.shape_rank - 2];
+}
+
+loom_value_id_t loom_vector_fragment_fact_column_value(
+    loom_vector_fragment_fact_t fact) {
+  if (fact.shape_rank != 2 && fact.shape_rank != 3) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  return fact.shape_value_ids[fact.shape_rank - 1];
 }
 
 static bool loom_vector_fragment_facts_match_contract_except_native_storage(

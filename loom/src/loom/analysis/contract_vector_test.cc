@@ -202,6 +202,7 @@ func.def @u8s8_dot4(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: vector<8xi32
   EXPECT_EQ(request.shape.m, 8);
   EXPECT_EQ(request.shape.n, 1);
   EXPECT_EQ(request.shape.k, 32);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.k_group_size, 4);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_U8);
   EXPECT_EQ(request.rhs.numeric_type, LOOM_CONTRACT_NUMERIC_I8);
@@ -297,6 +298,7 @@ func.def @dense_mma(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_da
   EXPECT_EQ(request.shape.m, 16);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 16);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_F16);
   EXPECT_EQ(request.lhs.payload_register_count, 4);
   EXPECT_EQ(request.lhs.payload_element_count, 8);

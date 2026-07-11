@@ -26,10 +26,9 @@ typedef struct loom_amdgpu_fragment_memory_address_t {
 bool loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint8_t term_index);
 
-// Returns the lane and static byte-address terms for one fragment register.
+// Returns the static byte-address term for one fragment register.
 bool loom_amdgpu_fragment_memory_register_terms(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
-    uint32_t* out_lane_mod_stride, uint32_t* out_lane_div_stride,
     uint64_t* out_static_byte_offset);
 
 // Returns true when a physical register group maps to contiguous bytes.
@@ -51,8 +50,7 @@ bool loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
 iree_status_t loom_amdgpu_emit_fragment_memory_base_address_accumulator(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan,
-    loom_amdgpu_matrix_fragment_lane_ids_t* lane_ids, uint16_t lane_divisor,
-    loom_type_t vgpr_type,
+    loom_amdgpu_matrix_fragment_lane_ids_t* lane_ids, loom_type_t vgpr_type,
     loom_amdgpu_fragment_memory_address_accumulator_t* out_accumulator);
 
 // Emits one packet's VGPR address and descriptor immediate offset.

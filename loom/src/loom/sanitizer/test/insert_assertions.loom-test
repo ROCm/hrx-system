@@ -303,19 +303,33 @@ func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
-  sanitizer.assert.access<write> %output[%row, %column] : view<64x64xf32, %layout>
+  sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 2, static_extents = [1, 1], static_strides = [1, 0]} : view<64x64xf32, %layout>
   %10 = index.constant 1 : index
   %11 = index.add %column, %10 : index
-  sanitizer.assert.access<write> %output[%row, %11] : view<64x64xf32, %layout>
-  %12 = index.constant 1 : index
-  %13 = index.add %row, %12 : index
-  sanitizer.assert.access<write> %output[%13, %column] : view<64x64xf32, %layout>
-  %14 = index.constant 1 : index
-  %15 = index.add %row, %14 : index
-  %16 = index.constant 1 : index
-  %17 = index.add %column, %16 : index
-  sanitizer.assert.access<write> %output[%15, %17] : view<64x64xf32, %layout>
+  sanitizer.assert.accesses<write> %output[%row, %11] {static_count = 2, static_extents = [1, 1], static_strides = [1, 0]} : view<64x64xf32, %layout>
   vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  sanitizer.assert.accesses<write> %output[%block, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
+  %7 = index.constant 1 : index
+  %8 = index.add %block, %7 : index
+  sanitizer.assert.accesses<write> %output[%8, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
   func.return
 }
 

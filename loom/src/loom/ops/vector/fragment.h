@@ -73,8 +73,9 @@ typedef struct loom_vector_fragment_fact_t {
   // Number of logical matrix shape values stored in shape_value_ids.
   uint16_t shape_rank;
 
-  // Logical row and column count SSA value IDs for the fragment role.
-  loom_value_id_t shape_value_ids[2];
+  // Logical shape SSA value IDs in source order. Rank-2 fragments use
+  // [row, column]; rank-3 fragments use [block, row, column].
+  loom_value_id_t shape_value_ids[3];
 
   // Explicit auxiliary SSA values keyed by vector auxiliary enum bits.
   loom_vector_encoding_auxiliary_view_t auxiliary;
@@ -124,6 +125,21 @@ bool loom_vector_fragment_fact_is_accumulator_like(
 
 // Returns true when |fact| describes any matrix fragment role.
 bool loom_vector_fragment_fact_has_matrix_shape(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the optional leading block extent, or LOOM_VALUE_ID_INVALID for a
+// rank-2 fragment or unsupported shape rank.
+loom_value_id_t loom_vector_fragment_fact_block_value(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the logical row extent, or LOOM_VALUE_ID_INVALID when the fragment
+// shape rank is unsupported.
+loom_value_id_t loom_vector_fragment_fact_row_value(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the logical column/reduction extent, or LOOM_VALUE_ID_INVALID when
+// the fragment shape rank is unsupported.
+loom_value_id_t loom_vector_fragment_fact_column_value(
     loom_vector_fragment_fact_t fact);
 
 // Returns true when fragment facts are byte-identical.

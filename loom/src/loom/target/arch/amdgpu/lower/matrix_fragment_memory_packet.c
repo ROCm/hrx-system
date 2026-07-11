@@ -590,7 +590,7 @@ static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
       plan->payload_form !=
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 ||
       !loom_amdgpu_matrix_fragment_role_is_result_like(plan->role) ||
-      plan->view_rank != LOOM_AMDGPU_FRAGMENT_VIEW_RANK ||
+      plan->view_rank != LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK ||
       plan->element_byte_count != 2 ||
       plan->axis_byte_strides[1] != plan->element_byte_count) {
     return false;
@@ -619,7 +619,10 @@ static bool loom_amdgpu_fragment_memory_select_packet(
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomAmdgpuFragmentMemoryPacketCandidates); ++i) {
     const uint16_t candidate = kLoomAmdgpuFragmentMemoryPacketCandidates[i];
-    if (candidate > remaining) {
+    if (candidate > remaining ||
+        (candidate % plan->address_layout.payload_registers_per_element) != 0 ||
+        (register_index % plan->address_layout.payload_registers_per_element) !=
+            0) {
       continue;
     }
     loom_amdgpu_descriptor_ref_t descriptor_ref =
@@ -828,13 +831,11 @@ static bool loom_amdgpu_fragment_memory_select_narrowed_store_packet(
   return false;
 }
 
-static bool loom_amdgpu_fragment_memory_plan_push_packet(
+static void loom_amdgpu_fragment_memory_plan_push_packet(
     loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
-  if (packet->result_register_count == 0 ||
-      plan->packet_count >= IREE_ARRAYSIZE(plan->packets)) {
-    return false;
-  }
+  IREE_ASSERT_GT(packet->result_register_count, 0);
+  IREE_ASSERT_LT(plan->packet_count, IREE_ARRAYSIZE(plan->packets));
   plan->packets[plan->packet_count++] = *packet;
   plan->packet_flags |= packet->flags;
   if (plan->payload_form ==
@@ -843,7 +844,6 @@ static bool loom_amdgpu_fragment_memory_plan_push_packet(
     plan->packet_flags |=
         LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE;
   }
-  return true;
 }
 
 static loom_amdgpu_fragment_memory_epilogue_strategy_t
@@ -938,16 +938,15 @@ bool loom_amdgpu_fragment_memory_plan_packets(
                   crosslane_packed_b16_store_flags, &packet)
             : loom_amdgpu_fragment_memory_select_packet(
                   descriptor_set, layout, plan, register_index, &packet);
-    if (!selected ||
-        !loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
-            layout, plan, &packet, out_constraint_key) ||
-        !loom_amdgpu_fragment_memory_plan_push_packet(plan, &packet)) {
+    if (!selected || !loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
+                         layout, plan, &packet, out_constraint_key)) {
       if (out_constraint_key != NULL &&
           iree_string_view_is_empty(*out_constraint_key)) {
         *out_constraint_key = IREE_SV("fragment_memory.packet");
       }
       return false;
     }
+    loom_amdgpu_fragment_memory_plan_push_packet(plan, &packet);
     register_index += packet.result_register_count;
   }
   if (plan->packet_count == 0) {

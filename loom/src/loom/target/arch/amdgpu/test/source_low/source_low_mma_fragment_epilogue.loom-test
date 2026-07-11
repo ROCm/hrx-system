@@ -44,10 +44,10 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %gate_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
-  %41 = v_lshrrev_b32_src0_inline %37, 4
-  %42 = v_lshlrev_b32_src0_inline %41, 7
-  %43 = v_and_b32_src0_inline %37, 15
-  %44 = v_lshlrev_b32_src0_inline %43, 1
+  %41 = v_and_b32_src0_inline %37, 15
+  %42 = v_lshlrev_b32_src0_inline %41, 1
+  %43 = v_lshrrev_b32_src0_inline %37, 4
+  %44 = v_lshlrev_b32_src0_inline %43, 7
   %45 = v_add_u32 %42, %44
   %46 = global_load_d16_b16_saddr %45, %gate_view
   %47 = v_bfe_u32_offset_0_width_16_low16 %46
@@ -115,7 +115,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %128 = v_and_b32_lit %111, 4294901760
   %130 = s_mov_b32 0
   %scale = s_load_dword %scale_view, %130
-  %132 = v_and_b32_src0_inline %43, 1
+  %132 = v_and_b32_src0_inline %41, 1
   %133 = v_cmp_eq_i32_src1_inline %132 {rhs = 0}
   %134 = v_mov_b32_copy %scale
   %136 = v_mul_f32 %72, %134
@@ -184,7 +184,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %200 = v_cvt_pk_u16_u32 %189, %190
   global_store_b32_saddr %45, %200, %output_view {offset = 1792}
   s_mov_b64_exec %191
-  %201 = v_and_b32_src0_inline %43, 1
+  %201 = v_and_b32_src0_inline %41, 1
   %202 = v_cmp_eq_i32_src1_inline %201 {rhs = 0}
   %203 = v_mov_b32_copy %scale
   %205 = v_mul_f32 %114, %203
@@ -868,8 +868,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
   %repacked = concat(%79, %82) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %84 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %84
-  %86 = v_lshlrev_b32_src0_inline %56, 8
-  %87 = v_lshlrev_b32_src0_inline %50, 2
+  %86 = v_lshlrev_b32_src0_inline %50, 2
+  %87 = v_lshlrev_b32_src0_inline %56, 8
   %88 = v_add_u32 %86, %87
   %89 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %90 = s_mov_b32_m0_imm 0
@@ -1012,8 +1012,8 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %repacked = concat(%107, %110, %113, %116) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %118 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %second = v_wmma_f32_16x16x16_bf16 %repacked, %rhs, %118
-  %120 = v_lshlrev_b32_src0_inline %72, 9
-  %121 = v_lshlrev_b32_src0_inline %66, 2
+  %120 = v_lshlrev_b32_src0_inline %66, 2
+  %121 = v_lshlrev_b32_src0_inline %72, 9
   %122 = v_add_u32 %120, %121
   %123 = slice %second[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   global_store_b32_saddr %122, %123, %output_view
@@ -1128,8 +1128,8 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %repacked = concat(%75, %78, %81, %84) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %86 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %second = v_wmma_f32_16x16x16_bf16 %repacked, %rhs, %86
-  %88 = v_lshlrev_b32_src0_inline %40, 9
-  %89 = v_lshlrev_b32_src0_inline %34, 2
+  %88 = v_lshlrev_b32_src0_inline %34, 2
+  %89 = v_lshlrev_b32_src0_inline %40, 9
   %90 = v_add_u32 %88, %89
   %91 = slice %second[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   global_store_b32_saddr %90, %91, %output_view
@@ -1222,8 +1222,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
   %repacked = concat(%59, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %64 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %64
-  %66 = v_lshlrev_b32_src0_inline %36, 8
-  %67 = v_lshlrev_b32_src0_inline %30, 2
+  %66 = v_lshlrev_b32_src0_inline %30, 2
+  %67 = v_lshlrev_b32_src0_inline %36, 8
   %68 = v_add_u32 %66, %67
   %69 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %70 = s_mov_b32_m0_imm 0
@@ -1415,8 +1415,8 @@ COMPILE-REPORT: source_low[2] function=report_result_fragment_repack_to_lhs_bf16
 COMPILE-REPORT: source_low[3] function=report_result_fragment_repack_to_lhs_bf16 source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.repack selection=plan plan=3734 plan_key=amdgpu.fragment_repack.strategy.result_to_lhs_bf16_transpose_bpermute emitted_ops=91
 COMPILE-REPORT: source_low[5] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store selection=plan plan=3604 emitted_ops=5
-COMPILE-REPORT: source_low_memory[0] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr source_root=output source_root_argument_index=1 storage={element_format:bf16} source_interval={begin_min_bytes:0,begin_max_bytes:0,end_min_bytes:16,end_max_bytes:16,exact_length_bytes:16} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 issued_read_bytes=0 issued_write_bytes=16 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=32 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[1] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr source_root=output source_root_argument_index=1 storage={element_format:bf16} source_interval={begin_min_bytes:16,begin_max_bytes:16,end_min_bytes:32,end_max_bytes:32,exact_length_bytes:16} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=16 element_bytes=2 vector_lanes=8 issued_read_bytes=0 issued_write_bytes=16 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=32 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[0] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr source_root=output source_root_argument_index=1 storage={element_format:bf16} source_interval={begin_min_bytes:0,begin_max_bytes:0,end_min_bytes:16,end_max_bytes:16,exact_length_bytes:16} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 issued_read_bytes=0 issued_write_bytes=16 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr source_root=output source_root_argument_index=1 storage={element_format:bf16} source_interval={begin_min_bytes:16,begin_max_bytes:16,end_min_bytes:32,end_max_bytes:32,exact_length_bytes:16} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=16 element_bytes=2 vector_lanes=8 issued_read_bytes=0 issued_write_bytes=16 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory_root[0] function=report_result_fragment_repack_to_lhs_bf16 source_root=output source_root_argument_index=1 memory_space=global packets=2 loads=0 stores=2 scalar_packets=0 vector_packets=2 source_lanes=16 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=2 unknown_dynamic_packets=0 dynamic_packets=2 dynamic_source_bytes=32 dynamic_read_bytes=0 dynamic_write_bytes=32 dynamic_issued_read_bytes=0 dynamic_issued_write_bytes=32 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=0 dispatch_source_write_bytes=1024 dispatch_source_total_bytes=1024 dispatch_issued_read_bytes=0 dispatch_issued_write_bytes=1024 dispatch_issued_total_bytes=1024 interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32,exact_static_packet_count:2,unique_byte_count:32} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32,exact_static_packet_count:2,unique_byte_count:32}
 COMPILE-REPORT: source_low_memory_argument[0] function=report_result_fragment_repack_to_lhs_bf16 source_root=output source_root_argument_index=1 memory_space=global packets=2 loads=0 stores=2 scalar_packets=0 vector_packets=2 source_lanes=16 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=2 unknown_dynamic_packets=0 dynamic_packets=2 dynamic_source_bytes=32 dynamic_read_bytes=0 dynamic_write_bytes=32 dynamic_issued_read_bytes=0 dynamic_issued_write_bytes=32 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=0 dispatch_source_write_bytes=1024 dispatch_source_total_bytes=1024 dispatch_issued_read_bytes=0 dispatch_issued_write_bytes=1024 dispatch_issued_total_bytes=1024 interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32,exact_static_packet_count:2,unique_byte_count:32} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32,exact_static_packet_count:2,unique_byte_count:32}
 COMPILE-REPORT: source_low_memory_argument_packet[0] function=report_result_fragment_repack_to_lhs_bf16 source_root=output source_root_argument_index=1 memory_space=global operation=store packet=amdgpu.global_store_b128_saddr storage={element_format:bf16} packets=2 loads=0 stores=2 scalar_packets=0 vector_packets=2 source_lanes=16 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=2 unknown_dynamic_packets=0 dynamic_packets=2 dynamic_source_bytes=32 dynamic_read_bytes=0 dynamic_write_bytes=32 dynamic_issued_read_bytes=0 dynamic_issued_write_bytes=32 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=0 dispatch_source_write_bytes=1024 dispatch_source_total_bytes=1024 dispatch_issued_read_bytes=0 dispatch_issued_write_bytes=1024 dispatch_issued_total_bytes=1024 interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:32,byte_count:32}

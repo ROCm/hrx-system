@@ -245,6 +245,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
   EXPECT_EQ(request.shape.m, 16);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 128);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_FP6);
   EXPECT_EQ(request.lhs.payload_register_count, 6);
   EXPECT_EQ(request.rhs.numeric_type, LOOM_CONTRACT_NUMERIC_BF6);
@@ -297,6 +298,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
   EXPECT_EQ(loom_contract_value_ref_value_id(request.shape_value_refs.m), 42u);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 128);
+  EXPECT_EQ(request.shape.block_count, 1);
 }
 
 TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {

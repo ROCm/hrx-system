@@ -8,6 +8,7 @@
 
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/encoding/storage.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 
@@ -101,18 +102,21 @@ static bool loom_vector_memory_value_type(const loom_module_t* module,
 
 static bool loom_vector_memory_fragment_footprint_type(
     const loom_module_t* module, loom_type_t view_type, const loom_op_t* op,
-    loom_type_t* out_type) {
+    loom_overflow_dim_t dimension_storage[3], loom_type_t* out_type) {
   *out_type = loom_type_none();
   if (loom_type_rank(view_type) < 2) return false;
 
+  loom_value_id_t blocks = LOOM_VALUE_ID_INVALID;
   loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
   loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
   switch (op->kind) {
     case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      blocks = loom_vector_fragment_load_blocks(op);
       rows = loom_vector_fragment_load_rows(op);
       columns = loom_vector_fragment_load_columns(op);
       break;
     case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      blocks = loom_vector_fragment_store_blocks(op);
       rows = loom_vector_fragment_store_rows(op);
       columns = loom_vector_fragment_store_columns(op);
       break;
@@ -120,14 +124,31 @@ static bool loom_vector_memory_fragment_footprint_type(
       return false;
   }
 
-  if (rows == LOOM_VALUE_ID_INVALID || rows >= module->values.count ||
-      columns == LOOM_VALUE_ID_INVALID || columns >= module->values.count) {
+  const uint8_t shape_rank = blocks == LOOM_VALUE_ID_INVALID ? 2 : 3;
+  loom_value_id_t shape[3] = {blocks, rows, columns};
+  const uint8_t shape_offset = (uint8_t)(3 - shape_rank);
+  if (loom_type_rank(view_type) < shape_rank) {
     return false;
   }
-  *out_type = loom_type_shaped_2d(
-      LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
-      loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
-      /*encoding_id=*/0);
+  for (uint8_t i = shape_offset; i < 3; ++i) {
+    if (shape[i] == LOOM_VALUE_ID_INVALID || shape[i] >= module->values.count) {
+      return false;
+    }
+  }
+  if (shape_rank == 2) {
+    *out_type = loom_type_shaped_2d(
+        LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+        loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
+        /*encoding_id=*/0);
+    return true;
+  }
+  for (uint8_t i = 0; i < shape_rank; ++i) {
+    dimension_storage[i] = loom_dim_pack_dynamic(shape[i]);
+  }
+  out_type->header =
+      loom_type_make_header(LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+                            shape_rank, /*flags=*/0);
+  out_type->dims[0] = (uint64_t)(uintptr_t)dimension_storage;
   return true;
 }
 
@@ -152,12 +173,15 @@ loom_vector_memory_fragment_footprint_axis_scale(
   }
 
   loom_vector_role_t role = LOOM_VECTOR_ROLE_COUNT_;
+  bool has_blocks = false;
   switch (op->kind) {
     case LOOM_OP_VECTOR_FRAGMENT_LOAD:
       role = loom_vector_fragment_load_role(op);
+      has_blocks = loom_vector_fragment_load_blocks_is_present(op);
       break;
     case LOOM_OP_VECTOR_FRAGMENT_STORE:
       role = loom_vector_fragment_store_role(op);
+      has_blocks = loom_vector_fragment_store_blocks_is_present(op);
       break;
     default:
       return scale;
@@ -174,6 +198,9 @@ loom_vector_memory_fragment_footprint_axis_scale(
   scale.vector_axis = kReductionVectorAxes[role];
   if (scale.vector_axis == UINT8_MAX) {
     return scale;
+  }
+  if (has_blocks) {
+    ++scale.vector_axis;
   }
   scale.storage_element_count = operand.sparsity_group.nonzero_element_count;
   scale.logical_element_count = operand.sparsity_group.element_count;
@@ -248,7 +275,7 @@ bool loom_vector_memory_footprint_describe(
   if (view >= module->values.count) return false;
   const loom_type_t view_type = loom_module_value_type(module, view);
 
-  loom_vector_memory_footprint_t footprint = {
+  *out_footprint = (loom_vector_memory_footprint_t){
       .kind = loom_vector_memory_classify_footprint_kind(op, access),
       .access = access,
       .view = view,
@@ -262,33 +289,33 @@ bool loom_vector_memory_footprint_describe(
       .vector_type = loom_type_none(),
       .axis_scale.vector_axis = UINT8_MAX,
   };
+  loom_vector_memory_footprint_t* footprint = out_footprint;
 
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
   if (loom_traits_may_read(traits)) {
-    footprint.flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_READS;
+    footprint->flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_READS;
   }
   if (loom_traits_may_write(traits)) {
-    footprint.flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_WRITES;
+    footprint->flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_WRITES;
   }
 
-  if (footprint.kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
-    if (!loom_vector_memory_fragment_footprint_type(module, view_type, op,
-                                                    &footprint.vector_type)) {
+  if (footprint->kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
+    if (!loom_vector_memory_fragment_footprint_type(
+            module, view_type, op, footprint->fragment_dimensions,
+            &footprint->vector_type)) {
       return false;
     }
-    footprint.axis_scale = loom_vector_memory_fragment_footprint_axis_scale(
+    footprint->axis_scale = loom_vector_memory_fragment_footprint_axis_scale(
         context, module, view_type, op);
   } else if (!loom_vector_memory_value_type(module, op, access,
-                                            &footprint.vector_type)) {
+                                            &footprint->vector_type)) {
     return false;
   }
   if (!loom_vector_memory_access_describe(context, module, view_type,
-                                          footprint.vector_type,
-                                          &footprint.vector_access)) {
+                                          footprint->vector_type,
+                                          &footprint->vector_access)) {
     return false;
   }
-
-  *out_footprint = footprint;
   return true;
 }
 

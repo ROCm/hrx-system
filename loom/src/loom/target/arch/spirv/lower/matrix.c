@@ -239,7 +239,8 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
     return false;
   }
 
-  if (!loom_spirv_contract_dimension_u16(contract_request->shape.m,
+  if (contract_request->shape.block_count != 1 ||
+      !loom_spirv_contract_dimension_u16(contract_request->shape.m,
                                          &out_query->m_size) ||
       !loom_spirv_contract_dimension_u16(contract_request->shape.n,
                                          &out_query->n_size) ||

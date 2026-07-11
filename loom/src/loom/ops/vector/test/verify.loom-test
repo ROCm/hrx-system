@@ -1030,6 +1030,18 @@ func.def @fragment_load_requires_full_rank_origin(%buffer: buffer, %offset: offs
 
 // ====
 
+// A blocked fragment carries three semantic matrix dimensions, even when a
+// source tries to hide the block coordinate in a lower-rank view.
+func.def @blocked_fragment_load_requires_rank_three_view(%buffer: buffer, %offset: offset, %row: index, %blocks: index, %m: index, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: TYPE/003 "view" "rank >= 3 view"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [blocks(%blocks), %m, %k] : view<16x16xf16, %layout> -> vector<2xf16>
+  func.return
+}
+
+// ====
+
 // Fragment loads may request a target-shaped element conversion at the load
 // boundary. Target legality owns selecting or rejecting the conversion.
 func.def @fragment_load_allows_load_boundary_conversion(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {

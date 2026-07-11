@@ -372,9 +372,24 @@ loom_vector_fragment_fact_dense_interpretation(
   loom_vector_fragment_fact_initialize(&dense);
   dense.role_flags = source.role_flags;
   dense.shape_rank = source.shape_rank;
-  dense.shape_value_ids[0] = source.shape_value_ids[0];
-  dense.shape_value_ids[1] = source.shape_value_ids[1];
+  memcpy(dense.shape_value_ids, source.shape_value_ids,
+         sizeof(dense.shape_value_ids));
   return dense;
+}
+
+static bool loom_vector_fragment_fact_set_shape(
+    loom_value_id_t blocks, loom_value_id_t rows, loom_value_id_t columns,
+    loom_vector_fragment_fact_t* out_fact) {
+  if (rows == LOOM_VALUE_ID_INVALID || columns == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  out_fact->shape_rank = blocks == LOOM_VALUE_ID_INVALID ? 2 : 3;
+  if (out_fact->shape_rank == 3) {
+    out_fact->shape_value_ids[0] = blocks;
+  }
+  out_fact->shape_value_ids[out_fact->shape_rank - 2] = rows;
+  out_fact->shape_value_ids[out_fact->shape_rank - 1] = columns;
+  return true;
 }
 
 static bool loom_vector_fragment_facts_match_except_role(
@@ -642,15 +657,19 @@ iree_status_t loom_vector_fragment_facts(
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
-  fact.shape_rank = 2;
-  fact.shape_value_ids[0] = loom_vector_fragment_rows(op);
-  fact.shape_value_ids[1] = loom_vector_fragment_columns(op);
+  if (!loom_vector_fragment_fact_set_shape(
+          loom_vector_fragment_blocks(op), loom_vector_fragment_rows(op),
+          loom_vector_fragment_columns(op), &fact)) {
+    result_facts[0] = loom_value_facts_unknown();
+    return iree_ok_status();
+  }
 
   loom_vector_fragment_parameter_view_t parameters;
+  const loom_value_slice_t parameter_values = loom_vector_fragment_params(op);
   iree_string_view_t unknown_key = iree_string_view_empty();
   if (!loom_vector_fragment_parameter_view_resolve(
-          module, loom_vector_fragment_params(op),
-          loom_vector_fragment_param_names(op), &parameters, &unknown_key)) {
+          module, parameter_values, loom_vector_fragment_param_names(op),
+          &parameters, &unknown_key)) {
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
@@ -667,8 +686,11 @@ iree_status_t loom_vector_fragment_facts(
 
     loom_value_fact_storage_schema_t storage_schema = {0};
     if (parameters.schema_parameter_ordinal != UINT16_MAX) {
-      uint16_t schema_operand_index =
-          (uint16_t)(3 + parameters.schema_parameter_ordinal);
+      const iree_host_size_t parameter_operand_offset =
+          (iree_host_size_t)(parameter_values.values -
+                             loom_op_const_operands(op));
+      const iree_host_size_t schema_operand_index =
+          parameter_operand_offset + parameters.schema_parameter_ordinal;
       if (schema_operand_index < op->operand_count &&
           loom_vector_fragment_query_storage_schema_from_facts(
               context, operand_facts[schema_operand_index], &storage_schema)) {
@@ -709,9 +731,13 @@ iree_status_t loom_vector_fragment_repack_facts(
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
-  fact.shape_rank = 2;
-  fact.shape_value_ids[0] = loom_vector_fragment_repack_rows(op);
-  fact.shape_value_ids[1] = loom_vector_fragment_repack_columns(op);
+  if (!loom_vector_fragment_fact_set_shape(
+          loom_vector_fragment_repack_blocks(op),
+          loom_vector_fragment_repack_rows(op),
+          loom_vector_fragment_repack_columns(op), &fact)) {
+    result_facts[0] = loom_value_facts_unknown();
+    return iree_ok_status();
+  }
   loom_vector_fragment_fact_t source_fact;
   if (loom_vector_fragment_fact_query_value_facts(context, operand_facts[0],
                                                   &source_fact) &&
@@ -736,9 +762,13 @@ iree_status_t loom_vector_fragment_load_facts(
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
-  fact.shape_rank = 2;
-  fact.shape_value_ids[0] = loom_vector_fragment_load_rows(op);
-  fact.shape_value_ids[1] = loom_vector_fragment_load_columns(op);
+  if (!loom_vector_fragment_fact_set_shape(
+          loom_vector_fragment_load_blocks(op),
+          loom_vector_fragment_load_rows(op),
+          loom_vector_fragment_load_columns(op), &fact)) {
+    result_facts[0] = loom_value_facts_unknown();
+    return iree_ok_status();
+  }
   fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
 
   loom_vector_encoding_auxiliary_view_t auxiliary;
