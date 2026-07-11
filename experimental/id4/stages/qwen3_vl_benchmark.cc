@@ -1091,7 +1091,6 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
     IREE_RETURN_IF_ERROR(
         WaitForSemaphore(update_semaphore.get(), update_value));
   }
-  context->diagnostics = {};
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       issue_semaphore;
@@ -1099,9 +1098,17 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
       context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, issue_semaphore.out()));
 
-  iree_hal_semaphore_t* wait_semaphore = update_semaphore.get();
-  uint64_t wait_value = update_value;
-  uint64_t signal_value = 0;
+  const uint64_t warm_signal_value = 1;
+  IREE_RETURN_IF_ERROR(IssueQwenBundle(
+      context, bundle.get(), boundary_bindings, update_semaphore.get(),
+      update_value, issue_semaphore.get(), warm_signal_value));
+  IREE_RETURN_IF_ERROR(
+      WaitForSemaphore(issue_semaphore.get(), warm_signal_value));
+  context->diagnostics = {};
+
+  iree_hal_semaphore_t* wait_semaphore = issue_semaphore.get();
+  uint64_t wait_value = warm_signal_value;
+  uint64_t signal_value = warm_signal_value;
   uint64_t iteration_count = 0;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
