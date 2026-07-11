@@ -190,6 +190,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
+    loom::util::segmented_storage
   PUBLIC
 )
 endif()

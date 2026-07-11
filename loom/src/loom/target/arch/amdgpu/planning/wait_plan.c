@@ -21,8 +21,33 @@
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/util/segmented_storage.h"
 
 #define LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE UINT32_MAX
+
+// Target payload size for lazily appended wait-action segments. Segments stay
+// small enough to share normal compiler workspace blocks with other planning
+// state while avoiding repeated copies as the final action count becomes known.
+#define LOOM_AMDGPU_WAIT_PLAN_ACTION_SEGMENT_BYTE_LENGTH (4u * 1024u)
+
+// Number of wait actions stored in each append segment.
+#define LOOM_AMDGPU_WAIT_PLAN_ACTIONS_PER_SEGMENT     \
+  (LOOM_AMDGPU_WAIT_PLAN_ACTION_SEGMENT_BYTE_LENGTH / \
+   sizeof(loom_amdgpu_wait_plan_action_t))
+
+static_assert(LOOM_AMDGPU_WAIT_PLAN_ACTIONS_PER_SEGMENT > 0,
+              "wait action must fit in one append segment");
+
+// One stable segment of wait actions populated before exact finalization.
+typedef struct loom_amdgpu_wait_plan_action_segment_t {
+  // Wait actions in append order.
+  loom_amdgpu_wait_plan_action_t
+      actions[LOOM_AMDGPU_WAIT_PLAN_ACTIONS_PER_SEGMENT];
+} loom_amdgpu_wait_plan_action_segment_t;
+
+static_assert(sizeof(loom_amdgpu_wait_plan_action_segment_t) <=
+                  LOOM_AMDGPU_WAIT_PLAN_ACTION_SEGMENT_BYTE_LENGTH,
+              "wait action segment exceeds its byte budget");
 
 typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   // Structural node forwards wait dependencies to its users.
@@ -172,12 +197,19 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   iree_host_size_t forwarding_node_count;
   // Monotonic DFS epoch for dependency forwarding.
   uint32_t dependency_visit_epoch;
-  // Output action rows.
+  // Sparse append state used while the final action count is unknown.
+  struct {
+    // Stable segments populated in action order.
+    loom_segmented_storage_t segments;
+    // Current append segment, or NULL before the first action.
+    loom_amdgpu_wait_plan_action_segment_t* tail;
+    // Number of populated actions in |tail|.
+    iree_host_size_t tail_count;
+  } action_stream;
+  // Final contiguous output action rows.
   loom_amdgpu_wait_plan_action_t* actions;
   // Number of populated action rows.
   iree_host_size_t action_count;
-  // Allocated action row capacity.
-  iree_host_size_t action_capacity;
   // Canonical packet-progress table populated after wait actions are known.
   loom_low_packet_progress_table_t progress;
   // Canonical packet hazard table populated after wait actions are known.
@@ -419,39 +451,6 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
   return loom_amdgpu_wait_plan_build_storage_release_action_index(builder);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_allocate_actions(
-    loom_amdgpu_wait_plan_builder_t* builder) {
-  const loom_low_schedule_table_t* schedule = builder->schedule;
-  const loom_low_allocation_table_t* allocation = builder->allocation;
-  iree_host_size_t action_input_capacity = 0;
-  if (!iree_host_size_checked_add(builder->dependency_link_count,
-                                  schedule->effect_use_count,
-                                  &action_input_capacity) ||
-      !iree_host_size_checked_add(action_input_capacity,
-                                  schedule->scheduled_node_count,
-                                  &action_input_capacity) ||
-      (allocation != NULL &&
-       !iree_host_size_checked_add(action_input_capacity,
-                                   schedule->scheduled_node_count,
-                                   &action_input_capacity)) ||
-      (allocation != NULL &&
-       !iree_host_size_checked_add(action_input_capacity,
-                                   allocation->storage_release_action_count,
-                                   &action_input_capacity)) ||
-      !iree_host_size_checked_mul(action_input_capacity,
-                                  LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT,
-                                  &builder->action_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU wait-plan action capacity overflows");
-  }
-  if (builder->action_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, builder->action_capacity, sizeof(*builder->actions),
-        (void**)&builder->actions));
-  }
-  return iree_ok_status();
-}
-
 static const loom_low_allocation_assignment_t* loom_amdgpu_wait_plan_assignment(
     const loom_low_allocation_table_t* allocation, loom_value_id_t value_id) {
   if (allocation == NULL || value_id == LOOM_VALUE_ID_INVALID) {
@@ -567,11 +566,53 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
   return iree_ok_status();
 }
 
-static void loom_amdgpu_wait_plan_append_action(
+static iree_status_t loom_amdgpu_wait_plan_append_action(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_t action) {
-  IREE_ASSERT_LT(builder->action_count, builder->action_capacity);
-  builder->actions[builder->action_count++] = action;
+  if (builder->action_stream.tail_count ==
+      LOOM_AMDGPU_WAIT_PLAN_ACTIONS_PER_SEGMENT) {
+    builder->action_stream.tail = NULL;
+    builder->action_stream.tail_count = 0;
+  }
+  if (builder->action_stream.tail == NULL) {
+    void* segment = NULL;
+    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+        &builder->action_stream.segments, builder->arena, &segment));
+    builder->action_stream.tail =
+        (loom_amdgpu_wait_plan_action_segment_t*)segment;
+  }
+  builder->action_stream.tail->actions[builder->action_stream.tail_count++] =
+      action;
+  ++builder->action_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_plan_finalize_actions(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  if (builder->action_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, builder->action_count, sizeof(*builder->actions),
+      (void**)&builder->actions));
+
+  iree_host_size_t output_count = 0;
+  for (uint32_t segment_index = 0;
+       segment_index < builder->action_stream.segments.segment_count;
+       ++segment_index) {
+    const loom_amdgpu_wait_plan_action_segment_t* segment =
+        (const loom_amdgpu_wait_plan_action_segment_t*)
+            loom_segmented_storage_const_segment(
+                &builder->action_stream.segments, segment_index);
+    const iree_host_size_t segment_action_count =
+        iree_min(builder->action_count - output_count,
+                 (iree_host_size_t)LOOM_AMDGPU_WAIT_PLAN_ACTIONS_PER_SEGMENT);
+    memcpy(&builder->actions[output_count], segment->actions,
+           segment_action_count * sizeof(*builder->actions));
+    output_count += segment_action_count;
+  }
+  IREE_ASSERT_EQ(output_count, builder->action_count);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_wait_plan_ensure_dependency_link_capacity(
@@ -1764,7 +1805,7 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
       builder->completed_position_counts[slot], drained_position_count);
   loom_amdgpu_wait_plan_mark_drained_producers(builder, node_index, slot,
                                                completed_position_count);
-  loom_amdgpu_wait_plan_append_action(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_append_action(
       builder,
       (loom_amdgpu_wait_plan_action_t){
           .kind = kind,
@@ -1779,7 +1820,7 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
                                ? node_index
                                : LOOM_LOW_SCHEDULE_NODE_NONE,
           .outstanding_before = outstanding_before,
-      });
+      }));
   if (target_count == 0 &&
       loom_amdgpu_wait_plan_node_follows_producer_in_same_block(
           builder->schedule, node_index, producer_node)) {
@@ -2675,6 +2716,10 @@ iree_status_t loom_amdgpu_wait_plan_build(
       .processor = loom_amdgpu_target_processor_from_resolved_target(
           schedule->module, &schedule->target),
   };
+  loom_segmented_storage_initialize(
+      sizeof(loom_amdgpu_wait_plan_action_segment_t),
+      iree_alignof(loom_amdgpu_wait_plan_action_segment_t),
+      &builder.action_stream.segments);
   loom_low_allocation_value_scratch_t scratch = {0};
   iree_status_t status =
       allocation != NULL
@@ -2687,13 +2732,13 @@ iree_status_t loom_amdgpu_wait_plan_build(
     status = loom_amdgpu_wait_plan_classify_nodes(&builder);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_wait_plan_allocate_actions(&builder);
-  }
-  if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_allocate_physical_state(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_build_actions(&builder);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_amdgpu_wait_plan_finalize_actions(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_build_hazard_action_index(&builder);
