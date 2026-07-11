@@ -21,7 +21,7 @@ iree_c_embed_data(
     name = "benchmark_kernels",
     testonly = True,
     srcs = [
-        "kernels/double_i32_at_byte_offset.loom",
+        "kernels/i32_memory_chain.loom",
     ],
     c_file_output = "benchmark_kernels.c",
     flatten = True,

@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "benchmark/benchmark.h"
 #include "loom/binding/c/benchmark/benchmark_kernels.h"
@@ -363,6 +364,101 @@ WorkspacePtr& CompileScenario::workspace_at(iree_host_size_t worker_ordinal) {
 
 void CompileScenario::RecordArtifactBytes(int64_t byte_count) {
   artifact_bytes_.fetch_add(byte_count, std::memory_order_relaxed);
+}
+
+TargetCompileScenario::TargetCompileScenario(
+    iree_host_size_t workspace_usable_block_size)
+    : CompileScenario(workspace_usable_block_size) {}
+
+iree_status_t TargetCompileScenario::SetUpTarget(
+    iree_host_size_t worker_count, TargetEnvironmentPtr target_environment,
+    TargetProfilePtr target_profile, loomc_string_view_t pipeline_identifier) {
+  target_environment_ = std::move(target_environment);
+  target_profile_ = std::move(target_profile);
+
+  loomc_target_selection_t* raw_selection = nullptr;
+  IREE_RETURN_IF_ERROR(
+      to_iree_status(loomc_target_selection_create_from_profile(
+          target_profile_.get(), loom_allocator(), &raw_selection)));
+  target_selection_.reset(raw_selection);
+
+  loomc_context_target_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.target_environment=*/target_environment_.get(),
+  };
+  loomc_context_options_t context_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      /*.structure_size=*/sizeof(context_options),
+      /*.next=*/&target_options,
+  };
+  loomc_context_t* raw_context = nullptr;
+  IREE_RETURN_IF_ERROR(to_iree_status(
+      loomc_context_create(&context_options, loom_allocator(), &raw_context)));
+  context_.reset(raw_context);
+
+  loomc_compiler_t* raw_compiler = nullptr;
+  IREE_RETURN_IF_ERROR(to_iree_status(loomc_compiler_create(
+      context_.get(), /*options=*/nullptr, loom_allocator(), &raw_compiler)));
+  compiler_.reset(raw_compiler);
+
+  loomc_target_selection_options_t selection_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+      /*.structure_size=*/sizeof(selection_options),
+      /*.next=*/nullptr,
+      /*.target_selection=*/target_selection_.get(),
+  };
+  loomc_target_pipeline_options_t pipeline_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      /*.structure_size=*/sizeof(pipeline_options),
+      /*.next=*/&selection_options,
+      /*.identifier=*/pipeline_identifier,
+      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      /*.source_to_low_max_errors=*/20,
+  };
+  loomc_pass_program_t* raw_pass_program = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status =
+      to_iree_status(loomc_pass_program_create_from_target_pipeline(
+          context_.get(), &pipeline_options, loom_allocator(),
+          &raw_pass_program, &raw_result));
+  PassProgramPtr pass_program(raw_pass_program);
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(
+      RequireSucceededResult(result.get(), "target pipeline preparation"));
+  pass_program_.reset(pass_program.release());
+
+  return SetUpWorkerSlots(worker_count);
+}
+
+iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
+    WorkspacePtr& workspace, ModulePtr& module, loomc_string_view_t module_name,
+    loomc_config_options_t config) {
+  loomc_target_selection_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.target_selection=*/target_selection_.get(),
+  };
+  loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+      /*.module_name=*/module_name,
+      /*.artifact_flags=*/0,
+      /*.config=*/config,
+  };
+
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status = to_iree_status(loomc_compile_module(
+      compiler_.get(), workspace.get(), pass_program_.get(), module.get(),
+      &compile_options, loom_allocator(), &raw_result));
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  return RequireSucceededResult(result.get(), "compilation");
 }
 
 void RunCompileBenchmark(::benchmark::State& state,

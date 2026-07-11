@@ -106,6 +106,42 @@ class CompileScenario {
   std::atomic<int64_t> artifact_bytes_{0};
 };
 
+// Shared production target setup for compile-and-emit benchmark scenarios.
+class TargetCompileScenario : public CompileScenario {
+ public:
+  explicit TargetCompileScenario(
+      iree_host_size_t workspace_usable_block_size = 0);
+
+ protected:
+  iree_status_t SetUpTarget(iree_host_size_t worker_count,
+                            TargetEnvironmentPtr target_environment,
+                            TargetProfilePtr target_profile,
+                            loomc_string_view_t pipeline_identifier);
+
+  iree_status_t CompileModuleToPreparedLow(WorkspacePtr& workspace,
+                                           ModulePtr& module,
+                                           loomc_string_view_t module_name,
+                                           loomc_config_options_t config);
+
+  loomc_target_environment_t* target_environment() const {
+    return target_environment_.get();
+  }
+
+  loomc_target_selection_t* target_selection() const {
+    return target_selection_.get();
+  }
+
+ private:
+  // Target provider set shared by all jobs in the scenario.
+  TargetEnvironmentPtr target_environment_;
+
+  // Concrete immutable target facts shared by all jobs in the scenario.
+  TargetProfilePtr target_profile_;
+
+  // Invocation-ready target selection shared by all jobs in the scenario.
+  TargetSelectionPtr target_selection_;
+};
+
 using CompileScenarioFactory = std::unique_ptr<CompileScenario> (*)(
     const ::benchmark::State& state, void* user_data);
 
