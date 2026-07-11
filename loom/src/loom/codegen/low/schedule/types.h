@@ -219,36 +219,22 @@ typedef struct loom_low_schedule_node_t {
   const loom_op_t* op;
   // Block containing |op|.
   const loom_block_t* block;
+  // Descriptor row for descriptor-backed nodes, or NULL.
+  const loom_low_descriptor_t* descriptor;
+  // Schedule-class row for descriptor-backed nodes, or NULL.
+  const loom_low_schedule_class_t* schedule_class;
   // Region block ordinal containing |op|.
   uint32_t block_index;
   // Source-order ordinal within the whole low function body.
   uint32_t source_ordinal;
   // Scheduled ordinal within |block| after topological scheduling.
   uint32_t scheduled_ordinal;
-  // Kind of schedule node.
-  loom_low_schedule_node_kind_t kind;
-  // Effective traits used for conservative structural ordering.
-  loom_trait_flags_t traits;
-  // Descriptor row for descriptor-backed nodes, or NULL.
-  const loom_low_descriptor_t* descriptor;
   // Source memory-access record attached to this node, or NONE.
   uint32_t memory_access_record_index;
-  // Schedule-class id for descriptor-backed nodes, or NONE.
-  uint16_t schedule_class_id;
-  // Borrowed schedule-class name for descriptor-backed nodes.
-  iree_string_view_t schedule_class_name;
-  // Descriptor schedule latency in cycles.
-  uint16_t latency_cycles;
-  // Descriptor latency interpretation.
-  loom_low_latency_kind_t latency_kind;
-  // Descriptor schedule-model quality.
-  loom_low_model_quality_t model_quality;
-  // Number of issue-resource rows consumed by the schedule class.
-  uint16_t issue_use_count;
-  // Number of hazard rows attached to the schedule class.
-  uint16_t hazard_count;
-  // Number of descriptor effect rows.
-  uint16_t effect_count;
+  // Effective traits used for conservative structural ordering.
+  loom_trait_flags_t traits;
+  // Kind of schedule node.
+  loom_low_schedule_node_kind_t kind;
   // Number of operand value ordinals.
   uint16_t operand_count;
   // Number of result value ordinals.

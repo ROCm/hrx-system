@@ -696,22 +696,38 @@ static iree_status_t loom_low_packet_json_write_packet(
   }
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(stream, ",\"schedule_class\":"));
+  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
+  iree_string_view_t schedule_class_name = iree_string_view_empty();
+  if (schedule_class != NULL) {
+    schedule_class_name = loom_low_descriptor_set_string(
+        descriptor_set, schedule_class->name_string_offset);
+  }
   IREE_RETURN_IF_ERROR(loom_low_packet_json_write_string_view_or_null(
-      node->schedule_class_name, stream));
+      schedule_class_name, stream));
+  const uint16_t latency_cycles =
+      schedule_class ? schedule_class->latency_cycles : 0;
+  const loom_low_latency_kind_t latency_kind =
+      schedule_class ? schedule_class->latency_kind
+                     : LOOM_LOW_LATENCY_KIND_UNKNOWN;
+  const loom_low_model_quality_t model_quality =
+      schedule_class ? schedule_class->model_quality
+                     : LOOM_LOW_MODEL_QUALITY_UNKNOWN;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"latency_cycles\":%" PRIu16 ",\"latency_kind\":",
-      node->latency_cycles));
+      stream,
+      ",\"latency_cycles\":%" PRIu16 ",\"latency_kind\":", latency_cycles));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      stream, loom_low_latency_kind_name(node->latency_kind)));
+      stream, loom_low_latency_kind_name(latency_kind)));
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(stream, ",\"model_quality\":"));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      stream, loom_low_model_quality_name(node->model_quality)));
+      stream, loom_low_model_quality_name(model_quality)));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream,
       ",\"issue_use_count\":%" PRIu16 ",\"hazard_count\":%" PRIu16
       ",\"effect_count\":%" PRIu16 ",\"results\":",
-      node->issue_use_count, node->hazard_count, node->effect_count));
+      schedule_class ? schedule_class->issue_use_count : 0,
+      schedule_class ? schedule_class->hazard_count : 0,
+      descriptor ? descriptor->effect_count : 0));
   IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value_array(
       allocation, type_print_options, loom_op_const_results(node->op),
       node->op->result_count, stream));

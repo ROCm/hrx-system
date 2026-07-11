@@ -234,17 +234,18 @@ void loom_low_schedule_compact_model_summaries(
 iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     loom_low_schedule_build_state_t* state, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
-  if (node->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
+  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
+  if (schedule_class == NULL) {
     return iree_ok_status();
   }
-  IREE_ASSERT(node->schedule_class_id <
-              state->target.descriptor_set->schedule_class_count);
-  const loom_low_schedule_class_t* schedule_class =
-      &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
   const loom_low_descriptor_t* descriptor = node->descriptor;
+  IREE_ASSERT(descriptor != NULL);
+  const uint16_t schedule_class_id = descriptor->schedule_class_id;
+  IREE_ASSERT(schedule_class_id <
+              state->target.descriptor_set->schedule_class_count);
   if (state->model_summaries) {
     loom_low_schedule_model_summary_t* model_summary =
-        &state->model_summaries[node->schedule_class_id];
+        &state->model_summaries[schedule_class_id];
     if (model_summary->use_count == UINT32_MAX) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "low schedule model summary counters overflow");
@@ -254,7 +255,7 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
           state->target.descriptor_set, schedule_class->name_string_offset);
       *model_summary = (loom_low_schedule_model_summary_t){
           .first_node = node_index,
-          .schedule_class_id = node->schedule_class_id,
+          .schedule_class_id = schedule_class_id,
           .schedule_class_name = schedule_class_name,
           .latency_cycles = schedule_class->latency_cycles,
           .latency_kind = schedule_class->latency_kind,
