@@ -30,6 +30,20 @@ TEST(FilesystemTest, EnsuresDirectoryAndFormatsChildPath) {
   id4_tooling_free_path(&child_path, iree_allocator_system());
 }
 
+TEST(FilesystemTest, EnsuresNestedDirectory) {
+  iree::testing::TempFilePath root_directory("id4_tooling_nested");
+  const std::string nested_directory = root_directory.path() + "/parent/child";
+  IREE_ASSERT_OK(id4_tooling_ensure_directory(
+      iree_make_string_view(nested_directory.data(), nested_directory.size()),
+      iree_allocator_system()));
+
+  const std::string marker_path = nested_directory + "/marker";
+  std::ofstream marker(marker_path);
+  ASSERT_TRUE(marker.is_open());
+  marker << "nested directory exists";
+  marker.close();
+}
+
 TEST(FilesystemTest, RejectsExistingNonDirectory) {
   iree::testing::TempFilePath file_path("id4_tooling_filesystem_file");
   std::ofstream file(file_path.path());

@@ -13,7 +13,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Ensures that |directory| exists as a filesystem directory.
+// Ensures that |directory| and any missing parent directories exist.
 iree_status_t id4_tooling_ensure_directory(iree_string_view_t directory,
                                            iree_allocator_t host_allocator);
 

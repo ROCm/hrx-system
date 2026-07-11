@@ -24,6 +24,30 @@ static bool id4_tooling_path_is_directory(const char* path) {
 #endif  // IREE_PLATFORM_WINDOWS
 }
 
+static bool id4_tooling_path_is_separator(char c) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  return c == '/' || c == '\\';
+#else
+  return c == '/';
+#endif  // IREE_PLATFORM_WINDOWS
+}
+
+static iree_status_t id4_tooling_create_single_directory(const char* path) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const int result = _mkdir(path);
+#else
+  const int result = mkdir(path, 0777);
+#endif  // IREE_PLATFORM_WINDOWS
+  const int saved_errno = errno;
+  if (result == 0 ||
+      (saved_errno == EEXIST && id4_tooling_path_is_directory(path))) {
+    return iree_ok_status();
+  }
+  return iree_make_status(iree_status_code_from_errno(saved_errno),
+                          "failed to create directory `%s` (%d)", path,
+                          saved_errno);
+}
+
 static iree_status_t id4_tooling_dup_cstring(iree_string_view_t value,
                                              iree_allocator_t host_allocator,
                                              char** out_string) {
@@ -49,18 +73,60 @@ iree_status_t id4_tooling_ensure_directory(iree_string_view_t directory,
   char* directory_path = NULL;
   IREE_RETURN_IF_ERROR(
       id4_tooling_dup_cstring(directory, host_allocator, &directory_path));
+
+  iree_host_size_t path_length = directory.size;
+  while (path_length > 1 &&
+         id4_tooling_path_is_separator(directory_path[path_length - 1])) {
+    directory_path[--path_length] = 0;
+  }
+
+  iree_host_size_t first_component_position = 0;
 #if defined(IREE_PLATFORM_WINDOWS)
-  const int result = _mkdir(directory_path);
-#else
-  const int result = mkdir(directory_path, 0777);
+  if (path_length >= 2 && directory_path[1] == ':') {
+    first_component_position =
+        path_length >= 3 && id4_tooling_path_is_separator(directory_path[2])
+            ? 3
+            : 2;
+  } else if (path_length >= 2 &&
+             id4_tooling_path_is_separator(directory_path[0]) &&
+             id4_tooling_path_is_separator(directory_path[1])) {
+    iree_host_size_t server_end = 2;
+    while (server_end < path_length &&
+           !id4_tooling_path_is_separator(directory_path[server_end])) {
+      ++server_end;
+    }
+    if (server_end == path_length) {
+      iree_allocator_free(host_allocator, directory_path);
+      return iree_ok_status();
+    }
+    iree_host_size_t share_end = server_end + 1;
+    while (share_end < path_length &&
+           !id4_tooling_path_is_separator(directory_path[share_end])) {
+      ++share_end;
+    }
+    first_component_position =
+        share_end == path_length ? path_length : share_end + 1;
+  }
 #endif  // IREE_PLATFORM_WINDOWS
-  const int saved_errno = errno;
-  const bool directory_exists =
-      saved_errno == EEXIST && id4_tooling_path_is_directory(directory_path);
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = first_component_position;
+       i <= path_length && iree_status_is_ok(status); ++i) {
+    if (i != path_length && !id4_tooling_path_is_separator(directory_path[i])) {
+      continue;
+    }
+    if (i == 0 || id4_tooling_path_is_separator(directory_path[i - 1])) {
+      continue;
+    }
+    const char saved_character = directory_path[i];
+    directory_path[i] = 0;
+    if (directory_path[i - 1] != ':') {
+      status = id4_tooling_create_single_directory(directory_path);
+    }
+    directory_path[i] = saved_character;
+  }
   iree_allocator_free(host_allocator, directory_path);
-  if (result == 0 || directory_exists) return iree_ok_status();
-  return iree_make_status(iree_status_code_from_errno(saved_errno),
-                          "failed to create directory (%d)", saved_errno);
+  return status;
 }
 
 iree_status_t id4_tooling_format_child_path(iree_string_view_t directory,
