@@ -9,8 +9,8 @@ low.func.def target(@gfx11_target) @gfx11_constants(%resource: reg<amdgpu.sgpr x
 }
 
 // ----
-  v_mov_b32 v1, 9
   s_mov_b32 s4, 7
+  v_mov_b32 v1, 9
   v_add_u32 v1, 123, v1
   buffer_store_dword v1, v0, s[0:3], s4 offen offset:12
   s_endpgm
@@ -1622,8 +1622,8 @@ low.func.def target(@gfx11_target) @gfx11_scheduled_liveness_resource(%kernarg: 
   s_load_dwordx2 s[0:1], s[0:1], s2 offset:0
   s_mov_b32 s6, 256
   s_mov_b32 s7, 822243328
-  v_mov_b32 v1, 1
   s_mov_b32 s3, 65535
+  v_mov_b32 v1, 1
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_and_b32 s1, s1, s3
   s_mov_b32 s4, s0
@@ -2424,8 +2424,8 @@ low.func.def target(@gfx11_target) @gfx11_predicated_tile_sweep_kq_reduction(%sr
 // ----
   s_mov_b32 s6, 16
   s_mov_b32 s7, 128
-  v_mov_b32 v1, 0
   s_mov_b32 s8, 0
+  v_mov_b32 v1, 0
   global_load_d16_b16 v2, v1, s[0:1] offset:0
   v_cvt_f32_f16 v2, v2
 .Lbb1:
@@ -2946,8 +2946,8 @@ low.func.def target(@gfx11_target) @gfx11_stress_fragment(%s0: reg<amdgpu.sgpr>,
   buffer_load_b128 v[12:15], v10, s[4:7], s8 offen offset:16
   s_load_dwordx2 s[0:1], s[0:1], s8 offset:16
   s_buffer_load_dword s1, s[4:7], s8 offset:0
-  v_add_u32 v8, v8, v9
   s_add_u32 s2, s2, s3
+  v_add_u32 v8, v8, v9
   s_add_u32 s1, s2, s1
   v_add_u32 v8, v8, v11
   buffer_store_dword v8, v10, s[4:7], s1 offen offset:8
