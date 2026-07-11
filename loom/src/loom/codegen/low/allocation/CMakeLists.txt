@@ -128,6 +128,7 @@ loom_cc_library(
     ::live_range
     ::spill_plan
     ::spill_traffic
+    ::storage
     ::storage_lease
     ::target_constraints
     ::unit_liveness
@@ -136,6 +137,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::liveness
     loom::codegen::low::descriptors
+    loom::codegen::low::placement
     loom::ir
   PUBLIC
 )
@@ -326,6 +328,7 @@ loom_cc_library(
     ::assignment
     iree::base
     loom::codegen::low::descriptors
+    loom::codegen::low::placement
   PUBLIC
 )
 

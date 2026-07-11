@@ -128,9 +128,9 @@ iree_status_t loom_low_allocate_function(
         &value_domain, options->liveness_order, arena, &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_placement_analyze_region(module, state.body,
-                                               &value_domain, &state.liveness,
-                                               arena, &state.placement);
+    status = loom_low_placement_analyze_region(
+        module, state.body, &value_domain, &state.liveness,
+        options->placement_pair_uses, arena, &state.placement);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(

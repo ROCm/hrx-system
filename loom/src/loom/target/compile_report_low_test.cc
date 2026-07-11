@@ -603,6 +603,19 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
   };
   const uint32_t scheduled_node_indices[] = {0, 1, 2, 3, 4, 5, 6, 7};
+  loom_low_schedule_table_t schedule = {};
+  schedule.module = &module;
+  schedule.target.descriptor_set = &descriptor_set;
+  schedule.blocks = schedule_blocks;
+  schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
+  schedule.nodes = schedule_nodes;
+  schedule.node_count = 13;
+  schedule.dependency_count = 6;
+  schedule.scheduled_node_indices = scheduled_node_indices;
+  schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
+  schedule.resource_use_count = 4;
+  schedule.hazard_gap_count = 2;
+  schedule.model_summary_count = 1;
   const loom_low_emission_frame_t frame = {
       /*.module=*/{},
       /*.function_op=*/{}, /*.target=*/
@@ -615,50 +628,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.feature_bits=*/{},
           /*.descriptor_set=*/&descriptor_set,
       },
-      /*.schedule=*/
-      {
-          /*.module=*/&module,
-          /*.function_op=*/{}, /*.target=*/
-          {
-              /*.target_symbol=*/{},
-              /*.target_op=*/{},
-              /*.bundle_storage=*/{},
-              /*.target_name=*/{},
-              /*.descriptor_set_key=*/{},
-              /*.feature_bits=*/{},
-              /*.descriptor_set=*/&descriptor_set,
-          },
-          /*.memory_access_table=*/{},
-          /*.value_ids=*/{},
-          /*.value_count=*/{},
-          /*.liveness=*/{},
-          /*.blocks=*/schedule_blocks,
-          /*.block_count=*/IREE_ARRAYSIZE(schedule_blocks),
-          /*.nodes=*/schedule_nodes,
-          /*.node_count=*/13,
-          /*.dependencies=*/{},
-          /*.dependency_count=*/6,
-          /*.visibility_dependencies=*/{},
-          /*.visibility_dependency_count=*/{},
-          /*.scheduled_node_indices=*/scheduled_node_indices,
-          /*.scheduled_node_count=*/IREE_ARRAYSIZE(scheduled_node_indices),
-          /*.error_count=*/{},
-          /*.failure=*/{},
-          /*.pressure_steps=*/{},
-          /*.pressure_step_count=*/{},
-          /*.candidate_decisions=*/{},
-          /*.candidate_decision_count=*/{},
-          /*.resource_uses=*/{},
-          /*.resource_use_count=*/4,
-          /*.effect_uses=*/{},
-          /*.effect_use_count=*/{},
-          /*.hazard_uses=*/{},
-          /*.hazard_use_count=*/{},
-          /*.hazard_gaps=*/{},
-          /*.hazard_gap_count=*/2,
-          /*.model_summaries=*/{},
-          /*.model_summary_count=*/1,
-      },
+      /*.schedule=*/schedule,
       /*.allocation=*/
       {
           /*.module=*/&module,

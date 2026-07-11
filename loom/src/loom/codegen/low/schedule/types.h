@@ -22,6 +22,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -209,6 +210,9 @@ typedef struct loom_low_schedule_pair_affinity_t {
   const loom_low_descriptor_t* second_descriptor;
   // Relative benefit for forming this pair. Zero disables the row.
   uint16_t priority;
+  // Index + 1 into the list placement_recipes table, or
+  // LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE.
+  uint16_t placement_recipe_index;
 } loom_low_schedule_pair_affinity_t;
 
 // List of target-provided pair-affinity rows.
@@ -217,6 +221,10 @@ typedef struct loom_low_schedule_pair_affinity_list_t {
   const loom_low_schedule_pair_affinity_t* values;
   // Number of entries in |values|.
   iree_host_size_t count;
+  // Borrowed target-provided placement recipes referenced by values.
+  const loom_low_placement_pair_recipe_t* placement_recipes;
+  // Number of entries in placement_recipes.
+  iree_host_size_t placement_recipe_count;
 } loom_low_schedule_pair_affinity_list_t;
 
 static inline loom_low_schedule_pair_affinity_list_t
@@ -746,6 +754,8 @@ typedef struct loom_low_schedule_table_t {
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.
   iree_host_size_t scheduled_node_count;
+  // Concrete placement-sensitive pair opportunities in scheduled order.
+  loom_low_placement_pair_use_list_t placement_pair_uses;
   // Number of error diagnostics emitted while attempting scheduling.
   uint32_t error_count;
   // Terminal hard-scheduling failure when |error_count| is non-zero.

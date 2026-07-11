@@ -10,3 +10,46 @@ low.func.def target(@target) @vopd_pairs_across_coalesced_copy(%a0: reg<amdgpu.v
 
 // ----
 {"format":"loom.amdgpu.vopd_plan.v0","function":"vopd_pairs_across_coalesced_copy","target":"target","descriptor_set":"amdgpu.rdna3.core","pair_count":1,"rejection_count":0,"packet_count":4,"pairs":[{"index":0,"reason":"mixed_components","block":0,"flags":0,"literal_u32":null,"x":{"packet":0,"node":0,"descriptor":"amdgpu.v_mul_f32","op_id":3,"op":"mul_f32","vdst":4,"src0":0,"vsrc1":1},"y":{"packet":2,"node":2,"descriptor":"amdgpu.v_add_f32","op_id":4,"op":"add_f32","vdst":5,"src0":2,"vsrc1":3}}],"rejections":[],"packets":[{"index":0,"role":"first","pair":0},{"index":1,"role":"none","pair":null},{"index":2,"role":"second","pair":0},{"index":3,"role":"none","pair":null}]}
+
+// ====
+
+// RUN: emit amdgpu-vopd-plan-json @rdna3_vopd_placement_across_copy
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @rdna3_vopd_placement_across_copy(%acc: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %next0 = v_fmac_f32 %acc, %lhs0, %rhs0
+  %next0_copy = copy %next0 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %next1 = v_fmaak_f32 %lhs1, %rhs1, 1065353216
+  return
+}
+
+// ----
+{"format":"loom.amdgpu.vopd_plan.v0","function":"rdna3_vopd_placement_across_copy","target":"target","descriptor_set":"amdgpu.rdna3.core","pair_count":1,"rejection_count":0,"packet_count":4,"pairs":[{"index":0,"reason":"mixed_components","block":0,"flags":1,"literal_u32":1065353216,"x":{"packet":0,"node":0,"descriptor":"amdgpu.v_fmac_f32","op_id":0,"op":"fmac_f32","vdst":0,"src0":1,"vsrc1":2},"y":{"packet":1,"node":2,"descriptor":"amdgpu.v_fmaak_f32","op_id":1,"op":"fmaak_f32","vdst":3,"src0":3,"vsrc1":4}}],"rejections":[],"packets":[{"index":0,"role":"first","pair":0},{"index":1,"role":"second","pair":0},{"index":2,"role":"none","pair":null},{"index":3,"role":"none","pair":null}]}
+
+// ====
+
+// RUN: emit amdgpu-vopd-plan-json @rdna4_vopd_placement
+
+amdgpu.target<gfx1200> @target
+low.func.def target(@target) @rdna4_vopd_placement(%acc: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+  %next0 = v_fmac_f32 %acc, %lhs0, %rhs0
+  %next1 = v_fmaak_f32 %lhs1, %rhs1, 1065353216
+  return
+}
+
+// ----
+{"format":"loom.amdgpu.vopd_plan.v0","function":"rdna4_vopd_placement","target":"target","descriptor_set":"amdgpu.rdna4.core","pair_count":1,"rejection_count":0,"packet_count":3,"pairs":[{"index":0,"reason":"mixed_components","block":0,"flags":1,"literal_u32":1065353216,"x":{"packet":0,"node":0,"descriptor":"amdgpu.v_fmac_f32","op_id":0,"op":"fmac_f32","vdst":0,"src0":1,"vsrc1":2},"y":{"packet":1,"node":1,"descriptor":"amdgpu.v_fmaak_f32","op_id":1,"op":"fmaak_f32","vdst":3,"src0":3,"vsrc1":4}}],"rejections":[],"packets":[{"index":0,"role":"first","pair":0},{"index":1,"role":"second","pair":0},{"index":2,"role":"none","pair":null}]}
+
+// ====
+
+// RUN: emit amdgpu-vopd-plan-json @gfx1250_vopd_placement
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @gfx1250_vopd_placement(%acc: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %next0 = v_fmac_f32 %acc, %lhs0, %rhs0
+  %next1 = v_fmaak_f32 %lhs1, %rhs1, 1065353216
+  return
+}
+
+// ----
+{"format":"loom.amdgpu.vopd_plan.v0","function":"gfx1250_vopd_placement","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","pair_count":1,"rejection_count":0,"packet_count":3,"pairs":[{"index":0,"reason":"mixed_components","block":0,"flags":1,"literal_u32":1065353216,"x":{"packet":0,"node":0,"descriptor":"amdgpu.v_fmac_f32","op_id":0,"op":"fmac_f32","vdst":0,"src0":1,"vsrc1":2},"y":{"packet":1,"node":1,"descriptor":"amdgpu.v_fmaak_f32","op_id":1,"op":"fmaak_f32","vdst":3,"src0":3,"vsrc1":4}}],"rejections":[],"packets":[{"index":0,"role":"first","pair":0},{"index":1,"role":"second","pair":0},{"index":2,"role":"none","pair":null}]}

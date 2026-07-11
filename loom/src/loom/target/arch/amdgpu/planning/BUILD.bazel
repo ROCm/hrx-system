@@ -295,6 +295,15 @@ loom_generated_textual_header(
     output_flag = "--pair-affinities",
 )
 
+loom_generated_textual_header(
+    name = "vopd_pair_placement_recipes_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_pair_placement_recipes.inl",
+    output_flag = "--pair-placement-recipes",
+)
+
 loom_cc_library(
     name = "wait_packet_tables",
     srcs = ["wait_packet_tables.c"],
@@ -361,6 +370,7 @@ loom_cc_library(
         ":vopd_component_rules.inl",
         ":vopd_pair_affinities.inl",
         ":vopd_pair_affinity_ranges.inl",
+        ":vopd_pair_placement_recipes.inl",
     ],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [

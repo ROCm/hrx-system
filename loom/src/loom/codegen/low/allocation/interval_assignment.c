@@ -84,6 +84,7 @@ loom_low_allocation_interval_assignment_search_context(
       .unit_liveness = state->context->unit_liveness,
       .target_constraints = state->context->target_constraints,
       .assignment_map = &state->result.assignment_map,
+      .placement = state->context->placement,
       .active_set = &state->active,
       .storage_leases = state->context->storage_leases,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,

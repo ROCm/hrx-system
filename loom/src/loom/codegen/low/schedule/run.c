@@ -227,6 +227,14 @@ static iree_status_t loom_low_schedule_initialize_storage(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_node_indices),
         (void**)&state->scheduled_node_indices));
+    const iree_host_size_t placement_pair_use_capacity = node_count / 2;
+    if (state->options->pair_affinities.placement_recipe_count != 0 &&
+        placement_pair_use_capacity != 0) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(state->arena, placement_pair_use_capacity,
+                                    sizeof(*state->placement_pair_uses),
+                                    (void**)&state->placement_pair_uses));
+    }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->state_chain_read_heads),
         (void**)&state->state_chain_read_heads));
@@ -347,6 +355,9 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
   if (loom_low_schedule_pair_affinity_list_is_empty(affinities)) {
     return iree_ok_status();
   }
+  IREE_ASSERT(affinities.placement_recipe_count == 0 ||
+              affinities.placement_recipes != NULL);
+  IREE_ASSERT_LE(affinities.count, UINT32_MAX);
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   if (descriptor_set->descriptor_count == 0) {
@@ -373,10 +384,11 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
     if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
       continue;
     }
-    if (state->pair_affinity_record_count >= UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low schedule pair-affinity record count exceeds uint32_t");
+    if (affinity->placement_recipe_index !=
+        LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE) {
+      const uint16_t recipe_index =
+          (uint16_t)(affinity->placement_recipe_index - 1u);
+      IREE_ASSERT_LT(recipe_index, affinities.placement_recipe_count);
     }
     const uint32_t record_index = (uint32_t)state->pair_affinity_record_count++;
     state->pair_affinity_records[record_index] =
@@ -384,6 +396,7 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
             .second_descriptor = affinity->second_descriptor,
             .next_record = state->pair_affinity_heads[first_ordinal],
             .priority = affinity->priority,
+            .placement_recipe_index = affinity->placement_recipe_index,
         };
     state->pair_affinity_heads[first_ordinal] = record_index;
   }
@@ -1491,18 +1504,19 @@ static bool loom_low_schedule_node_is_pair_transparent(
   }
 }
 
-static uint16_t loom_low_schedule_pair_affinity_priority(
+static const loom_low_schedule_pair_affinity_record_t*
+loom_low_schedule_find_pair_affinity(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* first,
     const loom_low_schedule_node_t* second) {
   if (first == NULL || second == NULL || first->descriptor == NULL ||
       second->descriptor == NULL || state->pair_affinity_heads == NULL) {
-    return 0;
+    return NULL;
   }
   const uint32_t first_ordinal =
       loom_low_schedule_descriptor_ordinal(state, first->descriptor);
   if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return 0;
+    return NULL;
   }
   for (uint32_t record_index = state->pair_affinity_heads[first_ordinal];
        record_index != LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
@@ -1510,10 +1524,19 @@ static uint16_t loom_low_schedule_pair_affinity_priority(
     const loom_low_schedule_pair_affinity_record_t* record =
         &state->pair_affinity_records[record_index];
     if (record->second_descriptor == second->descriptor) {
-      return record->priority;
+      return record;
     }
   }
-  return 0;
+  return NULL;
+}
+
+static uint16_t loom_low_schedule_pair_affinity_priority(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* first,
+    const loom_low_schedule_node_t* second) {
+  const loom_low_schedule_pair_affinity_record_t* record =
+      loom_low_schedule_find_pair_affinity(state, first, second);
+  return record != NULL ? record->priority : 0;
 }
 
 static bool loom_low_schedule_node_can_start_pair_affinity(
@@ -2042,8 +2065,7 @@ static void loom_low_schedule_record_candidate_decision(
 }
 
 static void loom_low_schedule_note_pair_affinity_node_scheduled(
-    loom_low_schedule_build_state_t* state, uint32_t node_index,
-    loom_low_schedule_candidate_score_t score) {
+    loom_low_schedule_build_state_t* state, uint32_t node_index) {
   if (loom_low_schedule_pair_affinity_list_is_empty(
           state->options->pair_affinities)) {
     state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -2052,10 +2074,37 @@ static void loom_low_schedule_note_pair_affinity_node_scheduled(
 
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
   if (node->descriptor != NULL) {
-    if (score.pair_affinity_score != 0 &&
-        state->pending_pair_affinity_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
-      state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-      return;
+    if (state->pending_pair_affinity_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
+      const loom_low_schedule_node_t* anchor =
+          &state->nodes[state->pending_pair_affinity_node];
+      const loom_low_schedule_pair_affinity_record_t* affinity =
+          loom_low_schedule_find_pair_affinity(state, anchor, node);
+      if (affinity != NULL &&
+          !loom_low_schedule_node_result_used_by(anchor, node)) {
+        const uint16_t placement_recipe_index =
+            affinity->placement_recipe_index;
+        if (placement_recipe_index != LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE) {
+          const uint16_t recipe_index = (uint16_t)(placement_recipe_index - 1u);
+          IREE_ASSERT_LT(
+              recipe_index,
+              state->options->pair_affinities.placement_recipe_count);
+          const loom_low_placement_pair_recipe_t* recipe =
+              &state->options->pair_affinities.placement_recipes[recipe_index];
+          IREE_ASSERT_NE(recipe->relation_count, 0);
+          IREE_ASSERT(state->placement_pair_uses != NULL);
+          IREE_ASSERT_LT(state->placement_pair_use_count,
+                         state->scheduled_node_count / 2);
+          state->placement_pair_uses[state->placement_pair_use_count++] =
+              (loom_low_placement_pair_use_t){
+                  .first_op = anchor->op,
+                  .second_op = node->op,
+                  .placement_recipe_index = placement_recipe_index,
+                  .priority = affinity->priority,
+              };
+        }
+        state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
+        return;
+      }
     }
     state->pending_pair_affinity_node =
         loom_low_schedule_node_can_start_pair_affinity(state, node)
@@ -2867,8 +2916,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       state->scheduled_node_indices[state->scheduled_node_count++] =
           chosen_node;
       ++block_record->scheduled_node_count;
-      loom_low_schedule_note_pair_affinity_node_scheduled(state, chosen_node,
-                                                          chosen_score);
+      loom_low_schedule_note_pair_affinity_node_scheduled(state, chosen_node);
       if (loom_low_schedule_uses_pressure_strategy(state)) {
         loom_low_schedule_record_candidate_decision(
             state, block_index, state->nodes[chosen_node].scheduled_ordinal,
@@ -3040,6 +3088,14 @@ iree_status_t loom_low_schedule_function(
         .visibility_dependency_count = state.visibility_dependency_count,
         .scheduled_node_indices = state.scheduled_node_indices,
         .scheduled_node_count = state.scheduled_node_count,
+        .placement_pair_uses =
+            {
+                .values = state.placement_pair_uses,
+                .count = state.placement_pair_use_count,
+                .placement_recipes = options->pair_affinities.placement_recipes,
+                .placement_recipe_count =
+                    options->pair_affinities.placement_recipe_count,
+            },
         .error_count = state.error_count,
         .failure = state.failure,
         .pressure_steps = state.pressure_steps,

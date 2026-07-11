@@ -20,6 +20,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,8 @@ typedef struct loom_low_allocation_search_context_t {
   const loom_low_allocation_target_constraints_t* target_constraints;
   // Current assignment lookup table.
   const loom_low_allocation_assignment_map_t* assignment_map;
+  // Function-local structural and concrete-location placement relations.
+  const loom_low_placement_table_t* placement;
   // Active assignment window at the interval currently being assigned.
   loom_low_allocation_active_set_t* active_set;
   // Materialized storage leases and release eligibility.
