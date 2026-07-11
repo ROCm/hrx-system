@@ -636,6 +636,7 @@ static iree_status_t loom_print_low_asm_structural_copy(
   IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
                                                      statement->operand_count,
                                                      LOOM_PRINT_FIELD_OPERAND));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_structural_attr_dict(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ":", false));
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
   IREE_RETURN_IF_ERROR(loom_print_value_type(ctx, statement->operands[0]));
