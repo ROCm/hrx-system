@@ -401,38 +401,6 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t rejected_units_until_pressure_cliff;
 } loom_low_schedule_candidate_decision_t;
 
-// Descriptor resource use recorded in scheduled order. This is an issue-model
-// trace, not a cycle-accurate reservation table; target overlays can refine it
-// into wait insertion, occupancy, or port-pressure diagnostics.
-typedef struct loom_low_schedule_resource_use_t {
-  // Scheduled node using the resource.
-  uint32_t node_index;
-  // Region block containing |node_index|.
-  uint32_t block_index;
-  // Scheduled ordinal within |block_index|.
-  uint32_t scheduled_ordinal;
-  // Issue-use row ordinal within the node's schedule class.
-  uint16_t issue_use_ordinal;
-  // Target resource table identifier consumed by this issue use.
-  uint16_t resource_id;
-  // Borrowed stable resource name.
-  iree_string_view_t resource_name;
-  // Abstract resource kind used by generic diagnostics.
-  loom_low_resource_kind_t resource_kind;
-  // Generic resource flags from the descriptor table.
-  loom_low_resource_flags_t resource_flags;
-  // Resource units available per cycle in the descriptor model.
-  uint16_t capacity_per_cycle;
-  // Contention group identifier shared by related resources.
-  uint16_t contention_group_id;
-  // Pipeline stage associated with this use.
-  uint16_t stage;
-  // Number of cycles the resource is occupied.
-  uint16_t cycles;
-  // Number of resource units consumed per cycle.
-  uint16_t units;
-} loom_low_schedule_resource_use_t;
-
 // Descriptor effect row recorded in scheduled order. Effects describe memory,
 // counter, call, barrier, and control visibility used by dependency
 // construction and target-owned visibility planning.
@@ -681,10 +649,7 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_candidate_decision_t* candidate_decisions;
   // Number of candidate decision records.
   iree_host_size_t candidate_decision_count;
-  // Descriptor resource uses in scheduled order. Empty when scheduled nodes do
-  // not reference descriptor issue-use rows.
-  const loom_low_schedule_resource_use_t* resource_uses;
-  // Number of resource-use records.
+  // Number of descriptor issue-use rows referenced by scheduled nodes.
   iree_host_size_t resource_use_count;
   // Descriptor effects in scheduled order.
   const loom_low_schedule_effect_use_t* effect_uses;

@@ -184,8 +184,6 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_pressure_step_t* pressure_steps;
   // Candidate decisions in scheduled order when requested.
   loom_low_schedule_candidate_decision_t* candidate_decisions;
-  // Descriptor resource uses in scheduled order.
-  loom_low_schedule_resource_use_t* resource_uses;
   // Descriptor effects in scheduled order.
   loom_low_schedule_effect_use_t* effect_uses;
   // Descriptor hazard rows in scheduled order.
@@ -323,8 +321,6 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t memory_access_record_count;
   // Next memory access record to bind while walking function-order nodes.
   iree_host_size_t memory_access_record_bind_index;
-  // Allocated resource-use record capacity.
-  iree_host_size_t resource_use_capacity;
   // Allocated effect-use record capacity.
   iree_host_size_t effect_use_capacity;
   // Allocated hazard-use record capacity.

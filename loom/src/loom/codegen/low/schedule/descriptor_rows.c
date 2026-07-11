@@ -10,23 +10,21 @@
 
 #include "iree/base/internal/math.h"
 
-static iree_status_t loom_low_schedule_append_resource_use(
+static iree_status_t loom_low_schedule_note_resource_use(
     loom_low_schedule_build_state_t* state,
-    loom_low_schedule_resource_use_t resource_use) {
-  IREE_ASSERT(state->resource_use_count < state->resource_use_capacity,
-              "precomputed resource-use capacity must cover all rows");
+    const loom_low_issue_use_t* issue_use) {
   IREE_ASSERT(state->resource_summaries != NULL);
-  IREE_ASSERT(resource_use.resource_id <
+  IREE_ASSERT(issue_use->resource_id <
               state->target.descriptor_set->resource_count);
   loom_low_schedule_resource_summary_t* summary =
-      &state->resource_summaries[resource_use.resource_id];
+      &state->resource_summaries[issue_use->resource_id];
   if (summary->use_count == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "low schedule resource-use count overflows");
   }
-  const uint64_t occupied_cycles = resource_use.cycles;
+  const uint64_t occupied_cycles = issue_use->cycles;
   const uint64_t unit_cycles =
-      (uint64_t)resource_use.cycles * (uint64_t)resource_use.units;
+      (uint64_t)issue_use->cycles * (uint64_t)issue_use->units;
   if (summary->total_occupied_cycles > UINT64_MAX - occupied_cycles ||
       summary->total_unit_cycles > UINT64_MAX - unit_cycles) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -37,20 +35,20 @@ static iree_status_t loom_low_schedule_append_resource_use(
   summary->total_unit_cycles += unit_cycles;
   summary->estimated_min_cycles =
       1 + (summary->total_unit_cycles - 1) / summary->capacity_per_cycle;
-  if (resource_use.units > summary->peak_units_per_cycle) {
-    summary->peak_units_per_cycle = resource_use.units;
+  if (issue_use->units > summary->peak_units_per_cycle) {
+    summary->peak_units_per_cycle = issue_use->units;
   }
   if (state->resource_ready_issue_cycles != NULL) {
     const uint32_t use_start = iree_math_saturating_add_u32(
-        state->current_issue_cycle, resource_use.stage);
+        state->current_issue_cycle, issue_use->stage);
     const uint32_t use_end =
-        iree_math_saturating_add_u32(use_start, resource_use.cycles);
-    if (use_end >
-        state->resource_ready_issue_cycles[resource_use.resource_id]) {
-      state->resource_ready_issue_cycles[resource_use.resource_id] = use_end;
+        iree_math_saturating_add_u32(use_start, issue_use->cycles);
+    if (use_end > state->resource_ready_issue_cycles[issue_use->resource_id]) {
+      state->resource_ready_issue_cycles[issue_use->resource_id] = use_end;
     }
   }
-  state->resource_uses[state->resource_use_count++] = resource_use;
+  IREE_ASSERT_NE(state->resource_use_count, IREE_HOST_SIZE_MAX);
+  ++state->resource_use_count;
   return iree_ok_status();
 }
 
@@ -291,26 +289,7 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
              ->issue_uses[schedule_class->issue_use_start + i];
     IREE_ASSERT(issue_use->resource_id <
                 state->target.descriptor_set->resource_count);
-    const loom_low_resource_t* resource =
-        &state->target.descriptor_set->resources[issue_use->resource_id];
-    iree_string_view_t resource_name = loom_low_descriptor_set_string(
-        state->target.descriptor_set, resource->name_string_offset);
-    IREE_RETURN_IF_ERROR(loom_low_schedule_append_resource_use(
-        state, (loom_low_schedule_resource_use_t){
-                   .node_index = node_index,
-                   .block_index = node->block_index,
-                   .scheduled_ordinal = node->scheduled_ordinal,
-                   .issue_use_ordinal = i,
-                   .resource_id = issue_use->resource_id,
-                   .resource_name = resource_name,
-                   .resource_kind = resource->kind,
-                   .resource_flags = resource->flags,
-                   .capacity_per_cycle = resource->capacity_per_cycle,
-                   .contention_group_id = resource->contention_group_id,
-                   .stage = issue_use->stage,
-                   .cycles = issue_use->cycles,
-                   .units = issue_use->units,
-               }));
+    IREE_RETURN_IF_ERROR(loom_low_schedule_note_resource_use(state, issue_use));
   }
   for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
     const loom_low_hazard_t* hazard =
