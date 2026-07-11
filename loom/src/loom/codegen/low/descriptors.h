@@ -105,6 +105,10 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand reads implicit state that constrains scheduling but is not a hidden
 // value dependency for generic CSE identity.
 #define LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE ((uint16_t)1u << 6)
+// Result may be safely rematerialized near each use. The descriptor generator
+// derives this projection after validating the result constraint, packet
+// effects, descriptor flags, and target-state behavior.
+#define LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE ((uint16_t)1u << 7)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;
