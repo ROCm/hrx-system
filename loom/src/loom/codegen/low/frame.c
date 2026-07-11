@@ -13,6 +13,7 @@
 #include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/error/error_catalog.h"
@@ -237,9 +238,12 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
   };
   if (statistics != NULL) ++statistics->frame_build_count;
 
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_func_op, options->descriptor_registry,
+      options->target_selection, diagnostic_emitter,
+      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   loom_low_schedule_options_t schedule_options = {
-      .descriptor_registry = options->descriptor_registry,
-      .target_selection = options->target_selection,
       .memory_access_table = options->memory_access_table,
       .pressure_cliffs = options->pressure_cliffs,
       .allocation_budgets = options->allocation_budgets,
@@ -251,27 +255,26 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       .diagnostic_flags = options->schedule_diagnostic_flags,
       .strategy = options->schedule_strategy,
   };
-  IREE_RETURN_IF_ERROR(loom_low_schedule_function(
-      module, low_func_op, &schedule_options, arena, &out_frame->schedule));
-  if (out_frame->schedule.error_count != 0) {
-    out_frame->target = out_frame->schedule.target;
-    return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_function(&model, &schedule_options, arena,
+                                        &out_frame->schedule);
   }
 
   loom_low_storage_lease_table_t storage_leases = {0};
-  if (options->storage_lease_provider != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_storage_lease_build(
-        &out_frame->schedule, options->storage_lease_provider, arena,
-        &storage_leases));
+  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0 &&
+      options->storage_lease_provider != NULL) {
+    status = loom_low_storage_lease_build(&out_frame->schedule,
+                                          options->storage_lease_provider,
+                                          arena, &storage_leases);
   }
 
   loom_liveness_order_t liveness_order = loom_liveness_order_empty();
-  IREE_RETURN_IF_ERROR(loom_low_emission_frame_liveness_order_from_schedule(
-      low_func_op, &out_frame->schedule, arena, &liveness_order));
+  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0) {
+    status = loom_low_emission_frame_liveness_order_from_schedule(
+        low_func_op, &out_frame->schedule, arena, &liveness_order);
+  }
   loom_low_allocation_options_t allocation_options = {
       .liveness_order = liveness_order,
-      .descriptor_registry = options->descriptor_registry,
-      .target_selection = options->target_selection,
       .budgets = options->allocation_budgets,
       .budget_count = options->allocation_budget_count,
       .fixed_values = options->allocation_fixed_values,
@@ -283,18 +286,22 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       .emitter = diagnostic_emitter,
       .diagnostic_flags = options->allocation_diagnostic_flags,
   };
-  if (statistics != NULL) ++statistics->allocation_run_count;
-  IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-      module, low_func_op, &allocation_options, arena, &out_frame->allocation));
-
-  if (out_frame->allocation.error_count != 0) {
-    out_frame->target = out_frame->schedule.target;
-    return iree_ok_status();
+  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0) {
+    if (statistics != NULL) ++statistics->allocation_run_count;
+    status = loom_low_allocate_function(&model, &allocation_options, arena,
+                                        &out_frame->allocation);
   }
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(&out_frame->schedule,
-                                                       &out_frame->allocation));
-  out_frame->target = out_frame->schedule.target;
-  return iree_ok_status();
+  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0 &&
+      out_frame->allocation.error_count == 0) {
+    status = loom_low_packet_validate_tables(&out_frame->schedule,
+                                             &out_frame->allocation);
+  }
+  if (iree_status_is_ok(status)) {
+    out_frame->target = out_frame->schedule.target;
+    loom_target_bundle_storage_rebind(&out_frame->target.bundle_storage);
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 iree_status_t loom_low_emission_frame_build(

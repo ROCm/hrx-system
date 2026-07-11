@@ -86,56 +86,52 @@ static iree_status_t loom_low_allocation_validate_synthesis_mode(
 }
 
 iree_status_t loom_low_allocate_function(
-    loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
     loom_low_allocation_table_t* out_table) {
-  if (!loom_low_function_def_isa(low_func_op)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected low.func.def or low.kernel.def");
-  }
-  *out_table = (loom_low_allocation_table_t){0};
+  *out_table = (loom_low_allocation_table_t){
+      .module = model->module,
+      .function_op = model->function_op,
+      .target = model->target,
+      .error_count = model->error_count,
+  };
+  loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
+  if (model->error_count != 0) return iree_ok_status();
+  IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
+  IREE_ASSERT(iree_any_bit_set(model->value_domain.flags,
+                               LOOM_LOCAL_VALUE_DOMAIN_FLAG_REGION_TREE));
 
   loom_low_allocation_build_state_t state = {
-      .module = module,
+      .module = model->module,
       .options = options,
       .arena = arena,
-      .body = loom_low_function_body((loom_op_t*)low_func_op),
-      .function_op = low_func_op,
+      .body = model->body,
+      .function_op = model->function_op,
+      .target = model->target,
   };
+  loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   IREE_RETURN_IF_ERROR(
-      loom_low_allocation_validate_synthesis_mode(low_func_op));
-
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_func_op, options->descriptor_registry,
-      options->target_selection, options->emitter, &state.target));
-  if (!state.target.descriptor_set) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low function target did not resolve");
-  }
+      loom_low_allocation_validate_synthesis_mode(model->function_op));
   iree_status_t status = loom_low_allocation_target_constraints_initialize(
-      module, low_func_op, &state.target, options->budgets,
+      model->module, model->function_op, &state.target, options->budgets,
       options->budget_count, options->reserved_ranges,
       options->reserved_range_count, options->emitter, arena,
       &state.target_constraints);
 
-  loom_local_value_domain_t value_domain = {0};
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_local_value_domain_acquire_for_region_tree(
-        module, state.body, arena, &value_domain);
-  }
+  const loom_local_value_domain_t* value_domain = &model->value_domain;
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_liveness_analyze_local_value_domain(
-        &value_domain, options->liveness_order, arena, &state.liveness);
+        value_domain, options->liveness_order, arena, &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_placement_analyze_region(
-        module, state.body, &value_domain, &state.liveness,
+        model->module, state.body, value_domain, &state.liveness,
         options->placement_pair_uses, arena, &state.placement);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
-        module, state.body, &state.target, options->liveness_order,
-        &state.placement, &value_domain, &state.liveness, arena,
+        model->module, state.body, &state.target, options->liveness_order,
+        &state.placement, value_domain, &state.liveness, arena,
         &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
@@ -144,13 +140,13 @@ iree_status_t loom_low_allocate_function(
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_target_constraints_resolve_fixed_values(
-        &state.target_constraints, &state.liveness, &value_domain,
+        &state.target_constraints, &state.liveness, value_domain,
         options->fixed_values, options->fixed_value_count, arena);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_storage_lease_state_initialize(
-        &options->storage_leases, module, low_func_op, &value_domain,
-        &state.liveness, arena, &state.storage_leases);
+        &options->storage_leases, model->module, model->function_op,
+        value_domain, &state.liveness, arena, &state.storage_leases);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     const loom_low_allocation_interval_assignment_context_t
@@ -212,14 +208,14 @@ iree_status_t loom_low_allocate_function(
   loom_low_allocation_table_t table = {0};
   if (iree_status_is_ok(status)) {
     table = (loom_low_allocation_table_t){
-        .module = module,
-        .function_op = low_func_op,
+        .module = model->module,
+        .function_op = model->function_op,
         .target = state.target,
         .liveness = state.liveness,
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,
         .fixed_value_count = state.target_constraints.fixed_value_count,
-        .allocation_mode = loom_low_function_allocation(low_func_op),
+        .allocation_mode = loom_low_function_allocation(model->function_op),
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
         .assignment_count = state.interval_assignment.assignment_count,
@@ -257,7 +253,6 @@ iree_status_t loom_low_allocate_function(
     };
     loom_target_bundle_storage_rebind(&table.target.bundle_storage);
   }
-  loom_local_value_domain_release(&value_domain);
   if (iree_status_is_ok(status) && table.error_count == 0) {
     status = loom_low_allocation_diagnostics_emit(
         &table, options->diagnostic_flags, options->emitter);

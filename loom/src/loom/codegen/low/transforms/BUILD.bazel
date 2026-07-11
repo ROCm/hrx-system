@@ -26,6 +26,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:allocation_rematerialization",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",

@@ -219,6 +219,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low:packet_json",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",

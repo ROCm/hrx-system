@@ -567,13 +567,8 @@ typedef struct loom_low_schedule_block_t {
 
 // Options controlling low schedule construction.
 typedef struct loom_low_schedule_options_t {
-  // Descriptor registry available to the scheduler.
-  const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional runtime/device target overlay applied when compatible with the
-  // function's target record.
-  loom_target_selection_t target_selection;
-  // Optional source-derived memory summaries for |low_func_op|. Empty uses
-  // conservative descriptor effect summaries.
+  // Optional source-derived memory summaries for the modeled function. Empty
+  // uses conservative descriptor effect summaries.
   loom_low_memory_access_table_t memory_access_table;
   // Optional target-provided register-pressure cliff table.
   loom_low_pressure_cliff_table_t pressure_cliffs;

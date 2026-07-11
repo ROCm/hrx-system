@@ -25,6 +25,7 @@ loom_cc_library(
     loom::codegen::low::allocation_rematerialization
     loom::codegen::low::descriptors
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::pipeline::pass_environment
     loom::ir
     loom::ops::low

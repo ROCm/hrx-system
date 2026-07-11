@@ -10,6 +10,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/descriptor_rows.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
@@ -230,14 +231,6 @@ static bool loom_low_schedule_uses_pressure_strategy(
          state->options->strategy ==
              LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING ||
          state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
-}
-
-static void loom_low_schedule_count_nodes(const loom_region_t* body,
-                                          iree_host_size_t* out_node_count) {
-  iree_host_size_t node_count = 0;
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(body, block) { node_count += block->op_count; }
-  *out_node_count = node_count;
 }
 
 static iree_status_t loom_low_schedule_initialize_value_records(
@@ -3684,41 +3677,41 @@ static void loom_low_schedule_initialize_preferred_pair_index(
 }
 
 iree_status_t loom_low_schedule_function(
-    loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_low_function_model_t* model,
     const loom_low_schedule_options_t* options, iree_arena_allocator_t* arena,
     loom_low_schedule_table_t* out_table) {
-  if (!loom_low_function_def_isa(low_func_op)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected low.func.def or low.kernel.def");
-  }
   if (!loom_low_schedule_strategy_is_valid(options->strategy)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown low schedule strategy %d",
                             (int)options->strategy);
   }
-  *out_table = (loom_low_schedule_table_t){0};
+  *out_table = (loom_low_schedule_table_t){
+      .module = model->module,
+      .function_op = model->function_op,
+      .target = model->target,
+      .error_count = model->error_count,
+  };
+  loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
+  if (model->error_count != 0) return iree_ok_status();
+  IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
 
   loom_low_schedule_build_state_t state = {
-      .module = module,
+      .module = model->module,
       .options = options,
       .arena = arena,
-      .function_op = low_func_op,
-      .body = loom_low_function_body((loom_op_t*)low_func_op),
+      .function_op = model->function_op,
+      .body = model->body,
+      .target = model->target,
+      .value_domain = &model->value_domain,
   };
+  loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
   IREE_ASSERT(state.body != NULL);
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_memory_access_table(
-      options->memory_access_table, low_func_op, state.body));
-  if (options->memory_access_table.function_op == low_func_op) {
+      options->memory_access_table, model->function_op, state.body));
+  if (options->memory_access_table.function_op == model->function_op) {
     state.memory_access_records = options->memory_access_table.values;
     state.memory_access_record_count = options->memory_access_table.count;
-  }
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_func_op, options->descriptor_registry,
-      options->target_selection, options->emitter, &state.target));
-  if (!state.target.descriptor_set) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low function target did not resolve");
   }
   state.register_type_resolver =
       loom_low_register_type_resolver_for_descriptor_set(
@@ -3726,21 +3719,15 @@ iree_status_t loom_low_schedule_function(
   IREE_RETURN_IF_ERROR(
       loom_low_schedule_initialize_pair_affinity_index(&state));
 
-  iree_host_size_t node_count = 0;
-  loom_low_schedule_count_nodes(state.body, &node_count);
+  const iree_host_size_t node_count = model->node_count;
   const bool needs_liveness =
       iree_any_bit_set(options->flags,
                        LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS) ||
       iree_any_bit_set(options->diagnostic_flags,
                        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS);
-  loom_local_value_domain_t value_domain = {0};
   loom_liveness_analysis_t liveness = {0};
-  iree_status_t status = loom_local_value_domain_acquire_for_region(
-      module, state.body, arena, &value_domain);
-  if (iree_status_is_ok(status)) {
-    state.value_domain = &value_domain;
-    status = loom_low_schedule_initialize_storage(&state, node_count);
-  }
+  iree_status_t status =
+      loom_low_schedule_initialize_storage(&state, node_count);
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_fill_nodes(&state);
   }
@@ -3762,7 +3749,7 @@ iree_status_t loom_low_schedule_function(
   }
   if (iree_status_is_ok(status) && needs_liveness) {
     status = loom_liveness_analyze_local_value_domain(
-        &value_domain, loom_liveness_order_empty(), arena, &liveness);
+        &model->value_domain, loom_liveness_order_empty(), arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_run_list_scheduler(&state, node_count);
@@ -3799,12 +3786,12 @@ iree_status_t loom_low_schedule_function(
 
   if (iree_status_is_ok(status)) {
     *out_table = (loom_low_schedule_table_t){
-        .module = module,
-        .function_op = low_func_op,
+        .module = model->module,
+        .function_op = model->function_op,
         .target = state.target,
         .memory_access_table = options->memory_access_table,
-        .value_ids = value_domain.value_ids,
-        .value_count = value_domain.value_count,
+        .value_ids = model->value_domain.value_ids,
+        .value_count = model->value_domain.value_count,
         .liveness = liveness,
         .blocks = state.blocks,
         .block_count = state.body->block_count,
@@ -3842,6 +3829,5 @@ iree_status_t loom_low_schedule_function(
                                             &out_table->dependencies);
     loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   }
-  loom_local_value_domain_release(&value_domain);
   return status;
 }
