@@ -369,6 +369,20 @@ low.func.def target(@test_target) @placement_affinity_rejected(%state: reg<test.
 
 // ====
 
+// RUN: emit low-allocation-json @detached_copy_materializes
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @detached_copy_materializes(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %copy = copy %state {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %state, %copy
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"detached_copy_materializes","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,"assignments":[{"index":0,"value":{"id":0,"name":"state","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":3,"name":"copy","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}}],"spill_plans":[],"copy_decisions":[{"index":0,"kind":"materialized","source_value":{"id":0,"name":"state","type":"reg<test.i32>"},"result_value":{"id":3,"name":"copy","type":"reg<test.i32>"},"source_assignment":0,"result_assignment":1}],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @structured_for_storage_affinity diagnostics=placement-decisions output=none
 
 test.target<low_core> @test_target
