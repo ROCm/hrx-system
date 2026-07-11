@@ -148,6 +148,30 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    segmented_storage
+  HDRS
+    "segmented_storage.h"
+  SRCS
+    "segmented_storage.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    segmented_storage_test
+  SRCS
+    "segmented_storage_test.cc"
+  DEPS
+    ::segmented_storage
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_test(
   NAME
     stable_id_test
