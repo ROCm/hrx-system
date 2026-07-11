@@ -120,8 +120,9 @@ iree_status_t loom_low_allocate_function(
 
   const loom_local_value_domain_t* value_domain = &model->value_domain;
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_liveness_analyze_local_value_domain(
-        value_domain, options->liveness_order, arena, &state.liveness);
+    status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
+        value_domain, &model->cfg_graph, options->liveness_order, arena,
+        &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_placement_analyze_region(
@@ -161,6 +162,7 @@ iree_status_t loom_low_allocate_function(
             .unit_liveness = &state.unit_liveness,
             .storage_leases = &state.storage_leases,
             .arena = arena,
+            .function_cfg_graph = &model->cfg_graph,
         };
     status = loom_low_allocation_interval_assignment_build(
         &interval_assignment_context, &state.interval_assignment);

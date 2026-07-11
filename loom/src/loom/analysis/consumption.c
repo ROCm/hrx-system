@@ -36,19 +36,30 @@ static bool loom_consumption_region_is_cfg(const loom_region_t* region) {
          iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
 }
 
-iree_status_t loom_consumption_region_query_initialize(
+void loom_consumption_region_query_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_consumption_region_query_t* out_query) {
-  if (!module || !region || !arena || !out_query) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "consumption query requires a module, region, arena, and output query");
-  }
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(region);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_query);
   memset(out_query, 0, sizeof(*out_query));
   out_query->module = module;
   out_query->region = region;
   out_query->arena = arena;
-  return iree_ok_status();
+}
+
+void loom_consumption_region_query_initialize_with_cfg_graph(
+    const loom_module_t* module, const loom_region_t* region,
+    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* arena,
+    loom_consumption_region_query_t* out_query) {
+  loom_consumption_region_query_initialize(module, region, arena, out_query);
+  IREE_ASSERT_ARGUMENT(cfg_graph);
+  IREE_ASSERT(cfg_graph->module == module);
+  IREE_ASSERT(cfg_graph->region == region);
+  IREE_ASSERT_EQ(cfg_graph->block_count, region->block_count);
+  out_query->cfg_graph = *cfg_graph;
+  out_query->cfg_graph_ready = true;
 }
 
 static iree_status_t loom_consumption_region_query_cfg_graph(

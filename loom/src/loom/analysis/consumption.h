@@ -38,9 +38,9 @@ typedef struct loom_consumption_region_query_t {
   const loom_module_t* module;
   // Region whose dynamic paths are queried.
   const loom_region_t* region;
-  // Arena used for the lazily built CFG graph and reusable DFS scratch.
+  // Arena used for owned CFG extraction and reusable DFS scratch.
   iree_arena_allocator_t* arena;
-  // Lazily built CFG graph for region when region is CFG-shaped.
+  // CFG graph for the region, built lazily or copied from shared analysis.
   loom_cfg_graph_t cfg_graph;
   // True once cfg_graph has been initialized.
   bool cfg_graph_ready;
@@ -75,9 +75,18 @@ typedef struct loom_consumption_use_after_query_t {
 
 // Initializes reusable consumption query state for |region|. CFG extraction is
 // lazy: regions without tied-result consumption do not pay graph construction.
-iree_status_t loom_consumption_region_query_initialize(
+void loom_consumption_region_query_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_consumption_region_query_t* out_query);
+
+// Initializes reusable consumption query state with a prebuilt CFG graph.
+//
+// The query copies the graph view and borrows its arena-owned arrays. The graph
+// must describe |region| and remain immutable while the query is used.
+void loom_consumption_region_query_initialize_with_cfg_graph(
+    const loom_module_t* module, const loom_region_t* region,
+    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* arena,
+    loom_consumption_region_query_t* out_query);
 
 // Prepares a reusable path query for uses of |value_id| that can dynamically
 // execute after |consuming_op|. This walks CFG edges once and does not scan IR

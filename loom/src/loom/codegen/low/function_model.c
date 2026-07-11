@@ -40,6 +40,20 @@ iree_status_t loom_low_function_model_initialize(
     IREE_RETURN_IF_ERROR(loom_local_value_domain_acquire_for_region(
         module, out_model->body, arena, &out_model->value_domain));
   }
+  out_model->cfg_graph = (loom_cfg_graph_t){
+      .module = module,
+      .region = out_model->body,
+      .block_count = out_model->body->block_count,
+  };
+  if (out_model->body->block_count > 1 ||
+      iree_any_bit_set(out_model->body->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
+    iree_status_t status = loom_cfg_graph_build(module, out_model->body, arena,
+                                                &out_model->cfg_graph);
+    if (!iree_status_is_ok(status)) {
+      loom_local_value_domain_release(&out_model->value_domain);
+      return status;
+    }
+  }
   const loom_block_t* block = NULL;
   loom_region_for_each_block(out_model->body, block) {
     out_model->node_count += block->op_count;

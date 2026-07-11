@@ -611,8 +611,8 @@ static iree_status_t loom_low_select_operand_forms_consumption_query(
   const loom_region_t* region = consuming_op->parent_block->parent_region;
   if (!state->consumption_query_initialized ||
       state->consumption_query.region != region) {
-    IREE_RETURN_IF_ERROR(loom_consumption_region_query_initialize(
-        state->module, region, state->pass->arena, &state->consumption_query));
+    loom_consumption_region_query_initialize(
+        state->module, region, state->pass->arena, &state->consumption_query);
     state->consumption_query_initialized = true;
   }
   *out_query = &state->consumption_query;

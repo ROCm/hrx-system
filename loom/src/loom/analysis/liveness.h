@@ -24,6 +24,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -258,6 +259,16 @@ iree_status_t loom_liveness_analyze_region(
 // value map instead of rebuilding module scratch ownership per analysis.
 iree_status_t loom_liveness_analyze_local_value_domain(
     const loom_local_value_domain_t* value_domain, loom_liveness_order_t order,
+    iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
+
+// Computes liveness over a local value domain and a prebuilt CFG graph.
+//
+// |cfg_graph| must describe the domain region and remain immutable until the
+// analysis completes. Non-CFG regions accept an identity-only graph. This entry
+// point lets adjacent analyses share CFG extraction without a hidden rebuild.
+iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
 
 // Computes liveness using an explicit per-block operation order.
