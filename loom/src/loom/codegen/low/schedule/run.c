@@ -626,6 +626,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   iree_host_size_t resource_use_capacity = 0;
   iree_host_size_t effect_use_capacity = 0;
   iree_host_size_t hazard_use_capacity = 0;
+  bool has_state_reg_class = false;
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   const iree_host_size_t reg_class_count = descriptor_set->reg_class_count;
@@ -680,6 +681,15 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                               "out of range");
     }
     state->reg_class_state_flags[alt->reg_class_id] |= access_flags;
+    has_state_reg_class = true;
+  }
+  if (has_state_reg_class && node_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, node_count,
+        sizeof(*state->state_last_dependency_consumer_nodes),
+        (void**)&state->state_last_dependency_consumer_nodes));
+    memset(state->state_last_dependency_consumer_nodes, 0xFF,
+           node_count * sizeof(*state->state_last_dependency_consumer_nodes));
   }
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_state_reads(state));
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {

@@ -178,8 +178,6 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_node_t* nodes;
   // Stable dependency graph accumulated while building the schedule DAG.
   loom_low_schedule_dependency_graph_t dependencies;
-  // Open-addressed dependency-set entries storing one-based dependency indices.
-  uint32_t* dependency_set_indices;
   // Node indices in final scheduled order.
   uint32_t* scheduled_node_indices;
   // Pressure-model steps in scheduled order for scored strategy runs.
@@ -220,6 +218,8 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* state_last_write_nodes;
   // Most recent non-writing state-ordering node, dense by register class.
   uint32_t* state_ordering_frontier_nodes;
+  // Most recent state-edge consumer indexed by producer schedule node.
+  uint32_t* state_last_dependency_consumer_nodes;
   // Outstanding architectural-state read lists, dense by register class.
   uint32_t* state_read_heads;
   // Outstanding state-read records used by state_read_heads.
@@ -277,8 +277,6 @@ typedef struct loom_low_schedule_build_state_t {
   // Per-resource aggregate resource pressure, dense by descriptor resource id
   // until compacted after scheduling.
   loom_low_schedule_resource_summary_t* resource_summaries;
-  // Allocated dependency-set entry capacity.
-  iree_host_size_t dependency_set_capacity;
   // Number of populated scheduled_node_indices entries.
   iree_host_size_t scheduled_node_count;
   // Number of error diagnostics emitted while attempting scheduling.
