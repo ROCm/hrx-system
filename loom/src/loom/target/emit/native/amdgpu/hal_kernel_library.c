@@ -1521,10 +1521,9 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
       .user_data = NULL,
   };
 
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(32 * 1024, allocator, &block_pool);
+  // Transient target tables share the module workspace pool for warm reuse.
   iree_arena_allocator_t table_arena;
-  iree_arena_initialize(&block_pool, &table_arena);
+  iree_arena_initialize(module->arena.block_pool, &table_arena);
 
   loom_target_entry_list_t entries = {0};
   loom_verify_result_t verify_result = {0};
@@ -1578,7 +1577,6 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
     loom_target_compile_report_record_status(report, iree_status_code(status));
   }
   iree_arena_deinitialize(&table_arena);
-  iree_arena_block_pool_deinitialize(&block_pool);
   loom_target_environment_deinitialize(&target_environment);
   return status;
 }

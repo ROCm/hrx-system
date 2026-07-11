@@ -108,9 +108,8 @@ typedef struct loom_ireevm_archive_emit_state_t {
   loom_target_low_descriptor_registry_t low_registry;
   // Diagnostic materializer shared by target-low verification and emission.
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter;
-  // Block pool backing all per-emission arena allocations.
-  iree_arena_block_pool_t block_pool;
-  // Arena for facts, frames, bytecode arrays, and archive table views.
+  // Arena for facts, frames, bytecode arrays, and archive table views backed
+  // by the module workspace pool.
   iree_arena_allocator_t table_arena;
   // Function bytecode objects emitted before archive wrapping.
   loom_ireevm_function_bytecode_t* bytecodes;
@@ -127,7 +126,6 @@ static void loom_ireevm_archive_emit_state_deinitialize(
                                                state->allocator);
   }
   iree_arena_deinitialize(&state->table_arena);
-  iree_arena_block_pool_deinitialize(&state->block_pool);
   loom_target_environment_deinitialize(&state->target_environment);
   state->initialized = false;
 }
@@ -160,9 +158,7 @@ static iree_status_t loom_ireevm_archive_emit_state_initialize(
         loom_ireevm_archive_emit_module_name(options);
   }
 
-  iree_arena_block_pool_initialize(32 * 1024, allocator,
-                                   &out_state->block_pool);
-  iree_arena_initialize(&out_state->block_pool, &out_state->table_arena);
+  iree_arena_initialize(module->arena.block_pool, &out_state->table_arena);
   out_state->initialized = true;
 
   iree_status_t status = loom_target_environment_initialize(
