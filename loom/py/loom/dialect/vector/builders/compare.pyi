@@ -37,6 +37,7 @@ class VectorCompareMixin:
     def cmpf(
         self,
         *,
+        fastmath: str = ...,
         predicate: str,
         lhs: ValueRef,
         rhs: ValueRef,
