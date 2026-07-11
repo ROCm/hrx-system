@@ -222,6 +222,75 @@ TEST(Arena, Reset) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
+TEST(Arena, CheckpointRestoreWithinBlock) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  uint8_t* retained_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, (void**)&retained_ptr));
+  memset(retained_ptr, 0xAB, 128);
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(&arena);
+
+  void* discarded_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 64, &discarded_ptr));
+  memset(discarded_ptr, 0xCD, 64);
+  EXPECT_GT(arena.used_allocation_size, checkpoint.used_allocation_size);
+
+  iree_arena_checkpoint_restore(&checkpoint);
+  EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
+  EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
+  EXPECT_EQ(arena.block_head, checkpoint.block_head);
+  EXPECT_EQ(arena.block_tail, checkpoint.block_tail);
+  EXPECT_EQ(arena.block_bytes_remaining, checkpoint.block_bytes_remaining);
+  for (iree_host_size_t i = 0; i < 128; ++i) {
+    EXPECT_EQ(retained_ptr[i], 0xAB);
+  }
+
+  void* reused_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 64, &reused_ptr));
+  EXPECT_EQ(reused_ptr, discarded_ptr);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, CheckpointRestoreReleasesBlocksAndOversizedAllocations) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  void* retained_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &retained_ptr));
+  ASSERT_NE(retained_ptr, nullptr);
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(&arena);
+
+  void* block_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
+  void* oversized_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize * 2, &oversized_ptr));
+  EXPECT_NE(arena.block_head, checkpoint.block_head);
+  EXPECT_NE(arena.allocation_head, checkpoint.allocation_head);
+
+  iree_arena_checkpoint_restore(&checkpoint);
+  EXPECT_EQ(arena.allocation_head, checkpoint.allocation_head);
+  EXPECT_EQ(arena.block_head, checkpoint.block_head);
+  EXPECT_EQ(arena.block_tail, checkpoint.block_tail);
+  EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
+  EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
+  EXPECT_EQ(arena.block_bytes_remaining, checkpoint.block_bytes_remaining);
+
+  void* reused_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &reused_ptr));
+  EXPECT_NE(reused_ptr, nullptr);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 TEST(Arena, OversizedAllocationAlignment) {
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
