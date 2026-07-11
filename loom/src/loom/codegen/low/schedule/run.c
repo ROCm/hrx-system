@@ -631,10 +631,10 @@ static iree_status_t loom_low_schedule_verify_structural_state_reads(
 
 static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
-  iree_host_size_t resource_use_capacity = 0;
   iree_host_size_t effect_use_capacity = 0;
   iree_host_size_t hazard_use_capacity = 0;
   bool has_state_reg_class = false;
+  bool has_resource_uses = false;
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   const iree_host_size_t reg_class_count = descriptor_set->reg_class_count;
@@ -703,14 +703,8 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
     const loom_low_schedule_class_t* schedule_class = node->schedule_class;
-    if (!iree_host_size_checked_add(
-            resource_use_capacity,
-            schedule_class ? schedule_class->issue_use_count : 0,
-            &resource_use_capacity)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low schedule resource-use capacity exceeds host size");
-    }
+    has_resource_uses |=
+        schedule_class != NULL && schedule_class->issue_use_count != 0;
     if (!iree_host_size_checked_add(
             effect_use_capacity,
             node->descriptor ? node->descriptor->effect_count : 0,
@@ -736,11 +730,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     memset(state->model_summaries, 0,
            schedule_class_count * sizeof(*state->model_summaries));
   }
-  if (resource_use_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, resource_use_capacity, sizeof(*state->resource_uses),
-        (void**)&state->resource_uses));
-    state->resource_use_capacity = resource_use_capacity;
+  if (has_resource_uses) {
     IREE_ASSERT(resource_count <= UINT16_MAX);
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, resource_count, sizeof(*state->resource_summaries),
@@ -3836,7 +3826,6 @@ iree_status_t loom_low_schedule_function(
         .pressure_step_count = state.pressure_step_count,
         .candidate_decisions = state.candidate_decisions,
         .candidate_decision_count = state.candidate_decision_count,
-        .resource_uses = state.resource_uses,
         .resource_use_count = state.resource_use_count,
         .effect_uses = state.effect_uses,
         .effect_use_count = state.effect_use_count,

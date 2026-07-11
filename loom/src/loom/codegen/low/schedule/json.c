@@ -493,35 +493,54 @@ iree_status_t loom_low_schedule_format_json(
   if (table->resource_use_count > 0) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
         &stream, ",\"scheduled_resource_uses\":["));
-    for (iree_host_size_t i = 0; i < table->resource_use_count; ++i) {
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
+    const loom_low_descriptor_set_t* descriptor_set =
+        table->target.descriptor_set;
+    iree_host_size_t resource_use_index = 0;
+    for (iree_host_size_t scheduled_index = 0;
+         scheduled_index < table->scheduled_node_count; ++scheduled_index) {
+      const uint32_t node_index =
+          table->scheduled_node_indices[scheduled_index];
+      const loom_low_schedule_node_t* node = &table->nodes[node_index];
+      const loom_low_schedule_class_t* schedule_class = node->schedule_class;
+      if (schedule_class == NULL) continue;
+      for (uint16_t issue_use_ordinal = 0;
+           issue_use_ordinal < schedule_class->issue_use_count;
+           ++issue_use_ordinal) {
+        const loom_low_issue_use_t* issue_use =
+            &descriptor_set->issue_uses[schedule_class->issue_use_start +
+                                        issue_use_ordinal];
+        IREE_ASSERT_LT(issue_use->resource_id, descriptor_set->resource_count);
+        const loom_low_resource_t* resource =
+            &descriptor_set->resources[issue_use->resource_id];
+        if (resource_use_index++ > 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
+        }
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+            &stream,
+            "{\"node\":%" PRIu32 ",\"block\":%" PRIu32
+            ",\"scheduled_ordinal\":%" PRIu32 ",\"issue_use_ordinal\":%" PRIu16
+            ",\"resource\":",
+            node_index, node->block_index, node->scheduled_ordinal,
+            issue_use_ordinal));
+        IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
+            &stream, loom_low_descriptor_set_string(
+                         descriptor_set, resource->name_string_offset)));
+        const iree_string_view_t resource_kind_name =
+            loom_low_resource_kind_name(resource->kind);
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+            &stream,
+            ",\"resource_kind\":%u,\"resource_kind_name\":"
+            "\"%.*s\",\"resource_flags\":%" PRIu16
+            ",\"capacity_per_cycle\":%" PRIu16 ",\"contention_group\":%" PRIu16
+            ",\"stage\":%" PRIu16 ",\"cycles\":%" PRIu16 ",\"units\":%" PRIu16
+            "}",
+            (unsigned)resource->kind, (int)resource_kind_name.size,
+            resource_kind_name.data, resource->flags,
+            resource->capacity_per_cycle, resource->contention_group_id,
+            issue_use->stage, issue_use->cycles, issue_use->units));
       }
-      const loom_low_schedule_resource_use_t* resource_use =
-          &table->resource_uses[i];
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          &stream,
-          "{\"node\":%" PRIu32 ",\"block\":%" PRIu32
-          ",\"scheduled_ordinal\":%" PRIu32 ",\"issue_use_ordinal\":%" PRIu16
-          ",\"resource\":",
-          resource_use->node_index, resource_use->block_index,
-          resource_use->scheduled_ordinal, resource_use->issue_use_ordinal));
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_string(&stream, resource_use->resource_name));
-      iree_string_view_t resource_kind_name =
-          loom_low_resource_kind_name(resource_use->resource_kind);
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          &stream,
-          ",\"resource_kind\":%u,\"resource_kind_name\":"
-          "\"%.*s\",\"resource_flags\":%" PRIu16
-          ",\"capacity_per_cycle\":%" PRIu16 ",\"contention_group\":%" PRIu16
-          ",\"stage\":%" PRIu16 ",\"cycles\":%" PRIu16 ",\"units\":%" PRIu16
-          "}",
-          (unsigned)resource_use->resource_kind, (int)resource_kind_name.size,
-          resource_kind_name.data, resource_use->resource_flags,
-          resource_use->capacity_per_cycle, resource_use->contention_group_id,
-          resource_use->stage, resource_use->cycles, resource_use->units));
     }
+    IREE_ASSERT_EQ(resource_use_index, table->resource_use_count);
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
   }
 
