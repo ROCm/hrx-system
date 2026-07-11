@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/debugging.h"
+#include "iree/base/internal/math.h"
 
 //===----------------------------------------------------------------------===//
 // iree_arena_block_pool_t
@@ -50,6 +51,14 @@ void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
       total_block_size - sizeof(iree_arena_block_t);
   out_block_pool->block_allocator = block_allocator;
   iree_atomic_arena_block_slist_initialize(&out_block_pool->available_slist);
+  IREE_STATISTICS({
+    iree_atomic_store(&out_block_pool->statistics.block_system_allocation_count,
+                      0, iree_memory_order_relaxed);
+    iree_atomic_store(&out_block_pool->statistics.oversized_allocation_count, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&out_block_pool->statistics.oversized_allocation_bytes, 0,
+                      iree_memory_order_relaxed);
+  });
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -78,6 +87,9 @@ iree_status_t iree_arena_block_pool_preallocate(
                                                 (void**)&block_base));
     iree_arena_block_t* block =
         iree_arena_block_trailer(block_pool, block_base);
+    IREE_STATISTICS(iree_atomic_fetch_add(
+        &block_pool->statistics.block_system_allocation_count, 1,
+        iree_memory_order_relaxed));
 #if defined(IREE_SANITIZER_THREAD)
     IREE_TSAN_RELEASE(block);
 #endif  // IREE_SANITIZER_THREAD
@@ -105,6 +117,29 @@ void iree_arena_block_pool_trim(iree_arena_block_pool_t* block_pool) {
   IREE_TRACE_ZONE_END(z0);
 }
 
+void iree_arena_block_pool_query_statistics(
+    const iree_arena_block_pool_t* block_pool,
+    iree_arena_block_pool_statistics_t* out_statistics) {
+  IREE_ASSERT_ARGUMENT(block_pool);
+  IREE_ASSERT_ARGUMENT(out_statistics);
+  memset(out_statistics, 0, sizeof(*out_statistics));
+  IREE_STATISTICS({
+    out_statistics->block_system_allocation_count = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.block_system_allocation_count,
+        iree_memory_order_relaxed);
+    out_statistics->block_system_allocation_bytes =
+        iree_math_saturating_mul_u64(
+            out_statistics->block_system_allocation_count,
+            block_pool->total_block_size);
+    out_statistics->oversized_allocation_count = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.oversized_allocation_count,
+        iree_memory_order_relaxed);
+    out_statistics->oversized_allocation_bytes = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.oversized_allocation_bytes,
+        iree_memory_order_relaxed);
+  });
+}
+
 iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
                                             iree_arena_block_t** out_block,
                                             void** out_ptr) {
@@ -127,6 +162,9 @@ iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
                                                 (void**)&block_base));
     block = iree_arena_block_trailer(block_pool, block_base);
     *out_ptr = block_base;
+    IREE_STATISTICS(iree_atomic_fetch_add(
+        &block_pool->statistics.block_system_allocation_count, 1,
+        iree_memory_order_relaxed));
   } else {
 #if defined(IREE_SANITIZER_THREAD)
     IREE_TSAN_ACQUIRE(block);
@@ -338,6 +376,13 @@ iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
     arena->allocation_head = allocation;
     arena->total_allocation_size += allocation_size;
     arena->used_allocation_size += byte_length;
+    IREE_STATISTICS({
+      iree_atomic_fetch_add(&block_pool->statistics.oversized_allocation_count,
+                            1, iree_memory_order_relaxed);
+      iree_atomic_fetch_add(&block_pool->statistics.oversized_allocation_bytes,
+                            (int64_t)allocation_size,
+                            iree_memory_order_relaxed);
+    });
     *out_ptr = (uint8_t*)allocation + sizeof(iree_arena_oversized_allocation_t);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
