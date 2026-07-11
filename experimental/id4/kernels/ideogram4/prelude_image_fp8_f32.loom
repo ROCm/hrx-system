@@ -14,7 +14,11 @@ config.decl @id4.ideogram4.prelude_image.hidden_size : %value: index where [rang
 
 func.def inline @id4_ideogram4_prelude_image_fp8_f32_scaled_product(%input_value: f32, %weight_value: f8E4M3, %scale: f32) -> (f32) {
   %weight_f32 = scalar.extf %weight_value : f8E4M3 to f32
-  %scaled_weight = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale : f32
+  %scale_bf16 = scalar.fptrunc %scale : f32 to bf16
+  %scale_f32 = scalar.extf %scale_bf16 : bf16 to f32
+  %scaled_weight_f32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale_f32 : f32
+  %scaled_weight_bf16 = scalar.fptrunc %scaled_weight_f32 : f32 to bf16
+  %scaled_weight = scalar.extf %scaled_weight_bf16 : bf16 to f32
   %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %scaled_weight : f32
   func.return %product : f32
 }
@@ -180,6 +184,20 @@ check.case public @id4_ideogram4_prelude_image_fp8_f32_zero_case {
   %expected = check.generate.fill value(0.0) : tensor<4608x2xf32>
   func.call @id4_ideogram4_prelude_image_fp8_f32(%image_tokens, %weight, %scale, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<2x128xf32>, tensor<4608x128xf8E4M3>, tensor<4608xf32>, tensor<4608xbf16>, tensor<2xi32>, tensor<2x4608xbf16>, tensor<4608x2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_prelude_image_fp8_f32_bf16_scale_rounding_case {
+  %image_tokens = check.generate.fill value(1.0) : tensor<1x4xf32>
+  %weight = check.generate.fill value(1.5) : tensor<2x4xf8E4M3>
+  %scale = check.generate.fill value(1.0029999999999999) : tensor<2xf32>
+  %bias = check.generate.fill value(0.0) : tensor<2xbf16>
+  %image_indicator = check.generate.fill value(1) : tensor<1xi32>
+  %indicator_embedding = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %expected = check.generate.fill value(6.0) : tensor<2x1xf32>
+  func.call @id4_ideogram4_prelude_image_fp8_f32(%image_tokens, %weight, %scale, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<1x4xf32>, tensor<2x4xf8E4M3>, tensor<2xf32>, tensor<2xbf16>, tensor<1xi32>, tensor<2x2xbf16>, tensor<2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xf32>
   check.return
 }
 

@@ -31380,4 +31380,117 @@ iree_native_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_dense_bias_fp8_f32_bf16_scale_rounding_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_dense_bias_fp8_f32_bf16_scale_rounding_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.dense_bias_fp8.input_size=16"
+    "--config=id4.ideogram4.dense_bias_fp8.output_size=2"
+    "--config=id4.ideogram4.dense_bias_fp8.activation_kind=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_fp8_bf16_f32_wmma_bf16_scale_rounding_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "--case=@id4_ideogram4_linear_fp8_bf16_f32_wmma_bf16_scale_rounding_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.token_count=16"
+    "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.dispatch_token_count=16"
+    "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.input_size=16"
+    "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.output_size=32"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_bf16_scale_rounding_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_bf16_scale_rounding_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
+    "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=128"
+    "--config=id4.ideogram4.linear_fp8_wmma.input_size=16"
+    "--config=id4.ideogram4.linear_fp8_wmma.output_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_bias_fp8_f32_bf16_scale_rounding_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_linear_bias_fp8_f32_bf16_scale_rounding_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_bias_fp8.token_count=1"
+    "--config=id4.ideogram4.linear_bias_fp8.token_offset=0"
+    "--config=id4.ideogram4.linear_bias_fp8.dispatch_token_count=1"
+    "--config=id4.ideogram4.linear_bias_fp8.input_size=16"
+    "--config=id4.ideogram4.linear_bias_fp8.output_size=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_bf16_scale_rounding_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_prelude_image_fp8_f32_bf16_scale_rounding_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.prelude_image.token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=1"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=4"
+    "--config=id4.ideogram4.prelude_image.hidden_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

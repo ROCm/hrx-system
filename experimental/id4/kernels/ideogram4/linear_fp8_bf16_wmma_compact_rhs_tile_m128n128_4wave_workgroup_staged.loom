@@ -124,7 +124,9 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma_compa
     %rhs_values_f32 = vector.extf %rhs_values_fp8 : vector<16xf8E4M3> to vector<16xf32>
     %global_output = index.add %row_tile_base, %lane : index
     %scale_value = view.load %scale_view[%global_output] : view<[%output_size]xf32, #dense> -> f32
-    %scale_values = vector.splat %scale_value : vector<16xf32>
+    %scale_value_bf16 = scalar.fptrunc %scale_value : f32 to bf16
+    %scale_value_f32 = scalar.extf %scale_value_bf16 : bf16 to f32
+    %scale_values = vector.splat %scale_value_f32 : vector<16xf32>
     %rhs_scaled_f32 = vector.mulf<reassoc|nsz|contract> %rhs_values_f32, %scale_values : vector<16xf32>
     %rhs_values = vector.fptrunc %rhs_scaled_f32 : vector<16xf32> to vector<16xbf16>
     %rhs_scratch_index = index.mul %lane, %sixteen : index
@@ -182,6 +184,17 @@ check.case public @id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_
   %scale = check.generate.fill value(2.0) : tensor<128xf32>
   %output = check.generate.fill value(0.0) : tensor<128x128xbf16>
   %expected = check.generate.fill value(32.0) : tensor<128x128xbf16>
+  func.call @id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<128x16xbf16>, tensor<2048xf8E4M3>, tensor<128xf32>, tensor<128x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_bf16_scale_rounding_case {
+  %input = check.generate.fill value(1.0) : tensor<128x16xbf16>
+  %weight = check.generate.fill value(1.5) : tensor<2048xf8E4M3>
+  %scale = check.generate.fill value(1.0029999999999999) : tensor<128xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128xbf16>
+  %expected = check.generate.fill value(24.0) : tensor<128x128xbf16>
   func.call @id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<128x16xbf16>, tensor<2048xf8E4M3>, tensor<128xf32>, tensor<128x128xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128xbf16>
   check.return

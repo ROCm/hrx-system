@@ -18,7 +18,6 @@
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/stages/ideogram4_dit_test_util.h"
 #include "experimental/id4/tooling/capture.h"
-#include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
@@ -51,16 +50,25 @@ namespace {
 
 constexpr uint8_t kOutputSentinel = 0xA5;
 
-using ParameterProviderRef =
-    id4::test::OwningRef<iree_io_parameter_provider_t,
-                         iree_io_parameter_provider_release>;
-
 typedef struct DitBranchParameterScopes {
   // BF16-expanded parameter scope for the selected branch.
   iree_string_view_t bf16;
   // FP8 e4m3 parameter scope for the selected branch.
   iree_string_view_t fp8_e4m3;
 } DitBranchParameterScopes;
+
+static iree_string_view_t DitBranchParameterScopeForFormat(
+    id4_ideogram4_dit_parameter_format_t parameter_format,
+    DitBranchParameterScopes parameter_scopes) {
+  switch (parameter_format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      return parameter_scopes.bf16;
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
+      return parameter_scopes.fp8_e4m3;
+    default:
+      return iree_string_view_empty();
+  }
+}
 
 static iree_status_t ParseDitParameterFormat(
     id4_ideogram4_dit_parameter_format_t* out_format) {
@@ -118,7 +126,14 @@ static iree_status_t CreateIdeogram4DitStage(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
-  create_options.parameter_scope = parameter_scopes.bf16;
+  create_options.parameter_scope =
+      DitBranchParameterScopeForFormat(parameter_format, parameter_scopes);
+  if (iree_string_view_is_empty(create_options.parameter_scope)) {
+    id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+        &source_rules, iree_allocator_system());
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT parameter format has no source scope");
+  }
   create_options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
   create_options.parameter_source_rule_count = source_rules.count;
   create_options.parameter_source_rules = source_rules.values;
@@ -225,46 +240,14 @@ static iree_status_t CreateDitParameterProviderFromFlags(
     iree_io_parameter_provider_t** out_provider) {
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = nullptr;
-  if (parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
-    return id4::test::CreateParameterProviderFromFlags(parameter_scopes.bf16,
-                                                       out_provider);
+  const iree_string_view_t parameter_scope =
+      DitBranchParameterScopeForFormat(parameter_format, parameter_scopes);
+  if (iree_string_view_is_empty(parameter_scope)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT parameter format has no provider scope");
   }
-
-  ParameterProviderRef bf16_provider;
-  ParameterProviderRef fp8_provider;
-  id4_tooling_parameter_provider_request_t requests[] = {
-      {
-          // BF16-expanded parameter scope.
-          .scope = parameter_scopes.bf16,
-          // BF16-expanded provider output.
-          .out_provider = bf16_provider.out(),
-      },
-      {
-          // FP8 e4m3 source parameter scope.
-          .scope = parameter_scopes.fp8_e4m3,
-          // FP8 e4m3 source provider output.
-          .out_provider = fp8_provider.out(),
-      },
-  };
-  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
-      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
-
-  const id4_tooling_parameter_provider_set_entry_t entries[] = {
-      {
-          // BF16-expanded parameter scope.
-          .scope = parameter_scopes.bf16,
-          // BF16-expanded provider.
-          .provider = bf16_provider.get(),
-      },
-      {
-          // FP8 e4m3 source parameter scope.
-          .scope = parameter_scopes.fp8_e4m3,
-          // FP8 e4m3 source provider.
-          .provider = fp8_provider.get(),
-      },
-  };
-  return id4_tooling_create_parameter_provider_set(
-      IREE_ARRAYSIZE(entries), entries, iree_allocator_system(), out_provider);
+  return id4::test::CreateParameterProviderFromFlags(parameter_scope,
+                                                     out_provider);
 }
 
 static id4_pipeline_tensor_layout_t FixtureComparisonLayout(
@@ -1513,6 +1496,45 @@ TEST(Ideogram4DitStageIntegration,
           IREE_SV("ideogram4_dit_materialized_wmma_attention_integration"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
+}
+
+static void RunFp8CompactRhsMaterializedFixture(
+    id4::test::Ideogram4DitBranch branch, iree_string_view_t capture_run_id) {
+  id4_ideogram4_dit_parameter_format_t parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_ASSERT_OK(ParseDitParameterFormat(&parameter_format));
+  ASSERT_EQ(parameter_format, ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3)
+      << "compact FP8 integration requires --dit_parameter_format=fp8_e4m3";
+  ASSERT_FALSE(iree_string_view_is_empty(
+      iree_make_cstring_view(FLAG_id4_pytorch_oracle_dir)))
+      << "compact FP8 integration requires --id4_pytorch_oracle_dir";
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
+      .branch = branch,
+      .capture_run_id = capture_run_id,
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueFp8CompactRhsMaterializedFixture) {
+  RunFp8CompactRhsMaterializedFixture(
+      id4::test::Ideogram4DitBranch::kConditioned,
+      IREE_SV("ideogram4_dit_fp8_compact_rhs_materialized"));
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueFp8CompactRhsMaterializedUnconditionedFixture) {
+  RunFp8CompactRhsMaterializedFixture(
+      id4::test::Ideogram4DitBranch::kUnconditioned,
+      IREE_SV("ideogram4_dit_fp8_compact_rhs_materialized_unconditioned"));
 }
 
 TEST(Ideogram4DitStageIntegration, PrepareAndIssueBlockedWmmaAttentionFixture) {
