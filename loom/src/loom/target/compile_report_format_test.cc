@@ -3144,24 +3144,24 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
 TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
-  const loom_target_compile_report_source_low_transform_row_t row = {
-      /*.function_name=*/IREE_SVL("kernel"),
-      /*.source_op_name=*/IREE_SVL("scf.for"),
-      /*.source_op_kind=*/42,
-      /*.transform_key=*/IREE_SVL("stage-loop-carried-fragments"),
-      /*.outcome=*/IREE_SVL("selected"),
-      /*.reason=*/IREE_SVL("staged_workgroup_memory"),
-      /*.candidate_value_count=*/4,
-      /*.selected_value_count=*/4,
-      /*.removed_loop_carried_value_count=*/4,
-      /*.removed_loop_carried_payload_register_count=*/32,
-      /*.row_count=*/16,
-      /*.column_count=*/16,
-      /*.workgroup_memory_byte_count=*/4096,
-      /*.inserted_load_op_count=*/8,
-      /*.inserted_store_op_count=*/8,
-      /*.inserted_barrier_op_count=*/2,
-  };
+  loom_target_compile_report_source_low_transform_row_t row = {};
+  row.function_name = IREE_SVL("kernel");
+  row.source_op_name = IREE_SVL("scf.for");
+  row.source_op_kind = 42;
+  row.transform_key = IREE_SVL("stage-loop-carried-fragments");
+  row.outcome = IREE_SVL("selected");
+  row.reason = IREE_SVL("staged_workgroup_memory");
+  row.candidate_value_count = 4;
+  row.selected_value_count = 4;
+  row.removed_loop_carried_value_count = 4;
+  row.removed_loop_carried_payload_register_count = 32;
+  row.block_count = 4;
+  row.row_count = 16;
+  row.column_count = 16;
+  row.workgroup_memory_byte_count = 4096;
+  row.inserted_load_op_count = 8;
+  row.inserted_store_op_count = 8;
+  row.inserted_barrier_op_count = 2;
   IREE_ASSERT_OK(loom_target_compile_report_record_source_low_transform_row(
       &report, &row));
 
@@ -3217,7 +3217,8 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output,
-                            IREE_SV("\"row_count\":16,\"column_count\":16,"
+                            IREE_SV("\"block_count\":4,\"row_count\":16,"
+                                    "\"column_count\":16,"
                                     "\"workgroup_memory_byte_count\":4096"),
                             0),
       IREE_STRING_VIEW_NPOS);

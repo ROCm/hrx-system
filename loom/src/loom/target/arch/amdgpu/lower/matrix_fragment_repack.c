@@ -44,13 +44,20 @@ static bool loom_amdgpu_fragment_repack_shape_value_matches(
 
 static bool loom_amdgpu_fragment_repack_shape_matches(
     const loom_value_fact_table_t* fact_table,
-    loom_vector_fragment_fact_t source_fact, loom_value_id_t rows,
-    loom_value_id_t columns) {
-  return source_fact.shape_rank == 2 &&
+    loom_vector_fragment_fact_t source_fact, loom_value_id_t blocks,
+    loom_value_id_t rows, loom_value_id_t columns) {
+  const uint8_t expected_rank = blocks == LOOM_VALUE_ID_INVALID ? 2 : 3;
+  return source_fact.shape_rank == expected_rank &&
+         (blocks == LOOM_VALUE_ID_INVALID ||
+          loom_amdgpu_fragment_repack_shape_value_matches(
+              fact_table, loom_vector_fragment_fact_block_value(source_fact),
+              blocks)) &&
          loom_amdgpu_fragment_repack_shape_value_matches(
-             fact_table, source_fact.shape_value_ids[0], rows) &&
+             fact_table, loom_vector_fragment_fact_row_value(source_fact),
+             rows) &&
          loom_amdgpu_fragment_repack_shape_value_matches(
-             fact_table, source_fact.shape_value_ids[1], columns);
+             fact_table, loom_vector_fragment_fact_column_value(source_fact),
+             columns);
 }
 
 static iree_string_view_t loom_amdgpu_fragment_repack_role_flags_key(
@@ -668,8 +675,8 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_contract_candidates_t*
         contract_candidates,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t rows,
-    loom_value_id_t columns, loom_symbol_ref_t target_ref,
+    const loom_value_fact_table_t* fact_table, loom_value_id_t blocks,
+    loom_value_id_t rows, loom_value_id_t columns, loom_symbol_ref_t target_ref,
     loom_amdgpu_fragment_repack_plan_t* plan) {
   if (bundle == NULL || bundle->snapshot == NULL || descriptor_set == NULL) {
     plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_LAYOUT;
@@ -707,9 +714,9 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
       continue;
     }
     if (!loom_amdgpu_matrix_fragment_shape_matches(
-            fact_table, layout, plan->source_role, rows, columns) ||
+            fact_table, layout, plan->source_role, blocks, rows, columns) ||
         !loom_amdgpu_matrix_fragment_shape_matches(
-            fact_table, layout, plan->result_role, rows, columns)) {
+            fact_table, layout, plan->result_role, blocks, rows, columns)) {
       continue;
     }
 
@@ -798,7 +805,9 @@ iree_status_t loom_amdgpu_select_vector_fragment_repack_plan(
   out_plan->source_role_flags = source_fact.role_flags;
 
   if (!loom_amdgpu_fragment_repack_shape_matches(
-          fact_table, source_fact, loom_vector_fragment_repack_rows(source_op),
+          fact_table, source_fact,
+          loom_vector_fragment_repack_blocks(source_op),
+          loom_vector_fragment_repack_rows(source_op),
           loom_vector_fragment_repack_columns(source_op))) {
     out_plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SHAPE;
     *out_selected = true;
@@ -819,7 +828,8 @@ iree_status_t loom_amdgpu_select_vector_fragment_repack_plan(
     (void)loom_amdgpu_fragment_repack_select_target_strategy(
         module, loom_low_lower_context_bundle(context),
         loom_low_lower_context_descriptor_set(context), contract_candidates,
-        fact_table, loom_vector_fragment_repack_rows(source_op),
+        fact_table, loom_vector_fragment_repack_blocks(source_op),
+        loom_vector_fragment_repack_rows(source_op),
         loom_vector_fragment_repack_columns(source_op),
         loom_low_lower_context_target_ref(context), out_plan);
   }

@@ -72,20 +72,6 @@ static bool loom_amdgpu_fragment_memory_packet_static_offset(
       plan, packet->register_index, element_index, out_static_byte_offset);
 }
 
-static uint32_t loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(
-    const loom_amdgpu_fragment_memory_plan_t* plan,
-    const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
-  uint32_t lane_mod_stride = 0;
-  uint32_t lane_div_stride = 0;
-  uint64_t unused_static_byte_offset = 0;
-  if (!loom_amdgpu_fragment_memory_register_terms(
-          plan, packet->register_index, &lane_mod_stride, &lane_div_stride,
-          &unused_static_byte_offset)) {
-    return 0;
-  }
-  return lane_mod_stride != 0 ? lane_mod_stride : lane_div_stride;
-}
-
 iree_status_t loom_amdgpu_fragment_memory_packet_resource(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan, loom_value_id_t low_binding,
@@ -178,8 +164,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .issued_write_byte_count = issued.write_byte_count,
       .issued_read_unknown_width_count = issued.read_unknown_width_count,
       .issued_write_unknown_width_count = issued.write_unknown_width_count,
-      .dynamic_stride_bytes =
-          loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(plan, packet),
+      .dynamic_stride_bytes = plan->address_layout.linear_lane_byte_stride,
       .vector_lane_stride_bytes = plan->element_byte_count,
       .bank_stride_words = 0,
       .bank_conflict_degree = 0,

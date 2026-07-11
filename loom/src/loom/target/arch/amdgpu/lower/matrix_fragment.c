@@ -26,7 +26,13 @@ static bool loom_amdgpu_fragment_memory_exact_nonnegative_i64(
 bool loom_amdgpu_matrix_fragment_tile_shape_matches(
     const loom_value_fact_table_t* fact_table,
     loom_amdgpu_matrix_tile_shape_t shape, loom_contract_operand_role_t role,
-    loom_value_id_t rows, loom_value_id_t columns) {
+    loom_value_id_t blocks, loom_value_id_t rows, loom_value_id_t columns) {
+  int64_t block_count = 1;
+  if (blocks != LOOM_VALUE_ID_INVALID &&
+      !loom_amdgpu_fragment_memory_exact_nonnegative_i64(fact_table, blocks,
+                                                         &block_count)) {
+    return false;
+  }
   int64_t row_count = 0;
   int64_t column_count = 0;
   if (!loom_amdgpu_fragment_memory_exact_nonnegative_i64(fact_table, rows,
@@ -36,6 +42,9 @@ bool loom_amdgpu_matrix_fragment_tile_shape_matches(
     return false;
   }
 
+  if (block_count != shape.block_count) {
+    return false;
+  }
   switch (role) {
     case LOOM_CONTRACT_OPERAND_ROLE_LHS:
       return row_count == shape.result_row_count &&
@@ -56,10 +65,10 @@ bool loom_amdgpu_matrix_fragment_tile_shape_matches(
 bool loom_amdgpu_matrix_fragment_shape_matches(
     const loom_value_fact_table_t* fact_table,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, loom_value_id_t rows,
-    loom_value_id_t columns) {
+    loom_contract_operand_role_t role, loom_value_id_t blocks,
+    loom_value_id_t rows, loom_value_id_t columns) {
   return loom_amdgpu_matrix_fragment_tile_shape_matches(
-      fact_table, layout->tile_shape, role, rows, columns);
+      fact_table, layout->tile_shape, role, blocks, rows, columns);
 }
 
 bool loom_amdgpu_matrix_fragment_role_is_result_like(
@@ -152,6 +161,9 @@ static bool loom_amdgpu_fragment_memory_scalar_type_from_numeric(
     loom_scalar_type_t* out_element_type) {
   *out_element_type = LOOM_SCALAR_TYPE_COUNT_;
   switch (numeric_type) {
+    case LOOM_AMDGPU_MATRIX_NUMERIC_F64:
+      *out_element_type = LOOM_SCALAR_TYPE_F64;
+      return true;
     case LOOM_AMDGPU_MATRIX_NUMERIC_F16:
       *out_element_type = LOOM_SCALAR_TYPE_F16;
       return true;

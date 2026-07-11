@@ -13,6 +13,7 @@ from itertools import product
 from math import prod
 
 _AXIS_NAMES = ("block", "row", "column", "reduction")
+_MAX_FRAGMENT_REGISTER_COUNT = 32
 _ROLE_AXIS_NAMES = {
     "lhs": frozenset(("row", "reduction")),
     "rhs": frozenset(("column", "reduction")),
@@ -203,6 +204,124 @@ def _single_tile_layout(
     )
 
 
+_BLOCKED_MFMA_RESULT_AXES = {
+    (16, 4): _axes(
+        block=_axis(thread=16, stride=4),
+        row=_axis(element=4),
+        column=_axis(thread=4),
+    ),
+    (4, 16): _axes(
+        block=_axis(element=4),
+        row=_axis(thread=4, stride=16, element=4),
+        column=_axis(thread=16),
+    ),
+    (2, 32): _axes(
+        block=_axis(outer=2),
+        row=_axis(outer=4, thread=2, stride=32, element=4),
+        column=_axis(thread=32),
+    ),
+}
+
+
+def _blocked_mfma_result_axes(
+    block_count: int, row_count: int
+) -> tuple[MatrixFragmentAxisLayout | None, ...]:
+    axes = _BLOCKED_MFMA_RESULT_AXES.get((block_count, row_count))
+    if axes is not None:
+        return axes
+    raise ValueError(f"unsupported blocked MFMA result shape {block_count}x{row_count}")
+
+
+def _blocked_mfma_layout(
+    key: str,
+    *,
+    block_count: int,
+    row_count: int,
+    reduction_count: int,
+    source_payload_element_count: int,
+    source_element_bit_count: int,
+    result_payload_element_count: int,
+    result_element_bit_count: int,
+) -> AmdgpuMatrixFragmentLayout:
+    lhs = _role(
+        "lhs",
+        source_payload_element_count,
+        source_element_bit_count,
+        _axes(
+            block=_axis(thread=block_count, stride=row_count),
+            row=_axis(thread=row_count),
+            reduction=_axis(element=reduction_count),
+        ),
+    )
+    rhs = _role(
+        "rhs",
+        source_payload_element_count,
+        source_element_bit_count,
+        _axes(
+            block=_axis(thread=block_count, stride=row_count),
+            column=_axis(thread=row_count),
+            reduction=_axis(element=reduction_count),
+        ),
+    )
+    result_axes = _blocked_mfma_result_axes(block_count, row_count)
+    return AmdgpuMatrixFragmentLayout(
+        key=key,
+        wave_size=64,
+        tile_shape=(block_count, row_count, row_count, reduction_count),
+        lhs=lhs,
+        rhs=rhs,
+        accumulator=_role(
+            "accumulator",
+            result_payload_element_count,
+            result_element_bit_count,
+            result_axes,
+        ),
+        result=_role(
+            "result",
+            result_payload_element_count,
+            result_element_bit_count,
+            result_axes,
+        ),
+    )
+
+
+def _blocked_f64_mfma_layout(key: str) -> AmdgpuMatrixFragmentLayout:
+    lhs = _role(
+        "lhs",
+        1,
+        64,
+        _axes(
+            block=_axis(thread=4, stride=4),
+            row=_axis(thread=4),
+            reduction=_axis(thread=4, stride=16),
+        ),
+    )
+    rhs = _role(
+        "rhs",
+        1,
+        64,
+        _axes(
+            block=_axis(thread=4, stride=4),
+            column=_axis(thread=4),
+            reduction=_axis(thread=4, stride=16),
+        ),
+    )
+    result_axes = _axes(
+        block=_axis(thread=4, stride=4),
+        row=_axis(thread=4, stride=16),
+        column=_axis(thread=4),
+    )
+    return AmdgpuMatrixFragmentLayout(
+        key=key,
+        wave_size=64,
+        tile_shape=(4, 4, 4, 4),
+        lhs=lhs,
+        rhs=rhs,
+        accumulator=_role("accumulator", 1, 64, result_axes),
+        result=_role("result", 1, 64, result_axes),
+    )
+
+
 def _rdna3_layout(
     key: str,
     *,
@@ -277,6 +396,20 @@ def _validate_role(
             f"matrix fragment layout '{layout.key}' role '{role.role}' has "
             "an invalid payload"
         )
+    if role.register_count > _MAX_FRAGMENT_REGISTER_COUNT:
+        raise ValueError(
+            f"matrix fragment layout '{layout.key}' role '{role.role}' uses "
+            f"{role.register_count} payload registers, exceeding the "
+            f"{_MAX_FRAGMENT_REGISTER_COUNT}-register architectural limit"
+        )
+    if (role.element_bit_count <= 32 and 32 % role.element_bit_count != 0) or (
+        role.element_bit_count > 32 and role.element_bit_count % 32 != 0
+    ):
+        raise ValueError(
+            f"matrix fragment layout '{layout.key}' role '{role.role}' "
+            f"{role.element_bit_count}-bit elements cannot be split into "
+            "32-bit payload registers"
+        )
     if (
         role.coordinate_element_offset < 0
         or role.coordinate_element_offset > 0xFFFF
@@ -286,6 +419,18 @@ def _validate_role(
         raise ValueError(
             f"matrix fragment layout '{layout.key}' role '{role.role}' has "
             "an invalid coordinate element mapping"
+        )
+    payload_elements_per_register = (
+        32 // role.element_bit_count if role.element_bit_count <= 32 else 1
+    )
+    if (
+        role.coordinate_element_offset != 0
+        or payload_elements_per_register % role.coordinate_element_stride != 0
+    ):
+        raise ValueError(
+            f"matrix fragment layout '{layout.key}' role '{role.role}' has "
+            "a coordinate element mapping that cannot be addressed from "
+            "32-bit payload registers"
         )
     reduction_group = role.reduction_group
     if reduction_group is not None:
@@ -344,6 +489,13 @@ def _validate_role(
                 f"matrix fragment layout '{layout.key}' role '{role.role}' "
                 f"has an empty {axis_name} axis"
             )
+        if axis.thread_count > 1 and (
+            axis.thread_count.bit_count() != 1 or axis.thread_stride.bit_count() != 1
+        ):
+            raise ValueError(
+                f"matrix fragment layout '{layout.key}' role '{role.role}' "
+                f"has a non-power-of-two {axis_name} lane factor"
+            )
         expected_extent = layout.tile_shape[axis_index]
         if axis_name == "reduction" and reduction_group is not None:
             expected_extent = (
@@ -394,11 +546,6 @@ def _validate_role(
                 f"thread coordinates alias canonical lane {lane}"
             )
         canonical_lanes.add(lane)
-    if role.register_count > 0xFFFF:
-        raise ValueError(
-            f"matrix fragment layout '{layout.key}' role '{role.role}' uses "
-            f"{role.register_count} payload registers"
-        )
 
 
 def validate_matrix_fragment_layout(layout: AmdgpuMatrixFragmentLayout) -> None:
@@ -570,6 +717,42 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         source_element_bit_count=32,
         result_payload_element_count=4,
     ),
+    *(
+        _blocked_mfma_layout(
+            key,
+            block_count=block_count,
+            row_count=row_count,
+            reduction_count=reduction_count,
+            source_payload_element_count=source_payload_element_count,
+            source_element_bit_count=source_element_bit_count,
+            result_payload_element_count=result_payload_element_count,
+            result_element_bit_count=result_element_bit_count,
+        )
+        for (
+            key,
+            block_count,
+            row_count,
+            reduction_count,
+            source_payload_element_count,
+            source_element_bit_count,
+            result_payload_element_count,
+            result_element_bit_count,
+        ) in (
+            ("cdna_mfma_f32_4x4x1_f32_16b", 16, 4, 1, 1, 32, 4, 32),
+            ("cdna_mfma_f32_4x4x2_bf16_16b", 16, 4, 2, 2, 16, 4, 32),
+            ("cdna_mfma_f32_4x4x4_packed16_16b", 16, 4, 4, 4, 16, 4, 32),
+            ("cdna_mfma_i32_4x4x4_i8_16b", 16, 4, 4, 4, 8, 4, 32),
+            ("cdna_mfma_f32_16x16x1_f32_4b", 4, 16, 1, 1, 32, 16, 32),
+            ("cdna_mfma_f32_16x16x2_bf16_4b", 4, 16, 2, 2, 16, 16, 32),
+            ("cdna_mfma_f32_16x16x4_packed16_4b", 4, 16, 4, 4, 16, 16, 32),
+            ("cdna_mfma_i32_16x16x4_i8_4b", 4, 16, 4, 4, 8, 16, 32),
+            ("cdna_mfma_f32_32x32x1_f32_2b", 2, 32, 1, 1, 32, 32, 32),
+            ("cdna_mfma_f32_32x32x2_bf16_2b", 2, 32, 2, 2, 16, 32, 32),
+            ("cdna_mfma_f32_32x32x4_packed16_2b", 2, 32, 4, 4, 16, 32, 32),
+            ("cdna_mfma_i32_32x32x4_i8_2b", 2, 32, 4, 4, 8, 32, 32),
+        )
+    ),
+    _blocked_f64_mfma_layout("cdna_mfma_f64_4x4x4_f64_4b"),
     _rdna3_layout(
         "rdna3_wmmar3_f16_16x16x16_f16",
         wave_size=32,

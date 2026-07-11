@@ -303,18 +303,25 @@ static bool loom_vector_to_scalar_encoded_auxiliary_matches_format(
 
 static bool loom_vector_to_scalar_encoded_logical_element_count_matches(
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand) {
-  if (operand->rows.is_dynamic || operand->columns.is_dynamic) {
+  if (operand->blocks.is_dynamic || operand->rows.is_dynamic ||
+      operand->columns.is_dynamic) {
     return true;
   }
-  if (operand->rows.static_value < 0 || operand->columns.static_value < 0) {
+  if (operand->blocks.static_value < 0 || operand->rows.static_value < 0 ||
+      operand->columns.static_value < 0) {
     return false;
   }
+  const uint64_t block_count = (uint64_t)operand->blocks.static_value;
   const uint64_t row_count = (uint64_t)operand->rows.static_value;
   const uint64_t column_count = (uint64_t)operand->columns.static_value;
   if (column_count != 0 && row_count > UINT64_MAX / column_count) {
     return false;
   }
   uint64_t element_count = row_count * column_count;
+  if (block_count != 0 && element_count > UINT64_MAX / block_count) {
+    return false;
+  }
+  element_count *= block_count;
   return element_count <= UINT16_MAX &&
          operand->schema.payload_element_count == (uint16_t)element_count;
 }
@@ -698,6 +705,7 @@ static uint32_t loom_vector_to_scalar_decode_operand(
   *out_operand = (loom_vector_to_scalar_encoded_matrix_operand_t){
       .schema = summary.storage_schema.encoded_operand,
       .auxiliary = auxiliary,
+      .blocks = loom_vector_to_scalar_static_term(1),
       .rows = rank == 1
                   ? loom_vector_to_scalar_static_term(1)
                   : loom_vector_to_scalar_dim_bound_term(state, result_type, 0),

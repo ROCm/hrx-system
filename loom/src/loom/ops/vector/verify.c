@@ -554,7 +554,7 @@ static iree_status_t loom_vector_verify_memory_access(
 static iree_status_t loom_vector_verify_fragment_memory_origin(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     loom_type_t view_type, loom_attribute_t static_indices,
-    uint16_t dynamic_index_count) {
+    uint16_t dynamic_index_count, uint8_t fragment_rank) {
   if (!loom_type_is_view(view_type)) {
     return iree_ok_status();
   }
@@ -563,9 +563,11 @@ static iree_status_t loom_vector_verify_fragment_memory_origin(
       emitter, op, static_indices, dynamic_index_count));
 
   uint8_t view_rank = loom_type_rank(view_type);
-  if (view_rank == 0) {
+  if (view_rank < fragment_rank) {
     return loom_vector_emit_operand_constraint(
-        emitter, op, IREE_SV("view"), view_type, IREE_SV("rank >= 1 view"));
+        emitter, op, IREE_SV("view"), view_type,
+        fragment_rank == 3 ? IREE_SV("rank >= 3 view")
+                           : IREE_SV("rank >= 2 view"));
   }
   if (static_indices.count != view_rank) {
     return loom_vector_emit_offset_count_mismatch(
@@ -771,9 +773,11 @@ iree_status_t loom_vector_fragment_store_verify(
     iree_diagnostic_emitter_t emitter) {
   loom_type_t view_type =
       loom_module_value_type(module, loom_vector_fragment_store_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_store_blocks_is_present(op) ? 3 : 2;
   IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
       emitter, op, view_type, loom_vector_fragment_store_static_indices(op),
-      loom_vector_fragment_store_indices(op).count));
+      loom_vector_fragment_store_indices(op).count, fragment_rank));
   return loom_vector_verify_optional_cache_policy(
       emitter, op, loom_vector_fragment_store_cache_scope_ATTR_INDEX,
       loom_vector_fragment_store_cache_temporal_ATTR_INDEX,
@@ -1825,9 +1829,11 @@ iree_status_t loom_vector_fragment_load_verify(
     iree_diagnostic_emitter_t emitter) {
   loom_type_t view_type =
       loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_load_blocks_is_present(op) ? 3 : 2;
   IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
       emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
-      loom_vector_fragment_load_indices(op).count));
+      loom_vector_fragment_load_indices(op).count, fragment_rank));
   IREE_RETURN_IF_ERROR(loom_vector_verify_optional_cache_policy(
       emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
       loom_vector_fragment_load_cache_temporal_ATTR_INDEX,

@@ -1136,17 +1136,19 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
 typedef uint32_t loom_amdgpu_fragment_memory_packet_flags_t;
 
 typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
+  // Packet-local lowering strategy bits for non-native memory payloads.
+  loom_amdgpu_fragment_memory_packet_flags_t flags;
+  // Descriptor row selected for this packet.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
   // First target fragment coordinate register covered by this packet.
   uint16_t register_index;
   // Number of target fragment coordinate registers covered by this packet.
   uint16_t result_register_count;
   // Number of 32-bit memory packet registers moved by the descriptor.
   uint16_t packet_register_count;
-  // Packet-local lowering strategy bits for non-native memory payloads.
-  loom_amdgpu_fragment_memory_packet_flags_t flags;
-  // Descriptor row selected for this packet.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_fragment_memory_packet_plan_t;
+static_assert(sizeof(loom_amdgpu_fragment_memory_packet_plan_t) == 12,
+              "fragment memory packet plans must stay cache dense");
 
 typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   // Payload storage matches the selected fragment role layout.
@@ -1179,19 +1181,34 @@ typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE = 4,
 } loom_amdgpu_fragment_memory_epilogue_strategy_t;
 
+typedef struct loom_amdgpu_fragment_memory_lane_term_t {
+  // Power-of-two divisor applied to the subgroup lane ID.
+  uint16_t divisor;
+  // Optional power-of-two modulus applied after division; zero omits it.
+  uint16_t modulus;
+  // Byte stride multiplied by the resulting lane digit.
+  uint32_t byte_stride;
+} loom_amdgpu_fragment_memory_lane_term_t;
+
 typedef struct loom_amdgpu_fragment_memory_address_layout_t {
-  // Logical payload elements stored in each 32-bit fragment register.
-  uint16_t payload_elements_per_register;
-  // Power-of-two lane divisor shared by the modulo and quotient terms.
-  uint16_t lane_divisor;
-  // Byte stride multiplied by lane modulo lane_divisor.
-  uint32_t lane_mod_byte_stride;
-  // Byte stride multiplied by lane divided by lane_divisor.
-  uint32_t lane_div_byte_stride;
-  // Byte stride between adjacent fragment registers.
-  uint32_t register_byte_stride;
+  // Constant byte stride between adjacent lanes, or zero when non-linear.
+  uint32_t linear_lane_byte_stride;
   // Byte stride between separately addressed elements in one register.
   uint32_t packed_element_byte_stride;
+  // Logical payload elements stored in each 32-bit fragment register.
+  uint16_t payload_elements_per_register;
+  // 32-bit fragment registers occupied by each logical payload element.
+  uint16_t payload_registers_per_element;
+  // Preferred lane divisor reused by common result epilogue operations.
+  uint16_t primary_lane_divisor;
+  // Number of populated lane coordinate terms.
+  uint8_t lane_term_count;
+  // Lane coordinate terms compiled from semantic layout axes.
+  loom_amdgpu_fragment_memory_lane_term_t
+      lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+  // Static byte offset of each physical fragment register.
+  uint32_t
+      register_byte_offsets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
 } loom_amdgpu_fragment_memory_address_layout_t;
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
@@ -1221,7 +1238,7 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_address_layout_t address_layout;
   // Direct memory packets emitted in increasing fragment-register order.
   loom_amdgpu_fragment_memory_packet_plan_t
-      packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
+      packets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
   // Number of populated packet plans.
   uint16_t packet_count;
   // Aggregate packet-local lowering strategy bits across all packets.

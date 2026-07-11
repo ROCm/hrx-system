@@ -282,6 +282,9 @@ typedef struct loom_contract_shape_t {
 
   // Exact K/reduction extent when proven, or 0 when dynamic.
   int64_t k;
+
+  // Exact independent matrix block count when proven, or 0 when dynamic.
+  int64_t block_count;
 } loom_contract_shape_t;
 
 typedef struct loom_contract_shape_value_refs_t {
@@ -293,6 +296,9 @@ typedef struct loom_contract_shape_value_refs_t {
 
   // Optional SSA value carrying the K/reduction extent.
   loom_contract_value_ref_t k;
+
+  // Optional SSA value carrying the independent matrix block count.
+  loom_contract_value_ref_t block_count;
 
   // Optional SSA value carrying the K-group element count.
   loom_contract_value_ref_t k_group_size;

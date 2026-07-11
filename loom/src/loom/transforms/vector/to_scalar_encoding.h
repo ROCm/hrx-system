@@ -29,6 +29,9 @@ typedef struct loom_vector_to_scalar_encoded_matrix_operand_t {
   // Explicit auxiliary SSA operands keyed by vector auxiliary enum bits.
   loom_vector_encoding_auxiliary_view_t auxiliary;
 
+  // Independent logical block count for block-indexed auxiliary topologies.
+  loom_vector_to_scalar_index_term_t blocks;
+
   // Logical row count for row-indexed auxiliary topologies.
   loom_vector_to_scalar_index_term_t rows;
 

@@ -81,6 +81,7 @@ loom_contract_request_t MatrixRequest(
       /*.m=*/m,
       /*.n=*/n,
       /*.k=*/k,
+      /*.block_count=*/1,
   };
   request.k_group_size = 1;
   request.lhs = Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type);

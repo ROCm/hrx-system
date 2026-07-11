@@ -17,7 +17,9 @@ from loom.assembly import (
     COMMA,
     GLUE,
     LBRACKET,
+    LPAREN,
     RBRACKET,
+    RPAREN,
     Attr,
     AttrDict,
     Flags,
@@ -1235,8 +1237,10 @@ vector_fragment = Op(
     doc=(
         "Attach a matrix-fragment interpretation to a physical vector value "
         "without changing the physical vector type. The role selects how the "
-        "two shape operands are interpreted: lhs is [m, k], rhs is [k, n], "
-        "and init/result are [m, n]. Dense/default fragments need only the "
+        "shape operands are interpreted: lhs is [m, k], rhs is [k, n], and "
+        "init/result are [m, n]. A leading block extent forms independent "
+        "batched fragments [b, m, k], [b, k, n], and [b, m, n]. Dense/default "
+        "fragments need only the "
         "data value and shape SSA values. Encoded fragments carry schema and "
         "scale/table/sparse metadata values in the keyed using dictionary so "
         "bulk runtime data remains ordinary SSA while lowering can consume a "
@@ -1244,6 +1248,12 @@ vector_fragment = Op(
     ),
     operands=[
         Operand("data", VECTOR, doc="Physical vector lanes or packed registers."),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
         Operand(
@@ -1278,6 +1288,10 @@ vector_fragment = Op(
         Ref("data"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
@@ -1317,6 +1331,12 @@ vector_fragment_repack = Op(
     ),
     operands=[
         Operand("source", VECTOR, doc="Native source matrix fragment payload."),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for the fragment tile."),
         Operand(
             "columns",
@@ -1335,6 +1355,10 @@ vector_fragment_repack = Op(
         Ref("source"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
@@ -1456,6 +1480,12 @@ vector_fragment_load = Op(
     operands=[
         Operand("view", VIEW, doc="Typed source view holding logical matrix data."),
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
         Operand(
@@ -1487,6 +1517,10 @@ vector_fragment_load = Op(
         IndexList("indices", "static_indices"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
@@ -1525,9 +1559,15 @@ vector_fragment_store = Op(
     operands=[
         Operand("value", VECTOR, doc="Physical matrix fragment payload to store."),
         Operand("view", VIEW, doc="Typed destination view for logical matrix data."),
+        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
-        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
     ],
     attrs=[
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
@@ -1544,6 +1584,10 @@ vector_fragment_store = Op(
         IndexList("indices", "static_indices"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),

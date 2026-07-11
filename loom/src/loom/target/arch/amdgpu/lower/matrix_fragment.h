@@ -20,8 +20,10 @@ extern "C" {
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 enum {
-  // Logical rank of a matrix-fragment source or destination view.
-  LOOM_AMDGPU_FRAGMENT_VIEW_RANK = 2,
+  // Logical rank of a one-block matrix-fragment source or destination view.
+  LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK = 2,
+  // Logical rank of a blocked matrix-fragment source or destination view.
+  LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK = 3,
   // Physical byte width of one matrix-fragment register.
   LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT = 4,
   // Number of packed 16-bit elements carried by one fragment register.
@@ -59,11 +61,11 @@ typedef struct loom_amdgpu_matrix_fragment_lane_ids_t {
   loom_value_id_t lane_div;
 } loom_amdgpu_matrix_fragment_lane_ids_t;
 
-// Returns true when |rows| and |columns| match |role| in |shape|.
+// Returns true when |blocks|, |rows|, and |columns| match |role| in |shape|.
 bool loom_amdgpu_matrix_fragment_tile_shape_matches(
     const loom_value_fact_table_t* fact_table,
     loom_amdgpu_matrix_tile_shape_t shape, loom_contract_operand_role_t role,
-    loom_value_id_t rows, loom_value_id_t columns);
+    loom_value_id_t blocks, loom_value_id_t rows, loom_value_id_t columns);
 
 // Returns true when |role| carries a matrix accumulator or result fragment.
 bool loom_amdgpu_matrix_fragment_role_is_result_like(
@@ -90,13 +92,13 @@ bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
 bool loom_amdgpu_matrix_fragment_role_layout_uses_scalar_b16_packets(
     const loom_matrix_fragment_role_layout_t* role_layout);
 
-// Returns true when |rows| and |columns| match the logical shape of |role| in
-// |layout|.
+// Returns true when |blocks|, |rows|, and |columns| match the logical shape of
+// |role| in |layout|.
 bool loom_amdgpu_matrix_fragment_shape_matches(
     const loom_value_fact_table_t* fact_table,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, loom_value_id_t rows,
-    loom_value_id_t columns);
+    loom_contract_operand_role_t role, loom_value_id_t blocks,
+    loom_value_id_t rows, loom_value_id_t columns);
 
 // Returns true when |payload_type| matches the physical storage selected for
 // one matrix-fragment role.

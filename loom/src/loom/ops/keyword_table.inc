@@ -79,3 +79,4 @@
     [LOOM_KW_UNROLL] = (const uint8_t*)"\x06" "unroll",
     [LOOM_KW_NAME] = (const uint8_t*)"\x04" "name",
     [LOOM_KW_ALIGN] = (const uint8_t*)"\x05" "align",
+    [LOOM_KW_BLOCKS] = (const uint8_t*)"\x06" "blocks",

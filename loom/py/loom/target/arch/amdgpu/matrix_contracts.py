@@ -2123,8 +2123,59 @@ def _complete_sparse_fragment_layout(
     )
 
 
+def _complete_blocked_fragment_layout(
+    contract: AmdgpuMatrixContract,
+) -> AmdgpuMatrixContract:
+    if contract.block_count == 1 or "sparse" in contract.flags:
+        return contract
+
+    contract_payloads = (
+        contract.lhs,
+        contract.rhs,
+        contract.accumulator,
+        contract.result,
+    )
+    candidates = tuple(
+        layout
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        if layout.wave_size == 64
+        and layout.tile_shape == (contract.block_count, *contract.tile_shape)
+        and all(
+            _payload_matches_fragment_role(payload, role)
+            for payload, role in zip(
+                contract_payloads, layout_roles(layout), strict=True
+            )
+        )
+    )
+    if len(candidates) != 1:
+        candidate_keys = ", ".join(layout.key for layout in candidates) or "none"
+        raise ValueError(
+            f"blocked AMDGPU matrix contract '{contract.name}' matched "
+            f"{len(candidates)} fragment layouts: {candidate_keys}"
+        )
+    fragment_layout = candidates[0].key
+    if (
+        contract.fragment_layout is not None
+        and contract.fragment_layout != fragment_layout
+    ):
+        raise ValueError(
+            f"blocked AMDGPU matrix contract '{contract.name}' names fragment "
+            f"layout '{contract.fragment_layout}', expected '{fragment_layout}'"
+        )
+    return replace(
+        contract,
+        wave_size="64",
+        fragment_layout=fragment_layout,
+        source_requirements=tuple(
+            requirement
+            for requirement in contract.source_requirements
+            if requirement != "fragment_layout"
+        ),
+    )
+
+
 AMDGPU_MATRIX_CONTRACTS = tuple(
-    _complete_sparse_fragment_layout(contract)
+    _complete_blocked_fragment_layout(_complete_sparse_fragment_layout(contract))
     for contract in _AMDGPU_MATRIX_CONTRACT_ROWS
 )
 

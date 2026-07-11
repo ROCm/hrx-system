@@ -2527,7 +2527,11 @@ loom_target_compile_report_format_source_low_transform_rows(
             builder, " removed_payload_registers=%" PRIu64,
             row->removed_loop_carried_payload_register_count));
       }
-      if (row->row_count != 0 || row->column_count != 0) {
+      if (row->block_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " shape=%" PRIu64 "x%" PRIu64 "x%" PRIu64,
+            row->block_count, row->row_count, row->column_count));
+      } else if (row->row_count != 0 || row->column_count != 0) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder, " shape=%" PRIu64 "x%" PRIu64, row->row_count,
             row->column_count));
@@ -5276,7 +5280,11 @@ loom_target_compile_report_format_source_low_transform_row_json(
         stream, &first_field, "removed_loop_carried_payload_register_count",
         row->removed_loop_carried_payload_register_count));
   }
-  if (row->row_count != 0 || row->column_count != 0) {
+  if (row->block_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "block_count", row->block_count));
+  }
+  if (row->block_count != 0 || row->row_count != 0 || row->column_count != 0) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
         stream, &first_field, "row_count", row->row_count));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(

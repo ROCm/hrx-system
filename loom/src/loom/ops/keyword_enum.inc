@@ -79,3 +79,4 @@
   LOOM_KW_UNROLL = 70,  // "unroll"
   LOOM_KW_NAME = 71,  // "name"
   LOOM_KW_ALIGN = 72,  // "align"
+  LOOM_KW_BLOCKS = 73,  // "blocks"

@@ -354,6 +354,11 @@ bool loom_contract_request_from_matrix_payloads(
   out_request->arithmetic = options->arithmetic;
   out_request->shape = options->shape;
   out_request->shape_value_refs = options->shape_value_refs;
+  if (out_request->shape.block_count == 0 &&
+      !loom_contract_value_ref_is_present(
+          out_request->shape_value_refs.block_count)) {
+    out_request->shape.block_count = 1;
+  }
   out_request->k_group_size = options->k_group_size;
   out_request->lhs = options->lhs.operand;
   out_request->lhs.role = LOOM_CONTRACT_OPERAND_ROLE_LHS;

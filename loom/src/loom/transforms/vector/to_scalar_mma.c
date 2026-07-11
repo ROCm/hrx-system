@@ -44,6 +44,9 @@ typedef struct loom_vector_to_scalar_mma_fragment_t {
   // Dense logical payload type.
   loom_type_t type;
 
+  // Independent logical block count for this fragment role.
+  loom_vector_to_scalar_index_term_t blocks;
+
   // Logical row count for this fragment role.
   loom_vector_to_scalar_index_term_t rows;
 
@@ -69,7 +72,8 @@ static bool loom_vector_to_scalar_mma_query_fragment(
   loom_vector_fragment_fact_t fact;
   if (!loom_vector_fragment_fact_query_value_facts(
           &state->rewriter->fact_table->context, facts, &fact) ||
-      !iree_any_bit_set(fact.role_flags, role_flags) || fact.shape_rank != 2 ||
+      !iree_any_bit_set(fact.role_flags, role_flags) ||
+      (fact.shape_rank != 2 && fact.shape_rank != 3) ||
       (fact.auxiliary.present_keys != 0 &&
        !loom_vector_to_scalar_mma_fragment_has_schema(&fact))) {
     return false;
@@ -86,9 +90,14 @@ static bool loom_vector_to_scalar_mma_query_fragment(
       .payload = payload,
       .fact = fact,
       .type = loom_module_value_type(state->rewriter->module, payload),
-      .rows = loom_vector_to_scalar_value_term(state, fact.shape_value_ids[0]),
-      .columns =
-          loom_vector_to_scalar_value_term(state, fact.shape_value_ids[1]),
+      .blocks = fact.shape_rank == 3
+                    ? loom_vector_to_scalar_value_term(
+                          state, loom_vector_fragment_fact_block_value(fact))
+                    : loom_vector_to_scalar_static_term(1),
+      .rows = loom_vector_to_scalar_value_term(
+          state, loom_vector_fragment_fact_row_value(fact)),
+      .columns = loom_vector_to_scalar_value_term(
+          state, loom_vector_fragment_fact_column_value(fact)),
   };
   return true;
 }
@@ -106,7 +115,7 @@ static uint32_t loom_vector_to_scalar_mma_fragment_query_rejection_bits(
       !iree_any_bit_set(fact.role_flags, role_flags)) {
     return LOOM_CONTRACT_REJECTION_ROLE;
   }
-  if (fact.shape_rank != 2) {
+  if (fact.shape_rank != 2 && fact.shape_rank != 3) {
     return LOOM_CONTRACT_REJECTION_SHAPE;
   }
   if (fact.auxiliary.present_keys != 0 &&
@@ -146,6 +155,18 @@ static bool loom_vector_to_scalar_mma_product_count(uint64_t lhs, uint64_t rhs,
   }
   *out_product = lhs * rhs;
   return true;
+}
+
+static bool loom_vector_to_scalar_mma_blocked_element_count(
+    int64_t blocks, int64_t rows, int64_t columns,
+    uint64_t* out_element_count) {
+  uint64_t matrix_element_count = 0;
+  if (blocks < 0 || !loom_vector_to_scalar_mma_logical_element_count(
+                        rows, columns, &matrix_element_count)) {
+    return false;
+  }
+  return loom_vector_to_scalar_mma_product_count(
+      (uint64_t)blocks, matrix_element_count, out_element_count);
 }
 
 static bool loom_vector_to_scalar_mma_term_is_static_non_negative(
@@ -209,7 +230,8 @@ static bool loom_vector_to_scalar_mma_term_matches_product(
 }
 
 static bool loom_vector_to_scalar_mma_type_is_dense_payload(
-    loom_vector_to_scalar_state_t* state, loom_type_t type,
+    loom_vector_to_scalar_state_t* state, loom_type_t type, uint16_t shape_rank,
+    loom_vector_to_scalar_index_term_t blocks,
     loom_vector_to_scalar_index_term_t rows,
     loom_vector_to_scalar_index_term_t columns,
     loom_vector_to_scalar_mma_payload_layout_t* out_layout) {
@@ -217,11 +239,18 @@ static bool loom_vector_to_scalar_mma_type_is_dense_payload(
   if (!loom_type_is_vector(type)) {
     return false;
   }
-  if (loom_type_rank(type) == 2) {
-    if (!loom_vector_to_scalar_mma_terms_equal(
-            loom_vector_to_scalar_dim_bound_term(state, type, 0), rows) ||
+  if (loom_type_rank(type) == shape_rank) {
+    const uint8_t row_axis = shape_rank - 2;
+    const uint8_t column_axis = shape_rank - 1;
+    if ((shape_rank == 3 &&
+         !loom_vector_to_scalar_mma_terms_equal(
+             loom_vector_to_scalar_dim_bound_term(state, type, 0), blocks)) ||
         !loom_vector_to_scalar_mma_terms_equal(
-            loom_vector_to_scalar_dim_bound_term(state, type, 1), columns)) {
+            loom_vector_to_scalar_dim_bound_term(state, type, row_axis),
+            rows) ||
+        !loom_vector_to_scalar_mma_terms_equal(
+            loom_vector_to_scalar_dim_bound_term(state, type, column_axis),
+            columns)) {
       return false;
     }
     *out_layout = LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_MATRIX_ROW_MAJOR;
@@ -232,26 +261,30 @@ static bool loom_vector_to_scalar_mma_type_is_dense_payload(
   }
   loom_vector_to_scalar_index_term_t flat_extent =
       loom_vector_to_scalar_dim_bound_term(state, type, 0);
-  if ((loom_vector_to_scalar_mma_term_is_static_value(columns, 1) &&
-       loom_vector_to_scalar_mma_terms_equal(flat_extent, rows)) ||
-      (loom_vector_to_scalar_mma_term_is_static_value(rows, 1) &&
-       loom_vector_to_scalar_mma_terms_equal(flat_extent, columns)) ||
-      loom_vector_to_scalar_mma_term_matches_product(state, flat_extent, rows,
-                                                     columns)) {
+  if (shape_rank == 2 &&
+      ((loom_vector_to_scalar_mma_term_is_static_value(columns, 1) &&
+        loom_vector_to_scalar_mma_terms_equal(flat_extent, rows)) ||
+       (loom_vector_to_scalar_mma_term_is_static_value(rows, 1) &&
+        loom_vector_to_scalar_mma_terms_equal(flat_extent, columns)) ||
+       loom_vector_to_scalar_mma_term_matches_product(state, flat_extent, rows,
+                                                      columns))) {
     *out_layout = LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_FLAT_ROW_MAJOR;
     return true;
   }
 
+  int64_t static_blocks = 0;
   int64_t static_rows = 0;
   int64_t static_columns = 0;
   uint64_t physical_element_count = 0;
   uint64_t logical_element_count = 0;
-  if (loom_vector_to_scalar_mma_term_is_static_non_negative(rows,
+  if (loom_vector_to_scalar_mma_term_is_static_non_negative(blocks,
+                                                            &static_blocks) &&
+      loom_vector_to_scalar_mma_term_is_static_non_negative(rows,
                                                             &static_rows) &&
       loom_vector_to_scalar_mma_term_is_static_non_negative(columns,
                                                             &static_columns) &&
-      loom_vector_to_scalar_mma_logical_element_count(
-          static_rows, static_columns, &logical_element_count) &&
+      loom_vector_to_scalar_mma_blocked_element_count(
+          static_blocks, static_rows, static_columns, &logical_element_count) &&
       loom_type_is_all_static(type) &&
       loom_type_static_element_count(type, &physical_element_count) &&
       physical_element_count == logical_element_count) {
@@ -274,6 +307,7 @@ loom_vector_to_scalar_mma_encoded_operand(
   return (loom_vector_to_scalar_encoded_matrix_operand_t){
       .schema = fragment->fact.encoded_operand,
       .auxiliary = fragment->fact.auxiliary,
+      .blocks = fragment->blocks,
       .rows = fragment->rows,
       .columns = fragment->columns,
   };
@@ -288,8 +322,8 @@ static bool loom_vector_to_scalar_mma_fragment_supports_logical_lanes(
     return false;
   }
   if (loom_vector_to_scalar_mma_type_is_dense_payload(
-          state, fragment->type, fragment->rows, fragment->columns,
-          &fragment->layout)) {
+          state, fragment->type, fragment->fact.shape_rank, fragment->blocks,
+          fragment->rows, fragment->columns, &fragment->layout)) {
     return true;
   }
   if (loom_vector_to_scalar_mma_fragment_has_schema(&fragment->fact)) {
@@ -314,7 +348,8 @@ static uint32_t loom_vector_to_scalar_mma_fragment_logical_lane_rejection_bits(
   loom_vector_to_scalar_mma_payload_layout_t layout =
       LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_UNSUPPORTED;
   if (loom_vector_to_scalar_mma_type_is_dense_payload(
-          state, fragment->type, fragment->rows, fragment->columns, &layout)) {
+          state, fragment->type, fragment->fact.shape_rank, fragment->blocks,
+          fragment->rows, fragment->columns, &layout)) {
     return LOOM_CONTRACT_REJECTION_NONE;
   }
   if (loom_vector_to_scalar_mma_fragment_has_schema(&fragment->fact)) {
@@ -335,7 +370,8 @@ static bool loom_vector_to_scalar_mma_result_is_dense_payload(
   loom_vector_to_scalar_mma_payload_layout_t result_layout =
       LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_UNSUPPORTED;
   return loom_vector_to_scalar_mma_type_is_dense_payload(
-             state, result_type, init->rows, init->columns, &result_layout) &&
+             state, result_type, init->fact.shape_rank, init->blocks,
+             init->rows, init->columns, &result_layout) &&
          init->layout == result_layout &&
          loom_type_equal(init->type, result_type);
 }
@@ -394,7 +430,9 @@ static bool loom_vector_to_scalar_mma_semantics_match(
   *out_numeric = LOOM_VECTOR_TO_SCALAR_MMA_NUMERIC_UNSUPPORTED;
   loom_type_t result_type = loom_module_value_type(
       state->rewriter->module, loom_vector_mma_result(state->op));
-  if (!loom_vector_to_scalar_mma_terms_equal(lhs->columns, rhs->rows) ||
+  if (!loom_vector_to_scalar_mma_terms_equal(lhs->blocks, rhs->blocks) ||
+      !loom_vector_to_scalar_mma_terms_equal(lhs->blocks, init->blocks) ||
+      !loom_vector_to_scalar_mma_terms_equal(lhs->columns, rhs->rows) ||
       !loom_vector_to_scalar_mma_terms_equal(lhs->rows, init->rows) ||
       !loom_vector_to_scalar_mma_terms_equal(rhs->columns, init->columns) ||
       !loom_type_is_vector(result_type)) {
@@ -493,7 +531,9 @@ static uint32_t loom_vector_to_scalar_mma_semantic_rejection_bits(
   loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
   loom_type_t result_type = loom_module_value_type(
       state->rewriter->module, loom_vector_mma_result(state->op));
-  if (!loom_vector_to_scalar_mma_terms_equal(lhs->columns, rhs->rows) ||
+  if (!loom_vector_to_scalar_mma_terms_equal(lhs->blocks, rhs->blocks) ||
+      !loom_vector_to_scalar_mma_terms_equal(lhs->blocks, init->blocks) ||
+      !loom_vector_to_scalar_mma_terms_equal(lhs->columns, rhs->rows) ||
       !loom_vector_to_scalar_mma_terms_equal(lhs->rows, init->rows) ||
       !loom_vector_to_scalar_mma_terms_equal(rhs->columns, init->columns) ||
       !loom_type_is_vector(result_type)) {
@@ -633,15 +673,24 @@ static iree_status_t loom_vector_to_scalar_mma_build_accumulate(
 static iree_status_t loom_vector_to_scalar_mma_build_matrix_indices(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_mma_fragment_t* fragment,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_list_t* out_indices) {
   switch (fragment->layout) {
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_FLAT_ROW_MAJOR: {
-      loom_vector_to_scalar_index_term_t ordinal = {0};
+      loom_vector_to_scalar_index_term_t ordinal = row;
+      if (fragment->fact.shape_rank == 3) {
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, block,
+            fragment->rows, &ordinal));
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal, row,
+            &ordinal));
+      }
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, row, fragment->columns,
-          &ordinal));
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, ordinal,
+          fragment->columns, &ordinal));
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal, column,
           &ordinal));
@@ -649,14 +698,16 @@ static iree_status_t loom_vector_to_scalar_mma_build_matrix_indices(
                                                        out_indices);
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_MATRIX_ROW_MAJOR: {
-      loom_vector_to_scalar_index_term_t terms[2] = {row, column};
-      return loom_vector_to_scalar_terms_to_index_list(state, terms, 2,
-                                                       out_indices);
+      loom_vector_to_scalar_index_term_t terms[3] = {block, row, column};
+      return loom_vector_to_scalar_terms_to_index_list(
+          state, &terms[3 - fragment->fact.shape_rank],
+          fragment->fact.shape_rank, out_indices);
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_LOGICAL_MEMORY: {
-      loom_vector_to_scalar_index_term_t terms[2] = {row, column};
-      return loom_vector_to_scalar_terms_to_index_list(state, terms, 2,
-                                                       out_indices);
+      loom_vector_to_scalar_index_term_t terms[3] = {block, row, column};
+      return loom_vector_to_scalar_terms_to_index_list(
+          state, &terms[3 - fragment->fact.shape_rank],
+          fragment->fact.shape_rank, out_indices);
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_UNSUPPORTED:
     default:
@@ -668,12 +719,22 @@ static iree_status_t loom_vector_to_scalar_mma_build_matrix_indices(
 static iree_status_t loom_vector_to_scalar_mma_build_matrix_ordinal(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_mma_fragment_t* fragment,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t* out_ordinal) {
+  *out_ordinal = row;
+  if (fragment->fact.shape_rank == 3) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, block, fragment->rows,
+        out_ordinal));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, *out_ordinal, row,
+        out_ordinal));
+  }
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, row, fragment->columns,
-      out_ordinal));
+      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, *out_ordinal,
+      fragment->columns, out_ordinal));
   return loom_vector_to_scalar_build_term_binary(
       state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, *out_ordinal, column,
       out_ordinal);
@@ -682,12 +743,13 @@ static iree_status_t loom_vector_to_scalar_mma_build_matrix_ordinal(
 static iree_status_t loom_vector_to_scalar_mma_materialize_matrix_lane(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_mma_fragment_t* fragment,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column, loom_type_t result_type,
     loom_value_id_t* out_lane) {
   loom_vector_to_scalar_index_list_t indices = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_matrix_indices(
-      state, fragment, row, column, &indices));
+      state, fragment, block, row, column, &indices));
   loom_value_id_t raw_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
       state, fragment->payload, indices, &raw_lane));
@@ -697,7 +759,7 @@ static iree_status_t loom_vector_to_scalar_mma_materialize_matrix_lane(
   }
   loom_vector_to_scalar_index_term_t ordinal = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_matrix_ordinal(
-      state, fragment, row, column, &ordinal));
+      state, fragment, block, row, column, &ordinal));
   const loom_vector_to_scalar_encoded_matrix_operand_t operand =
       loom_vector_to_scalar_mma_encoded_operand(fragment);
   return loom_vector_to_scalar_build_encoded_matrix_lane(
@@ -709,21 +771,24 @@ static iree_status_t loom_vector_to_scalar_mma_materialize_matrix_lane(
 static iree_status_t loom_vector_to_scalar_mma_insert_matrix_lane(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_mma_fragment_t* fragment, loom_value_id_t lane,
-    loom_value_id_t aggregate, loom_vector_to_scalar_index_term_t row,
+    loom_value_id_t aggregate, loom_vector_to_scalar_index_term_t block,
+    loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column, loom_value_id_t* out_aggregate) {
   loom_vector_to_scalar_index_list_t indices = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_matrix_indices(
-      state, fragment, row, column, &indices));
+      state, fragment, block, row, column, &indices));
   return loom_vector_to_scalar_insert_lane(
       state, lane, aggregate, fragment->type, indices, out_aggregate);
 }
 
 static iree_status_t loom_vector_to_scalar_mma_extract_matrix_lane(
     loom_vector_to_scalar_state_t* state,
-    const loom_vector_to_scalar_mma_fragment_t* fragment, int64_t row,
-    int64_t column, loom_type_t result_type, loom_value_id_t* out_lane) {
+    const loom_vector_to_scalar_mma_fragment_t* fragment, int64_t block,
+    int64_t row, int64_t column, loom_type_t result_type,
+    loom_value_id_t* out_lane) {
   return loom_vector_to_scalar_mma_materialize_matrix_lane(
-      state, fragment, loom_vector_to_scalar_static_term(row),
+      state, fragment, loom_vector_to_scalar_static_term(block),
+      loom_vector_to_scalar_static_term(row),
       loom_vector_to_scalar_static_term(column), result_type, out_lane);
 }
 
@@ -740,13 +805,13 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_lane(
     loom_vector_to_scalar_mma_numeric_t numeric,
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
-    const loom_vector_to_scalar_mma_fragment_t* init, int64_t row,
-    int64_t column, int64_t k_count, loom_value_id_t* out_lane) {
+    const loom_vector_to_scalar_mma_fragment_t* init, int64_t block,
+    int64_t row, int64_t column, int64_t k_count, loom_value_id_t* out_lane) {
   loom_type_t accumulator_type =
       loom_type_scalar(loom_type_element_type(init->type));
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_extract_matrix_lane(
-      state, init, row, column, accumulator_type, &accumulator));
+      state, init, block, row, column, accumulator_type, &accumulator));
 
   const loom_scalar_type_t accumulator_element_type =
       loom_type_element_type(accumulator_type);
@@ -760,9 +825,9 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_lane(
     loom_value_id_t lhs_lane = LOOM_VALUE_ID_INVALID;
     loom_value_id_t rhs_lane = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_extract_matrix_lane(
-        state, lhs, row, k, accumulator_type, &lhs_lane));
+        state, lhs, block, row, k, accumulator_type, &lhs_lane));
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_extract_matrix_lane(
-        state, rhs, k, column, accumulator_type, &rhs_lane));
+        state, rhs, block, k, column, accumulator_type, &rhs_lane));
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_accumulate(
         state, numeric, lhs_lane, lhs_scalar_type, rhs_lane, rhs_scalar_type,
         accumulator, accumulator_type, &accumulator));
@@ -775,15 +840,24 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_lane(
 static bool loom_vector_to_scalar_mma_shapes_are_static(
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
-    const loom_vector_to_scalar_mma_fragment_t* init, int64_t* out_m,
-    int64_t* out_n, int64_t* out_k) {
+    const loom_vector_to_scalar_mma_fragment_t* init, int64_t* out_block_count,
+    int64_t* out_m, int64_t* out_n, int64_t* out_k) {
+  int64_t lhs_blocks = 0;
+  int64_t rhs_blocks = 0;
+  int64_t init_blocks = 0;
   int64_t lhs_rows = 0;
   int64_t lhs_columns = 0;
   int64_t rhs_rows = 0;
   int64_t rhs_columns = 0;
   int64_t init_rows = 0;
   int64_t init_columns = 0;
-  if (!loom_vector_to_scalar_mma_term_is_static_non_negative(lhs->rows,
+  if (!loom_vector_to_scalar_mma_term_is_static_non_negative(lhs->blocks,
+                                                             &lhs_blocks) ||
+      !loom_vector_to_scalar_mma_term_is_static_non_negative(rhs->blocks,
+                                                             &rhs_blocks) ||
+      !loom_vector_to_scalar_mma_term_is_static_non_negative(init->blocks,
+                                                             &init_blocks) ||
+      !loom_vector_to_scalar_mma_term_is_static_non_negative(lhs->rows,
                                                              &lhs_rows) ||
       !loom_vector_to_scalar_mma_term_is_static_non_negative(lhs->columns,
                                                              &lhs_columns) ||
@@ -797,10 +871,12 @@ static bool loom_vector_to_scalar_mma_shapes_are_static(
                                                              &init_columns)) {
     return false;
   }
-  if (lhs_rows != init_rows || lhs_columns != rhs_rows ||
+  if (lhs_blocks != rhs_blocks || lhs_blocks != init_blocks ||
+      lhs_rows != init_rows || lhs_columns != rhs_rows ||
       rhs_columns != init_columns) {
     return false;
   }
+  *out_block_count = init_blocks;
   *out_m = init_rows;
   *out_n = init_columns;
   *out_k = lhs_columns;
@@ -812,6 +888,7 @@ static iree_status_t loom_vector_to_scalar_mma_build_accumulate_at(
     loom_vector_to_scalar_mma_numeric_t numeric,
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t k, loom_value_id_t accumulator,
@@ -821,9 +898,9 @@ static iree_status_t loom_vector_to_scalar_mma_build_accumulate_at(
   loom_type_t accumulator_type =
       loom_type_scalar(loom_type_element_type(state->vector_type));
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_materialize_matrix_lane(
-      state, lhs, row, k, accumulator_type, &lhs_lane));
+      state, lhs, block, row, k, accumulator_type, &lhs_lane));
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_materialize_matrix_lane(
-      state, rhs, k, column, accumulator_type, &rhs_lane));
+      state, rhs, block, k, column, accumulator_type, &rhs_lane));
   const loom_scalar_type_t accumulator_element_type =
       loom_type_element_type(accumulator_type);
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_accumulate(
@@ -858,6 +935,7 @@ static iree_status_t loom_vector_to_scalar_mma_accumulator_loop(
     loom_vector_to_scalar_mma_numeric_t numeric,
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column, loom_value_id_t init_lane,
     loom_value_id_t* out_lane) {
@@ -884,7 +962,7 @@ static iree_status_t loom_vector_to_scalar_mma_accumulator_loop(
       loom_region_entry_arg_id(loom_scf_for_body(loop), 1);
   loom_value_id_t next_accumulator = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_accumulate_at(
-      state, numeric, lhs, rhs, row, column, k, accumulator_arg,
+      state, numeric, lhs, rhs, block, row, column, k, accumulator_arg,
       &next_accumulator));
   loom_op_t* yield_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(&state->rewriter->builder,
@@ -902,15 +980,16 @@ static iree_status_t loom_vector_to_scalar_mma_build_dynamic_result_lane(
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
     const loom_vector_to_scalar_mma_fragment_t* init,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column, loom_value_id_t* out_lane) {
   loom_value_id_t init_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_materialize_matrix_lane(
-      state, init, row, column,
+      state, init, block, row, column,
       loom_type_scalar(loom_type_element_type(state->vector_type)),
       &init_lane));
   return loom_vector_to_scalar_mma_accumulator_loop(
-      state, numeric, lhs, rhs, row, column, init_lane, out_lane);
+      state, numeric, lhs, rhs, block, row, column, init_lane, out_lane);
 }
 
 static iree_status_t loom_vector_to_scalar_mma_column_loop(
@@ -919,6 +998,7 @@ static iree_status_t loom_vector_to_scalar_mma_column_loop(
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
     const loom_vector_to_scalar_mma_fragment_t* init,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row, loom_value_id_t current_aggregate,
     loom_value_id_t* out_aggregate) {
   loom_value_id_t lower_bound = LOOM_VALUE_ID_INVALID;
@@ -944,10 +1024,11 @@ static iree_status_t loom_vector_to_scalar_mma_column_loop(
       loom_region_entry_arg_id(loom_scf_for_body(loop), 1);
   loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_dynamic_result_lane(
-      state, numeric, lhs, rhs, init, row, column, &lane));
+      state, numeric, lhs, rhs, init, block, row, column, &lane));
   loom_value_id_t yielded_aggregate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_insert_matrix_lane(
-      state, init, lane, aggregate_arg, row, column, &yielded_aggregate));
+      state, init, lane, aggregate_arg, block, row, column,
+      &yielded_aggregate));
   loom_op_t* yield_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(&state->rewriter->builder,
                                             &yielded_aggregate, 1,
@@ -964,6 +1045,7 @@ static iree_status_t loom_vector_to_scalar_mma_row_loop(
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
     const loom_vector_to_scalar_mma_fragment_t* init,
+    loom_vector_to_scalar_index_term_t block, loom_value_id_t current_aggregate,
     loom_value_id_t* out_payload) {
   loom_value_id_t lower_bound = LOOM_VALUE_ID_INVALID;
   loom_value_id_t upper_bound = LOOM_VALUE_ID_INVALID;
@@ -974,8 +1056,9 @@ static iree_status_t loom_vector_to_scalar_mma_row_loop(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &init->payload, 1, &init->type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      step, &current_aggregate, 1, &init->type, 1, NULL, 0,
+      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -986,7 +1069,55 @@ static iree_status_t loom_vector_to_scalar_mma_row_loop(
       loom_region_entry_arg_id(loom_scf_for_body(loop), 1);
   loom_value_id_t yielded_aggregate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_column_loop(
-      state, numeric, lhs, rhs, init, row, aggregate_arg, &yielded_aggregate));
+      state, numeric, lhs, rhs, init, block, row, aggregate_arg,
+      &yielded_aggregate));
+  loom_op_t* yield_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scf_yield_build(&state->rewriter->builder,
+                                            &yielded_aggregate, 1,
+                                            state->location, &yield_op));
+  loom_builder_restore(&state->rewriter->builder, saved);
+
+  *out_payload = loom_scf_for_results(loop).values[0];
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_to_scalar_mma_block_loop(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_mma_numeric_t numeric,
+    const loom_vector_to_scalar_mma_fragment_t* lhs,
+    const loom_vector_to_scalar_mma_fragment_t* rhs,
+    const loom_vector_to_scalar_mma_fragment_t* init,
+    loom_value_id_t* out_payload) {
+  if (init->fact.shape_rank == 2) {
+    return loom_vector_to_scalar_mma_row_loop(
+        state, numeric, lhs, rhs, init, loom_vector_to_scalar_static_term(0),
+        init->payload, out_payload);
+  }
+
+  loom_value_id_t lower_bound = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t upper_bound = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t step = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_loop_bounds(
+      state, init->blocks, &lower_bound, &upper_bound, &step));
+
+  loom_op_t* loop = NULL;
+  IREE_RETURN_IF_ERROR(loom_scf_for_build(
+      &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
+      step, &init->payload, 1, &init->type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+  loom_vector_to_scalar_record_loop_created(state);
+
+  loom_builder_ip_t saved = loom_builder_enter_region(
+      &state->rewriter->builder, loop, loom_scf_for_body(loop));
+  const loom_vector_to_scalar_index_term_t block =
+      loom_vector_to_scalar_dynamic_term(
+          loom_region_entry_arg_id(loom_scf_for_body(loop), 0));
+  const loom_value_id_t aggregate_arg =
+      loom_region_entry_arg_id(loom_scf_for_body(loop), 1);
+  loom_value_id_t yielded_aggregate = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_mma_row_loop(state, numeric, lhs, rhs, init, block,
+                                         aggregate_arg, &yielded_aggregate));
   loom_op_t* yield_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(&state->rewriter->builder,
                                             &yielded_aggregate, 1,
@@ -1003,9 +1134,14 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_fragment(
     loom_value_id_t* out_replacement) {
   loom_op_t* fragment_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_fragment_build(
-      &state->rewriter->builder, LOOM_VECTOR_ROLE_RESULT, payload,
-      init->fact.shape_value_ids[0], init->fact.shape_value_ids[1], NULL, 0,
-      NULL, 0, init->type, state->location, &fragment_op));
+      &state->rewriter->builder,
+      init->fact.shape_rank == 3 ? LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_BLOCKS
+                                 : 0,
+      LOOM_VECTOR_ROLE_RESULT, payload,
+      loom_vector_fragment_fact_block_value(init->fact),
+      loom_vector_fragment_fact_row_value(init->fact),
+      loom_vector_fragment_fact_column_value(init->fact), NULL, 0, NULL, 0,
+      init->type, state->location, &fragment_op));
   *out_replacement = loom_vector_fragment_result(fragment_op);
   return iree_ok_status();
 }
@@ -1085,9 +1221,14 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
     return false;
   }
   const loom_matrix_fragment_role_layout_t* result = &layout->result;
-  return layout->tile_shape.block_count == 1 &&
-         result->coordinate_flags == (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-                                      LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN) &&
+  loom_matrix_fragment_coordinate_flags_t expected_flags =
+      LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+      LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN;
+  if (layout->tile_shape.block_count > 1) {
+    expected_flags |= LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK;
+  }
+  return layout->tile_shape.block_count > 0 &&
+         result->coordinate_flags == expected_flags &&
          result->payload_element_count != 0 &&
          result->coordinate_element_offset == 0 &&
          result->coordinate_element_stride == 1;
@@ -1096,13 +1237,17 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
 static bool loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
     const loom_matrix_fragment_layout_t* layout,
     const loom_matrix_fragment_role_layout_t* role_layout) {
+  loom_matrix_fragment_coordinate_flags_t shared_flags =
+      LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION;
+  if (layout->tile_shape.block_count > 1) {
+    shared_flags |= LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK;
+  }
   const bool carries_row = role_layout->coordinate_flags ==
-                           (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-                            LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION);
-  const bool carries_column = role_layout->coordinate_flags ==
-                              (LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
-                               LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION);
-  return layout->tile_shape.block_count == 1 &&
+                           (shared_flags | LOOM_MATRIX_FRAGMENT_COORDINATE_ROW);
+  const bool carries_column =
+      role_layout->coordinate_flags ==
+      (shared_flags | LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN);
+  return layout->tile_shape.block_count > 0 &&
          role_layout->payload_element_count != 0 &&
          (carries_row || carries_column);
 }
@@ -1122,11 +1267,13 @@ static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
   if (layout->wave_size == 0 || layout->tile_shape.reduction_count == 0) {
     return false;
   }
+  int64_t block_count = 0;
   int64_t m = 0;
   int64_t n = 0;
   int64_t k = 0;
-  if (!loom_vector_to_scalar_mma_shapes_are_static(lhs, rhs, init, &m, &n,
-                                                   &k) ||
+  if (!loom_vector_to_scalar_mma_shapes_are_static(lhs, rhs, init, &block_count,
+                                                   &m, &n, &k) ||
+      block_count != layout->tile_shape.block_count ||
       m != layout->tile_shape.result_row_count ||
       n != layout->tile_shape.result_column_count ||
       k != layout->tile_shape.reduction_count) {
@@ -1417,10 +1564,19 @@ iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_term_t lane_id,
     loom_vector_to_scalar_index_term_t payload_element_index,
+    loom_vector_to_scalar_index_term_t* out_block,
     loom_vector_to_scalar_index_term_t* out_row,
     loom_vector_to_scalar_index_term_t* out_column) {
   const loom_matrix_fragment_role_layout_t* result_layout =
       &state->matrix_fragment_layout->result;
+  if (iree_any_bit_set(result_layout->coordinate_flags,
+                       LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK)) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_axis_coordinate_term(
+        state, state->matrix_fragment_layout, result_layout, lane_id,
+        payload_element_index, LOOM_MATRIX_FRAGMENT_AXIS_BLOCK, out_block));
+  } else {
+    *out_block = loom_vector_to_scalar_static_term(0);
+  }
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_axis_coordinate_term(
       state, state->matrix_fragment_layout, result_layout, lane_id,
       payload_element_index, LOOM_MATRIX_FRAGMENT_AXIS_ROW, out_row));
@@ -1432,12 +1588,13 @@ iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
 static iree_status_t loom_vector_to_scalar_mma_build_reduction_source_element(
     loom_vector_to_scalar_state_t* state,
     const loom_matrix_fragment_role_layout_t* role_layout,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column, uint16_t reduction,
     loom_vector_to_scalar_index_term_t* out_source_lane,
     loom_vector_to_scalar_index_term_t* out_payload_element_index) {
   const loom_vector_to_scalar_index_term_t coordinates[] = {
-      [LOOM_MATRIX_FRAGMENT_AXIS_BLOCK] = loom_vector_to_scalar_static_term(0),
+      [LOOM_MATRIX_FRAGMENT_AXIS_BLOCK] = block,
       [LOOM_MATRIX_FRAGMENT_AXIS_ROW] = row,
       [LOOM_MATRIX_FRAGMENT_AXIS_COLUMN] = column,
       [LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION] =
@@ -1500,13 +1657,14 @@ static iree_status_t loom_vector_to_scalar_mma_build_distributed_lane(
     loom_vector_to_scalar_index_term_t lane_id, uint16_t payload_element_index,
     int64_t k, loom_value_id_t* out_lane) {
   const loom_matrix_fragment_layout_t* layout = state->matrix_fragment_layout;
+  loom_vector_to_scalar_index_term_t block = {0};
   loom_vector_to_scalar_index_term_t row = {0};
   loom_vector_to_scalar_index_term_t column = {0};
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_build_result_fragment_coordinate_terms(
           state, lane_id,
-          loom_vector_to_scalar_static_term(payload_element_index), &row,
-          &column));
+          loom_vector_to_scalar_static_term(payload_element_index), &block,
+          &row, &column));
 
   loom_type_t accumulator_type =
       loom_type_scalar(loom_type_element_type(init->type));
@@ -1522,13 +1680,13 @@ static iree_status_t loom_vector_to_scalar_mma_build_distributed_lane(
     loom_vector_to_scalar_index_term_t lhs_payload_element_index = {0};
     IREE_RETURN_IF_ERROR(
         loom_vector_to_scalar_mma_build_reduction_source_element(
-            state, &layout->lhs, row, column, (uint16_t)reduction,
+            state, &layout->lhs, block, row, column, (uint16_t)reduction,
             &lhs_source_lane, &lhs_payload_element_index));
     loom_vector_to_scalar_index_term_t rhs_source_lane = {0};
     loom_vector_to_scalar_index_term_t rhs_payload_element_index = {0};
     IREE_RETURN_IF_ERROR(
         loom_vector_to_scalar_mma_build_reduction_source_element(
-            state, &layout->rhs, row, column, (uint16_t)reduction,
+            state, &layout->rhs, block, row, column, (uint16_t)reduction,
             &rhs_source_lane, &rhs_payload_element_index));
 
     loom_value_id_t lhs_lane = LOOM_VALUE_ID_INVALID;
@@ -1596,10 +1754,12 @@ static iree_status_t loom_vector_to_scalar_mma_lower_static(
     loom_vector_to_scalar_mma_numeric_t numeric,
     const loom_vector_to_scalar_mma_fragment_t* lhs,
     const loom_vector_to_scalar_mma_fragment_t* rhs,
-    const loom_vector_to_scalar_mma_fragment_t* init, int64_t m, int64_t n,
-    int64_t k, loom_value_id_t* out_replacement, bool* out_handled) {
+    const loom_vector_to_scalar_mma_fragment_t* init, int64_t block_count,
+    int64_t m, int64_t n, int64_t k, loom_value_id_t* out_replacement,
+    bool* out_handled) {
   uint64_t element_count = 0;
-  if (!loom_vector_to_scalar_mma_logical_element_count(m, n, &element_count) ||
+  if (!loom_vector_to_scalar_mma_blocked_element_count(block_count, m, n,
+                                                       &element_count) ||
       element_count > UINT16_MAX) {
     return iree_ok_status();
   }
@@ -1625,11 +1785,14 @@ static iree_status_t loom_vector_to_scalar_mma_lower_static(
       state->rewriter->arena, (iree_host_size_t)element_count,
       sizeof(*elements), (void**)&elements));
   uint16_t ordinal = 0;
-  for (int64_t row = 0; row < m; ++row) {
-    for (int64_t column = 0; column < n; ++column) {
-      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_result_lane(
-          state, numeric, lhs, rhs, init, row, column, k, &elements[ordinal]));
-      ++ordinal;
+  for (int64_t block = 0; block < block_count; ++block) {
+    for (int64_t row = 0; row < m; ++row) {
+      for (int64_t column = 0; column < n; ++column) {
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_result_lane(
+            state, numeric, lhs, rhs, init, block, row, column, k,
+            &elements[ordinal]));
+        ++ordinal;
+      }
     }
   }
 
@@ -1652,8 +1815,8 @@ static iree_status_t loom_vector_to_scalar_mma_lower_dynamic(
     const loom_vector_to_scalar_mma_fragment_t* init,
     loom_value_id_t* out_replacement, bool* out_handled) {
   loom_value_id_t payload = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_row_loop(state, numeric, lhs,
-                                                          rhs, init, &payload));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_block_loop(
+      state, numeric, lhs, rhs, init, &payload));
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_result_fragment(
       state, init, payload, out_replacement));
   *out_handled = true;
@@ -1843,12 +2006,19 @@ static iree_status_t loom_vector_to_scalar_mma_result_lane_terms(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_mma_fragment_t* init,
     loom_vector_to_scalar_index_list_t indices, bool* out_supported,
+    loom_vector_to_scalar_index_term_t* out_block,
     loom_vector_to_scalar_index_term_t* out_row,
     loom_vector_to_scalar_index_term_t* out_column) {
   *out_supported = false;
-  if (indices.rank == 2) {
-    *out_row = loom_vector_to_scalar_lane_term(state, indices, 0);
-    *out_column = loom_vector_to_scalar_lane_term(state, indices, 1);
+  *out_block = loom_vector_to_scalar_static_term(0);
+  if (indices.rank == init->fact.shape_rank) {
+    if (indices.rank == 3) {
+      *out_block = loom_vector_to_scalar_lane_term(state, indices, 0);
+    }
+    *out_row = loom_vector_to_scalar_lane_term(state, indices,
+                                               (uint8_t)(indices.rank - 2));
+    *out_column = loom_vector_to_scalar_lane_term(state, indices,
+                                                  (uint8_t)(indices.rank - 1));
     *out_supported = true;
     return iree_ok_status();
   }
@@ -1862,12 +2032,25 @@ static iree_status_t loom_vector_to_scalar_mma_result_lane_terms(
       }
       loom_vector_to_scalar_index_term_t ordinal =
           loom_vector_to_scalar_lane_term(state, indices, 0);
+      loom_vector_to_scalar_index_term_t matrix_ordinal = ordinal;
+      if (init->fact.shape_rank == 3) {
+        loom_vector_to_scalar_index_term_t matrix_element_count = {0};
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, init->rows,
+            init->columns, &matrix_element_count));
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, ordinal,
+            matrix_element_count, out_block));
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_REM, ordinal,
+            matrix_element_count, &matrix_ordinal));
+      }
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, ordinal, init->columns,
-          out_row));
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, matrix_ordinal,
+          init->columns, out_row));
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_REM, ordinal, init->columns,
-          out_column));
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_REM, matrix_ordinal,
+          init->columns, out_column));
       *out_supported = true;
       return iree_ok_status();
     }
@@ -1904,16 +2087,17 @@ iree_status_t loom_vector_to_scalar_try_materialize_mma_lane(
     return iree_ok_status();
   }
 
+  loom_vector_to_scalar_index_term_t block = {0};
   loom_vector_to_scalar_index_term_t row = {0};
   loom_vector_to_scalar_index_term_t column = {0};
   bool lane_supported = false;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_result_lane_terms(
-      &lane_state, &init, indices, &lane_supported, &row, &column));
+      &lane_state, &init, indices, &lane_supported, &block, &row, &column));
   if (!lane_supported) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_dynamic_result_lane(
-      &lane_state, numeric, &lhs, &rhs, &init, row, column, out_lane));
+      &lane_state, numeric, &lhs, &rhs, &init, block, row, column, out_lane));
   *out_materialized = true;
   return iree_ok_status();
 }
@@ -1937,6 +2121,7 @@ iree_status_t loom_vector_to_scalar_lower_mma(
     return iree_ok_status();
   }
 
+  int64_t block_count = 0;
   int64_t m = 0;
   int64_t n = 0;
   int64_t k = 0;
@@ -1945,10 +2130,10 @@ iree_status_t loom_vector_to_scalar_lower_mma(
       loom_vector_to_scalar_mma_fragment_supports_logical_lanes(state, &init) &&
       loom_vector_to_scalar_mma_result_is_dense_payload(state, &init) &&
       loom_type_is_all_static(init.type) &&
-      loom_vector_to_scalar_mma_shapes_are_static(&lhs, &rhs, &init, &m, &n,
-                                                  &k)) {
+      loom_vector_to_scalar_mma_shapes_are_static(&lhs, &rhs, &init,
+                                                  &block_count, &m, &n, &k)) {
     return loom_vector_to_scalar_mma_lower_static(state, numeric, &lhs, &rhs,
-                                                  &init, m, n, k,
+                                                  &init, block_count, m, n, k,
                                                   out_replacement, out_handled);
   }
   if (loom_vector_to_scalar_mma_fragment_supports_logical_lanes(state, &lhs) &&

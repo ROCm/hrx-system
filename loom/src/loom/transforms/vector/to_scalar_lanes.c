@@ -771,8 +771,9 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
               matrix_fragment_layout)) {
         return true;
       }
-      if (indices.rank == 2) return true;
-      return false;
+      const uint8_t logical_rank =
+          loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
+      return indices.rank == logical_rank;
     }
 
     loom_vector_to_scalar_descriptor_t descriptor = {0};
@@ -836,13 +837,16 @@ loom_vector_to_scalar_try_physical_result_fragment_load_lane(
   const loom_vector_to_scalar_index_term_t register_index =
       loom_vector_to_scalar_lane_term(&def_state, indices, 0);
 
-  loom_vector_to_scalar_index_term_t terms[2] = {0};
+  loom_vector_to_scalar_index_term_t terms[3] = {0};
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_build_result_fragment_coordinate_terms(
-          &def_state, lane_id, register_index, &terms[0], &terms[1]));
+          &def_state, lane_id, register_index, &terms[0], &terms[1],
+          &terms[2]));
+  const uint8_t logical_rank =
+      loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
   loom_vector_to_scalar_index_list_t logical_indices = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_terms_to_index_list(
-      &def_state, terms, IREE_ARRAYSIZE(terms), &logical_indices));
+      &def_state, &terms[3 - logical_rank], logical_rank, &logical_indices));
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_load_lane(
       &def_state, logical_indices, out_lane));
   *out_materialized = true;
@@ -919,7 +923,9 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     if (*out_materialized) {
       return iree_ok_status();
     }
-    if (indices.rank != 2) {
+    const uint8_t logical_rank =
+        loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
+    if (indices.rank != logical_rank) {
       return iree_ok_status();
     }
     loom_vector_to_scalar_state_t def_state = {

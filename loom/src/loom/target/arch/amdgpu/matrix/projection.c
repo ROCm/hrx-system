@@ -87,10 +87,11 @@ static bool loom_amdgpu_matrix_contract_fragment_is_complete(
 
 static bool loom_amdgpu_matrix_contract_shape_is_native(
     const loom_contract_request_t* request) {
-  return request->shape.m > 0 && request->shape.m <= UINT16_MAX &&
-         request->shape.n > 0 && request->shape.n <= UINT16_MAX &&
-         request->shape.k > 0 && request->shape.k <= UINT16_MAX &&
-         request->k_group_size != 0;
+  return request->shape.block_count > 0 &&
+         request->shape.block_count <= UINT16_MAX && request->shape.m > 0 &&
+         request->shape.m <= UINT16_MAX && request->shape.n > 0 &&
+         request->shape.n <= UINT16_MAX && request->shape.k > 0 &&
+         request->shape.k <= UINT16_MAX && request->k_group_size != 0;
 }
 
 static loom_amdgpu_matrix_contract_flags_t
@@ -244,7 +245,8 @@ bool loom_amdgpu_matrix_contract_match_request_from_contract(
 
   loom_amdgpu_matrix_contract_match_request_t request = {0};
   request.family = LOOM_AMDGPU_MATRIX_FAMILY_UNKNOWN;
-  request.tile_shape.block_count = 1;
+  request.tile_shape.block_count =
+      (uint16_t)contract_request->shape.block_count;
   request.tile_shape.result_row_count = (uint16_t)contract_request->shape.m;
   request.tile_shape.result_column_count = (uint16_t)contract_request->shape.n;
   request.tile_shape.reduction_count = (uint16_t)contract_request->shape.k;

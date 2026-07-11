@@ -41,6 +41,10 @@ extern "C" {
 // already-packed VGPR tuple, not scalarized vector arithmetic.
 #define LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS 16u
 
+// Maximum number of 32-bit registers in one target matrix fragment. Wide CDNA
+// MFMA result fragments use a full 32-register tuple.
+#define LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS 32u
+
 // Maximum number of packed i8 lanes accepted by opaque packed-register
 // helpers.
 #define LOOM_AMDGPU_MAX_PACKED_I8_LANES \

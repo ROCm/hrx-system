@@ -44,10 +44,11 @@ typedef struct loom_amdgpu_fragment_memory_address_base_key_t {
   loom_block_t* block;
   // Register type used for any VGPR address terms.
   loom_type_t vgpr_type;
-  // Static lane-mod byte stride in the fragment register map.
-  uint32_t lane_mod_stride;
-  // Static lane-div byte stride in the fragment register map.
-  uint32_t lane_div_stride;
+  // Number of lane coordinate terms in the key.
+  uint8_t lane_term_count;
+  // Lane coordinate terms in the compiled address layout.
+  loom_amdgpu_fragment_memory_lane_term_t
+      lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
   // Number of dynamic source terms in the key.
   uint8_t dynamic_term_count;
   // Source SSA values used for dynamic byte-address terms.

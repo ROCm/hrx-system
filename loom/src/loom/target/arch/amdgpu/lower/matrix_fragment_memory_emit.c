@@ -28,6 +28,14 @@
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/util/fact_table.h"
 
+static uint32_t loom_amdgpu_fragment_memory_packet_element_count(
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
+  return ((uint32_t)packet->result_register_count *
+          plan->address_layout.payload_elements_per_register) /
+         plan->address_layout.payload_registers_per_element;
+}
+
 typedef enum loom_amdgpu_fragment_memory_pending_store_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PENDING_STORE_PAYLOAD_FORM_F32 = 0,
   LOOM_AMDGPU_FRAGMENT_MEMORY_PENDING_STORE_PAYLOAD_FORM_BF16 = 1,
@@ -394,7 +402,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
 
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
-  const uint16_t lane_divisor = plan->address_layout.lane_divisor;
+  const uint16_t lane_divisor = plan->address_layout.primary_lane_divisor;
   loom_amdgpu_matrix_fragment_lane_ids_t lane_ids;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_matrix_fragment_lane_ids(
       context, source_op, lane_divisor, vgpr_type, &lane_ids));
@@ -432,10 +440,10 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
   loom_amdgpu_fragment_memory_address_accumulator_t base_accumulator;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_emit_fragment_memory_base_address_accumulator(
-          context, source_op, plan, &lane_ids, lane_divisor, vgpr_type,
-          &base_accumulator));
+          context, source_op, plan, &lane_ids, vgpr_type, &base_accumulator));
 
-  loom_value_id_t low_packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
+  loom_value_id_t low_packets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS] =
+      {0};
   for (uint16_t packet_index = 0; packet_index < plan->packet_count;
        ++packet_index) {
     const loom_amdgpu_fragment_memory_packet_plan_t* packet =
@@ -473,9 +481,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
         /*element_index=*/0, packet->descriptor_ref, &base_accumulator,
         low_resource, vgpr_type, &address));
     const uint32_t vector_lane_count =
-        low_subword ? 1
-                    : (uint32_t)packet->result_register_count *
-                          plan->address_layout.payload_elements_per_register;
+        low_subword
+            ? 1
+            : loom_amdgpu_fragment_memory_packet_element_count(plan, packet);
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
         context, source_op, layout, plan, packet, /*element_index=*/0,
         vector_lane_count, packet_type, &address, low_packet_resource,
@@ -515,7 +523,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
 
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
-  const uint16_t lane_divisor = plan->address_layout.lane_divisor;
+  const uint16_t lane_divisor = plan->address_layout.primary_lane_divisor;
   loom_amdgpu_matrix_fragment_lane_ids_t lane_ids;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_matrix_fragment_lane_ids(
       context, source_op, lane_divisor, vgpr_type, &lane_ids));
@@ -540,8 +548,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
   loom_amdgpu_fragment_memory_address_accumulator_t base_accumulator;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_emit_fragment_memory_base_address_accumulator(
-          context, source_op, plan, &lane_ids, lane_divisor, vgpr_type,
-          &base_accumulator));
+          context, source_op, plan, &lane_ids, vgpr_type, &base_accumulator));
 
   if (plan->payload_form ==
       LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
@@ -634,7 +641,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
     }
 
     loom_amdgpu_fragment_memory_pending_store_t
-        pending_stores[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
+        pending_stores[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS] = {0};
     iree_host_size_t pending_store_count = 0;
     for (uint16_t packet_index = 0; packet_index < plan->packet_count;
          ++packet_index) {
@@ -730,8 +737,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
         /*element_index=*/0, packet->descriptor_ref, &base_accumulator,
         low_resource, vgpr_type, &address));
     const uint32_t vector_lane_count =
-        (uint32_t)packet->result_register_count *
-        plan->address_layout.payload_elements_per_register;
+        loom_amdgpu_fragment_memory_packet_element_count(plan, packet);
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_store_packet(
         context, source_op, layout, plan, packet, /*element_index=*/0,
         vector_lane_count, &address, low_payload_packet, low_packet_resource,
