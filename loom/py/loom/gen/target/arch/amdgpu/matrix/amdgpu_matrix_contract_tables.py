@@ -37,6 +37,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.matrix_contracts import (  # noqa: E402
     AMDGPU_MATRIX_CONTRACTS,
+    AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS,
     AmdgpuMatrixContract,
     AmdgpuMatrixPayload,
 )
@@ -150,24 +151,6 @@ _MATRIX_ATTR_IMMEDIATE_FIELDS = frozenset(
 _FRAGMENT_LAYOUT_C_NAMES = {
     None: "LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN",
     **{key: layout.c_kind for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items()},
-}
-
-_NUMERIC_TYPE_BIT_COUNTS = {
-    "f64": 64,
-    "f32": 32,
-    "f16": 16,
-    "bf16": 16,
-    "xf32": 32,
-    "i32": 32,
-    "i8": 8,
-    "iu8": 8,
-    "i4": 4,
-    "iu4": 4,
-    "fp8": 8,
-    "bf8": 8,
-    "fp6": 6,
-    "bf6": 6,
-    "fp4": 4,
 }
 
 _MATRIX_WAIT_RESULT_FAMILIES = frozenset(("mfma", "smfmac"))
@@ -557,6 +540,8 @@ def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
 
 def _validate_contract_fragment_layout(contract: AmdgpuMatrixContract) -> None:
     if contract.fragment_layout is None:
+        if "sparse" in contract.flags:
+            raise ValueError(f"sparse AMDGPU matrix contract '{contract.name}' has no fragment layout")
         return
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.get(contract.fragment_layout)
     if layout is None:
@@ -569,6 +554,13 @@ def _validate_contract_fragment_layout(contract: AmdgpuMatrixContract) -> None:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' shape {contract.tile_shape} disagrees with fragment layout '{layout.key}' shape {layout.tile_shape}")
     if contract.wave_size != "any" and int(contract.wave_size) != layout.wave_size:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' wave size {contract.wave_size} disagrees with fragment layout '{layout.key}' wave size {layout.wave_size}")
+    compressed_roles = tuple(role.role for role in layout_roles(layout) if role.reduction_group is not None)
+    if "sparse" in contract.flags:
+        reduction_group = layout.lhs.reduction_group
+        if compressed_roles != ("lhs",) or reduction_group is None or reduction_group.storage_element_count != 2 or reduction_group.logical_element_count != 4:
+            raise ValueError(f"sparse AMDGPU matrix contract '{contract.name}' uses fragment layout '{layout.key}' without an exact 2:4 LHS")
+    elif compressed_roles:
+        raise ValueError(f"dense AMDGPU matrix contract '{contract.name}' uses compressed fragment layout '{layout.key}'")
     contract_payloads = (
         contract.lhs,
         contract.rhs,
@@ -576,7 +568,7 @@ def _validate_contract_fragment_layout(contract: AmdgpuMatrixContract) -> None:
         contract.result,
     )
     for contract_payload, role_layout in zip(contract_payloads, layout_roles(layout), strict=True):
-        element_bit_count = _NUMERIC_TYPE_BIT_COUNTS.get(contract_payload.numeric_type)
+        element_bit_count = AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS.get(contract_payload.numeric_type)
         if element_bit_count is None:
             raise ValueError(f"AMDGPU matrix contract '{contract.name}' role '{role_layout.role}' uses fragment layout '{layout.key}' with unsupported numeric type '{contract_payload.numeric_type}'")
         actual_payload = (

@@ -8,7 +8,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
+    MatrixFragmentReductionGroup,
+    MatrixFragmentRoleLayout,
+    layout_roles,
+)
+
+AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS = {
+    "f64": 64,
+    "f32": 32,
+    "f16": 16,
+    "bf16": 16,
+    "xf32": 32,
+    "i32": 32,
+    "i8": 8,
+    "iu8": 8,
+    "i4": 4,
+    "iu4": 4,
+    "fp8": 8,
+    "bf8": 8,
+    "fp6": 6,
+    "bf6": 6,
+    "fp4": 4,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +74,7 @@ def payload(
     return AmdgpuMatrixPayload(numeric_type, register_count, element_count)
 
 
-AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
+_AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x1.f32",
         family="mfma",
@@ -2016,8 +2041,97 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
 )
 
 
+def _payload_matches_fragment_role(
+    payload: AmdgpuMatrixPayload, role: MatrixFragmentRoleLayout
+) -> bool:
+    element_bit_count = AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS.get(payload.numeric_type)
+    return element_bit_count is not None and (
+        payload.register_count,
+        payload.element_count,
+        element_bit_count,
+    ) == (
+        role.register_count,
+        role.payload_element_count,
+        role.element_bit_count,
+    )
+
+
+def _complete_sparse_fragment_layout(
+    contract: AmdgpuMatrixContract,
+) -> AmdgpuMatrixContract:
+    if "sparse" not in contract.flags:
+        return contract
+
+    wave_size_by_family = {"smfmac": 64, "swmmac": 32}
+    wave_size = wave_size_by_family.get(contract.family)
+    if wave_size is None:
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' has "
+            f"unsupported family '{contract.family}'"
+        )
+    if contract.wave_size not in ("any", str(wave_size)):
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' has wave size "
+            f"{contract.wave_size}, expected {wave_size}"
+        )
+
+    contract_payloads = (
+        contract.lhs,
+        contract.rhs,
+        contract.accumulator,
+        contract.result,
+    )
+    candidates = tuple(
+        layout
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        if layout.wave_size == wave_size
+        and layout.tile_shape == (contract.block_count, *contract.tile_shape)
+        and layout.lhs.reduction_group == MatrixFragmentReductionGroup(2, 4)
+        and layout.rhs.reduction_group is None
+        and all(
+            _payload_matches_fragment_role(payload, role)
+            for payload, role in zip(
+                contract_payloads, layout_roles(layout), strict=True
+            )
+        )
+    )
+    if len(candidates) != 1:
+        candidate_keys = ", ".join(layout.key for layout in candidates) or "none"
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' matched "
+            f"{len(candidates)} fragment layouts: {candidate_keys}"
+        )
+    fragment_layout = candidates[0].key
+    if (
+        contract.fragment_layout is not None
+        and contract.fragment_layout != fragment_layout
+    ):
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' names fragment "
+            f"layout '{contract.fragment_layout}', expected '{fragment_layout}'"
+        )
+    source_requirements = tuple(
+        requirement
+        for requirement in contract.source_requirements
+        if requirement != "fragment_layout"
+    )
+    return replace(
+        contract,
+        wave_size=str(wave_size),
+        fragment_layout=fragment_layout,
+        source_requirements=source_requirements,
+    )
+
+
+AMDGPU_MATRIX_CONTRACTS = tuple(
+    _complete_sparse_fragment_layout(contract)
+    for contract in _AMDGPU_MATRIX_CONTRACT_ROWS
+)
+
+
 __all__ = (
     "AMDGPU_MATRIX_CONTRACTS",
+    "AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS",
     "AmdgpuMatrixContract",
     "AmdgpuMatrixPayload",
     "payload",
