@@ -74,6 +74,8 @@ typedef enum id4_pipeline_region_dispatch_binding_flag_bits_e {
   ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE = 1u << 0,
   // read_range describes the byte interval read by this binding.
   ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_READ_RANGE = 1u << 1,
+  // This full-tensor write intentionally destroys overlapping alias contents.
+  ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE = 1u << 2,
 } id4_pipeline_region_dispatch_binding_flag_bits_t;
 
 // Tensor byte interval relative to the bound logical tensor.
@@ -93,6 +95,15 @@ typedef enum id4_pipeline_tensor_import_flag_bits_e {
   ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED = 1u << 0,
 } id4_pipeline_tensor_import_flag_bits_t;
 
+// Local tensor subview behavior flags.
+typedef uint32_t id4_pipeline_region_subview_flags_t;
+
+// Local tensor subview behavior flag bits.
+typedef enum id4_pipeline_region_subview_flag_bits_e {
+  // The new logical tensor starts uninitialized regardless of source contents.
+  ID4_PIPELINE_REGION_SUBVIEW_FLAG_DISCARD_CONTENTS = 1u << 0,
+} id4_pipeline_region_subview_flag_bits_t;
+
 // Local tensor lifetime behavior flags.
 typedef uint32_t id4_pipeline_region_local_lifetime_flags_t;
 
@@ -100,6 +111,8 @@ typedef uint32_t id4_pipeline_region_local_lifetime_flags_t;
 typedef enum id4_pipeline_region_local_lifetime_flag_bits_e {
   // Tensor storage was acquired from a previously released local slab range.
   ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_REUSED = 1u << 0,
+  // Tensor is a logical subview and does not own a local slab range.
+  ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_SUBVIEW = 1u << 1,
 } id4_pipeline_region_local_lifetime_flag_bits_t;
 
 // Scalar element type for planned tensor values.
@@ -188,6 +201,8 @@ typedef struct id4_pipeline_region_local_lifetime_t {
   iree_string_view_t name;
   // Builder-local tensor ordinal.
   uint32_t ordinal;
+  // Builder-local ordinal of the tensor owning the backing allocation.
+  uint32_t storage_root_ordinal;
   // Lifetime behavior flags.
   id4_pipeline_region_local_lifetime_flags_t flags;
   // Scalar element type.
@@ -200,6 +215,8 @@ typedef struct id4_pipeline_region_local_lifetime_t {
   iree_device_size_t alignment;
   // Byte offset into the local slab binding.
   iree_device_size_t offset;
+  // Byte offset from the storage root to this logical tensor.
+  iree_device_size_t storage_byte_offset;
   // Operation ordinal where the tensor was acquired.
   iree_host_size_t acquire_operation_ordinal;
   // Epoch where the tensor was acquired.
@@ -208,6 +225,10 @@ typedef struct id4_pipeline_region_local_lifetime_t {
   iree_host_size_t release_operation_ordinal;
   // Epoch where the tensor was released, or UINT32_MAX.
   uint32_t release_epoch;
+  // Operation ordinal where the root storage became dead.
+  iree_host_size_t storage_release_operation_ordinal;
+  // Epoch where the root storage became dead.
+  uint32_t storage_release_epoch;
 } id4_pipeline_region_local_lifetime_t;
 
 // Kernel descriptor consumed by region dispatch.
@@ -288,6 +309,8 @@ typedef struct id4_pipeline_region_statistics_t {
   uint32_t current_epoch;
   // Number of local tensor acquire operations.
   iree_host_size_t local_acquire_count;
+  // Number of local tensor subview operations.
+  iree_host_size_t local_subview_count;
   // Number of local tensor release operations.
   iree_host_size_t local_release_count;
   // Number of local slab ranges reused after an epoch boundary.
@@ -413,6 +436,14 @@ void id4_pipeline_region_local_lifetime_list_release(
 iree_status_t id4_pipeline_region_acquire_tensor(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_tensor_layout_t* layout,
+    id4_pipeline_tensor_t* out_tensor);
+
+// Creates a logical tensor view into an acquired local tensor.
+iree_status_t id4_pipeline_region_subview_tensor(
+    id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
+    const id4_pipeline_tensor_layout_t* layout,
+    iree_device_size_t source_byte_offset,
+    id4_pipeline_region_subview_flags_t flags,
     id4_pipeline_tensor_t* out_tensor);
 
 // Imports an initialized or uninitialized tensor from a binding-table slot.

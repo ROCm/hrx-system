@@ -419,6 +419,8 @@ static bool id4_pipeline_program_plan_operation_uses_tensor(
     const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
   if (!op) return false;
   switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW:
+      return op->payload.subview.source.ordinal == tensor.ordinal;
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
            ++i) {

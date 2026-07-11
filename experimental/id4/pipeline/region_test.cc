@@ -203,6 +203,195 @@ TEST_F(RegionBuilderTest, AcquireReleaseReusesOnlyAfterEpochAdvance) {
   id4_pipeline_region_builder_destroy(builder);
 }
 
+TEST_F(RegionBuilderTest, SubviewRetainsRootStorageWithoutCountingBytes) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t root_layout =
+      MakeTensorLayout(IREE_SV("root"), 64);
+  id4_pipeline_tensor_layout_t subview_layout =
+      MakeTensorLayout(IREE_SV("root.lower_half"), 32);
+
+  id4_pipeline_tensor_t root;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &root_layout, &root));
+  id4_pipeline_tensor_t subview;
+  IREE_ASSERT_OK(id4_pipeline_region_subview_tensor(
+      builder, root, &subview_layout, /*source_byte_offset=*/0,
+      ID4_PIPELINE_REGION_SUBVIEW_FLAG_DISCARD_CONTENTS, &subview));
+  EXPECT_EQ(subview.binding_slot, root.binding_slot);
+  EXPECT_EQ(subview.offset, root.offset);
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.local_acquire_count, 1u);
+  EXPECT_EQ(statistics.local_subview_count, 1u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 64u);
+  EXPECT_EQ(statistics.local_slab_high_water_mark, 64u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, root));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_layout_t other_layout =
+      MakeTensorLayout(IREE_SV("other"), 64);
+  id4_pipeline_tensor_t other;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &other_layout, &other));
+  EXPECT_EQ(other.offset, 64u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, other));
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, subview));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_layout_t reused_layout =
+      MakeTensorLayout(IREE_SV("reused"), 64);
+  id4_pipeline_tensor_t reused;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &reused_layout, &reused));
+  EXPECT_EQ(reused.offset, 0u);
+
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.local_acquire_count, 3u);
+  EXPECT_EQ(statistics.local_subview_count, 1u);
+  EXPECT_EQ(statistics.local_reuse_count, 1u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 128u);
+  EXPECT_EQ(statistics.local_slab_high_water_mark, 128u);
+
+  iree_host_size_t lifetime_count = 0;
+  id4_pipeline_region_local_lifetime_t* lifetimes = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_region_builder_clone_local_lifetimes(
+      builder, iree_allocator_system(), &lifetime_count, &lifetimes));
+  ASSERT_EQ(lifetime_count, 4u);
+  const id4_pipeline_region_local_lifetime_t* root_lifetime = nullptr;
+  const id4_pipeline_region_local_lifetime_t* subview_lifetime = nullptr;
+  for (iree_host_size_t i = 0; i < lifetime_count; ++i) {
+    if (lifetimes[i].ordinal == root.ordinal) root_lifetime = &lifetimes[i];
+    if (iree_all_bits_set(lifetimes[i].flags,
+                          ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_SUBVIEW)) {
+      subview_lifetime = &lifetimes[i];
+    }
+  }
+  ASSERT_NE(root_lifetime, nullptr);
+  ASSERT_NE(subview_lifetime, nullptr);
+  EXPECT_EQ(subview_lifetime->storage_root_ordinal, root.ordinal);
+  EXPECT_EQ(subview_lifetime->storage_byte_offset, 0u);
+  EXPECT_EQ(root_lifetime->storage_release_operation_ordinal,
+            subview_lifetime->storage_release_operation_ordinal);
+  EXPECT_EQ(root_lifetime->storage_release_epoch,
+            subview_lifetime->storage_release_epoch);
+  id4_pipeline_region_local_lifetime_list_release(lifetime_count, lifetimes,
+                                                  iree_allocator_system());
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
+TEST_F(RegionBuilderTest, DestructiveAliasWriteConsumesOverlappingNames) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t root_layout =
+      MakeTensorLayout(IREE_SV("root"), 64);
+  id4_pipeline_tensor_t root;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &root_layout, &root));
+
+  id4_pipeline_region_kernel_t initialize_kernel =
+      MakeDryKernel(IREE_SV("initialize"), 1);
+  id4_pipeline_region_dispatch_binding_t initialize_binding = {
+      /*.tensor=*/root,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &initialize_kernel,
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &initialize_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_tensor_layout_t subview_layout =
+      MakeTensorLayout(IREE_SV("root.lower_half"), 32);
+  id4_pipeline_tensor_t subview;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_subview_tensor(
+          builder, root, &subview_layout, /*source_byte_offset=*/0,
+          ID4_PIPELINE_REGION_SUBVIEW_FLAG_DISCARD_CONTENTS, &subview));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(id4_pipeline_region_subview_tensor(
+      builder, root, &subview_layout, /*source_byte_offset=*/0,
+      ID4_PIPELINE_REGION_SUBVIEW_FLAG_DISCARD_CONTENTS, &subview));
+
+  id4_pipeline_region_kernel_t alias_kernel =
+      MakeDryKernel(IREE_SV("alias"), 2);
+  id4_pipeline_region_dispatch_binding_t undeclared_bindings[] = {
+      {
+          /*.tensor=*/root,
+          /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+      },
+      {
+          /*.tensor=*/subview,
+          /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      },
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
+          builder, &alias_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), IREE_ARRAYSIZE(undeclared_bindings),
+          undeclared_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_dispatch_binding_t destructive_bindings[] = {
+      {
+          /*.tensor=*/root,
+          /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+      },
+      {
+          /*.tensor=*/subview,
+          /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+          /*.flags=*/
+          ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE,
+      },
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &alias_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), IREE_ARRAYSIZE(destructive_bindings),
+      destructive_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_kernel_t read_kernel = MakeDryKernel(IREE_SV("read"), 1);
+  id4_pipeline_region_dispatch_binding_t read_root = {
+      /*.tensor=*/root,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
+          builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), /*binding_count=*/1, &read_root,
+          IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  id4_pipeline_region_dispatch_binding_t read_subview = {
+      /*.tensor=*/subview,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &read_subview,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
 TEST_F(RegionBuilderTest, ReleasedAdjacentRangesCoalesce) {
   id4_pipeline_region_builder_t* builder = CreateDryBuilder();
   id4_pipeline_tensor_layout_t wide_layout =
@@ -261,6 +450,109 @@ TEST_F(RegionBuilderTest, ReleasedAdjacentRangesCoalesce) {
   EXPECT_EQ(statistics.local_reuse_count, 4u);
   EXPECT_EQ(statistics.local_slab_byte_length, 192u);
   EXPECT_EQ(statistics.local_slab_high_water_mark, 192u);
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
+TEST_F(RegionBuilderTest, ReuseSelectsLowestFittingAddress) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t low_layout =
+      MakeTensorLayout(IREE_SV("low"), 64);
+  id4_pipeline_tensor_layout_t guard0_layout =
+      MakeTensorLayout(IREE_SV("guard0"), 64);
+  id4_pipeline_tensor_layout_t middle_layout =
+      MakeTensorLayout(IREE_SV("middle"), 64);
+  id4_pipeline_tensor_layout_t guard1_layout =
+      MakeTensorLayout(IREE_SV("guard1"), 64);
+  id4_pipeline_tensor_layout_t high_layout =
+      MakeTensorLayout(IREE_SV("high"), 64);
+  id4_pipeline_tensor_t low;
+  id4_pipeline_tensor_t guard0;
+  id4_pipeline_tensor_t middle;
+  id4_pipeline_tensor_t guard1;
+  id4_pipeline_tensor_t high;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &low_layout, &low));
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &guard0_layout, &guard0));
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &middle_layout, &middle));
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &guard1_layout, &guard1));
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &high_layout, &high));
+  EXPECT_EQ(low.offset, 0u);
+  EXPECT_EQ(middle.offset, 128u);
+  EXPECT_EQ(high.offset, 256u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, low));
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, middle));
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, high));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_layout_t temporary_layout =
+      MakeTensorLayout(IREE_SV("temporary"), 64);
+  id4_pipeline_tensor_t temporary;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &temporary_layout,
+                                                    &temporary));
+  EXPECT_EQ(temporary.offset, 0u);
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, temporary));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  // Removing the first free range swaps the highest range to the front of the
+  // internal array. Reuse still chooses the lowest fitting address.
+  id4_pipeline_tensor_layout_t result_layout =
+      MakeTensorLayout(IREE_SV("result"), 32);
+  id4_pipeline_tensor_t result;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &result_layout, &result));
+  EXPECT_EQ(result.offset, 0u);
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
+TEST_F(RegionBuilderTest, ReuseExtendsReleasedSlabTail) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t live_layout =
+      MakeTensorLayout(IREE_SV("live"), 64);
+  id4_pipeline_tensor_layout_t tail_layout =
+      MakeTensorLayout(IREE_SV("tail"), 64);
+  id4_pipeline_tensor_t live;
+  id4_pipeline_tensor_t tail;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &live_layout, &live));
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &tail_layout, &tail));
+  EXPECT_EQ(live.offset, 0u);
+  EXPECT_EQ(tail.offset, 64u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, tail));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_layout_t expanded_layout =
+      MakeTensorLayout(IREE_SV("expanded"), 96);
+  id4_pipeline_tensor_t expanded;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &expanded_layout, &expanded));
+  EXPECT_EQ(expanded.offset, 64u);
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.local_reuse_count, 1u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 160u);
+  EXPECT_EQ(statistics.local_slab_high_water_mark, 160u);
 
   id4_pipeline_region_builder_destroy(builder);
 }

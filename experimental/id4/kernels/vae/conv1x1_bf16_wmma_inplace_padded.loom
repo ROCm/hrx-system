@@ -1,0 +1,97 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.vae.conv1x1_inplace.pixel_count : %value: index where [range(%value, 16, 16777216), mul(%value, 16)]
+
+config.decl @id4.vae.conv1x1_inplace.input_channel_count : %value: index where [range(%value, 128, 4096), mul(%value, 16)]
+
+config.decl @id4.vae.conv1x1_inplace.output_channel_count : %value: index where [range(%value, 128, 128)]
+
+kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128") @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %pixel_count = config.get @id4.vae.conv1x1_inplace.pixel_count : index
+  %workgroup_count = index.div %pixel_count, %sixteen : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%thirty_two, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %forty_eight = index.constant 48 : index
+  %sixty_four = index.constant 64 : index
+  %eighty = index.constant 80 : index
+  %ninety_six = index.constant 96 : index
+  %one_hundred_twelve = index.constant 112 : index
+  %one_hundred_twenty_eight = index.constant 128 : index
+  %pixel_tile = kernel.workgroup.id<x> : index
+  %pixel_count = config.get @id4.vae.conv1x1_inplace.pixel_count : index
+  %input_channel_count = config.get @id4.vae.conv1x1_inplace.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv1x1_inplace.output_channel_count : index
+  %pixel_origin = index.mul %pixel_tile, %sixteen : index
+  %k_tile_count = index.div %input_channel_count, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %weight_layout = encoding.layout.strided [1, %input_channel_count] : encoding<layout>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  %init0 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init1 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init2 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init3 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init4 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init5 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init6 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init7 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %k_tile = [%zero to %k_tile_count step %unit](%acc0 = %init0 : vector<8xf32>, %acc1 = %init1 : vector<8xf32>, %acc2 = %init2 : vector<8xf32>, %acc3 = %init3 : vector<8xf32>, %acc4 = %init4 : vector<8xf32>, %acc5 = %init5 : vector<8xf32>, %acc6 = %init6 : vector<8xf32>, %acc7 = %init7 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs = vector.fragment.load<lhs> %input_view[%pixel_origin, %k_origin] shape [%m, %k] : view<[%pixel_count]x[%input_channel_count]xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %zero] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %sixteen] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs2 = vector.fragment.load<rhs> %weight_view[%k_origin, %thirty_two] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs3 = vector.fragment.load<rhs> %weight_view[%k_origin, %forty_eight] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs4 = vector.fragment.load<rhs> %weight_view[%k_origin, %sixty_four] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs5 = vector.fragment.load<rhs> %weight_view[%k_origin, %eighty] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs6 = vector.fragment.load<rhs> %weight_view[%k_origin, %ninety_six] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs7 = vector.fragment.load<rhs> %weight_view[%k_origin, %one_hundred_twelve] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %next0 = vector.mma %lhs, %rhs0, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs1, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs2, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs3, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next4 = vector.mma %lhs, %rhs4, %acc4 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next5 = vector.mma %lhs, %rhs5, %acc5 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next6 = vector.mma %lhs, %rhs6, %acc6 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next7 = vector.mma %lhs, %rhs7, %acc7 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  vector.fragment.store<result> %result0, %output_view[%pixel_origin, %zero] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result1, %output_view[%pixel_origin, %sixteen] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result2, %output_view[%pixel_origin, %thirty_two] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result3, %output_view[%pixel_origin, %forty_eight] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result4, %output_view[%pixel_origin, %sixty_four] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result5, %output_view[%pixel_origin, %eighty] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result6, %output_view[%pixel_origin, %ninety_six] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  vector.fragment.store<result> %result7, %output_view[%pixel_origin, %one_hundred_twelve] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  kernel.return
+}
+
+check.case public @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_case {
+  %storage = check.generate.fill value(1.0) : tensor<16x256xbf16>
+  %weight = check.generate.fill value(0.00390625) : tensor<256x128xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16x256xbf16>
+  func.call @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128(%storage, %weight, %storage) : (tensor<16x256xbf16>, tensor<256x128xbf16>, tensor<16x256xbf16>)
+  check.expect.close actual(%storage) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x256xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_case> @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small

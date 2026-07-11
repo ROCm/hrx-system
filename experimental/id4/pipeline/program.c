@@ -15,6 +15,10 @@ typedef struct id4_pipeline_program_tensor_state_t {
   id4_pipeline_program_tensor_record_t record;
   // True when the tensor contents may be read.
   bool initialized;
+  // True after destructive aliasing permanently invalidates this logical name.
+  bool consumed;
+  // Most recent execution epoch where a dispatch accessed this tensor.
+  uint32_t access_epoch;
 } id4_pipeline_program_tensor_state_t;
 
 struct id4_pipeline_program_builder_t {
@@ -38,6 +42,8 @@ struct id4_pipeline_program_builder_t {
   iree_host_size_t operation_count;
   // Allocated operation-record capacity.
   iree_host_size_t operation_capacity;
+  // Current execution epoch after authored barriers.
+  uint32_t current_epoch;
 };
 
 struct id4_pipeline_program_t {
@@ -460,7 +466,8 @@ static iree_status_t id4_pipeline_program_validate_dispatch_binding_flags(
     iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
   const id4_pipeline_program_dispatch_binding_flags_t allowed_flags =
       ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE |
-      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE;
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE |
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE;
   if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -538,6 +545,216 @@ static iree_status_t id4_pipeline_program_validate_dispatch_binding_range(
   return iree_ok_status();
 }
 
+static id4_pipeline_program_tensor_byte_range_t
+id4_pipeline_program_dispatch_binding_effective_read_range(
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    const id4_pipeline_program_tensor_record_t* tensor_record) {
+  if (iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE)) {
+    return binding->read_range;
+  }
+  return (id4_pipeline_program_tensor_byte_range_t){
+      // Whole tensor reads start at the logical tensor base.
+      .offset = 0,
+      // Whole tensor read byte coverage.
+      .length = tensor_record->byte_length,
+  };
+}
+
+static id4_pipeline_program_tensor_byte_range_t
+id4_pipeline_program_dispatch_binding_effective_write_range(
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    const id4_pipeline_program_tensor_record_t* tensor_record) {
+  if (iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    return binding->write_range;
+  }
+  return (id4_pipeline_program_tensor_byte_range_t){
+      // Whole tensor writes start at the logical tensor base.
+      .offset = 0,
+      // Whole tensor write byte coverage.
+      .length = tensor_record->byte_length,
+  };
+}
+
+static iree_status_t id4_pipeline_program_storage_range(
+    const id4_pipeline_program_tensor_record_t* tensor_record,
+    id4_pipeline_program_tensor_byte_range_t tensor_range,
+    id4_pipeline_program_tensor_byte_range_t* out_storage_range) {
+  out_storage_range->length = tensor_range.length;
+  if (!iree_device_size_checked_add(tensor_record->storage_byte_offset,
+                                    tensor_range.offset,
+                                    &out_storage_range->offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor storage offset overflow");
+  }
+  return iree_ok_status();
+}
+
+static bool id4_pipeline_program_byte_ranges_overlap(
+    id4_pipeline_program_tensor_byte_range_t lhs,
+    id4_pipeline_program_tensor_byte_range_t rhs) {
+  const iree_device_size_t lhs_end = lhs.offset + lhs.length;
+  const iree_device_size_t rhs_end = rhs.offset + rhs.length;
+  return lhs.offset < rhs_end && rhs.offset < lhs_end;
+}
+
+static iree_status_t
+id4_pipeline_program_validate_destructive_alias_write_binding(
+    const id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    const id4_pipeline_program_tensor_state_t* state,
+    iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
+  if (!iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE)) {
+    return iree_ok_status();
+  }
+  if (!iree_any_bit_set(binding->access,
+                        ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dispatch %.*s binding %" PRIhsz
+                            " destructive alias binding requires write access",
+                            (int)dispatch_name.size, dispatch_name.data,
+                            binding_index);
+  }
+  if (iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE) &&
+      (binding->write_range.offset != 0 ||
+       binding->write_range.length != state->record.byte_length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dispatch %.*s binding %" PRIhsz
+        " destructive alias write must cover the full logical tensor",
+        (int)dispatch_name.size, dispatch_name.data, binding_index);
+  }
+  if (state->record.storage_root_ordinal == binding->tensor.ordinal) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dispatch %.*s binding %" PRIhsz
+        " destructive alias write requires a transient subview",
+        (int)dispatch_name.size, dispatch_name.data, binding_index);
+  }
+  if (state->record.storage_root_ordinal >= builder->tensor_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "program tensor storage root is invalid");
+  }
+  const id4_pipeline_program_tensor_record_t* root =
+      &builder->tensor_states[state->record.storage_root_ordinal].record;
+  if (root->producer_operation_ordinal >= builder->operation_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "program tensor storage producer is invalid");
+  }
+  const id4_pipeline_program_op_t* producer =
+      &builder->operations[root->producer_operation_ordinal];
+  if (producer->kind != ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dispatch %.*s binding %" PRIhsz
+        " destructive alias write requires acquired transient storage",
+        (int)dispatch_name.size, dispatch_name.data, binding_index);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_validate_dispatch_binding_aliases(
+    const id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_dispatch_loom_options_t* options) {
+  for (iree_host_size_t i = 0; i < options->binding_count; ++i) {
+    const id4_pipeline_program_dispatch_binding_t* lhs = &options->bindings[i];
+    const id4_pipeline_program_tensor_record_t* lhs_record =
+        &builder->tensor_states[lhs->tensor.ordinal].record;
+    for (iree_host_size_t j = i + 1; j < options->binding_count; ++j) {
+      const id4_pipeline_program_dispatch_binding_t* rhs =
+          &options->bindings[j];
+      const id4_pipeline_program_tensor_record_t* rhs_record =
+          &builder->tensor_states[rhs->tensor.ordinal].record;
+      if (lhs_record->storage_root_ordinal !=
+          rhs_record->storage_root_ordinal) {
+        continue;
+      }
+
+      if (iree_any_bit_set(lhs->access,
+                           ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE) &&
+          iree_any_bit_set(rhs->access,
+                           ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+        id4_pipeline_program_tensor_byte_range_t lhs_storage_range;
+        id4_pipeline_program_tensor_byte_range_t rhs_storage_range;
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_storage_range(
+            lhs_record,
+            id4_pipeline_program_dispatch_binding_effective_write_range(
+                lhs, lhs_record),
+            &lhs_storage_range));
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_storage_range(
+            rhs_record,
+            id4_pipeline_program_dispatch_binding_effective_write_range(
+                rhs, rhs_record),
+            &rhs_storage_range));
+        if (id4_pipeline_program_byte_ranges_overlap(lhs_storage_range,
+                                                     rhs_storage_range)) {
+          return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "dispatch %.*s bindings %" PRIhsz
+                                  " and %" PRIhsz " write overlapping storage",
+                                  (int)options->name.size, options->name.data,
+                                  i, j);
+        }
+      }
+
+      const id4_pipeline_program_dispatch_binding_t* writers[2] = {lhs, rhs};
+      const id4_pipeline_program_tensor_record_t* writer_records[2] = {
+          lhs_record, rhs_record};
+      const iree_host_size_t writer_indices[2] = {i, j};
+      const id4_pipeline_program_dispatch_binding_t* readers[2] = {rhs, lhs};
+      const id4_pipeline_program_tensor_record_t* reader_records[2] = {
+          rhs_record, lhs_record};
+      const iree_host_size_t reader_indices[2] = {j, i};
+      for (iree_host_size_t direction = 0; direction < 2; ++direction) {
+        const id4_pipeline_program_dispatch_binding_t* writer =
+            writers[direction];
+        const id4_pipeline_program_dispatch_binding_t* reader =
+            readers[direction];
+        if (!iree_any_bit_set(writer->access,
+                              ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE) ||
+            !iree_any_bit_set(reader->access,
+                              ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ)) {
+          continue;
+        }
+        id4_pipeline_program_tensor_byte_range_t write_storage_range;
+        id4_pipeline_program_tensor_byte_range_t read_storage_range;
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_storage_range(
+            writer_records[direction],
+            id4_pipeline_program_dispatch_binding_effective_write_range(
+                writer, writer_records[direction]),
+            &write_storage_range));
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_storage_range(
+            reader_records[direction],
+            id4_pipeline_program_dispatch_binding_effective_read_range(
+                reader, reader_records[direction]),
+            &read_storage_range));
+        if (!id4_pipeline_program_byte_ranges_overlap(write_storage_range,
+                                                      read_storage_range)) {
+          continue;
+        }
+        if (!iree_all_bits_set(
+                writer->flags,
+                ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE)) {
+          return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "dispatch %.*s write binding %" PRIhsz
+                                  " overlaps read binding %" PRIhsz
+                                  " without destructive alias permission",
+                                  (int)options->name.size, options->name.data,
+                                  writer_indices[direction],
+                                  reader_indices[direction]);
+        }
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_validate_import_flags(
     id4_pipeline_program_import_tensor_flags_t flags,
     iree_string_view_t tensor_name) {
@@ -546,6 +763,17 @@ static iree_status_t id4_pipeline_program_validate_import_flags(
   if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "import tensor %.*s has unsupported flags 0x%x",
+                          (int)tensor_name.size, tensor_name.data, flags);
+}
+
+static iree_status_t id4_pipeline_program_validate_subview_flags(
+    id4_pipeline_program_subview_tensor_flags_t flags,
+    iree_string_view_t tensor_name) {
+  const id4_pipeline_program_subview_tensor_flags_t allowed_flags =
+      ID4_PIPELINE_PROGRAM_SUBVIEW_TENSOR_FLAG_DISCARD_CONTENTS;
+  if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "subview tensor %.*s has unsupported flags 0x%x",
                           (int)tensor_name.size, tensor_name.data, flags);
 }
 
@@ -695,6 +923,8 @@ static iree_status_t id4_pipeline_program_copy_tensor_record(
   target->dtype = source->dtype;
   target->shape = source->shape;
   target->byte_length = source->byte_length;
+  target->storage_root_ordinal = source->storage_root_ordinal;
+  target->storage_byte_offset = source->storage_byte_offset;
   target->producer_operation_ordinal = source->producer_operation_ordinal;
   return id4_pipeline_program_copy_string(source->name, host_allocator,
                                           &target->name);
@@ -872,6 +1102,9 @@ static iree_status_t id4_pipeline_program_copy_op(
     case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
       target->payload.acquire = source->payload.acquire;
       break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW:
+      target->payload.subview = source->payload.subview;
+      break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       target->payload.dispatch_loom.binding_count =
           source->payload.dispatch_loom.binding_count;
@@ -1047,11 +1280,14 @@ static iree_status_t id4_pipeline_program_builder_add_tensor(
       .dtype = dtype,
       .shape = shape,
       .byte_length = byte_length,
+      .storage_root_ordinal = (uint32_t)builder->tensor_count,
+      .storage_byte_offset = 0,
       .producer_operation_ordinal = producer_operation_ordinal,
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_copy_tensor_record(
       &source_record, builder->arena_allocator, &state->record));
   state->initialized = initialized;
+  state->access_epoch = UINT32_MAX;
   out_tensor->ordinal = (uint32_t)builder->tensor_count;
   ++builder->tensor_count;
   return iree_ok_status();
@@ -1486,6 +1722,143 @@ iree_status_t id4_pipeline_program_acquire_tensor(
   return status;
 }
 
+iree_status_t id4_pipeline_program_subview_tensor(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_subview_tensor_options_t* options,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  IREE_ASSERT_ARGUMENT(out_tensor);
+  *out_tensor = id4_pipeline_program_tensor_invalid();
+  if (!builder) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program builder is required");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program subview tensor options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("program subview tensor")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program subview tensor extension structures are not supported");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_subview_flags(
+      options->flags, options->name));
+
+  id4_pipeline_program_tensor_state_t* source_state = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_validate_tensor(
+      builder, options->source, &source_state));
+  if (source_state->consumed) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "subview source tensor %.*s was consumed",
+                            (int)source_state->record.name.size,
+                            source_state->record.name.data);
+  }
+  const uint32_t storage_root_ordinal =
+      source_state->record.storage_root_ordinal;
+  if (storage_root_ordinal >= builder->tensor_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "subview source storage root is invalid");
+  }
+  const id4_pipeline_program_tensor_state_t* root_state =
+      &builder->tensor_states[storage_root_ordinal];
+  if (root_state->record.producer_operation_ordinal >=
+      builder->operation_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "subview source storage producer is invalid");
+  }
+  const id4_pipeline_program_op_t* root_producer =
+      &builder->operations[root_state->record.producer_operation_ordinal];
+  if (root_producer->kind != ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "subview source tensor %.*s is not a local transient",
+        (int)source_state->record.name.size, source_state->record.name.data);
+  }
+  for (iree_host_size_t i = 0; i < builder->tensor_count; ++i) {
+    const id4_pipeline_program_tensor_state_t* state =
+        &builder->tensor_states[i];
+    if (state->record.storage_root_ordinal == storage_root_ordinal &&
+        state->access_epoch == builder->current_epoch) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "subview tensor %.*s requires a barrier after storage access",
+          (int)options->name.size, options->name.data);
+    }
+  }
+
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_tensor_metadata(
+      options->name, source_state->record.dtype, options->shape, &byte_length));
+  const iree_device_size_t element_byte_length =
+      id4_pipeline_program_dtype_byte_length(source_state->record.dtype);
+  if ((options->source_byte_offset % element_byte_length) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "subview tensor %.*s byte offset is not aligned",
+                            (int)options->name.size, options->name.data);
+  }
+  iree_device_size_t source_end = 0;
+  if (!iree_device_size_checked_add(options->source_byte_offset, byte_length,
+                                    &source_end) ||
+      source_end > source_state->record.byte_length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "subview tensor %.*s range exceeds source tensor %.*s byte length",
+        (int)options->name.size, options->name.data,
+        (int)source_state->record.name.size, source_state->record.name.data);
+  }
+  iree_device_size_t storage_byte_offset = 0;
+  if (!iree_device_size_checked_add(source_state->record.storage_byte_offset,
+                                    options->source_byte_offset,
+                                    &storage_byte_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "subview tensor storage offset overflow");
+  }
+  iree_device_size_t storage_end = 0;
+  if (!iree_device_size_checked_add(storage_byte_offset, byte_length,
+                                    &storage_end) ||
+      storage_end > root_state->record.byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "subview tensor storage range exceeds its root");
+  }
+
+  const id4_pipeline_program_dtype_t dtype = source_state->record.dtype;
+  const bool initialized =
+      source_state->initialized &&
+      !iree_any_bit_set(
+          options->flags,
+          ID4_PIPELINE_PROGRAM_SUBVIEW_TENSOR_FLAG_DISCARD_CONTENTS);
+  const iree_host_size_t operation_ordinal = builder->operation_count;
+  id4_pipeline_program_tensor_t tensor = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_add_tensor(
+      builder, options->name, dtype, options->shape, operation_ordinal,
+      initialized, &tensor));
+  id4_pipeline_program_tensor_state_t* target_state =
+      &builder->tensor_states[tensor.ordinal];
+  target_state->record.storage_root_ordinal = storage_root_ordinal;
+  target_state->record.storage_byte_offset = storage_byte_offset;
+  id4_pipeline_program_op_t op = {
+      .kind = ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW,
+      .ordinal = operation_ordinal,
+      .payload.subview =
+          {
+              .flags = options->flags,
+              .source = options->source,
+              .source_byte_offset = options->source_byte_offset,
+              .tensor = tensor,
+          },
+  };
+  iree_status_t status = id4_pipeline_program_builder_append_op(builder, &op);
+  if (iree_status_is_ok(status)) {
+    *out_tensor = tensor;
+  } else {
+    id4_pipeline_program_builder_remove_last_tensor(builder);
+  }
+  return status;
+}
+
 iree_status_t id4_pipeline_program_dispatch_loom(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_dispatch_loom_options_t* options) {
@@ -1533,6 +1906,16 @@ iree_status_t id4_pipeline_program_dispatch_loom(
         builder, options->bindings[i].tensor, &state));
     IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_dispatch_binding_range(
         &options->bindings[i], &state->record, options->name, i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_program_validate_destructive_alias_write_binding(
+            builder, &options->bindings[i], state, options->name, i));
+    if (state->consumed) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "dispatch %.*s uses consumed tensor %.*s",
+                              (int)options->name.size, options->name.data,
+                              (int)state->record.name.size,
+                              state->record.name.data);
+    }
     if (iree_any_bit_set(options->bindings[i].access,
                          ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ) &&
         !state->initialized) {
@@ -1543,6 +1926,8 @@ iree_status_t id4_pipeline_program_dispatch_loom(
                               state->record.name.data);
     }
   }
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_validate_dispatch_binding_aliases(builder, options));
 
   id4_pipeline_program_op_t op = {
       .kind = ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM,
@@ -1559,14 +1944,51 @@ iree_status_t id4_pipeline_program_dispatch_loom(
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_append_op(builder, &op));
   for (iree_host_size_t i = 0; i < options->binding_count; ++i) {
-    if (!iree_any_bit_set(options->bindings[i].access,
-                          ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
-      continue;
-    }
     id4_pipeline_program_tensor_state_t* state = NULL;
     IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_validate_tensor(
         builder, options->bindings[i].tensor, &state));
-    state->initialized = true;
+    state->access_epoch = builder->current_epoch;
+    if (iree_any_bit_set(options->bindings[i].access,
+                         ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+      state->initialized = true;
+    }
+  }
+  for (iree_host_size_t i = 0; i < options->binding_count; ++i) {
+    const id4_pipeline_program_dispatch_binding_t* writer =
+        &options->bindings[i];
+    if (!iree_all_bits_set(
+            writer->flags,
+            ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE)) {
+      continue;
+    }
+    id4_pipeline_program_tensor_state_t* writer_state =
+        &builder->tensor_states[writer->tensor.ordinal];
+    id4_pipeline_program_tensor_byte_range_t write_storage_range;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_storage_range(
+        &writer_state->record,
+        id4_pipeline_program_dispatch_binding_effective_write_range(
+            writer, &writer_state->record),
+        &write_storage_range));
+    for (iree_host_size_t j = 0; j < builder->tensor_count; ++j) {
+      id4_pipeline_program_tensor_state_t* state = &builder->tensor_states[j];
+      if (j == writer->tensor.ordinal ||
+          state->record.storage_root_ordinal !=
+              writer_state->record.storage_root_ordinal) {
+        continue;
+      }
+      const id4_pipeline_program_tensor_byte_range_t tensor_storage_range = {
+          // Byte offset from the shared storage root.
+          .offset = state->record.storage_byte_offset,
+          // Full logical tensor byte length.
+          .length = state->record.byte_length,
+      };
+      if (!id4_pipeline_program_byte_ranges_overlap(write_storage_range,
+                                                    tensor_storage_range)) {
+        continue;
+      }
+      state->initialized = false;
+      state->consumed = true;
+    }
   }
   return iree_ok_status();
 }
@@ -1605,7 +2027,13 @@ iree_status_t id4_pipeline_program_barrier(
       .ordinal = builder->operation_count,
       .payload.barrier.name = options->name,
   };
-  return id4_pipeline_program_builder_append_op(builder, &op);
+  if (builder->current_epoch == UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program execution epoch overflow");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_append_op(builder, &op));
+  ++builder->current_epoch;
+  return iree_ok_status();
 }
 
 iree_status_t id4_pipeline_program_region_cut(

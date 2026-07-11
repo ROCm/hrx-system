@@ -354,6 +354,98 @@ static id4_pipeline_program_t* CreateLocalCrossingProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateDestructiveSubviewProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t root = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t acquire_options = {
+      /*.structure_size=*/sizeof(acquire_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("root"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_U32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(16),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &acquire_options, &root));
+  id4_pipeline_program_dispatch_binding_t initialize =
+      id4_pipeline_program_write(root);
+  id4_pipeline_program_dispatch_loom_options_t initialize_options = {
+      /*.structure_size=*/sizeof(initialize_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("initialize"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/write"), IREE_SV("write")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&initialize,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &initialize_options));
+  id4_pipeline_program_barrier_options_t before_alias_options = {
+      /*.structure_size=*/sizeof(before_alias_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("before_alias"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &before_alias_options));
+
+  id4_pipeline_program_tensor_t subview = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_subview_tensor_options_t subview_options = {
+      /*.structure_size=*/sizeof(subview_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_SUBVIEW_TENSOR_FLAG_DISCARD_CONTENTS,
+      /*.name=*/IREE_SV("root.lower_half"),
+      /*.source=*/root,
+      /*.source_byte_offset=*/0,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(8),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_subview_tensor(builder, &subview_options, &subview));
+  id4_pipeline_program_dispatch_binding_t alias_bindings[] = {
+      id4_pipeline_program_read(root),
+      id4_pipeline_program_write_alias(subview),
+  };
+  id4_pipeline_program_dispatch_loom_options_t alias_options = {
+      /*.structure_size=*/sizeof(alias_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("alias"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/alias"), IREE_SV("alias")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(alias_bindings),
+      /*.bindings=*/alias_bindings,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &alias_options));
+  id4_pipeline_program_barrier_options_t after_alias_options = {
+      /*.structure_size=*/sizeof(after_alias_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_alias"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &after_alias_options));
+  id4_pipeline_program_dispatch_binding_t read =
+      id4_pipeline_program_read(subview);
+  id4_pipeline_program_dispatch_loom_options_t read_options = {
+      /*.structure_size=*/sizeof(read_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read_alias"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &read_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 TEST(PipelineProgramRegion, LowersSourceRangeWithPriorBoundaryDeclarations) {
   id4_pipeline_program_t* program = CreateBoundaryDispatchProgram();
   RegionBuilderScope region_scope;
@@ -384,6 +476,67 @@ TEST(PipelineProgramRegion, LowersSourceRangeWithPriorBoundaryDeclarations) {
   EXPECT_EQ(statistics.dispatch_count, 1u);
   EXPECT_EQ(statistics.operation_count, 1u);
   EXPECT_EQ(statistics.local_acquire_count, 0u);
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramRegion, LowersSubviewAsOneRootAllocation) {
+  id4_pipeline_program_t* program = CreateDestructiveSubviewProgram();
+  RegionBuilderScope region_scope;
+
+  id4_pipeline_program_region_lower_options_t lower_options = {
+      /*.structure_size=*/sizeof(lower_options),
+      /*.next=*/nullptr,
+      /*.program=*/program,
+      /*.source_operation_offset=*/0,
+      /*.source_operation_count=*/
+      id4_pipeline_program_operation_count(program),
+      /*.builder=*/region_scope.builder(),
+      /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
+      /*.captured_tap_names=*/iree_string_view_list_empty(),
+      /*.local_tensor_alignment=*/16,
+      /*.user_data=*/nullptr,
+      /*.resolve_import=*/nullptr,
+      /*.resolve_parameter=*/nullptr,
+      /*.resolve_constant=*/nullptr,
+      /*.resolve_kernel=*/nullptr,
+      /*.resolve_tap=*/nullptr,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_region_lower(&lower_options,
+                                                   iree_allocator_system()));
+
+  id4_pipeline_region_statistics_t statistics = {};
+  id4_pipeline_region_builder_statistics(region_scope.builder(), &statistics);
+  EXPECT_EQ(statistics.local_acquire_count, 1u);
+  EXPECT_EQ(statistics.local_subview_count, 1u);
+  EXPECT_EQ(statistics.local_release_count, 2u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 64u);
+  EXPECT_EQ(statistics.local_slab_high_water_mark, 64u);
+
+  iree_host_size_t lifetime_count = 0;
+  id4_pipeline_region_local_lifetime_t* lifetimes = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_region_builder_clone_local_lifetimes(
+      region_scope.builder(), iree_allocator_system(), &lifetime_count,
+      &lifetimes));
+  ASSERT_EQ(lifetime_count, 2u);
+  const id4_pipeline_region_local_lifetime_t* root_lifetime = nullptr;
+  const id4_pipeline_region_local_lifetime_t* subview_lifetime = nullptr;
+  for (iree_host_size_t i = 0; i < lifetime_count; ++i) {
+    if (iree_all_bits_set(lifetimes[i].flags,
+                          ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_SUBVIEW)) {
+      subview_lifetime = &lifetimes[i];
+    } else {
+      root_lifetime = &lifetimes[i];
+    }
+  }
+  ASSERT_NE(root_lifetime, nullptr);
+  ASSERT_NE(subview_lifetime, nullptr);
+  EXPECT_EQ(subview_lifetime->storage_root_ordinal, root_lifetime->ordinal);
+  EXPECT_EQ(subview_lifetime->offset, root_lifetime->offset);
+  EXPECT_EQ(root_lifetime->storage_release_operation_ordinal,
+            subview_lifetime->storage_release_operation_ordinal);
+  id4_pipeline_region_local_lifetime_list_release(lifetime_count, lifetimes,
+                                                  iree_allocator_system());
 
   id4_pipeline_program_release(program);
 }

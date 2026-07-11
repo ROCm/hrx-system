@@ -570,4 +570,18 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   });
 }
 
+TEST(Ideogram4DecodeStageFixtureIntegration,
+     IssueFinalLatentFixtureBf16OnlineFullFrame) {
+  RunFinalLatentFixture({
+      // Activation storage route used by the memory-oriented VAE decode.
+      ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+      // Online attention avoids materializing quadratic score tensors.
+      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
+      // Validate the exported image without retaining internal stage taps.
+      kValidateDecodedImage,
+      // Stable identifier used when capturing this integration run.
+      IREE_SV("ideogram4_decode_fixture_bf16_online_full_frame"),
+  });
+}
+
 }  // namespace

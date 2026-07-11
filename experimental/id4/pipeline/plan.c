@@ -894,14 +894,22 @@ static iree_status_t id4_pipeline_plan_copy_regions(
                               "region %.*s local lifetime array is required",
                               (int)source->name.size, source->name.data);
     }
-    if (source->local_lifetime_count !=
-        source->statistics.local_acquire_count) {
+    iree_host_size_t expected_local_lifetime_count = 0;
+    if (!iree_host_size_checked_add(source->statistics.local_acquire_count,
+                                    source->statistics.local_subview_count,
+                                    &expected_local_lifetime_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "region %.*s local lifetime count overflow",
+                              (int)source->name.size, source->name.data);
+    }
+    if (source->local_lifetime_count != expected_local_lifetime_count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "region %.*s local lifetime count %" PRIhsz
-                              " does not match local acquire count %" PRIhsz,
+                              " does not match local acquire and subview "
+                              "count %" PRIhsz,
                               (int)source->name.size, source->name.data,
                               source->local_lifetime_count,
-                              source->statistics.local_acquire_count);
+                              expected_local_lifetime_count);
     }
     if (source->parameter_load_group_count != 0 &&
         !source->parameter_load_groups) {
@@ -1000,6 +1008,33 @@ static iree_status_t id4_pipeline_plan_copy_regions(
             (int)source_lifetime->name.size, source_lifetime->name.data,
             (uint64_t)lifetime_end,
             (uint64_t)source->statistics.local_slab_byte_length);
+      }
+      const id4_pipeline_region_local_lifetime_t* root_lifetime = NULL;
+      for (iree_host_size_t k = 0; k < source->local_lifetime_count; ++k) {
+        if (source->local_lifetimes[k].ordinal ==
+            source_lifetime->storage_root_ordinal) {
+          root_lifetime = &source->local_lifetimes[k];
+          break;
+        }
+      }
+      if (!root_lifetime) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "region %.*s local lifetime %.*s storage root %u is missing",
+            (int)source->name.size, source->name.data,
+            (int)source_lifetime->name.size, source_lifetime->name.data,
+            source_lifetime->storage_root_ordinal);
+      }
+      iree_device_size_t expected_lifetime_offset = 0;
+      if (!iree_device_size_checked_add(root_lifetime->offset,
+                                        source_lifetime->storage_byte_offset,
+                                        &expected_lifetime_offset) ||
+          expected_lifetime_offset != source_lifetime->offset) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "region %.*s local lifetime %.*s storage offset is inconsistent",
+            (int)source->name.size, source->name.data,
+            (int)source_lifetime->name.size, source_lifetime->name.data);
       }
       id4_pipeline_region_local_lifetime_t* target_lifetime = &lifetimes[j];
       *target_lifetime = *source_lifetime;
@@ -2900,14 +2935,15 @@ static iree_status_t id4_pipeline_plan_append_region_statistics_json(
       "{\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz
       ",\"copy_count\":%" PRIhsz ",\"barrier_count\":%" PRIhsz
       ",\"current_epoch\":%u"
-      ",\"local_acquire_count\":%" PRIhsz ",\"local_release_count\":%" PRIhsz
-      ",\"local_reuse_count\":%" PRIhsz ",\"bound_import_count\":%" PRIhsz
-      ",\"local_slab_byte_length\":%" PRIu64
+      ",\"local_acquire_count\":%" PRIhsz ",\"local_subview_count\":%" PRIhsz
+      ",\"local_release_count\":%" PRIhsz ",\"local_reuse_count\":%" PRIhsz
+      ",\"bound_import_count\":%" PRIhsz ",\"local_slab_byte_length\":%" PRIu64
       ",\"local_slab_high_water_mark\":%" PRIu64 "}",
       statistics.operation_count, statistics.dispatch_count,
       statistics.copy_count, statistics.barrier_count, statistics.current_epoch,
-      statistics.local_acquire_count, statistics.local_release_count,
-      statistics.local_reuse_count, statistics.bound_import_count,
+      statistics.local_acquire_count, statistics.local_subview_count,
+      statistics.local_release_count, statistics.local_reuse_count,
+      statistics.bound_import_count,
       (uint64_t)statistics.local_slab_byte_length,
       (uint64_t)statistics.local_slab_high_water_mark);
 }
@@ -3309,6 +3345,9 @@ static iree_status_t id4_pipeline_plan_resolve_recorded_binding_ref(
                  : id4_pipeline_plan_resolve_local_recorded_binding_ref(
                        plan, tensor, region_id, out_ref);
     }
+    case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW:
+      return id4_pipeline_plan_resolve_local_recorded_binding_ref(
+          plan, tensor, region_id, out_ref);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program tensor %.*s producer kind %d is not "
@@ -3912,10 +3951,12 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
           builder, id4_pipeline_tensor_dtype_format(lifetime->dtype)));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          ",\"ordinal\":%u,\"flags\":%u,\"offset\":%" PRIu64
+          ",\"ordinal\":%u,\"storage_root_ordinal\":%u,\"flags\":%u"
+          ",\"offset\":%" PRIu64 ",\"storage_byte_offset\":%" PRIu64
           ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64
           ",\"acquire_operation_ordinal\":%" PRIhsz ",\"acquire_epoch\":%u",
-          lifetime->ordinal, lifetime->flags, (uint64_t)lifetime->offset,
+          lifetime->ordinal, lifetime->storage_root_ordinal, lifetime->flags,
+          (uint64_t)lifetime->offset, (uint64_t)lifetime->storage_byte_offset,
           (uint64_t)lifetime->byte_length, (uint64_t)lifetime->alignment,
           lifetime->acquire_operation_ordinal, lifetime->acquire_epoch));
       if (lifetime->release_operation_ordinal == IREE_HOST_SIZE_MAX) {
@@ -3928,12 +3969,29 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       }
       if (lifetime->release_epoch == UINT32_MAX) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-            builder, ",\"release_epoch\":null,\"shape\":"));
+            builder, ",\"release_epoch\":null"));
       } else {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            builder,
-            ",\"release_epoch\":%u,\"shape\":", lifetime->release_epoch));
+            builder, ",\"release_epoch\":%u", lifetime->release_epoch));
       }
+      if (lifetime->storage_release_operation_ordinal == IREE_HOST_SIZE_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, ",\"storage_release_operation_ordinal\":null"));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, ",\"storage_release_operation_ordinal\":%" PRIhsz,
+            lifetime->storage_release_operation_ordinal));
+      }
+      if (lifetime->storage_release_epoch == UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, ",\"storage_release_epoch\":null"));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, ",\"storage_release_epoch\":%u",
+            lifetime->storage_release_epoch));
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, ",\"shape\":"));
       IREE_RETURN_IF_ERROR(
           id4_pipeline_plan_append_shape_json(builder, lifetime->shape));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));

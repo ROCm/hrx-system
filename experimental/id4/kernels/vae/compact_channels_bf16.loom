@@ -1,0 +1,56 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.vae.compact_channels.pixel_count : %value: index where [range(%value, 16, 16777216), mul(%value, 16)]
+
+config.decl @id4.vae.compact_channels.input_channel_stride : %value: index where [range(%value, 128, 4096), mul(%value, 8)]
+
+config.decl @id4.vae.compact_channels.output_channel_count : %value: index where [range(%value, 128, 4096), mul(%value, 8)]
+
+config.decl @id4.vae.compact_channels.output_element_count : %value: index where [range(%value, 2048, 268435456), mul(%value, 2048)]
+
+kernel.def target(@id4_gfx1100) export("id4_vae_compact_channels_bf16_v8") @id4_vae_compact_channels_bf16_v8() {
+  %unit = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %two_hundred_fifty_six = index.constant 256 : index
+  %output_element_count = config.get @id4.vae.compact_channels.output_element_count : index
+  %vector_count = index.div %output_element_count, %eight : index
+  %workgroup_count = index.div %vector_count, %two_hundred_fifty_six : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%two_hundred_fifty_six, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %eight = index.constant 8 : index
+  %two_hundred_fifty_six = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel_count = config.get @id4.vae.compact_channels.pixel_count : index
+  %input_channel_stride = config.get @id4.vae.compact_channels.input_channel_stride : index
+  %output_channel_count = config.get @id4.vae.compact_channels.output_channel_count : index
+  %output_element_count = config.get @id4.vae.compact_channels.output_element_count : index
+  %input_element_count = index.mul %pixel_count, %input_channel_stride : index
+  %workgroup_vector_base = index.mul %workgroup, %two_hundred_fifty_six : index
+  %vector_index = index.add %workgroup_vector_base, %lane : index
+  %output_element = index.mul %vector_index, %eight : index
+  %pixel = index.div %output_element, %output_channel_count : index
+  %channel = index.rem %output_element, %output_channel_count : index
+  %input_pixel_base = index.mul %pixel, %input_channel_stride : index
+  %input_element = index.add %input_pixel_base, %channel : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
+  %value = vector.load %input_view[%input_element] : view<[%input_element_count]xbf16, #dense> -> vector<8xbf16>
+  vector.store %value, %output_view[%output_element] : vector<8xbf16>, view<[%output_element_count]xbf16, #dense>
+  kernel.return
+}
+
+check.case public @id4_vae_compact_channels_bf16_v8_small_case {
+  %input = check.generate.fill value(2.0) : tensor<16x256xbf16>
+  %output = check.generate.fill value(-1.0) : tensor<16x128xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<16x128xbf16>
+  func.call @id4_vae_compact_channels_bf16_v8(%input, %output) : (tensor<16x256xbf16>, tensor<16x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x128xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_compact_channels_bf16_v8_small_case> @id4_vae_compact_channels_bf16_v8_small

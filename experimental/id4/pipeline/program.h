@@ -73,6 +73,8 @@ typedef enum id4_pipeline_program_op_kind_e {
   ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT = 8,
   // Stage-region scheduling boundary between executable regions.
   ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT = 9,
+  // Logical tensor view into an acquired transient tensor.
+  ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW = 10,
 } id4_pipeline_program_op_kind_t;
 
 // Tensor access flags observed by a semantic dispatch.
@@ -95,6 +97,8 @@ typedef enum id4_pipeline_program_dispatch_binding_flag_bits_e {
   ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE = 1u << 0,
   // read_range describes the byte interval read by this binding.
   ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE = 1u << 1,
+  // This full-tensor write intentionally destroys overlapping alias contents.
+  ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE = 1u << 2,
 } id4_pipeline_program_dispatch_binding_flag_bits_t;
 
 // Tensor byte interval relative to the bound logical tensor.
@@ -113,6 +117,15 @@ typedef enum id4_pipeline_program_import_tensor_flag_bits_e {
   // Imported tensor contents are initialized before stage execution begins.
   ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED = 1u << 0,
 } id4_pipeline_program_import_tensor_flag_bits_t;
+
+// Transient tensor subview behavior flags.
+typedef uint32_t id4_pipeline_program_subview_tensor_flags_t;
+
+// Transient tensor subview behavior flag bits.
+typedef enum id4_pipeline_program_subview_tensor_flag_bits_e {
+  // The new logical tensor starts uninitialized regardless of source contents.
+  ID4_PIPELINE_PROGRAM_SUBVIEW_TENSOR_FLAG_DISCARD_CONTENTS = 1u << 0,
+} id4_pipeline_program_subview_tensor_flag_bits_t;
 
 // Inline tensor shape used by semantic program values.
 typedef struct id4_pipeline_program_shape_t {
@@ -180,6 +193,10 @@ typedef struct id4_pipeline_program_tensor_record_t {
   id4_pipeline_program_shape_t shape;
   // Dense tensor byte length derived from dtype and shape.
   iree_device_size_t byte_length;
+  // Tensor ordinal owning the backing storage allocation.
+  uint32_t storage_root_ordinal;
+  // Byte offset from the storage root to this logical tensor.
+  iree_device_size_t storage_byte_offset;
   // Operation ordinal that introduced the tensor.
   iree_host_size_t producer_operation_ordinal;
 } id4_pipeline_program_tensor_record_t;
@@ -237,6 +254,18 @@ typedef struct id4_pipeline_program_acquire_op_t {
   // Acquired uninitialized transient tensor.
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_acquire_op_t;
+
+// Transient tensor subview operation payload.
+typedef struct id4_pipeline_program_subview_op_t {
+  // Subview behavior flags.
+  id4_pipeline_program_subview_tensor_flags_t flags;
+  // Existing local transient tensor containing the subview range.
+  id4_pipeline_program_tensor_t source;
+  // Byte offset from the source tensor to the subview.
+  iree_device_size_t source_byte_offset;
+  // New logical tensor referencing the source storage range.
+  id4_pipeline_program_tensor_t tensor;
+} id4_pipeline_program_subview_op_t;
 
 // Loom dispatch operation payload.
 typedef struct id4_pipeline_program_dispatch_loom_op_t {
@@ -298,6 +327,8 @@ typedef struct id4_pipeline_program_op_t {
     id4_pipeline_program_constant_op_t constant;
     // Acquire operation payload.
     id4_pipeline_program_acquire_op_t acquire;
+    // Transient tensor subview operation payload.
+    id4_pipeline_program_subview_op_t subview;
     // Loom dispatch operation payload.
     id4_pipeline_program_dispatch_loom_op_t dispatch_loom;
     // Barrier operation payload.
@@ -392,6 +423,24 @@ typedef struct id4_pipeline_program_acquire_tensor_options_t {
   // Tensor shape.
   id4_pipeline_program_shape_t shape;
 } id4_pipeline_program_acquire_tensor_options_t;
+
+// Options for creating a logical tensor view into a local transient.
+typedef struct id4_pipeline_program_subview_tensor_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Subview behavior flags.
+  id4_pipeline_program_subview_tensor_flags_t flags;
+  // Stable tensor name used for diagnostics.
+  iree_string_view_t name;
+  // Existing local transient tensor containing the subview range.
+  id4_pipeline_program_tensor_t source;
+  // Byte offset from the source tensor to the subview.
+  iree_device_size_t source_byte_offset;
+  // Logical shape of the subview using the source element type.
+  id4_pipeline_program_shape_t shape;
+} id4_pipeline_program_subview_tensor_options_t;
 
 // Options for authoring a Loom dispatch.
 typedef struct id4_pipeline_program_dispatch_loom_options_t {
@@ -616,6 +665,16 @@ id4_pipeline_program_write(id4_pipeline_program_tensor_t tensor) {
       tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE);
 }
 
+// Returns a full write that intentionally destroys overlapping alias contents.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_write_alias(id4_pipeline_program_tensor_t tensor) {
+  id4_pipeline_program_dispatch_binding_t binding =
+      id4_pipeline_program_write(tensor);
+  binding.flags =
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE;
+  return binding;
+}
+
 // Returns a write-only dispatch binding with explicit byte coverage.
 static inline id4_pipeline_program_dispatch_binding_t
 id4_pipeline_program_write_range(id4_pipeline_program_tensor_t tensor,
@@ -631,6 +690,16 @@ id4_pipeline_program_read_write(id4_pipeline_program_tensor_t tensor) {
   return id4_pipeline_program_dispatch_binding(
       tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ |
                   ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE);
+}
+
+// Returns an in-place alias binding that preserves initialized contents.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_read_write_alias(id4_pipeline_program_tensor_t tensor) {
+  id4_pipeline_program_dispatch_binding_t binding =
+      id4_pipeline_program_read_write(tensor);
+  binding.flags =
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_DESTRUCTIVE_ALIAS_WRITE;
+  return binding;
 }
 
 // Returns the dense byte width of one scalar element or zero for invalid
@@ -679,6 +748,12 @@ iree_status_t id4_pipeline_program_constant(
 iree_status_t id4_pipeline_program_acquire_tensor(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_acquire_tensor_options_t* options,
+    id4_pipeline_program_tensor_t* out_tensor);
+
+// Creates a logical tensor view into an acquired transient tensor.
+iree_status_t id4_pipeline_program_subview_tensor(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_subview_tensor_options_t* options,
     id4_pipeline_program_tensor_t* out_tensor);
 
 // Authors a Loom dispatch over explicit tensor bindings.
