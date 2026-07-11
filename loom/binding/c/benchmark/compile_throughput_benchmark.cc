@@ -295,6 +295,14 @@ void CompileScenario::SetExtraCounters(::benchmark::State& state) const {
   (void)state;
 }
 
+iree_status_t CompileScenario::WarmUp(iree_host_size_t worker_count) {
+  for (iree_host_size_t worker_ordinal = 0; worker_ordinal < worker_count;
+       ++worker_ordinal) {
+    IREE_RETURN_IF_ERROR(RunJob(worker_ordinal, worker_ordinal % job_count()));
+  }
+  return iree_ok_status();
+}
+
 void CompileScenario::ResetCounters() {
   artifact_bytes_.store(0, std::memory_order_relaxed);
   for (WorkerSlot& worker : workers_) {
@@ -310,9 +318,15 @@ int64_t CompileScenario::artifact_bytes() const {
 void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
                                                      int64_t total_jobs) const {
   loomc_workspace_statistics_t total = {0};
+  uint64_t lifetime_block_system_allocation_count = 0;
+  uint64_t lifetime_block_system_allocation_bytes = 0;
   for (const WorkerSlot& worker : workers_) {
     loomc_workspace_statistics_t current;
     loomc_workspace_query_statistics(worker.workspace.get(), &current);
+    lifetime_block_system_allocation_count +=
+        current.block_system_allocation_count;
+    lifetime_block_system_allocation_bytes +=
+        current.block_system_allocation_bytes;
     total.block_system_allocation_count +=
         current.block_system_allocation_count -
         worker.allocation_baseline.block_system_allocation_count;
@@ -341,6 +355,10 @@ void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
   state.counters["workspace_block_bytes/kernel"] =
       total_jobs == 0 ? 0.0
                       : (double)total.block_system_allocation_bytes / job_count;
+  state.counters["workspace_block_system_allocations"] =
+      (double)lifetime_block_system_allocation_count;
+  state.counters["workspace_block_system_bytes"] =
+      (double)lifetime_block_system_allocation_bytes;
   state.counters["workspace_oversized_allocations/kernel"] =
       total_jobs == 0 ? 0.0
                       : (double)total.oversized_allocation_count / job_count;
@@ -489,11 +507,7 @@ void RunCompileBenchmark(::benchmark::State& state,
 
   status = scenario->SetUp((iree_host_size_t)worker_count);
   if (iree_status_is_ok(status)) {
-    status = loomc_benchmark_compile_pool_run_batch(
-        &pool,
-        std::min<iree_host_size_t>(scenario->job_count(),
-                                   (iree_host_size_t)worker_count),
-        RunScenarioJob, scenario.get());
+    status = scenario->WarmUp((iree_host_size_t)worker_count);
   }
   if (!iree_status_is_ok(status)) {
     std::string message = FormatStatus(status);
@@ -522,9 +536,15 @@ void RunCompileBenchmark(::benchmark::State& state,
   loomc_benchmark_compile_pool_deinitialize(&pool);
 }
 
-void RunCompileBenchmarkDirect(::benchmark::State& state,
-                               CompileScenarioFactory factory,
-                               const void* user_data) {
+enum class DirectBenchmarkWarmup {
+  kScenario,
+  kNone,
+};
+
+static void RunCompileBenchmarkDirectImpl(::benchmark::State& state,
+                                          CompileScenarioFactory factory,
+                                          const void* user_data,
+                                          DirectBenchmarkWarmup warmup) {
   constexpr int64_t kWorkerCount = 1;
   std::unique_ptr<CompileScenario> scenario = factory(state, user_data);
   if (!scenario) {
@@ -533,13 +553,8 @@ void RunCompileBenchmarkDirect(::benchmark::State& state,
   }
 
   iree_status_t status = scenario->SetUp((iree_host_size_t)kWorkerCount);
-  if (iree_status_is_ok(status)) {
-    iree_host_size_t warmup_count =
-        std::min<iree_host_size_t>(scenario->job_count(), kWorkerCount);
-    for (iree_host_size_t i = 0; i < warmup_count && iree_status_is_ok(status);
-         ++i) {
-      status = scenario->RunJob(/*worker_ordinal=*/0, i);
-    }
+  if (iree_status_is_ok(status) && warmup == DirectBenchmarkWarmup::kScenario) {
+    status = scenario->WarmUp(kWorkerCount);
   }
   if (!iree_status_is_ok(status)) {
     std::string message = FormatStatus(status);
@@ -568,6 +583,20 @@ void RunCompileBenchmarkDirect(::benchmark::State& state,
   }
 
   SetThroughputCounters(state, *scenario, total_jobs, kWorkerCount);
+}
+
+void RunCompileBenchmarkDirect(::benchmark::State& state,
+                               CompileScenarioFactory factory,
+                               const void* user_data) {
+  RunCompileBenchmarkDirectImpl(state, factory, user_data,
+                                DirectBenchmarkWarmup::kScenario);
+}
+
+void RunCompileBenchmarkDirectCold(::benchmark::State& state,
+                                   CompileScenarioFactory factory,
+                                   const void* user_data) {
+  RunCompileBenchmarkDirectImpl(state, factory, user_data,
+                                DirectBenchmarkWarmup::kNone);
 }
 
 }  // namespace loomc::bench
