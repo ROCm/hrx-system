@@ -45,6 +45,47 @@ func.def @static_add_select_cast(%a: vector<4xi32>, %b: vector<4xi32>, %mask: ve
 
 // ====
 
+// Scalar and vector copysignf share the same fast-math contract, including
+// through per-lane scalarization.
+func.def @static_copysign_flags(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xf32>) {
+  %r = vector.copysignf<nnan|nsz> %a, %b : vector<2xf32>
+  func.return %r : vector<2xf32>
+}
+
+// ----
+func.def @static_copysign_flags(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xf32>) {
+  %4 = vector.extract %a[0] : vector<2xf32> -> f32
+  %5 = vector.extract %b[0] : vector<2xf32> -> f32
+  %6 = scalar.copysignf<nnan|nsz> %4, %5 : f32
+  %7 = vector.extract %a[1] : vector<2xf32> -> f32
+  %8 = vector.extract %b[1] : vector<2xf32> -> f32
+  %9 = scalar.copysignf<nnan|nsz> %7, %8 : f32
+  %r = vector.from_elements %6, %9 : vector<2xf32>
+  func.return %r : vector<2xf32>
+}
+
+// ====
+
+// Floating-point comparisons preserve their per-lane fast-math permissions.
+func.def @static_cmpf_flags(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xi1>) {
+  %r = vector.cmpf<nnan|ninf> olt, %a, %b : vector<2xf32> -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+
+// ----
+func.def @static_cmpf_flags(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xi1>) {
+  %4 = vector.extract %a[0] : vector<2xf32> -> f32
+  %5 = vector.extract %b[0] : vector<2xf32> -> f32
+  %6 = scalar.cmpf<nnan|ninf> olt, %4, %5 : f32
+  %7 = vector.extract %a[1] : vector<2xf32> -> f32
+  %8 = vector.extract %b[1] : vector<2xf32> -> f32
+  %9 = scalar.cmpf<nnan|ninf> olt, %7, %8 : f32
+  %r = vector.from_elements %6, %9 : vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+
+// ====
+
 // Dynamic lanewise ops lower to an scf.for loop carrying the vector aggregate
 // because the number of scalar lanes is not statically known.
 func.def @dynamic_add(%n: index, %a: vector<[%n]xi32>, %b: vector<[%n]xi32>) -> (vector<[%n]xi32>) {

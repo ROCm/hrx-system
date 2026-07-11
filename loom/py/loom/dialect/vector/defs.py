@@ -2404,7 +2404,10 @@ vector_cmpf = Op(
         Operand("rhs", VECTOR),
     ],
     results=[Result("result", VECTOR)],
-    attrs=[AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=CmpFPredicate)],
+    attrs=[
+        AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=CmpFPredicate),
+        AttrDef("fastmath", ATTR_TYPE_FLAGS, optional=True, enum_def=FastMathFlags),
+    ],
     constraints=[
         HasFloatElement("lhs"),
         HasI1Element("result"),
@@ -2416,6 +2419,7 @@ vector_cmpf = Op(
     facts="loom_vector_cmpf_facts",
     canonicalize="loom_vector_comparison_canonicalize",
     format=[
+        Flags("fastmath"),
         Attr("predicate"),
         COMMA,
         Ref("lhs"),

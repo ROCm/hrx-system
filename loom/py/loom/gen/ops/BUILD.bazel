@@ -63,6 +63,18 @@ C_TABLES_SRCS = [
     "type_registry.py",
 ]
 
+iree_py_binary(
+    name = "c_vector_scalarization",
+    srcs = ["c_vector_scalarization.py"],
+    main = "c_vector_scalarization.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":c_tables",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
+    ],
+)
+
 C_TABLES_BASE_DEPS = [
     ":model",
     "//loom/py/loom:core",

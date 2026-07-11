@@ -14,6 +14,7 @@
 #include "loom/ir/types.h"
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/vector/to_scalar_descriptors.h"
 #include "loom/transforms/vector/to_scalar_options.h"
 
 #ifdef __cplusplus
@@ -44,8 +45,6 @@ loom_vector_to_scalar_statistics_if_available(loom_pass_t* pass) {
              : NULL;
 }
 
-typedef struct loom_vector_to_scalar_descriptor_t
-    loom_vector_to_scalar_descriptor_t;
 typedef struct loom_vector_to_scalar_lane_cache_entry_t
     loom_vector_to_scalar_lane_cache_entry_t;
 
@@ -62,7 +61,7 @@ typedef struct loom_vector_to_scalar_state_t {
   // Vector op currently being scalarized.
   loom_op_t* op;
   // Descriptor that selects the lane-program family for |op|.
-  const loom_vector_to_scalar_descriptor_t* descriptor;
+  loom_vector_to_scalar_descriptor_t descriptor;
   // Rewriter value checkpoint used to preserve result names on new values.
   loom_value_id_t value_checkpoint;
   // Result ordinal being scalarized for multi-result vector ops.

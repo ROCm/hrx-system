@@ -116,18 +116,16 @@ static iree_status_t loom_vector_to_scalar_prepare_state(
     uint16_t result_ordinal, loom_vector_to_scalar_state_t* out_state) {
   loom_value_id_t result = loom_op_results(op)[result_ordinal];
   loom_type_t result_type = loom_module_value_type(rewriter->module, result);
-  loom_type_t scalar_type = descriptor && descriptor->result_is_i1
-                                ? loom_type_scalar(LOOM_SCALAR_TYPE_I1)
-                                : loom_vector_to_scalar_lane_type(result_type);
   *out_state = (loom_vector_to_scalar_state_t){
       .pass = pass,
       .rewriter = rewriter,
       .op = op,
-      .descriptor = descriptor,
+      .descriptor =
+          descriptor ? *descriptor : (loom_vector_to_scalar_descriptor_t){0},
       .value_checkpoint = loom_rewriter_value_checkpoint(rewriter),
       .result_ordinal = result_ordinal,
       .vector_type = result_type,
-      .result_scalar_type = scalar_type,
+      .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
       .location = op->location,
   };
   loom_vector_to_scalar_state_bind_statistics(out_state, pass);
@@ -325,11 +323,13 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
   }
   *out_handled = true;
 
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  IREE_ASSERT(loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor));
   loom_vector_to_scalar_state_t state = {
       .pass = pass,
       .rewriter = rewriter,
       .op = op,
-      .descriptor = loom_vector_to_scalar_find_descriptor(op->kind),
+      .descriptor = descriptor,
       .value_checkpoint = loom_rewriter_value_checkpoint(rewriter),
       .result_scalar_type = result_type,
       .location = op->location,
@@ -443,9 +443,10 @@ static iree_status_t loom_vector_to_scalar_lower_deinterleave(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
   *out_handled = true;
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(op->kind);
-  if (!descriptor) return iree_ok_status();
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
+    return iree_ok_status();
+  }
 
   loom_value_id_t replacements[2] = {LOOM_VALUE_ID_INVALID,
                                      LOOM_VALUE_ID_INVALID};
@@ -453,7 +454,7 @@ static iree_status_t loom_vector_to_scalar_lower_deinterleave(
   for (uint16_t i = 0; i < 2; ++i) {
     loom_vector_to_scalar_state_t state = {0};
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
-        pass, rewriter, op, descriptor, i, &state));
+        pass, rewriter, op, &descriptor, i, &state));
     if (i == 0) {
       first_state = state;
       loom_vector_to_scalar_state_bind_statistics(&first_state, pass);
@@ -676,19 +677,20 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op) {
   if (op->result_count != 1) return iree_ok_status();
 
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(op->kind);
-  if (!descriptor) return iree_ok_status();
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
+    return iree_ok_status();
+  }
 
   loom_vector_to_scalar_state_t state = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
-      pass, rewriter, op, descriptor, 0, &state));
-  if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
+      pass, rewriter, op, &descriptor, 0, &state));
+  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
       loom_vector_to_scalar_decode_rejection_bits(&state) !=
           LOOM_CONTRACT_REJECTION_NONE) {
     return iree_ok_status();
   }
-  if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_TRANSFORM) {
+  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_TRANSFORM) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_validate_transform(&state));
     if (loom_pass_has_error_diagnostics(pass)) {
       return iree_ok_status();
@@ -857,9 +859,8 @@ uint32_t loom_vector_decode_to_scalar_reference_rejection_bits(
   if (!loom_vector_decode_isa(op)) {
     return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
   }
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(op->kind);
-  if (!descriptor) {
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
     return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
   }
   loom_value_id_t result = loom_vector_decode_result(op);
