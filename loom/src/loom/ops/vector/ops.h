@@ -1386,11 +1386,13 @@ LOOM_DEFINE_OPERAND(loom_vector_cmpf_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_vector_cmpf_rhs, 1)
 LOOM_DEFINE_RESULT(loom_vector_cmpf_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_cmpf_predicate, 0, loom_vector_cmpf_predicate_t)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_cmpf_fastmath)
 iree_status_t loom_vector_cmpf_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder, uint8_t instance_flags,
+    uint8_t predicate, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t operand_type,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_vector_cmpf_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,

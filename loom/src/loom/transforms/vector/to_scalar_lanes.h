@@ -18,9 +18,6 @@ extern "C" {
 
 loom_type_t loom_vector_to_scalar_lane_type(loom_type_t vector_type);
 
-uint8_t loom_vector_to_scalar_project_instance_flags(
-    loom_vector_to_scalar_instance_flag_mode_t mode, uint8_t instance_flags);
-
 iree_status_t loom_vector_to_scalar_build_scalar_constant(
     loom_builder_t* builder, loom_type_t result_type,
     loom_location_id_t location, int64_t integer_value,

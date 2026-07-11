@@ -21,6 +21,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    c_vector_scalarization
+  MAIN
+    "c_vector_scalarization.py"
+  SRCS
+    "c_vector_scalarization.py"
+  DEPS
+    loom::py::loom::gen::ops::c_tables
+    loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::vector::vector
+)
+
+iree_py_library(
+  NAME
     c_tables
   SRCS
     "__init__.py"

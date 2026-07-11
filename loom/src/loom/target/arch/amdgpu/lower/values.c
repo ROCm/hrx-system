@@ -15,6 +15,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/encoding_auxiliary.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/ops/vector/scalarization.h"
 #include "loom/target/arch/amdgpu/contracts/arithmetic_lower_rules.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/arithmetic.h"
@@ -315,6 +316,7 @@ typedef enum loom_amdgpu_scalar_conversion_op_group_e {
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTF,
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTSI,
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTUI,
+  LOOM_AMDGPU_SCALAR_CONVERSION_OP_SITOFP,
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_UITOFP,
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_FPTOSI,
   LOOM_AMDGPU_SCALAR_CONVERSION_OP_FPTOUI,
@@ -3869,6 +3871,7 @@ static const uint8_t
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTF, EXTF),
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTSI, EXTSI),
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTUI, EXTUI),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(SITOFP, SITOFP),
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(UITOFP, UITOFP),
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(FPTOSI, FPTOSI),
         LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(FPTOUI, FPTOUI),
@@ -4016,57 +4019,61 @@ typedef struct loom_amdgpu_vector_conversion_lane_rule_t {
   loom_amdgpu_vector_conversion_lane_rule_flags_t flags;
 } loom_amdgpu_vector_conversion_lane_rule_t;
 
-#define LOOM_AMDGPU_VECTOR_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
-#define LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(                           \
-    op, descriptor_ref_, source_element_types_, result_element_types_, flags_) \
-  [LOOM_AMDGPU_VECTOR_OP_INDEX(LOOM_OP_VECTOR_##op)] = {                       \
-      .convert_descriptor_ref = (descriptor_ref_),                             \
-      .source_element_types = (source_element_types_),                         \
-      .result_element_types = (result_element_types_),                         \
-      .flags = (flags_),                                                       \
+#define LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(                          \
+    scalar_op, descriptor_ref_, source_element_types_, result_element_types_, \
+    flags_)                                                                   \
+  [LOOM_AMDGPU_SCALAR_CONVERSION_OP_##scalar_op] = {                          \
+      .convert_descriptor_ref = (descriptor_ref_),                            \
+      .source_element_types = (source_element_types_),                        \
+      .result_element_types = (result_element_types_),                        \
+      .flags = (flags_),                                                      \
   }
 
 static const loom_amdgpu_vector_conversion_lane_rule_t
-    kAmdgpuVectorConversionLaneRulesByVectorOp[LOOM_OP_VECTOR_COUNT_] = {
-        LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
-            TRUNCI, LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
-            LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
-            LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
-            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_SOURCE_WIDER_THAN_RESULT),
-        LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
-            SITOFP, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_I32,
-            LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32, LOOM_SCALAR_TYPE_SET_F32,
-            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_SIGN_EXTEND_PACKED_SOURCE),
-        LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
-            UITOFP, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_U32,
-            LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32, LOOM_SCALAR_TYPE_SET_F32,
-            0),
-        LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
-            FPTOSI, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_I32_F32,
-            LOOM_SCALAR_TYPE_SET_F32, LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32,
-            0),
-        LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
-            FPTOUI, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_U32_F32,
-            LOOM_SCALAR_TYPE_SET_F32, LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32,
-            0),
+    kAmdgpuVectorConversionLaneRulesByScalarOp
+        [LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_] = {
+            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
+                TRUNCI, LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
+                LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_SOURCE_WIDER_THAN_RESULT),
+            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
+                SITOFP, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_I32,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32,
+                LOOM_SCALAR_TYPE_SET_F32,
+                LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_SIGN_EXTEND_PACKED_SOURCE),
+            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
+                UITOFP, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_U32,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32,
+                LOOM_SCALAR_TYPE_SET_F32, 0),
+            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
+                FPTOSI, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_I32_F32,
+                LOOM_SCALAR_TYPE_SET_F32,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32, 0),
+            LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW(
+                FPTOUI, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_U32_F32,
+                LOOM_SCALAR_TYPE_SET_F32,
+                LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD_LE32, 0),
 };
 
-#undef LOOM_AMDGPU_VECTOR_OP_INDEX
 #undef LOOM_AMDGPU_VECTOR_CONVERSION_LANE_RULE_ROW
 
 static const loom_amdgpu_vector_conversion_lane_rule_t*
 loom_amdgpu_vector_conversion_lane_rule(
     loom_op_kind_t op_kind, loom_scalar_type_t source_element_type,
     loom_scalar_type_t result_element_type) {
-  if (loom_op_dialect_id(op_kind) != LOOM_DIALECT_VECTOR) {
+  const loom_vector_scalarization_t* scalarization =
+      loom_vector_scalarization_lookup(op_kind);
+  if (scalarization == NULL) {
     return NULL;
   }
-  const uint8_t op_index = loom_op_dialect_index(op_kind);
-  if (op_index >= IREE_ARRAYSIZE(kAmdgpuVectorConversionLaneRulesByVectorOp)) {
+  const loom_amdgpu_scalar_conversion_op_group_t op_group =
+      loom_amdgpu_scalar_conversion_op_group(scalarization->lane_op_kind);
+  if (op_group >= IREE_ARRAYSIZE(kAmdgpuVectorConversionLaneRulesByScalarOp)) {
     return NULL;
   }
   const loom_amdgpu_vector_conversion_lane_rule_t* rule =
-      &kAmdgpuVectorConversionLaneRulesByVectorOp[op_index];
+      &kAmdgpuVectorConversionLaneRulesByScalarOp[op_group];
   if (!loom_scalar_type_set_contains(rule->source_element_types,
                                      source_element_type) ||
       !loom_scalar_type_set_contains(rule->result_element_types,

@@ -733,14 +733,13 @@ static bool loom_vector_to_scalar_fragment_store_source_is_supported(
     return loom_vector_to_scalar_mma_supports_logical_result_lanes(state,
                                                                    def_op);
   }
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(def_op->kind);
-  if (descriptor == NULL ||
-      descriptor->lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC) {
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor) ||
+      descriptor.lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC) {
     return false;
   }
   const loom_value_id_t* operands = loom_op_const_operands(def_op);
-  for (uint8_t i = 0; i < descriptor->lane_operand_count; ++i) {
+  for (uint16_t i = 0; i < def_op->operand_count; ++i) {
     if (!loom_vector_to_scalar_fragment_store_source_is_supported(
             state, operands[i])) {
       return false;
@@ -785,12 +784,11 @@ static uint32_t loom_vector_to_scalar_fragment_store_source_rejection_bits(
         loom_vector_to_scalar_lane_type(mma_state.vector_type);
     return loom_vector_to_scalar_mma_reference_rejection_bits(&mma_state);
   }
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(def_op->kind);
-  if (descriptor != NULL &&
-      descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_GENERIC) {
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor) &&
+      descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_GENERIC) {
     const loom_value_id_t* operands = loom_op_const_operands(def_op);
-    for (uint8_t i = 0; i < descriptor->lane_operand_count; ++i) {
+    for (uint16_t i = 0; i < def_op->operand_count; ++i) {
       uint32_t bits =
           loom_vector_to_scalar_fragment_store_source_rejection_bits(
               state, operands[i]);

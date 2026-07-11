@@ -704,10 +704,12 @@ LOOM_DEFINE_ISA(loom_scalar_copysignf_isa, LOOM_OP_SCALAR_COPYSIGNF)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_rhs, 1)
 LOOM_DEFINE_RESULT(loom_scalar_copysignf_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_copysignf_fastmath)
 iree_status_t loom_scalar_copysignf_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder, uint8_t instance_flags,
+    loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_scalar_copysignf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_copysignf_facts(
     loom_fact_context_t* context,

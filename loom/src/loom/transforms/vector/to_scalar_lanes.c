@@ -55,19 +55,6 @@ static loom_attribute_t loom_vector_to_scalar_zero_attr(
   return loom_attr_i64(0);
 }
 
-uint8_t loom_vector_to_scalar_project_instance_flags(
-    loom_vector_to_scalar_instance_flag_mode_t mode, uint8_t instance_flags) {
-  switch (mode) {
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_DROP:
-      return 0;
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FORWARD:
-      return instance_flags;
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH:
-      return instance_flags;
-  }
-  return 0;
-}
-
 iree_status_t loom_vector_to_scalar_build_scalar_constant(
     loom_builder_t* builder, loom_type_t result_type,
     loom_location_id_t location, int64_t integer_value,
@@ -639,20 +626,19 @@ iree_status_t loom_vector_to_scalar_build_poison_lane(
 static iree_status_t loom_vector_to_scalar_build_generic_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
-  const loom_vector_to_scalar_descriptor_t* descriptor = state->descriptor;
   loom_value_id_t lane_operands[4] = {0};
+  const uint16_t operand_count = state->op->operand_count;
+  IREE_ASSERT_LE(operand_count, IREE_ARRAYSIZE(lane_operands));
   const loom_value_id_t* operands = loom_op_const_operands(state->op);
-  for (uint8_t i = 0; i < descriptor->lane_operand_count; ++i) {
+  for (uint16_t i = 0; i < operand_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
         state, operands[i], indices, &lane_operands[i]));
   }
 
-  uint8_t instance_flags = loom_vector_to_scalar_project_instance_flags(
-      descriptor->instance_flag_mode, state->op->instance_flags);
   const loom_attribute_t* attrs = loom_op_attrs(state->op);
   return loom_vector_to_scalar_build_generic_lane_op(
-      state, descriptor->lane_op_kind, instance_flags, lane_operands,
-      descriptor->lane_operand_count, attrs, descriptor->copied_attr_count,
+      state, state->descriptor.lane_op_kind, state->op->instance_flags,
+      lane_operands, operand_count, attrs, state->op->attribute_count,
       state->result_scalar_type, out_lane);
 }
 
@@ -731,7 +717,7 @@ iree_status_t loom_vector_to_scalar_build_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
   loom_vector_to_scalar_record_lane_materialized(state);
-  return kVectorToScalarLaneLowerers[state->descriptor->lane_kind](
+  return kVectorToScalarLaneLowerers[state->descriptor.lane_kind](
       state, indices, out_lane);
 }
 
@@ -789,14 +775,12 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
       return false;
     }
 
-    const loom_vector_to_scalar_descriptor_t* descriptor =
-        loom_vector_to_scalar_find_descriptor(def_op->kind);
-    if (descriptor == NULL ||
-        descriptor->lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
+    loom_vector_to_scalar_descriptor_t descriptor = {0};
+    if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor) ||
+        descriptor.lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
         !iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
       return false;
     }
-    if (descriptor->lane_operand_count > def_op->operand_count) return false;
     return true;
   }
 }
@@ -959,9 +943,10 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         state, def_op, indices, out_materialized, out_lane);
   }
 
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(def_op->kind);
-  if (!descriptor) return iree_ok_status();
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor)) {
+    return iree_ok_status();
+  }
   loom_value_t* value_record =
       loom_module_value(state->rewriter->module, value);
   uint16_t result_ordinal = loom_value_def_index(value_record);
@@ -976,13 +961,11 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .value_checkpoint = state->value_checkpoint,
       .result_ordinal = result_ordinal,
       .vector_type = result_type,
-      .result_scalar_type = descriptor->result_is_i1
-                                ? loom_type_scalar(LOOM_SCALAR_TYPE_I1)
-                                : loom_vector_to_scalar_lane_type(result_type),
+      .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
       .matrix_fragment_layout = state->matrix_fragment_layout,
       .location = def_op->location,
   };
-  if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
+  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
       loom_vector_to_scalar_decode_rejection_bits(&def_state) !=
           LOOM_CONTRACT_REJECTION_NONE) {
     return iree_ok_status();

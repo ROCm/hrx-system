@@ -401,9 +401,7 @@ static bool loom_vector_to_scalar_try_configure_product_fmaf_forest(
 
   accumulator_state->fused_product_lhs = loom_vector_mulf_lhs(input_op);
   accumulator_state->fused_product_rhs = loom_vector_mulf_rhs(input_op);
-  accumulator_state->product_flags =
-      loom_vector_to_scalar_project_instance_flags(
-          LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH, product_flags);
+  accumulator_state->product_flags = product_flags;
   accumulator_state->fmaf_flags =
       accumulator_state->product_flags & accumulator_state->instance_flags;
   accumulator_state->use_product_fmaf_forest = true;
@@ -425,12 +423,9 @@ iree_status_t loom_vector_to_scalar_lower_reduce(
       .input = loom_vector_reduce_input(state->op),
       .init = loom_vector_reduce_init(state->op),
       .scalar_kind = scalar_kind,
-      .instance_flags =
-          loom_combining_kind_accepts_float(reduce_kind)
-              ? loom_vector_to_scalar_project_instance_flags(
-                    LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-                    state->op->instance_flags)
-              : 0,
+      .instance_flags = loom_combining_kind_accepts_float(reduce_kind)
+                            ? state->op->instance_flags
+                            : 0,
   };
   loom_vector_to_scalar_try_configure_product_fmaf_forest(
       state, reduce_kind, reduce_flags, &accumulator_state);
@@ -835,12 +830,9 @@ iree_status_t loom_vector_to_scalar_lower_reduce_axes(
       .result_type = result_type,
       .axes = loom_vector_reduce_axes_axes(state->op),
       .scalar_kind = scalar_kind,
-      .instance_flags =
-          loom_combining_kind_accepts_float(reduce_kind)
-              ? loom_vector_to_scalar_project_instance_flags(
-                    LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-                    state->op->instance_flags)
-              : 0,
+      .instance_flags = loom_combining_kind_accepts_float(reduce_kind)
+                            ? state->op->instance_flags
+                            : 0,
   };
   if (loom_type_is_scalar(result_type)) {
     loom_vector_to_scalar_index_list_t index_list = {0};
@@ -862,9 +854,7 @@ iree_status_t loom_vector_to_scalar_lower_dotf(
       .input = loom_vector_dotf_lhs(state->op),
       .rhs = loom_vector_dotf_rhs(state->op),
       .init = loom_vector_dotf_init(state->op),
-      .instance_flags = loom_vector_to_scalar_project_instance_flags(
-          LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-          state->op->instance_flags),
+      .instance_flags = state->op->instance_flags,
       .use_fmaf = true,
   };
   return loom_vector_to_scalar_lower_accumulator(&accumulator_state,
