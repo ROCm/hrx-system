@@ -70,7 +70,7 @@ static iree_string_view_t loom_testbench_string_from_id(
 static loom_scalar_type_t loom_testbench_value_scalar_type(
     const loom_module_t* module, loom_value_id_t value_id) {
   if (value_id >= module->values.count) return LOOM_SCALAR_TYPE_COUNT_;
-  loom_type_t type = module->values.entries[value_id].type;
+  loom_type_t type = loom_module_value_type(module, value_id);
   if (!loom_type_is_scalar(type)) return LOOM_SCALAR_TYPE_COUNT_;
   return loom_type_element_type(type);
 }
@@ -78,7 +78,7 @@ static loom_scalar_type_t loom_testbench_value_scalar_type(
 static loom_type_t loom_testbench_value_type(const loom_module_t* module,
                                              loom_value_id_t value_id) {
   if (value_id >= module->values.count) return (loom_type_t){0};
-  return module->values.entries[value_id].type;
+  return loom_module_value_type(module, value_id);
 }
 
 static bool loom_testbench_scalar_type_is_integral_sample(
@@ -234,7 +234,7 @@ static bool loom_testbench_plan_range_parameter(
   out_parameter->kind = LOOM_TESTBENCH_PARAMETER_RANGE;
   out_parameter->op = op;
   out_parameter->value_id = value_id;
-  out_parameter->type = module->values.entries[value_id].type;
+  out_parameter->type = loom_module_value_type(module, value_id);
   out_parameter->sample_count = sample_count;
   out_parameter->range.policy = policy;
   out_parameter->range.scalar_type = scalar_type;
@@ -253,7 +253,7 @@ static bool loom_testbench_plan_choice_parameter(
   out_parameter->kind = LOOM_TESTBENCH_PARAMETER_CHOICE;
   out_parameter->op = op;
   out_parameter->value_id = loom_check_param_choice_result(op);
-  out_parameter->type = module->values.entries[out_parameter->value_id].type;
+  out_parameter->type = loom_module_value_type(module, out_parameter->value_id);
   out_parameter->sample_count = values.count;
   out_parameter->choice.values = values.i64_array;
   out_parameter->choice.count = values.count;
@@ -274,7 +274,7 @@ static bool loom_testbench_plan_seed_parameter(
   out_parameter->kind = LOOM_TESTBENCH_PARAMETER_SEED;
   out_parameter->op = op;
   out_parameter->value_id = loom_check_param_seed_result(op);
-  out_parameter->type = module->values.entries[out_parameter->value_id].type;
+  out_parameter->type = loom_module_value_type(module, out_parameter->value_id);
   out_parameter->sample_count = (iree_host_size_t)count;
   out_parameter->seed.base = loom_check_param_seed_base(op);
   out_parameter->seed.count = (iree_host_size_t)count;

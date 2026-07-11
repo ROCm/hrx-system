@@ -1018,7 +1018,7 @@ static bool loom_verify_op_result_contains_value(const loom_op_t* op,
 static bool loom_verify_value_is_named_placeholder(
     const loom_verify_state_t* state, loom_value_id_t value_id) {
   if (value_id >= state->module->values.count) return false;
-  const loom_value_t* value = &state->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(state->module, value_id);
   if (loom_value_is_block_arg(value)) return false;
   return value->name_id != LOOM_STRING_ID_INVALID &&
          loom_def_op(value->def) == NULL;

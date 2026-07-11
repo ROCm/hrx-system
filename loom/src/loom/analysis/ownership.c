@@ -58,7 +58,7 @@ bool loom_ownership_value_matches(
     return false;
   }
   return loom_ownership_type_matches(family,
-                                     module->values.entries[value_id].type);
+                                     loom_module_value_type(module, value_id));
 }
 
 bool loom_ownership_operand_effect_at(

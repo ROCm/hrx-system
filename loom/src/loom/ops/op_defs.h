@@ -1116,8 +1116,7 @@ static inline loom_value_t* loom_op_operand_value(const loom_module_t* module,
                                                   uint16_t index) {
   IREE_ASSERT(index < op->operand_count);
   loom_value_id_t value_id = loom_op_operands(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Resolves an op's result value ID to the value struct in the module's
@@ -1131,8 +1130,7 @@ static inline loom_value_t* loom_op_result_value(const loom_module_t* module,
                                                  uint16_t index) {
   IREE_ASSERT(index < op->result_count);
   loom_value_id_t value_id = loom_op_results(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Returns a pointer to the single use entry if the value has exactly

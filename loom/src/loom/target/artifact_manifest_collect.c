@@ -94,7 +94,7 @@ static iree_string_view_t loom_target_artifact_manifest_value_name(
     return iree_string_view_empty();
   }
   return loom_target_artifact_manifest_module_string(
-      module, module->values.entries[value_id].name_id);
+      module, loom_module_value(module, value_id)->name_id);
 }
 
 static const loom_attribute_t* loom_target_artifact_manifest_find_named_attr(

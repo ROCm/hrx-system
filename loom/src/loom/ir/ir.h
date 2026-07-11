@@ -45,7 +45,7 @@
 //
 // Table-owned entities use integer IDs; ownership/backreference edges use
 // stable arena pointers:
-//   value_id   -> index into module->values.entries[]
+//   value_id   -> index into the module value table
 //   symbol_id  -> index into module->symbols.entries[]
 //   string_id  -> index into module->strings.entries[]
 //   type_id    -> index into module->types.entries[] (for interned types)
@@ -1858,8 +1858,8 @@ typedef struct loom_string_table_t {
   iree_string_view_t* entries;
 } loom_string_table_t;
 
-// Value table. Cache-line-aligned entries for fast iteration.
-// All values (op results and block arguments) in a module live here.
+// Value table. Cache-line-aligned entries for fast iteration. All values (op
+// results and block arguments) in a module live here and are accessed by ID.
 typedef struct loom_value_table_t {
   iree_host_size_t count;
   iree_host_size_t capacity;
@@ -2105,6 +2105,33 @@ typedef struct loom_module_t {
   loom_intern_table_t string_intern;
   loom_intern_table_t type_intern;
 } loom_module_t;
+
+// Returns a pointer to a value by ID.
+static inline loom_value_t* loom_module_value(const loom_module_t* module,
+                                              loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < module->values.count);
+  return &module->values.entries[value_id];
+}
+
+// Returns the type of a value by ID.
+static inline loom_type_t loom_module_value_type(const loom_module_t* module,
+                                                 loom_value_id_t value_id) {
+  return loom_module_value(module, value_id)->type;
+}
+
+// Returns the optional SSA display name for |value_id|, or an empty string view
+// when the value is anonymous or invalid.
+static inline iree_string_view_t loom_module_value_name(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (module == NULL || value_id >= module->values.count) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
+  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
+    return iree_string_view_empty();
+  }
+  return module->strings.entries[name_id];
+}
 
 //===----------------------------------------------------------------------===//
 // Enumeration macros

@@ -415,8 +415,8 @@ TEST_F(ModuleTest, RegionAppendBlockGrowthKeepsBlockReferencesStable) {
   EXPECT_EQ(appended->last_op, nullptr);
 
   loom_block_t* entry = loom_region_entry_block(body);
-  EXPECT_EQ(loom_value_def_block(&module->values.entries[arg_id]), entry);
-  EXPECT_EQ(loom_value_def_index(&module->values.entries[arg_id]), 0u);
+  EXPECT_EQ(loom_value_def_block(loom_module_value(module, arg_id)), entry);
+  EXPECT_EQ(loom_value_def_index(loom_module_value(module, arg_id)), 0u);
   EXPECT_EQ(op->parent_block, entry);
 
   loom_module_free(module);
@@ -669,7 +669,7 @@ TEST_F(ModuleTest, DefineValue) {
   EXPECT_EQ(id, 0u);
   EXPECT_EQ(module->values.count, 1u);
 
-  loom_value_t* value = &module->values.entries[id];
+  loom_value_t* value = loom_module_value(module, id);
   EXPECT_EQ(loom_type_kind(value->type), LOOM_TYPE_SCALAR);
   EXPECT_EQ(loom_type_element_type(value->type), LOOM_SCALAR_TYPE_F32);
   EXPECT_EQ(module->types.count, 1u);
@@ -691,7 +691,7 @@ TEST_F(ModuleTest, DefineValueInternsShapedTypeClosure) {
   EXPECT_TRUE(loom_type_equal(module->types.entries[0],
                               loom_type_scalar(LOOM_SCALAR_TYPE_F32)));
   EXPECT_TRUE(loom_type_equal(module->types.entries[1], vector_type));
-  EXPECT_TRUE(loom_type_equal(module->values.entries[id].type,
+  EXPECT_TRUE(loom_type_equal(loom_module_value_type(module, id),
                               module->types.entries[1]));
 
   loom_module_free(module);
@@ -725,7 +725,7 @@ TEST_F(ModuleTest, DefineValueAlignment) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(module, f32, &id));
-  EXPECT_EQ((uintptr_t)&module->values.entries[id] % 64, 0u)
+  EXPECT_EQ((uintptr_t)loom_module_value(module, id) % 64, 0u)
       << "Value entries must be 64-byte aligned";
   loom_module_free(module);
 }
@@ -748,7 +748,9 @@ TEST_F(ModuleTest, DefineValueGrowth) {
 
   // Verify all values are still accessible after growth.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    EXPECT_EQ(loom_type_kind(module->values.entries[i].type), LOOM_TYPE_SCALAR);
+    EXPECT_EQ(
+        loom_type_kind(loom_module_value_type(module, (loom_value_id_t)i)),
+        LOOM_TYPE_SCALAR);
   }
   loom_module_free(module);
 }

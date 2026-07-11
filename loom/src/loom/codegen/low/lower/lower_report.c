@@ -274,7 +274,7 @@ static bool loom_low_lower_memory_report_value_exact_i64(
   if (value_id >= context->module->values.count) {
     return false;
   }
-  const loom_value_t* value = &context->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(context->module, value_id);
   if (loom_value_is_block_arg(value)) {
     return false;
   }
@@ -364,7 +364,7 @@ static bool loom_low_lower_memory_report_add_step(
   if (value_id >= context->module->values.count) {
     return false;
   }
-  const loom_value_t* value = &context->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(context->module, value_id);
   if (loom_value_is_block_arg(value)) {
     return false;
   }
@@ -398,7 +398,7 @@ static bool loom_low_lower_memory_report_header_upper_bound(
     return false;
   }
   const loom_value_t* condition_value =
-      &context->module->values.entries[condition];
+      loom_module_value(context->module, condition);
   if (loom_value_is_block_arg(condition_value)) {
     return false;
   }

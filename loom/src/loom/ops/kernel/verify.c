@@ -125,7 +125,7 @@ static iree_status_t loom_kernel_emit_result_constraint(
 static iree_string_view_t loom_kernel_value_name(const loom_module_t* module,
                                                  loom_value_id_t value_id) {
   if (value_id >= module->values.count) return IREE_SV("<invalid>");
-  loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return IREE_SV("<unnamed>");
   }

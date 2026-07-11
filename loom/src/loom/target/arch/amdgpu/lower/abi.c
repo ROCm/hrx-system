@@ -180,7 +180,7 @@ static iree_string_view_t loom_amdgpu_argument_value_name(
   if (value_id == LOOM_VALUE_ID_INVALID || value_id >= module->values.count) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return iree_string_view_empty();
   }
