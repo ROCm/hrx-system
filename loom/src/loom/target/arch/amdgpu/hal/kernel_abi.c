@@ -623,7 +623,7 @@ static iree_string_view_t loom_amdgpu_hal_kernel_abi_value_name(
   if (value_id >= module->values.count) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   return loom_amdgpu_hal_kernel_abi_module_string(module, name_id);
 }
 

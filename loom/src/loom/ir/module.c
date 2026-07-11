@@ -1583,11 +1583,11 @@ iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
       loom_type_use_prepare_for_type(module, canonical_type, &reference_count));
 
   loom_value_id_t id = (loom_value_id_t)module->values.count;
-  loom_value_t* value = &module->values.entries[id];
+  ++module->values.count;
+  loom_value_t* value = loom_module_value(module, id);
   value->type = canonical_type;
   value->name_id = LOOM_STRING_ID_INVALID;
   value->def = loom_value_def_make_none();
-  module->values.count++;
 
   if (reference_count > 0) {
     IREE_RETURN_IF_ERROR(
@@ -1607,7 +1607,7 @@ iree_status_t loom_module_set_value_type(loom_module_t* module,
                             " values)",
                             (unsigned)value_id, module->values.count);
   }
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   loom_type_t canonical_type = {0};
   IREE_RETURN_IF_ERROR(
       loom_module_canonicalize_value_type(module, type, &canonical_type));
@@ -1635,7 +1635,7 @@ iree_status_t loom_module_set_value_name(loom_module_t* module,
                             "%" PRIhsz " strings)",
                             (unsigned)name_id, module->strings.count);
   }
-  module->values.entries[value_id].name_id = name_id;
+  loom_module_value(module, value_id)->name_id = name_id;
   return iree_ok_status();
 }
 
@@ -1757,7 +1757,7 @@ iree_status_t loom_module_refresh_value_type_uses(loom_module_t* module,
                             (unsigned)value_id, module->values.count);
   }
   iree_host_size_t reference_count = 0;
-  loom_type_t type = module->values.entries[value_id].type;
+  loom_type_t type = loom_module_value_type(module, value_id);
   IREE_RETURN_IF_ERROR(
       loom_type_use_prepare_for_type(module, type, &reference_count));
   loom_type_use_table_remove_outgoing_for_value(&module->type_uses, value_id);
@@ -1776,12 +1776,13 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module) {
   // intact. This is a bulk recovery path after structural reconstruction, not
   // the per-edit hot path.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_module_value_tracks_type_uses(&module->values.entries[i])) {
+    const loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
+    if (!loom_module_value_tracks_type_uses(value)) {
       continue;
     }
     iree_host_size_t value_reference_count = 0;
     IREE_RETURN_IF_ERROR(loom_type_use_prepare_for_type(
-        module, module->values.entries[i].type, &value_reference_count));
+        module, value->type, &value_reference_count));
     reference_count += value_reference_count;
   }
   IREE_RETURN_IF_ERROR(loom_type_use_table_ensure_record_capacity(
@@ -1789,11 +1790,12 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module) {
 
   loom_type_use_table_reset(&module->type_uses);
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_module_value_tracks_type_uses(&module->values.entries[i])) {
+    const loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
+    if (!loom_module_value_tracks_type_uses(value)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_type_use_table_add_outgoing_for_value(
-        module, (loom_value_id_t)i, module->values.entries[i].type));
+        module, (loom_value_id_t)i, value->type));
   }
   return iree_ok_status();
 }
@@ -2976,7 +2978,7 @@ iree_status_t loom_module_replace_value_type_uses(loom_module_t* module,
         module->type_uses.value_heads[old_id].first_incoming_use_id;
     loom_value_id_t user_value_id =
         module->type_uses.records[use_id].user_value_id;
-    loom_type_t old_type = module->values.entries[user_value_id].type;
+    loom_type_t old_type = loom_module_value_type(module, user_value_id);
     loom_type_t new_type = old_type;
     bool changed = false;
     IREE_RETURN_IF_ERROR(loom_module_replace_type_value_refs_impl(
@@ -3184,7 +3186,7 @@ iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
   ++block->arg_count;
   block->arg_ids[arg_index] = value_id;
 
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   value->flags |= LOOM_VALUE_FLAG_BLOCK_ARG;
   value->def = loom_value_def_make_block(block, arg_index);
   return iree_ok_status();

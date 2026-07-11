@@ -870,7 +870,7 @@ static bool loom_target_compile_report_low_add_step(
   if (value_id >= module->values.count) {
     return false;
   }
-  const loom_value_t* value = &module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value)) {
     return false;
   }
@@ -913,7 +913,7 @@ static bool loom_target_compile_report_low_header_upper_bound(
   if (condition >= module->values.count) {
     return false;
   }
-  const loom_value_t* condition_value = &module->values.entries[condition];
+  const loom_value_t* condition_value = loom_module_value(module, condition);
   if (loom_value_is_block_arg(condition_value)) {
     return false;
   }

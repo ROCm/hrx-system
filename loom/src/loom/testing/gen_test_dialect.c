@@ -233,7 +233,7 @@ static iree_status_t loom_test_gen_region_map(
   loom_block_t* entry_block = loom_region_entry_block(body);
   for (uint16_t j = 0; j < entry_block->arg_count; ++j) {
     loom_value_id_t arg_id = loom_block_arg_id(entry_block, j);
-    loom_value_t* arg_val = &context->builder->module->values.entries[arg_id];
+    loom_value_t* arg_val = loom_module_value(context->builder->module, arg_id);
     loom_test_gen_values_add(&body_values, arg_id, arg_val->type);
   }
 
@@ -333,7 +333,7 @@ static iree_status_t loom_test_gen_region_loop(
   loom_block_t* entry_block = loom_region_entry_block(body);
   for (uint16_t j = 0; j < entry_block->arg_count; ++j) {
     loom_value_id_t arg_id = loom_block_arg_id(entry_block, j);
-    loom_value_t* arg_val = &context->builder->module->values.entries[arg_id];
+    loom_value_t* arg_val = loom_module_value(context->builder->module, arg_id);
     loom_test_gen_values_add(&body_values, arg_id, arg_val->type);
   }
 

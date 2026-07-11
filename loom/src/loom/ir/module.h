@@ -64,34 +64,6 @@ static inline loom_block_t* loom_module_block(loom_module_t* module) {
   return loom_region_entry_block(module->body);
 }
 
-// Returns a pointer to a value by ID.
-static inline loom_value_t* loom_module_value(const loom_module_t* module,
-                                              loom_value_id_t value_id) {
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
-}
-
-// Returns the type of a value by ID.
-static inline loom_type_t loom_module_value_type(const loom_module_t* module,
-                                                 loom_value_id_t value_id) {
-  IREE_ASSERT(value_id < module->values.count);
-  return module->values.entries[value_id].type;
-}
-
-// Returns the optional SSA display name for |value_id|, or an empty string view
-// when the value is anonymous or invalid.
-static inline iree_string_view_t loom_module_value_name(
-    const loom_module_t* module, loom_value_id_t value_id) {
-  if (module == NULL || value_id >= module->values.count) {
-    return iree_string_view_empty();
-  }
-  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
-  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[name_id];
-}
-
 // Sets the type of a value by ID, updating SSA references carried by the old
 // and new type payloads in the module's type-use side table.
 iree_status_t loom_module_set_value_type(loom_module_t* module,
@@ -164,7 +136,7 @@ static inline loom_type_t loom_block_arg_type(const loom_module_t* module,
 
 // Defines a fresh SSA value in the module's value table with the given type.
 // The stored type is canonicalized through the module type interner unless it
-// is NONE. Returns the value ID (index into module->values.entries[]). The
+// is NONE. Returns the value ID in the module value table. The
 // value's def pointer is unset; the builder fills it when finalizing the
 // defining op or loom_block_add_arg fills it for block arguments.
 iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,

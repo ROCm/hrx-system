@@ -2257,12 +2257,13 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
     loom_value_id_t result = results[i];
     if (remove_results[i]) {
       loom_module_drop_value_type_uses(module, result);
-      module->values.entries[result].def = loom_value_def_make_none();
+      loom_module_value(module, result)->def = loom_value_def_make_none();
       continue;
     }
     uint16_t new_index = result_map[i];
     results[new_index] = result;
-    module->values.entries[result].def = loom_value_def_make_op(op, new_index);
+    loom_module_value(module, result)->def =
+        loom_value_def_make_op(op, new_index);
   }
 
   op->result_count = kept_count;
@@ -2294,13 +2295,13 @@ static iree_status_t loom_op_verify_erase_preconditions(loom_module_t* module,
   loom_value_id_t* results = loom_op_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID &&
-        module->values.entries[results[i]].use_count > 0) {
+        loom_module_value(module, results[i])->use_count > 0) {
       iree_string_view_t op_name = loom_op_name(module, op);
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "cannot erase %.*s: result %%%u still has %u use(s)",
           (int)op_name.size, op_name.data, (unsigned)results[i],
-          (unsigned)module->values.entries[results[i]].use_count);
+          (unsigned)loom_module_value(module, results[i])->use_count);
     }
     if (results[i] != LOOM_VALUE_ID_INVALID &&
         loom_value_has_type_uses_outside_op(module, results[i], op)) {
@@ -2390,7 +2391,7 @@ static iree_status_t loom_op_erase_subtree(loom_module_t* module, loom_op_t* op,
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_module_drop_value_type_uses(module, results[i]);
-      module->values.entries[results[i]].def = loom_value_def_make_none();
+      loom_module_value(module, results[i])->def = loom_value_def_make_none();
     }
   }
   loom_module_unlink_symbol_defining_op(module, op, loom_op_vtable(module, op));
@@ -2709,7 +2710,8 @@ static iree_status_t loom_module_note_attribute_type_value_ref(
     loom_value_id_t value_id, void* user_data) {
   loom_module_t* module = (loom_module_t*)user_data;
   if (value_id < module->values.count) {
-    module->values.entries[value_id].flags |= LOOM_VALUE_FLAG_ATTRIBUTE_USES;
+    loom_module_value(module, value_id)->flags |=
+        LOOM_VALUE_FLAG_ATTRIBUTE_USES;
   }
   return iree_ok_status();
 }
@@ -2717,7 +2719,8 @@ static iree_status_t loom_module_note_attribute_type_value_ref(
 static void loom_module_note_attribute_value_ref(loom_module_t* module,
                                                  loom_value_id_t value_id) {
   if (value_id < module->values.count) {
-    module->values.entries[value_id].flags |= LOOM_VALUE_FLAG_ATTRIBUTE_USES;
+    loom_module_value(module, value_id)->flags |=
+        LOOM_VALUE_FLAG_ATTRIBUTE_USES;
   }
 }
 
@@ -2796,7 +2799,7 @@ iree_status_t loom_module_note_op_attribute_value_refs(loom_module_t* module,
 iree_status_t loom_value_add_use(loom_module_t* module,
                                  loom_value_id_t value_id, loom_op_t* user_op,
                                  uint16_t operand_index) {
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   if (value->use_count >= LOOM_VALUE_MAX_USE_COUNT) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED, "value %%%u has too many uses (%u max)",
@@ -2867,7 +2870,7 @@ iree_status_t loom_value_remove_use(loom_module_t* module,
                                     loom_value_id_t value_id,
                                     loom_op_t* user_op,
                                     uint16_t operand_index) {
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   loom_use_index_t* operand_use_indices = loom_op_operand_use_indices(user_op);
   loom_use_index_t use_index = operand_use_indices[operand_index];
   loom_use_t* uses = loom_value_uses_mutable(value);
@@ -2959,7 +2962,7 @@ iree_status_t loom_builder_finalize_op(loom_builder_t* builder, loom_op_t* op) {
   loom_value_id_t* results = loom_op_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
-      builder->module->values.entries[results[i]].def =
+      loom_module_value(builder->module, results[i])->def =
           loom_value_def_make_op(op, i);
     }
   }
@@ -3281,11 +3284,11 @@ iree_status_t loom_value_replace_all_uses_with(loom_module_t* module,
                                                loom_value_id_t old_id,
                                                loom_value_id_t new_id) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   uint32_t old_use_count = old_value->use_count;
   const bool old_has_attribute_uses = loom_value_has_attribute_uses(old_value);
 
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, old_use_count));
 
@@ -3333,7 +3336,7 @@ iree_status_t loom_value_replace_all_uses_except(loom_module_t* module,
                                                  loom_value_id_t new_id,
                                                  const loom_op_t* except_op) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   if (old_value->use_count == 0) return iree_ok_status();
 
   // Count how many uses will be transferred vs kept.
@@ -3347,7 +3350,7 @@ iree_status_t loom_value_replace_all_uses_except(loom_module_t* module,
   if (transfer_count == 0) return iree_ok_status();
 
   // Ensure new has capacity.
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, transfer_count));
 
@@ -3391,7 +3394,7 @@ iree_status_t loom_value_replace_uses_if(loom_module_t* module,
                                          loom_use_predicate_fn predicate,
                                          void* user_data) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   if (old_value->use_count == 0) return iree_ok_status();
 
   // Count how many uses will be transferred.
@@ -3405,7 +3408,7 @@ iree_status_t loom_value_replace_uses_if(loom_module_t* module,
   if (transfer_count == 0) return iree_ok_status();
 
   // Ensure new has capacity.
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, transfer_count));
 
@@ -3470,7 +3473,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
     for (uint16_t a = 0; a < block->arg_count; ++a) {
       loom_value_id_t arg_id = loom_block_arg_id(block, a);
       if (arg_id != LOOM_VALUE_ID_INVALID) {
-        module->values.entries[arg_id].def =
+        loom_module_value(module, arg_id)->def =
             loom_value_def_make_block(block, a);
       }
     }
@@ -3493,7 +3496,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
       loom_value_id_t* results = loom_op_results(op);
       for (uint16_t i = 0; i < op->result_count; ++i) {
         if (results[i] != LOOM_VALUE_ID_INVALID) {
-          module->values.entries[results[i]].def =
+          loom_module_value(module, results[i])->def =
               loom_value_def_make_op(op, i);
         }
       }
@@ -3520,7 +3523,7 @@ iree_status_t loom_module_compute_uses(loom_module_t* module) {
   loom_region_reset_effect_summaries(module->body);
   // Clear all use and def data on every value.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    loom_value_t* value = &module->values.entries[i];
+    loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
     value->use_count = 0;
     value->flags &=
         ~(LOOM_VALUE_FLAG_OVERFLOW_USES | LOOM_VALUE_FLAG_ATTRIBUTE_USES);

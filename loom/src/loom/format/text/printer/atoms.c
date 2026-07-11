@@ -29,7 +29,7 @@ static bool loom_print_value_has_name(const loom_module_t* module,
   if (!module || value_id >= module->values.count) {
     return false;
   }
-  loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return false;
   }
@@ -45,7 +45,7 @@ static const void* loom_print_value_parse_scope(const loom_module_t* module,
   if (!module || value_id >= module->values.count) {
     return NULL;
   }
-  const loom_value_t* value = &module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value)) {
     loom_block_t* block = loom_value_def_block(value);
     return block ? (const void*)block->parent_region : NULL;
@@ -82,7 +82,7 @@ static bool loom_print_value_is_printable(const loom_module_t* module,
   if (!module || value_id >= module->values.count) {
     return false;
   }
-  const loom_value_t* value = &module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value)) {
     return loom_value_def_block(value) != NULL;
   }
@@ -107,7 +107,7 @@ static bool loom_print_value_name_is_duplicated(const loom_module_t* module,
     if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
       continue;
     }
-    if (module->values.entries[i].name_id == name_id) {
+    if (loom_module_value(module, (loom_value_id_t)i)->name_id == name_id) {
       return true;
     }
   }
@@ -124,7 +124,8 @@ static bool loom_print_explicit_value_name_exists(const loom_module_t* module,
     if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
       continue;
     }
-    loom_string_id_t name_id = module->values.entries[i].name_id;
+    loom_string_id_t name_id =
+        loom_module_value(module, (loom_value_id_t)i)->name_id;
     if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
       continue;
     }
@@ -236,7 +237,8 @@ static bool loom_print_explicit_value_name_with_suffix_exists(
     if (loom_print_value_parse_scope(module, (loom_value_id_t)i) != scope) {
       continue;
     }
-    loom_string_id_t name_id = module->values.entries[i].name_id;
+    loom_string_id_t name_id =
+        loom_module_value(module, (loom_value_id_t)i)->name_id;
     if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
       continue;
     }
@@ -768,7 +770,7 @@ static iree_status_t loom_text_print_result_type(loom_type_t type,
 iree_status_t loom_print_value_type(loom_print_context_t* ctx,
                                     loom_value_id_t value_id) {
   if (value_id < ctx->module->values.count) {
-    return loom_print_type(ctx, ctx->module->values.entries[value_id].type);
+    return loom_print_type(ctx, loom_module_value_type(ctx->module, value_id));
   }
   return loom_output_stream_write_cstring(ctx->stream, "<unknown>");
 }
@@ -777,7 +779,7 @@ iree_status_t loom_print_result_value_type(loom_print_context_t* ctx,
                                            loom_value_id_t value_id) {
   if (value_id < ctx->module->values.count) {
     return loom_text_print_result_type(
-        ctx->module->values.entries[value_id].type, ctx->module, ctx->stream,
+        loom_module_value_type(ctx->module, value_id), ctx->module, ctx->stream,
         ctx);
   }
   return loom_output_stream_write_cstring(ctx->stream, "<unknown>");

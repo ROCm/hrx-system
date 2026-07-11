@@ -449,7 +449,7 @@ bool loom_dominates_value(const loom_dominance_info_t* info,
       value_id >= info->module->values.count) {
     return false;
   }
-  const loom_value_t* value = &info->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(info->module, value_id);
 
   if (value->flags & LOOM_VALUE_FLAG_BLOCK_ARG) {
     // Block argument: dominates all ops in dominated blocks and all ops in
