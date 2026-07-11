@@ -276,6 +276,30 @@ func.def @matrix_operand_rejects_zero_payload_registers() {
 
 // ====
 
+func.def @matrix_operand_rejects_structured_sparsity_without_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "0"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @matrix_operand_rejects_non_decreasing_structured_sparsity_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "4"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=4> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @matrix_operand_rejects_density_without_structured_sparsity() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_elements" "4"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  func.return
+}
+
+// ====
+
 func.def @turboquant_missing_static_param(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
   %dense = encoding.layout.dense : encoding<layout>
   %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>

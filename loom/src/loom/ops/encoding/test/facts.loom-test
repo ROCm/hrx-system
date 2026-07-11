@@ -170,6 +170,25 @@ func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
 
 // ====
 
+// Structured-sparsity facts preserve both the logical group extent and the
+// number of physically stored nonzero elements.
+func.def @matrix_operand_structured_sparsity_summary() -> (i64, i64, i64) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %policy = test.fact_encoding_matrix_field %schema["sparsity"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_matrix_field %schema["sparsity_group_elements"] : encoding<schema> -> i64
+  %nonzero = test.fact_encoding_matrix_field %schema["sparsity_group_nonzero_elements"] : encoding<schema> -> i64
+  func.return %policy, %elements, %nonzero : i64, i64, i64
+}
+// ----
+func.def @matrix_operand_structured_sparsity_summary() -> (i64, i64, i64) {
+  %policy = scalar.constant 2 : i64
+  %elements = scalar.constant 4 : i64
+  %nonzero = scalar.constant 2 : i64
+  func.return %policy, %elements, %nonzero : i64, i64, i64
+}
+
+// ====
+
 // GGML Q8_0 is a concrete block-quant schema: dense signed i8 payload lanes
 // with one f16 block scale covering 32 logical elements.
 func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {

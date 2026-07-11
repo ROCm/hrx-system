@@ -1068,9 +1068,9 @@ func.def @fragment_load_rejects_unknown_auxiliary_key(%buffer: buffer, %offset: 
 // Static sparse fragment-load storage schemas require explicit metadata SSA
 // operands at the load boundary.
 func.def @fragment_load_requires_sparse_auxiliary(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
-  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured>>>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>>
   // ERROR@+1: ENCODING/016 "vector.fragment.load" "sparsity"
-  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured>>> -> vector<4xi32>
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf8E4M3, #physical_storage<layout=#dense, schema=#matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>> -> vector<4xi32>
   func.return
 }
 
