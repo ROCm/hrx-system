@@ -237,8 +237,9 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
       "x%" PRIu64 " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_encoded_source=%" PRIu64
       "MiB param_encode_steps=%" PRIhsz " param_load_groups[total=%" PRIhsz
-      ",encode=%" PRIhsz "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64
-      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      ",encode=%" PRIhsz "] local_slab=%" PRIu64 "MiB local_hw=%" PRIu64
+      "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
+      " regions=%" PRIhsz,
       static_cast<int>(branch_name.size), branch_name.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(weight_execution_format.size),
@@ -255,9 +256,10 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
       statistics.parameter_encode_load_step_count,
       statistics.parameter_load_group_count,
       statistics.parameter_encode_load_group_count,
+      CeilMiB(statistics.memory_slab_byte_length),
       CeilMiB(statistics.memory_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
-      statistics.dispatch_count);
+      statistics.dispatch_count, statistics.region_count);
   iree_benchmark_set_label(benchmark_state, label);
 }
 
@@ -665,7 +667,15 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
 
   iree_hal_semaphore_t* wait_semaphore = update_semaphore.get();
   uint64_t wait_value = update_value;
-  uint64_t signal_value = 0;
+  uint64_t signal_value = 1;
+  IREE_RETURN_IF_ERROR(IssueDitBundle(&context, bundle.get(), boundary_bindings,
+                                      wait_semaphore, wait_value,
+                                      issue_semaphore.get(), signal_value));
+  IREE_RETURN_IF_ERROR(WaitForSemaphore(issue_semaphore.get(), signal_value));
+  wait_semaphore = issue_semaphore.get();
+  wait_value = signal_value;
+  context.diagnostics = {};
+
   uint64_t iteration_count = 0;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
