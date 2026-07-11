@@ -148,6 +148,28 @@ typedef struct iree_arena_allocator_t {
   iree_host_size_t block_bytes_remaining;
 } iree_arena_allocator_t;
 
+// Saved allocation state used to discard speculative arena allocations.
+//
+// Checkpoints are restored in stack order. Restoring a checkpoint invalidates
+// every allocation made by its arena after the checkpoint was saved while
+// preserving allocations that predate it.
+typedef struct iree_arena_checkpoint_t {
+  // Arena this checkpoint was saved from.
+  iree_arena_allocator_t* arena;
+  // Oversized-allocation list head at the checkpoint.
+  iree_arena_oversized_allocation_t* allocation_head;
+  // Current fixed-size block at the checkpoint.
+  iree_arena_block_t* block_head;
+  // Oldest fixed-size block retained by the arena at the checkpoint.
+  iree_arena_block_t* block_tail;
+  // Total bytes owned by the arena at the checkpoint.
+  iree_host_size_t total_allocation_size;
+  // Total bytes consumed from the arena at the checkpoint.
+  iree_host_size_t used_allocation_size;
+  // Unused bytes in |block_head| at the checkpoint.
+  iree_host_size_t block_bytes_remaining;
+} iree_arena_checkpoint_t;
+
 // Initializes an arena that will use |block_pool| for allocating blocks as
 // needed.
 void iree_arena_initialize(iree_arena_block_pool_t* block_pool,
@@ -158,6 +180,13 @@ void iree_arena_deinitialize(iree_arena_allocator_t* arena);
 
 // Resets the entire arena and returns allocated blocks to the parent pool.
 void iree_arena_reset(iree_arena_allocator_t* arena);
+
+// Saves the current allocation state of |arena| for a later restore.
+iree_arena_checkpoint_t iree_arena_checkpoint_save(
+    iree_arena_allocator_t* arena);
+
+// Restores |checkpoint| and invalidates allocations made after it was saved.
+void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint);
 
 // Allocates |byte_length| contiguous bytes from the arena.
 // The returned bytes will have undefined contents and must be initialized by
