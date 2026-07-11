@@ -142,6 +142,14 @@ typedef enum loom_amdgpu_vopd_component_source_bits_e {
 } loom_amdgpu_vopd_component_source_bits_t;
 typedef uint8_t loom_amdgpu_vopd_component_source_mask_t;
 
+typedef enum loom_amdgpu_vopd_component_flag_bits_e {
+  // Component has no additional planning capabilities.
+  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_NONE = 0u,
+  // SRC0 and VSRC1 may be exchanged without changing component semantics.
+  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES = 1u << 0,
+} loom_amdgpu_vopd_component_flag_bits_t;
+typedef uint8_t loom_amdgpu_vopd_component_flags_t;
+
 typedef enum loom_amdgpu_vopd_component_lane_bits_e {
   // Component may not occupy either VOPD lane.
   LOOM_AMDGPU_VOPD_COMPONENT_LANE_NONE = 0u,
@@ -203,6 +211,8 @@ typedef struct loom_amdgpu_vopd_component_info_t {
   loom_amdgpu_vopd_component_pair_mask_t pairing_mask;
   // Source operand slots that contain real VGPRs.
   loom_amdgpu_vopd_component_source_mask_t source_register_mask;
+  // Descriptor-derived component planning capabilities.
+  loom_amdgpu_vopd_component_flags_t flags;
 } loom_amdgpu_vopd_component_info_t;
 
 typedef enum loom_amdgpu_vopd_rejection_reason_e {
@@ -245,6 +255,10 @@ typedef enum loom_amdgpu_vopd_pair_flag_bits_e {
   LOOM_AMDGPU_VOPD_PAIR_FLAG_NONE = 0u,
   // VOPD pair uses the shared 32-bit literal payload word.
   LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL = 1u << 0,
+  // X component encodes its commutable sources in the opposite orientation.
+  LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED = 1u << 1,
+  // Y component encodes its commutable sources in the opposite orientation.
+  LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED = 1u << 2,
 } loom_amdgpu_vopd_pair_flag_bits_t;
 typedef uint32_t loom_amdgpu_vopd_pair_flags_t;
 

@@ -875,8 +875,8 @@ low.func.def target(@gfx11_target) @gfx11_vopd_rope_pair_rotate_motif(%even: reg
 // ----
   v_dual_mul_f32 v4, v0, v3 :: v_dual_mul_f32 v5, v1, v2
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_sub_f32 v6, v4, v5
-  v_dual_mul_f32 v7, v0, v2 :: v_dual_mul_f32 v8, v1, v3
+  v_dual_sub_f32 v6, v4, v5 :: v_dual_mul_f32 v7, v2, v0
+  v_mul_f32 v8, v1, v3
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_f32 v9, v7, v8
   s_endpgm
@@ -3239,17 +3239,16 @@ low.func.def target(@gfx11_target) @gfx11_grouped_trans_lanes(%input0: reg<amdgp
 // ----
   v_exp_f32 v6, v1
   v_exp_f32 v7, v2
-  v_exp_f32 v8, v3
-  v_exp_f32 v9, v4
+  v_exp_f32 v9, v3
+  v_exp_f32 v10, v4
   v_add_f32 v6, v6, v0
   v_add_f32 v7, v7, v0
   s_waitcnt_depctr depctr(0)
-  v_add_f32 v8, v8, v0
-  v_add_f32 v9, v9, v0
+  v_dual_add_f32 v8, v0, v9 :: v_dual_add_f32 v11, v10, v0
   v_rcp_f32 v0, v6
   v_rcp_f32 v6, v7
   v_rcp_f32 v7, v8
-  v_rcp_f32 v8, v9
+  v_rcp_f32 v8, v11
   v_mul_f32 v0, v0, v1
   v_mul_f32 v1, v6, v2
   s_waitcnt_depctr depctr(0)
@@ -3306,28 +3305,27 @@ low.func.def target(@gfx11_target) @gfx11_grouped_trans_lanes_b128_tail_depctr(%
 // ----
   v_exp_f32 v10, v1
   v_exp_f32 v11, v2
-  v_exp_f32 v12, v3
-  v_exp_f32 v13, v4
-  v_exp_f32 v14, v5
-  v_exp_f32 v15, v6
-  v_exp_f32 v16, v7
-  v_exp_f32 v17, v8
+  v_exp_f32 v13, v3
+  v_exp_f32 v14, v4
+  v_exp_f32 v15, v5
+  v_exp_f32 v17, v6
+  v_exp_f32 v18, v7
+  v_exp_f32 v19, v8
   v_add_f32 v10, v10, v0
   v_add_f32 v11, v11, v0
-  v_add_f32 v12, v12, v0
-  v_add_f32 v13, v13, v0
-  v_add_f32 v14, v14, v0
-  v_add_f32 v15, v15, v0
-  v_add_f32 v16, v16, v0
-  v_add_f32 v17, v17, v0
+  v_add_f32 v12, v13, v0
+  v_add_f32 v21, v14, v0
+  v_add_f32 v13, v15, v0
+  v_add_f32 v14, v17, v0
+  v_dual_add_f32 v15, v0, v18 :: v_dual_add_f32 v16, v19, v0
   v_rcp_f32 v0, v10
   v_rcp_f32 v10, v11
   v_rcp_f32 v11, v12
-  v_rcp_f32 v12, v13
-  v_rcp_f32 v13, v14
-  v_rcp_f32 v14, v15
-  v_rcp_f32 v15, v16
-  v_rcp_f32 v16, v17
+  v_rcp_f32 v12, v21
+  v_rcp_f32 v13, v13
+  v_rcp_f32 v14, v14
+  v_rcp_f32 v15, v15
+  v_rcp_f32 v16, v16
   v_mul_f32 v0, v0, v1
   v_mul_f32 v1, v10, v2
   v_mul_f32 v2, v11, v3
@@ -3661,4 +3659,132 @@ low.func.def target(@gfx11_target) @gfx11_concat(%r0: reg<amdgpu.sgpr>, %r1: reg
   s_add_u32 s5, s2, s3
   s_add_u32 s4, s4, s5
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_commutes_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1 fixed=%sum0:physical_register:6:1 fixed=%sum1:physical_register:7:1 fixed=%minimum0:physical_register:8:1 fixed=%minimum1:physical_register:9:1 fixed=%maximum0:physical_register:10:1 fixed=%maximum1:physical_register:11:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_commutes_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %product0 = v_mul_f32 %lhs0, %shared
+  %product1 = v_mul_f32 %lhs1, %shared
+  %sum0 = v_add_f32 %lhs0, %shared
+  %sum1 = v_add_f32 %lhs1, %shared
+  %minimum0 = v_min_f32 %lhs0, %shared
+  %minimum1 = v_min_f32 %lhs1, %shared
+  %maximum0 = v_max_f32 %lhs0, %shared
+  %maximum1 = v_max_f32 %lhs1, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v4, v2, v0 :: v_dual_mul_f32 v5, v1, v2
+  v_dual_add_f32 v6, v2, v0 :: v_dual_add_f32 v7, v1, v2
+  v_dual_min_f32 v8, v2, v0 :: v_dual_min_f32 v9, v1, v2
+  v_dual_max_f32 v10, v2, v0 :: v_dual_max_f32 v11, v1, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_keeps_ordered_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference0:physical_register:4:1 fixed=%difference1:physical_register:5:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_keeps_ordered_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %difference0 = v_sub_f32 %lhs0, %shared
+  %difference1 = v_sub_f32 %lhs1, %shared
+  return
+}
+
+// ----
+  v_sub_f32 v4, v0, v2
+  v_sub_f32 v5, v1, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_commutes_accumulate_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%acc0:physical_register:4:1 fixed=%acc1:physical_register:5:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_commutes_accumulate_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %next0 = v_fmac_f32 %acc0, %lhs0, %shared
+  %next1 = v_fmac_f32 %acc1, %lhs1, %shared
+  return
+}
+
+// ----
+  v_dual_fmac_f32 v4, v2, v0 :: v_dual_fmac_f32 v5, v1, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_commutes_literal_product_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%next0:physical_register:4:1 fixed=%next1:physical_register:5:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_commutes_literal_product_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %next0 = v_fmaak_f32 %lhs0, %shared, 1065353216
+  %next1 = v_fmaak_f32 %lhs1, %shared, 1065353216
+  return
+}
+
+// ----
+  v_dual_fmaak_f32 v4, v2, v0, 0x3f800000 :: v_dual_fmaak_f32 v5, v1, v2, 0x3f800000
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_commutes_dot_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%acc0:physical_register:4:1 fixed=%acc1:physical_register:5:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_commutes_dot_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %next0 = v_dot2_f32_f16 %lhs0, %shared, %acc0
+  %next1 = v_dot2_f32_f16 %lhs1, %shared, %acc1
+  return
+}
+
+// ----
+  v_dual_dot2acc_f32_f16 v4, v2, v0 :: v_dual_dot2acc_f32_f16 v5, v1, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vopd_commutes_y_integer_sources strategy=source fixed=%lhs:physical_register:0:1 fixed=%integer_lhs:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference0:physical_register:4:1 fixed=%sum:physical_register:5:1 fixed=%difference1:physical_register:6:1 fixed=%maximum:physical_register:7:1 fixed=%difference2:physical_register:8:1 fixed=%minimum:physical_register:9:1
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_vopd_commutes_y_integer_sources(%lhs: reg<amdgpu.vgpr>, %integer_lhs: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %difference0 = v_sub_f32 %lhs, %shared
+  %sum = v_add_u32 %integer_lhs, %shared
+  %difference1 = v_sub_f32 %lhs, %shared
+  %maximum = v_max_i32 %integer_lhs, %shared
+  %difference2 = v_sub_f32 %lhs, %shared
+  %minimum = v_min_i32 %integer_lhs, %shared
+  return
+}
+
+// ----
+  v_dual_sub_f32 v4, v0, v2 :: v_dual_add_nc_u32 v5, v2, v1
+  v_dual_sub_f32 v6, v0, v2 :: v_dual_max_i32 v7, v2, v1
+  v_dual_sub_f32 v8, v0, v2 :: v_dual_min_i32 v9, v2, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vopd_commutes_y_bitwise_sources fixed=%lhs:physical_register:0:1 fixed=%integer_lhs:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference:physical_register:4:1 fixed=%masked:physical_register:5:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_commutes_y_bitwise_sources(%lhs: reg<amdgpu.vgpr>, %integer_lhs: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %difference = v_sub_f32 %lhs, %shared
+  %masked = v_and_b32 %integer_lhs, %shared
+  return
+}
+
+// ----
+  v_dual_sub_f32 v4, v0, v2 :: v_dual_and_b32 v5, v2, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_vopd_commutes_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1
+amdgpu.target<gfx1200> @gfx12_target
+low.func.def target(@gfx12_target) @gfx12_vopd_commutes_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+  %product0 = v_mul_f32 %lhs0, %shared
+  %product1 = v_mul_f32 %lhs1, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v4, v2, v0 :: v_dual_mul_f32 v5, v1, v2
   s_endpgm

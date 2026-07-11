@@ -125,11 +125,16 @@ typedef struct loom_low_placement_pair_relation_t {
 } loom_low_placement_pair_relation_t;
 
 // Target-provided placement recipe shared by compatible descriptor pairs.
+// Each alternative is a conjunction of |relation_count| rows. Alternatives
+// are ordered by preference; placement selects the first one that is not
+// structurally impossible for the concrete pair values.
 typedef struct loom_low_placement_pair_recipe_t {
-  // Borrowed relation rows in the recipe.
+  // Borrowed relation rows grouped contiguously by alternative.
   const loom_low_placement_pair_relation_t* relations;
-  // Number of entries in relations.
+  // Number of relation rows in each alternative.
   uint16_t relation_count;
+  // Number of ordered alternative relation conjunctions.
+  uint16_t alternative_count;
 } loom_low_placement_pair_recipe_t;
 
 // One concrete pair opportunity retained from the final schedule.

@@ -2182,14 +2182,16 @@ def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
         ) == (None, None, None, None)
         assert descriptor.operands[1].descriptor_operand.role is OperandRole.OPERAND
         assert OperandFlag.IMPLICIT in descriptor.operands[1].descriptor_operand.flags
-        assert tuple(constraint.kind for constraint in descriptor.constraints) == (
-            ConstraintKind.TIED,
-            ConstraintKind.DESTRUCTIVE,
-        )
-        assert tuple(
-            (constraint.lhs_operand_index, constraint.rhs_operand_index)
+        constraint_contracts = {
+            (
+                constraint.kind,
+                constraint.lhs_operand_index,
+                constraint.rhs_operand_index,
+            )
             for constraint in descriptor.constraints
-        ) == ((0, 1), (0, 1))
+        }
+        assert (ConstraintKind.TIED, 0, 1) in constraint_contracts
+        assert (ConstraintKind.DESTRUCTIVE, 0, 1) in constraint_contracts
 
         descriptor = descriptors["amdgpu.s_fmac_f16"]
         assert descriptor.schedule_class == _SCHEDULE_SALU
@@ -2499,14 +2501,17 @@ def test_packed_dot2_descriptors_pin_destructive_accumulator() -> None:
             assert tuple(
                 operand.descriptor_operand.field_name for operand in descriptor.operands
             ) == ("dst", "lhs", "rhs", "acc")
-            assert tuple(constraint.kind for constraint in descriptor.constraints) == (
-                ConstraintKind.TIED,
-                ConstraintKind.DESTRUCTIVE,
-            )
-            assert tuple(
-                (constraint.lhs_operand_index, constraint.rhs_operand_index)
+            constraint_contracts = {
+                (
+                    constraint.kind,
+                    constraint.lhs_operand_index,
+                    constraint.rhs_operand_index,
+                )
                 for constraint in descriptor.constraints
-            ) == ((0, 3), (0, 3))
+            }
+            assert (ConstraintKind.TIED, 0, 3) in constraint_contracts
+            assert (ConstraintKind.DESTRUCTIVE, 0, 3) in constraint_contracts
+            assert (ConstraintKind.COMMUTABLE, 1, 2) in constraint_contracts
 
 
 def _expected_mix_descriptor_keys(

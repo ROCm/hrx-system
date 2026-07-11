@@ -26,6 +26,7 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     build_amdgpu_core_descriptor_set_from_spec,
 )
@@ -42,6 +43,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
 )
+from loom.target.low_descriptors import ConstraintKind, Descriptor, DescriptorSet  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 
@@ -54,6 +56,9 @@ _FORM_FMAAK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL"
 _FORM_FMAMK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL"
 _FORM_INLINE_MOV = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV"
 _FORM_TIED_ACCUMULATE = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE"
+
+_COMPONENT_FLAG_NONE = "LOOM_AMDGPU_VOPD_COMPONENT_FLAG_NONE"
+_COMPONENT_FLAG_COMMUTABLE_SOURCES = "LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES"
 
 _LANE_XY = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY"
 _LANE_X = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_X"
@@ -103,6 +108,7 @@ class _VopdComponentDefinition:
 class _VopdComponentRule:
     component: _VopdComponentDefinition
     descriptor_set_keys: tuple[str, ...]
+    flags: str = _COMPONENT_FLAG_NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +154,7 @@ class _VopdPairPlacementRelation:
 
 @dataclass(frozen=True, slots=True)
 class _VopdPairPlacementRecipe:
-    relations: tuple[_VopdPairPlacementRelation, ...]
+    alternatives: tuple[tuple[_VopdPairPlacementRelation, ...], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,11 +454,11 @@ def _descriptor_set_infos_by_key(
     return {info.key: info for info in descriptor_set_infos}
 
 
-def _descriptor_keys_by_set_key(
+def _descriptor_sets_by_key(
     descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo],
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
-) -> dict[str, tuple[str, ...]]:
-    descriptor_keys: dict[str, tuple[str, ...]] = {}
+) -> dict[str, DescriptorSet]:
+    descriptor_sets: dict[str, DescriptorSet] = {}
     for info in descriptor_set_infos:
         try:
             spec = isa_specs[info.isa_xml_key]
@@ -464,15 +470,15 @@ def _descriptor_keys_by_set_key(
         )
         if descriptor_set.key != info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
-        descriptor_keys[info.key] = tuple(descriptor.key for descriptor in descriptor_set.descriptors)
-    return descriptor_keys
+        descriptor_sets[info.key] = descriptor_set
+    return descriptor_sets
 
 
 def _validate_component_definition(
     component: _VopdComponentDefinition,
     descriptor_set_keys: Sequence[str],
     descriptor_set_infos_by_key: Mapping[str, AmdgpuDescriptorSetInfo],
-    descriptor_keys_by_set_key: Mapping[str, tuple[str, ...]],
+    descriptors_by_set_key: Mapping[str, Mapping[str, Descriptor]],
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> None:
     owner = f"AMDGPU VOPD component '{component.descriptor_key}'"
@@ -486,10 +492,53 @@ def _validate_component_definition(
             raise ValueError(f"{owner} references unknown descriptor set '{descriptor_set_key}'")
         if not _descriptor_set_supports_vopd(info):
             raise ValueError(f"{owner} references non-VOPD descriptor set '{descriptor_set_key}'")
-        descriptor_keys = set(descriptor_keys_by_set_key[descriptor_set_key])
-        if component.descriptor_key not in descriptor_keys:
+        descriptors = descriptors_by_set_key[descriptor_set_key]
+        if component.descriptor_key not in descriptors:
             raise ValueError(f"{owner} references descriptor set '{descriptor_set_key}' where the scalar component descriptor is absent")
         _validate_xml_instruction(component, info, isa_specs[info.isa_xml_key])
+
+
+def _descriptor_commutes_packet_operands(
+    descriptor: Descriptor,
+    lhs_packet_operand_index: int,
+    rhs_packet_operand_index: int,
+) -> bool:
+    packet_operand_indices = tuple(index for index, operand in enumerate(descriptor.operands) if operand_role_is_packet_input(operand.role))
+    packet_operand_count = len(packet_operand_indices)
+    if lhs_packet_operand_index >= packet_operand_count or rhs_packet_operand_index >= packet_operand_count:
+        raise ValueError(f"AMDGPU VOPD descriptor '{descriptor.key}' source operands ({lhs_packet_operand_index}, {rhs_packet_operand_index}) exceed packet operand count {packet_operand_count}")
+    lhs_descriptor_operand_index = packet_operand_indices[lhs_packet_operand_index]
+    rhs_descriptor_operand_index = packet_operand_indices[rhs_packet_operand_index]
+    expected_pair = frozenset((lhs_descriptor_operand_index, rhs_descriptor_operand_index))
+    return any(
+        constraint.kind is ConstraintKind.COMMUTABLE and constraint.rhs_operand_index is not None and frozenset((constraint.lhs_operand_index, constraint.rhs_operand_index)) == expected_pair
+        for constraint in descriptor.constraints
+    )
+
+
+def _component_flags_for_descriptors(
+    component: _VopdComponentDefinition,
+    descriptor_set_keys: Sequence[str],
+    descriptors_by_set_key: Mapping[str, Mapping[str, Descriptor]],
+) -> str:
+    if component.source_register_mask != _SOURCE_BINARY:
+        return _COMPONENT_FLAG_NONE
+    src0_index = _component_source_operand_index(component, _SOURCE_SRC0)
+    vsrc1_index = _component_source_operand_index(component, _SOURCE_VSRC1)
+    commutable_by_set = {
+        descriptor_set_key: _descriptor_commutes_packet_operands(
+            descriptors_by_set_key[descriptor_set_key][component.descriptor_key],
+            src0_index,
+            vsrc1_index,
+        )
+        for descriptor_set_key in descriptor_set_keys
+    }
+    if len(set(commutable_by_set.values())) != 1:
+        contracts = ", ".join(f"{descriptor_set_key}={commutable}" for descriptor_set_key, commutable in commutable_by_set.items())
+        raise ValueError(f"AMDGPU VOPD component '{component.descriptor_key}' has target-dependent commutability ({contracts})")
+    if next(iter(commutable_by_set.values())):
+        return _COMPONENT_FLAG_COMMUTABLE_SOURCES
+    return _COMPONENT_FLAG_NONE
 
 
 def _descriptor_lookup_rows_for_set(
@@ -615,10 +664,35 @@ def _placement_source_ref(
     )
 
 
-def _pair_placement_recipe(
+def _source_mask_for_component_orientation(
+    source_mask: str,
+    component_flags: str,
+) -> str:
+    if component_flags == _COMPONENT_FLAG_NONE:
+        return source_mask
+    if component_flags != _COMPONENT_FLAG_COMMUTABLE_SOURCES:
+        raise ValueError(f"unsupported AMDGPU VOPD component flags '{component_flags}'")
+    if source_mask == _SOURCE_SRC0:
+        return _SOURCE_VSRC1
+    if source_mask == _SOURCE_VSRC1:
+        return _SOURCE_SRC0
+    raise ValueError(f"unsupported AMDGPU VOPD source mask '{source_mask}'")
+
+
+def _component_sources_are_commutable(component_flags: str) -> bool:
+    if component_flags == _COMPONENT_FLAG_NONE:
+        return False
+    if component_flags == _COMPONENT_FLAG_COMMUTABLE_SOURCES:
+        return True
+    raise ValueError(f"unsupported AMDGPU VOPD component flags '{component_flags}'")
+
+
+def _pair_placement_relations(
     first_component: _VopdComponentDefinition,
     second_component: _VopdComponentDefinition,
-) -> _VopdPairPlacementRecipe:
+    first_component_flags: str,
+    second_component_flags: str,
+) -> tuple[_VopdPairPlacementRelation, ...]:
     first_result = _placement_result_ref(_PLACEMENT_COMPONENT_FIRST)
     second_result = _placement_result_ref(_PLACEMENT_COMPONENT_SECOND)
     relations: list[_VopdPairPlacementRelation] = [
@@ -630,20 +704,31 @@ def _pair_placement_recipe(
         )
     ]
     for source_mask in (_SOURCE_SRC0, _SOURCE_VSRC1):
-        first_has_source = _component_has_source(first_component, source_mask)
-        second_has_source = _component_has_source(second_component, source_mask)
+        first_source_mask = _source_mask_for_component_orientation(
+            source_mask,
+            first_component_flags,
+        )
+        second_source_mask = _source_mask_for_component_orientation(
+            source_mask,
+            second_component_flags,
+        )
+        first_has_source = _component_has_source(first_component, first_source_mask)
+        second_has_source = _component_has_source(
+            second_component,
+            second_source_mask,
+        )
         if first_has_source and second_has_source:
             relations.append(
                 _VopdPairPlacementRelation(
                     result=_placement_source_ref(
                         _PLACEMENT_COMPONENT_FIRST,
                         first_component,
-                        source_mask,
+                        first_source_mask,
                     ),
                     source=_placement_source_ref(
                         _PLACEMENT_COMPONENT_SECOND,
                         second_component,
-                        source_mask,
+                        second_source_mask,
                     ),
                     kind=_PLACEMENT_DIFFERENT_MASKED,
                     location_mask=0x3,
@@ -656,7 +741,7 @@ def _pair_placement_recipe(
                     source=_placement_source_ref(
                         _PLACEMENT_COMPONENT_SECOND,
                         second_component,
-                        source_mask,
+                        second_source_mask,
                     ),
                     kind=_PLACEMENT_DISJOINT,
                     location_mask=0,
@@ -669,13 +754,49 @@ def _pair_placement_recipe(
                     source=_placement_source_ref(
                         _PLACEMENT_COMPONENT_FIRST,
                         first_component,
-                        source_mask,
+                        first_source_mask,
                     ),
                     kind=_PLACEMENT_DISJOINT,
                     location_mask=0,
                 )
             )
-    return _VopdPairPlacementRecipe(relations=tuple(relations))
+    return tuple(relations)
+
+
+def _pair_placement_recipe(
+    first_component: _VopdComponentDefinition,
+    second_component: _VopdComponentDefinition,
+    first_component_flags: str = _COMPONENT_FLAG_NONE,
+    second_component_flags: str = _COMPONENT_FLAG_NONE,
+) -> _VopdPairPlacementRecipe:
+    aligned_relations = _pair_placement_relations(
+        first_component,
+        second_component,
+        _COMPONENT_FLAG_NONE,
+        _COMPONENT_FLAG_NONE,
+    )
+    alternatives = [aligned_relations]
+    first_sources_are_commutable = _component_sources_are_commutable(first_component_flags)
+    second_sources_are_commutable = _component_sources_are_commutable(second_component_flags)
+    if first_sources_are_commutable:
+        crossed_relations = _pair_placement_relations(
+            first_component,
+            second_component,
+            _COMPONENT_FLAG_COMMUTABLE_SOURCES,
+            _COMPONENT_FLAG_NONE,
+        )
+    elif second_sources_are_commutable:
+        crossed_relations = _pair_placement_relations(
+            first_component,
+            second_component,
+            _COMPONENT_FLAG_NONE,
+            _COMPONENT_FLAG_COMMUTABLE_SOURCES,
+        )
+    else:
+        crossed_relations = aligned_relations
+    if frozenset(crossed_relations) != frozenset(aligned_relations):
+        alternatives.append(crossed_relations)
+    return _VopdPairPlacementRecipe(alternatives=tuple(alternatives))
 
 
 def _pair_affinity_rows_for_set(
@@ -698,6 +819,8 @@ def _pair_affinity_rows_for_set(
             placement_recipe = _pair_placement_recipe(
                 first_rule.component,
                 second_rule.component,
+                first_rule.flags,
+                second_rule.flags,
             )
             placement_recipe_index = placement_recipe_indices.get(placement_recipe)
             if placement_recipe_index is None:
@@ -745,11 +868,18 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
     placement_relation_count = 0
     for recipe_index, recipe in enumerate(tables.pair_placement_recipes):
         owner = f"AMDGPU VOPD pair-placement recipe {recipe_index}"
-        if not recipe.relations:
+        if not recipe.alternatives:
             raise ValueError(f"{owner} is empty")
+        relation_count = len(recipe.alternatives[0])
+        if relation_count == 0:
+            raise ValueError(f"{owner} has an empty alternative")
+        if any(len(alternative) != relation_count for alternative in recipe.alternatives):
+            raise ValueError(f"{owner} alternatives have inconsistent relation counts")
         _validate_uint16(owner, "first relation", placement_relation_count)
-        _validate_uint16(owner, "relation count", len(recipe.relations))
-        for relation in recipe.relations:
+        _validate_uint16(owner, "relation count", relation_count)
+        _validate_uint16(owner, "alternative count", len(recipe.alternatives))
+        relations = (relation for alternative in recipe.alternatives for relation in alternative)
+        for relation in relations:
             for field_name, ref in (
                 ("result", relation.result),
                 ("source", relation.source),
@@ -777,7 +907,7 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
                     raise ValueError(f"{owner} disjoint relation has a location mask")
             else:
                 raise ValueError(f"{owner} has unknown relation kind")
-        placement_relation_count += len(recipe.relations)
+        placement_relation_count += relation_count * len(recipe.alternatives)
     if placement_relation_count > _UINT16_MAX:
         raise ValueError("AMDGPU VOPD pair-placement relations exceed uint16_t")
     pair_affinity_count = len(tables.pair_affinity_rows)
@@ -826,21 +956,22 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
             first_component = tables.rules[first_rule_index_plus_one - 1].component
             second_component = tables.rules[second_rule_index_plus_one - 1].component
             recipe = tables.pair_placement_recipes[pair.placement_recipe_index]
-            for relation in recipe.relations:
-                _validate_pair_placement_ref(
-                    owner,
-                    "result",
-                    relation.result,
-                    first_component,
-                    second_component,
-                )
-                _validate_pair_placement_ref(
-                    owner,
-                    "source",
-                    relation.source,
-                    first_component,
-                    second_component,
-                )
+            for alternative in recipe.alternatives:
+                for relation in alternative:
+                    _validate_pair_placement_ref(
+                        owner,
+                        "result",
+                        relation.result,
+                        first_component,
+                        second_component,
+                    )
+                    _validate_pair_placement_ref(
+                        owner,
+                        "source",
+                        relation.source,
+                        first_component,
+                        second_component,
+                    )
 
 
 def _materialize_vopd_component_tables(
@@ -848,7 +979,9 @@ def _materialize_vopd_component_tables(
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> _VopdComponentTables:
     infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
-    descriptor_keys_by_set_key = _descriptor_keys_by_set_key(descriptor_set_infos, isa_specs)
+    descriptor_sets_by_key = _descriptor_sets_by_key(descriptor_set_infos, isa_specs)
+    descriptor_keys_by_set_key = {key: tuple(descriptor.key for descriptor in descriptor_set.descriptors) for key, descriptor_set in descriptor_sets_by_key.items()}
+    descriptors_by_set_key = {key: {descriptor.key: descriptor for descriptor in descriptor_set.descriptors} for key, descriptor_set in descriptor_sets_by_key.items()}
     components = _component_definitions()
 
     rules: list[_VopdComponentRule] = []
@@ -865,13 +998,18 @@ def _materialize_vopd_component_tables(
             component,
             descriptor_set_keys,
             infos_by_key,
-            descriptor_keys_by_set_key,
+            descriptors_by_set_key,
             isa_specs,
         )
         rules.append(
             _VopdComponentRule(
                 component=component,
                 descriptor_set_keys=descriptor_set_keys,
+                flags=_component_flags_for_descriptors(
+                    component,
+                    descriptor_set_keys,
+                    descriptors_by_set_key,
+                ),
             )
         )
 
@@ -960,7 +1098,7 @@ def _component_rule_initializer(index: int, rule: _VopdComponentRule) -> str:
             f"    {component.form},",
             f"    {accumulator_index}, {src0_index}, {vsrc1_index},",
             f"    {component.lane_mask}, {component.pairing_mask},",
-            f"    {component.source_register_mask})",
+            f"    {component.source_register_mask}, {rule.flags})",
         ]
     )
 
@@ -1021,10 +1159,12 @@ def _pair_placement_recipe_initializer(
     first_relation: int,
     recipe: _VopdPairPlacementRecipe,
 ) -> str:
+    relation_count = len(recipe.alternatives[0])
     return "\n".join(
         [
             "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(",
-            f"    {recipe_index}, {first_relation}, {len(recipe.relations)})",
+            f"    {recipe_index}, {first_relation}, {relation_count},",
+            f"    {len(recipe.alternatives)})",
         ]
     )
 
@@ -1119,8 +1259,8 @@ def _emit_pair_placement_recipes(tables: _VopdComponentTables) -> str:
                 recipe,
             )
         )
-        relation_initializers.extend(_pair_placement_relation_initializer(relation) for relation in recipe.relations)
-        first_relation += len(recipe.relations)
+        relation_initializers.extend(_pair_placement_relation_initializer(relation) for alternative in recipe.alternatives for relation in alternative)
+        first_relation += len(recipe.alternatives[0]) * len(recipe.alternatives)
     return (
         "\n".join(
             [
