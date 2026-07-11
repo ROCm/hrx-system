@@ -11,7 +11,7 @@
 #include "loomc/iree.h"
 
 enum {
-  LOOMC_WORKSPACE_DEFAULT_USABLE_BLOCK_SIZE = 32 * 1024,
+  LOOMC_WORKSPACE_DEFAULT_USABLE_BLOCK_SIZE = 128 * 1024,
 };
 
 struct loomc_workspace_t {
