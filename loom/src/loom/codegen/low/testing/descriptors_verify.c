@@ -1820,7 +1820,8 @@ static iree_status_t loom_low_verify_operand(
       LOOM_LOW_OPERAND_FLAG_IMPLICIT | LOOM_LOW_OPERAND_FLAG_TIED |
           LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER | LOOM_LOW_OPERAND_FLAG_OPTIONAL |
           LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE |
-          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE,
+          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
+          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));

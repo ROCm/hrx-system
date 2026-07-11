@@ -1122,6 +1122,7 @@ def test_gfx125x_vop_operands_use_mode_address_state() -> None:
     )
     assert OperandFlag.IMPLICIT in mode_operand.flags
     assert OperandFlag.STATE_READ in mode_operand.flags
+    assert OperandFlag.SCHEDULE_ONLY_STATE in mode_operand.flags
 
 
 def test_gfx125x_uncontrolled_vgpr_operands_use_low_subset() -> None:

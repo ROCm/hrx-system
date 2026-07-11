@@ -234,6 +234,109 @@ def operand_role_is_packet_input(role: OperandRole) -> bool:
     )
 
 
+def _validate_binary_constraint(
+    descriptor: Descriptor,
+    constraint_index: int,
+    constraint_name: str,
+    lhs_operand_index: int,
+    rhs_operand_index: int | None,
+) -> int:
+    description = f"descriptor '{descriptor.key}' {constraint_name} constraint {constraint_index}"
+    if rhs_operand_index is None:
+        raise ValueError(f"{description} requires an rhs operand")
+    if lhs_operand_index == rhs_operand_index:
+        raise ValueError(f"{description} cannot reference the same operand twice")
+    return rhs_operand_index
+
+
+def _validate_rematerializable_result(
+    descriptor: Descriptor,
+    result_index: int,
+) -> None:
+    description = f"descriptor '{descriptor.key}' rematerializable result {result_index}"
+    if DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags:
+        raise ValueError(f"{description} requires the dead-removable flag")
+    forbidden_flags = {
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+    }.intersection(descriptor.flags)
+    if forbidden_flags:
+        names = ", ".join(sorted(flag.name.lower() for flag in forbidden_flags))
+        raise ValueError(f"{description} has incompatible descriptor flags: {names}")
+    if descriptor.effects:
+        raise ValueError(f"{description} requires an effect-free descriptor")
+
+    for operand_index, operand in enumerate(descriptor.operands):
+        state_flags = {
+            OperandFlag.STATE_READ,
+            OperandFlag.STATE_WRITE,
+        }.intersection(operand.flags)
+        if not state_flags:
+            continue
+        if OperandFlag.SCHEDULE_ONLY_STATE in operand.flags:
+            continue
+        if state_flags != {OperandFlag.STATE_WRITE} or operand.role is not OperandRole.RESULT or operand_index != result_index:
+            raise ValueError(f"{description} cannot replay target state operand '{operand.field_name}'")
+
+
+def validate_descriptor_constraints(
+    descriptor: Descriptor,
+) -> tuple[int, ...]:
+    """Validates constraints and returns rematerializable result indices."""
+
+    rematerializable_results: set[int] = set()
+    for constraint_index, constraint in enumerate(descriptor.constraints):
+        lhs_operand_index = constraint.lhs_operand_index
+        rhs_operand_index = constraint.rhs_operand_index
+        description = f"descriptor '{descriptor.key}' constraint {constraint_index}"
+        if lhs_operand_index < 0 or lhs_operand_index >= len(descriptor.operands):
+            raise ValueError(f"{description} lhs operand {lhs_operand_index} is out of range")
+        if rhs_operand_index is not None and (rhs_operand_index < 0 or rhs_operand_index >= len(descriptor.operands)):
+            raise ValueError(f"{description} rhs operand {rhs_operand_index} is out of range")
+
+        lhs = descriptor.operands[lhs_operand_index]
+        if constraint.kind in (
+            ConstraintKind.TIED,
+            ConstraintKind.DESTRUCTIVE,
+        ):
+            constraint_name = constraint.kind.name.lower()
+            rhs_operand_index = _validate_binary_constraint(
+                descriptor,
+                constraint_index,
+                constraint_name,
+                lhs_operand_index,
+                rhs_operand_index,
+            )
+            rhs = descriptor.operands[rhs_operand_index]
+            if lhs.role is not OperandRole.RESULT or not operand_role_is_packet_input(rhs.role):
+                raise ValueError(f"descriptor '{descriptor.key}' {constraint_name} constraint requires a result lhs and packet operand rhs")
+        elif constraint.kind is ConstraintKind.COMMUTABLE:
+            rhs_operand_index = _validate_binary_constraint(
+                descriptor,
+                constraint_index,
+                "commutable",
+                lhs_operand_index,
+                rhs_operand_index,
+            )
+            rhs = descriptor.operands[rhs_operand_index]
+            if lhs.role is not OperandRole.OPERAND or rhs.role is not OperandRole.OPERAND:
+                raise ValueError(f"descriptor '{descriptor.key}' commutable constraint requires two operand rows")
+        elif constraint.kind in (
+            ConstraintKind.EARLY_CLOBBER,
+            ConstraintKind.REMATERIALIZABLE,
+            ConstraintKind.FOLDABLE,
+        ):
+            if rhs_operand_index is not None or lhs.role is not OperandRole.RESULT:
+                raise ValueError(f"descriptor '{descriptor.key}' {constraint.kind.name.lower()} constraint requires one result operand")
+            if constraint.kind is ConstraintKind.REMATERIALIZABLE:
+                if lhs_operand_index in rematerializable_results:
+                    raise ValueError(f"descriptor '{descriptor.key}' repeats rematerializable result {lhs_operand_index}")
+                _validate_rematerializable_result(descriptor, lhs_operand_index)
+                rematerializable_results.add(lhs_operand_index)
+
+    return tuple(sorted(rematerializable_results))
+
+
 def operands_may_share_encoding_field(
     descriptor: Descriptor,
     lhs_index: int,

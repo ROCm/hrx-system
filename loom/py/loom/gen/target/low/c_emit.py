@@ -27,6 +27,7 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
+    Operand,
     descriptor_stable_id,
 )
 
@@ -35,6 +36,16 @@ def _register_part_id_expr(compiled: CompiledDescriptorSet, part_name: str | Non
     if part_name is None:
         return "LOOM_LOW_REGISTER_PART_NONE"
     return str(compiled.register_part_ids[part_name])
+
+
+def _operand_flag_expr(operand: Operand, rematerializable: bool) -> str:
+    flag_expr = c_spelling.flag_expr(operand.flags)
+    if not rematerializable:
+        return flag_expr
+    rematerializable_flag = "LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE"
+    if flag_expr == "0":
+        return rematerializable_flag
+    return f"{flag_expr} | {rematerializable_flag}"
 
 
 def _hazard_reference_kind(hazard: Hazard) -> HazardReferenceKind:
@@ -420,7 +431,7 @@ def emit_source_for_views(
             [
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
                 f".role = {operand.role.c_name},",
-                f".flags = {c_spelling.flag_expr(operand.flags)},",
+                f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",
                 f".reg_class_alt_count = {len(operand.reg_alts)},",
                 f".unit_count = {operand.unit_count},",

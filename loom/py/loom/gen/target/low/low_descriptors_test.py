@@ -28,6 +28,8 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
+    Effect,
+    EffectKind,
     EncodingFieldValue,
     EnumDomain,
     EnumValue,
@@ -55,6 +57,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
 )
 
 
@@ -370,8 +373,67 @@ def test_compiler_rejects_barrier_flag_without_effect() -> None:
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def test_compiler_projects_validated_rematerializable_results() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.operand_rematerializable == [True]
+
+
+def test_compiler_rejects_rematerializable_result_without_dead_removal() -> None:
+    descriptor = replace(TEST_LOW_CONST_I32_DESCRIPTOR, flags=())
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' rematerializable result 0 requires the dead-removable flag"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_effectful_rematerializable_result() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        effects=(Effect(EffectKind.READ),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' rematerializable result 0 requires an effect-free descriptor"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_rematerialization_across_target_state() -> None:
+    descriptor = replace(
+        TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.state.add.special' rematerializable result 0 cannot replay target state operand 'state_out'"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_allowlist_closes_over_operand_form_replacements() -> None:
-    base_descriptor = TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[1]
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
     replacement_descriptor = replace(
         base_descriptor,
         key="test.add.i32.rhs_zero",
@@ -548,7 +610,7 @@ def test_shared_source_allows_view_local_non_authorable_surface() -> None:
 def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
     first_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
-        descriptors=(TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[0],),
+        descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
     )
     sibling_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -556,11 +618,14 @@ def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
         function_name="loom_test_low_sibling_core_descriptor_set",
         c_table_prefix="TestLowSiblingCore",
         c_enum_prefix="TEST_LOW_SIBLING_CORE",
-        descriptors=(TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[1],),
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
     )
     storage_set = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
-        descriptors=TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[:2],
+        descriptors=(
+            TEST_LOW_CONST_I32_DESCRIPTOR,
+            TEST_LOW_ADD_I32_DESCRIPTOR,
+        ),
     )
 
     source = generate_descriptor_set_shared_source(

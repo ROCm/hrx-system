@@ -92,11 +92,7 @@ static iree_status_t loom_low_allocation_rematerialization_clone_for_use(
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
 
-  if (result_index >= cloned_op->result_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "rematerialized packet result index is outside cloned packet results");
-  }
+  IREE_ASSERT(result_index < cloned_op->result_count);
   const loom_value_id_t cloned_value_id =
       loom_op_results(cloned_op)[result_index];
   IREE_RETURN_IF_ERROR(
@@ -192,15 +188,9 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
       ++result->rewritten_operand_count;
     }
   }
-  bool erased = false;
   if (iree_status_is_ok(status)) {
-    status = loom_rewriter_erase_if_dead(&rewriter, defining_op, &erased);
-  }
-  if (iree_status_is_ok(status) && !erased) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "rematerialized packet producer remained live after rewriting all "
-        "operand uses");
+    IREE_ASSERT(loom_op_results_unused(module, defining_op));
+    status = loom_rewriter_erase(&rewriter, defining_op);
   }
   if (iree_status_is_ok(status)) {
     result->value_id = value_id;

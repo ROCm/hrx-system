@@ -1276,7 +1276,11 @@ def _mode_state_read(field_name: str = "mode_in") -> Operand:
         field_name,
         OperandRole.IMPLICIT,
         _MODE_ALT,
-        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        flags=(
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_READ,
+            OperandFlag.SCHEDULE_ONLY_STATE,
+        ),
         unit_count=1,
     )
 

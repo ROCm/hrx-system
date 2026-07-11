@@ -611,9 +611,11 @@ def compile_descriptor_set(
     used_resource_names: set[str] = set()
     used_schedule_names: set[str] = set()
     used_enum_domain_names: set[str] = set()
+    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
 
     for descriptor in selected_descriptors:
         result_count = validation.validate_descriptor_operands(descriptor)
+        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:
@@ -841,6 +843,7 @@ def compile_descriptor_set(
     storage_lease_group_starts: dict[tuple[StorageLease, ...], int] = {}
     operands: list[Operand] = []
     operand_alt_starts: list[int] = []
+    operand_rematerializable: list[bool] = []
     immediates: list[Immediate] = []
     immediate_encoding_slices: list[ImmediateEncodingSlice] = []
     immediate_encoding_slice_starts: list[int] = []
@@ -893,7 +896,8 @@ def compile_descriptor_set(
 
     for descriptor in selected_descriptors:
         operand_start = len(operands)
-        for operand in descriptor.operands:
+        rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
+        for operand_index, operand in enumerate(descriptor.operands):
             alt_group: tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...] = tuple(
                 (
                     None if reg_alt.reg_class is None else reg_class_ids[reg_alt.reg_class],
@@ -908,6 +912,7 @@ def compile_descriptor_set(
                 reg_class_alts.extend(alt_group)
             operands.append(operand)
             operand_alt_starts.append(alt_start)
+            operand_rematerializable.append(operand_index in rematerializable_result_set)
         immediate_start = len(immediates)
         for immediate in descriptor.immediates:
             slice_start = 0
@@ -1007,6 +1012,7 @@ def compile_descriptor_set(
         reg_class_alts=reg_class_alts,
         operands=operands,
         operand_alt_starts=operand_alt_starts,
+        operand_rematerializable=operand_rematerializable,
         immediates=immediates,
         immediate_encoding_slices=immediate_encoding_slices,
         immediate_encoding_slice_starts=immediate_encoding_slice_starts,
