@@ -607,7 +607,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
           ignored_value_ids, assignment_count,
           /*ignored_storage_lease_value_ids=*/NULL,
           /*ignored_storage_lease_value_count=*/0,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE)) {
     *out_blocked = true;
     return iree_ok_status();
   }
