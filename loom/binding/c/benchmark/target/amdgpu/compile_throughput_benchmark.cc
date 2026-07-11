@@ -53,8 +53,11 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
   AmdgpuI32ChainScenario(
       iree_host_size_t job_count,
       std::initializer_list<iree_host_size_t> operation_counts,
-      AmdgpuBenchmarkTarget target)
-      : job_count_(std::max<iree_host_size_t>(job_count, 1)), target_(target) {
+      AmdgpuBenchmarkTarget target,
+      iree_host_size_t workspace_usable_block_size = 0)
+      : TargetCompileScenario(workspace_usable_block_size),
+        job_count_(std::max<iree_host_size_t>(job_count, 1)),
+        target_(target) {
     operation_counts_.reserve(operation_counts.size());
     for (iree_host_size_t operation_count : operation_counts) {
       operation_count = std::max<iree_host_size_t>(operation_count, 1);
@@ -252,6 +255,15 @@ static std::unique_ptr<CompileScenario> CreateAmdgpuI32AlternatingChainScenario(
       *target);
 }
 
+static std::unique_ptr<CompileScenario> CreateAmdgpuI32ChainWorkspaceScenario(
+    const ::benchmark::State& state, const void* user_data) {
+  const auto* target = static_cast<const AmdgpuBenchmarkTarget*>(user_data);
+  return std::make_unique<AmdgpuI32ChainScenario>(
+      (iree_host_size_t)state.range(1),
+      std::initializer_list<iree_host_size_t>{(iree_host_size_t)state.range(2)},
+      *target, (iree_host_size_t)state.range(3));
+}
+
 static void BM_AmdgpuI32ChainSmoke(::benchmark::State& state,
                                    const AmdgpuBenchmarkTarget* target) {
   RunCompileBenchmarkDirect(state, CreateAmdgpuI32ChainScenario, target);
@@ -285,6 +297,33 @@ BENCHMARK_CAPTURE(BM_AmdgpuI32ChainCold, Gfx1200, &kGfx1200Target)
     ->Args({1, 1, 1024})
     ->Iterations(1)
     ->UseRealTime();
+
+static void BM_AmdgpuI32ChainWorkspaceCold(
+    ::benchmark::State& state, const AmdgpuBenchmarkTarget* target) {
+  RunCompileBenchmarkDirectCold(state, CreateAmdgpuI32ChainWorkspaceScenario,
+                                target);
+}
+
+static void BM_AmdgpuI32ChainWorkspace(::benchmark::State& state,
+                                       const AmdgpuBenchmarkTarget* target) {
+  RunCompileBenchmarkDirect(state, CreateAmdgpuI32ChainWorkspaceScenario,
+                            target);
+}
+
+#define LOOM_BENCHMARK_AMDGPU_I32_CHAIN_WORKSPACE(target_name, target)      \
+  BENCHMARK_CAPTURE(BM_AmdgpuI32ChainWorkspaceCold, target_name, target)    \
+      ->ArgsProduct({{1}, {1}, {1024}, {32 * 1024, 64 * 1024, 128 * 1024}}) \
+      ->Iterations(1)                                                       \
+      ->UseRealTime();                                                      \
+  BENCHMARK_CAPTURE(BM_AmdgpuI32ChainWorkspace, target_name, target)        \
+      ->ArgsProduct({{1}, {1}, {1024}, {32 * 1024, 64 * 1024, 128 * 1024}}) \
+      ->UseRealTime()
+
+LOOM_BENCHMARK_AMDGPU_I32_CHAIN_WORKSPACE(Gfx1100, &kGfx1100Target);
+LOOM_BENCHMARK_AMDGPU_I32_CHAIN_WORKSPACE(Gfx942, &kGfx942Target);
+LOOM_BENCHMARK_AMDGPU_I32_CHAIN_WORKSPACE(Gfx1200, &kGfx1200Target);
+
+#undef LOOM_BENCHMARK_AMDGPU_I32_CHAIN_WORKSPACE
 
 static void BM_AmdgpuI32ChainAlternating(::benchmark::State& state,
                                          const AmdgpuBenchmarkTarget* target) {
