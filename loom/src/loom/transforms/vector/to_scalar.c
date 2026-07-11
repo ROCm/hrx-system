@@ -324,7 +324,10 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
   *out_handled = true;
 
   loom_vector_to_scalar_descriptor_t descriptor = {0};
-  IREE_ASSERT(loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor));
+  if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
+    IREE_ASSERT_UNREACHABLE("scalar vector.extract descriptor");
+    IREE_BUILTIN_UNREACHABLE();
+  }
   loom_vector_to_scalar_state_t state = {
       .pass = pass,
       .rewriter = rewriter,

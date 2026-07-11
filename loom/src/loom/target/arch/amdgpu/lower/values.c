@@ -5898,6 +5898,24 @@ typedef struct loom_amdgpu_vector_fp8_octet_storage_t {
   uint32_t source_register_index;
 } loom_amdgpu_vector_fp8_octet_storage_t;
 
+static loom_amdgpu_vector_fp8_octet_storage_t
+loom_amdgpu_vector_fp8_storage_octet(
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
+    uint32_t lane_index) {
+  IREE_ASSERT_LT(lane_index + 7u, plan->lane_count);
+  IREE_ASSERT_EQ(plan->storage_lane_stride, 1u);
+  const uint64_t storage_lane =
+      (uint64_t)plan->storage_lane_offset + (uint64_t)lane_index;
+  IREE_ASSERT_EQ(storage_lane & 3u, 0u);
+  IREE_ASSERT_LT(storage_lane + 7u, plan->storage_lane_count);
+  const uint64_t source_register_index = storage_lane / 4u;
+  IREE_ASSERT_LT(source_register_index + 1u, plan->storage_register_count);
+  IREE_ASSERT_LE(source_register_index, UINT32_MAX);
+  return (loom_amdgpu_vector_fp8_octet_storage_t){
+      .source_register_index = (uint32_t)source_register_index,
+  };
+}
+
 static bool loom_amdgpu_vector_fp8_query_storage_octet(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     uint32_t lane_index,
@@ -5919,9 +5937,7 @@ static bool loom_amdgpu_vector_fp8_query_storage_octet(
       source_register_index > UINT32_MAX) {
     return false;
   }
-  *out_octet_storage = (loom_amdgpu_vector_fp8_octet_storage_t){
-      .source_register_index = (uint32_t)source_register_index,
-  };
+  *out_octet_storage = loom_amdgpu_vector_fp8_storage_octet(plan, lane_index);
   return true;
 }
 
@@ -6290,9 +6306,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
   loom_string_id_t scale_sel_name_id = LOOM_STRING_ID_INVALID;
   for (uint32_t lane_index = 0; lane_index < plan->lane_count;
        lane_index += 8u) {
-    loom_amdgpu_vector_fp8_octet_storage_t octet_storage = {0};
-    IREE_ASSERT_TRUE(loom_amdgpu_vector_fp8_query_storage_octet(
-        plan, lane_index, &octet_storage));
+    const loom_amdgpu_vector_fp8_octet_storage_t octet_storage =
+        loom_amdgpu_vector_fp8_storage_octet(plan, lane_index);
     if (low_e8m0_scale == LOOM_VALUE_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,

@@ -16,6 +16,37 @@ _ARGS = clang_tidy_test.parse_arguments()
 
 
 class StyleChecksTest(clang_tidy_test.ClangTidyAssertions):
+    def test_assert_output_calls_are_diagnosed(self):
+        output = clang_tidy_test.run_clang_tidy(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-assert-output-call",
+            source=clang_tidy_test.source_path(__file__, "style_checks.c"),
+            compiler_args=["-std=gnu11"],
+        )
+        self.assertContainsAll(
+            output,
+            [
+                "call with an output parameter in IREE_ASSERT is discarded "
+                "in release builds",
+                "call with an output parameter in IREE_ASSERT_TRUE is "
+                "discarded in release builds",
+                "call with an output parameter in IREE_ASSERT_EQ is discarded "
+                "in release builds",
+                "[iree-assert-output-call]",
+                "iree_clang_tidy_style_query(input, out_output)",
+            ],
+        )
+        self.assertContainsNone(
+            output,
+            [
+                "iree_clang_tidy_style_assert_after_output_call",
+                "iree_clang_tidy_style_assert_const_call",
+                "iree_clang_tidy_style_assert_mutable_non_output_call",
+                "iree_clang_tidy_style_assert_null_output_call",
+            ],
+        )
+
     def test_cpp_designated_initializers_are_diagnosed(self):
         output = clang_tidy_test.run_clang_tidy(
             clang_tidy=_ARGS.clang_tidy,
