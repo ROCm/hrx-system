@@ -179,7 +179,7 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
     same_op_reason_name_value, assembly_mnemonic_value,                       \
     rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value)                                               \
+    source_register_mask_value, flags_value)                                  \
   [row_index_value] = {                                                       \
       .info =                                                                 \
           {                                                                   \
@@ -200,6 +200,7 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
               .lane_mask = lane_mask_value,                                   \
               .pairing_mask = pairing_mask_value,                             \
               .source_register_mask = source_register_mask_value,             \
+              .flags = flags_value,                                           \
           },                                                                  \
   },
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
@@ -255,8 +256,9 @@ static const loom_amdgpu_vopd_pair_affinity_range_t
 
 #undef LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE
 
-#define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE( \
-    recipe_index_value, first_relation_value, relation_count_value)
+#define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(                     \
+    recipe_index_value, first_relation_value, relation_count_value, \
+    alternative_count_value)
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(                        \
     result_component_value, result_kind_value, result_index_value,       \
     result_unit_offset_value, source_component_value, source_kind_value, \
@@ -291,10 +293,12 @@ static const loom_low_placement_pair_relation_t kVopdPairPlacementRelations[] =
 #undef LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE
 
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(                        \
-    recipe_index_value, first_relation_value, relation_count_value)    \
+    recipe_index_value, first_relation_value, relation_count_value,    \
+    alternative_count_value)                                           \
   [recipe_index_value] = {                                             \
       .relations = &kVopdPairPlacementRelations[first_relation_value], \
       .relation_count = relation_count_value,                          \
+      .alternative_count = alternative_count_value,                    \
   },
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(                        \
     result_component_value, result_kind_value, result_index_value,       \
@@ -333,7 +337,7 @@ static const loom_amdgpu_vopd_pair_affinity_row_t kVopdPairAffinities[] = {
     same_op_reason_name_value, assembly_mnemonic_value,                       \
     rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value)                                               \
+    source_register_mask_value, flags_value)                                  \
   [op_value] = (uint8_t)((row_index_value) + 1),
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
                                                row_index_value)
@@ -351,7 +355,7 @@ static const uint8_t
     same_op_reason_name_value, assembly_mnemonic_value,                       \
     rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value)
+    source_register_mask_value, flags_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
                                                row_index_value)      \
   [same_op_reason_value] = (uint8_t)((row_index_value) + 1),
@@ -1329,6 +1333,59 @@ loom_amdgpu_vopd_register_constraint_flags(
   return flags;
 }
 
+static void loom_amdgpu_vopd_swap_component_sources(
+    loom_amdgpu_vopd_candidate_component_t* component) {
+  IREE_ASSERT(iree_all_bits_set(component->info->source_register_mask,
+                                LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY));
+  const uint16_t src0 = component->src0;
+  component->src0 = component->vsrc1;
+  component->vsrc1 = src0;
+}
+
+static bool loom_amdgpu_vopd_try_register_orientations(
+    loom_amdgpu_vopd_candidate_pair_t* candidate,
+    loom_amdgpu_vopd_register_constraint_flags_t* out_constraint_flags) {
+  *out_constraint_flags = loom_amdgpu_vopd_register_constraint_flags(candidate);
+  if (*out_constraint_flags == 0) {
+    return true;
+  }
+
+  const bool can_swap_x =
+      iree_any_bit_set(candidate->x.info->flags,
+                       LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES);
+  const bool can_swap_y =
+      iree_any_bit_set(candidate->y.info->flags,
+                       LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES);
+  if (can_swap_x) {
+    loom_amdgpu_vopd_swap_component_sources(&candidate->x);
+    if (loom_amdgpu_vopd_register_constraint_flags(candidate) == 0) {
+      candidate->flags |= LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED;
+      return true;
+    }
+    loom_amdgpu_vopd_swap_component_sources(&candidate->x);
+  }
+  if (can_swap_y) {
+    loom_amdgpu_vopd_swap_component_sources(&candidate->y);
+    if (loom_amdgpu_vopd_register_constraint_flags(candidate) == 0) {
+      candidate->flags |= LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED;
+      return true;
+    }
+    loom_amdgpu_vopd_swap_component_sources(&candidate->y);
+  }
+  if (can_swap_x && can_swap_y) {
+    loom_amdgpu_vopd_swap_component_sources(&candidate->x);
+    loom_amdgpu_vopd_swap_component_sources(&candidate->y);
+    if (loom_amdgpu_vopd_register_constraint_flags(candidate) == 0) {
+      candidate->flags |= LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED |
+                          LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED;
+      return true;
+    }
+    loom_amdgpu_vopd_swap_component_sources(&candidate->x);
+    loom_amdgpu_vopd_swap_component_sources(&candidate->y);
+  }
+  return false;
+}
+
 static bool loom_amdgpu_vopd_immediate_is_inline_u32(
     const loom_amdgpu_vopd_plan_builder_t* builder, uint32_t value) {
   const loom_low_descriptor_set_t* descriptor_set =
@@ -1630,9 +1687,8 @@ static void loom_amdgpu_vopd_analyze_pair(
   }
   out_analysis->rejection_reason =
       LOOM_AMDGPU_VOPD_REJECTION_REASON_REGISTER_CONSTRAINTS;
-  out_analysis->register_constraint_flags =
-      loom_amdgpu_vopd_register_constraint_flags(&candidate);
-  if (out_analysis->register_constraint_flags != 0) {
+  if (!loom_amdgpu_vopd_try_register_orientations(
+          &candidate, &out_analysis->register_constraint_flags)) {
     return;
   }
   out_analysis->candidate = candidate;
@@ -1924,7 +1980,9 @@ iree_status_t loom_amdgpu_vopd_plan_verify(
                               pair_index);
     }
     const loom_amdgpu_vopd_pair_flags_t supported_flags =
-        LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL;
+        LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL |
+        LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED |
+        LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED;
     if (iree_any_bit_set(pair->flags, ~supported_flags)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "AMDGPU VOPD pair %" PRIhsz
@@ -2023,7 +2081,7 @@ static iree_status_t loom_amdgpu_vopd_plan_write_packet_descriptor_json(
 static iree_status_t loom_amdgpu_vopd_plan_write_component_json(
     const loom_amdgpu_vopd_plan_t* plan, uint32_t packet_index,
     uint32_t node_index, uint16_t op, uint16_t vdst, uint16_t src0,
-    uint16_t vsrc1, loom_output_stream_t* stream) {
+    uint16_t vsrc1, bool sources_swapped, loom_output_stream_t* stream) {
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream, "{\"packet\":%" PRIu32 ",\"node\":%" PRIu32 ",\"descriptor\":",
       packet_index, node_index));
@@ -2033,10 +2091,14 @@ static iree_status_t loom_amdgpu_vopd_plan_write_component_json(
       stream, ",\"op_id\":%" PRIu16 ",\"op\":", op));
   IREE_RETURN_IF_ERROR(
       loom_json_write_escaped_string(stream, loom_amdgpu_vopd_op_name(op)));
-  return loom_output_stream_write_format(
-      stream,
-      ",\"vdst\":%" PRIu16 ",\"src0\":%" PRIu16 ",\"vsrc1\":%" PRIu16 "}", vdst,
-      src0, vsrc1);
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+      stream, ",\"vdst\":%" PRIu16 ",\"src0\":%" PRIu16 ",\"vsrc1\":%" PRIu16,
+      vdst, src0, vsrc1));
+  if (sources_swapped) {
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_cstring(stream, ",\"sources_swapped\":true"));
+  }
+  return loom_output_stream_write_char(stream, '}');
 }
 
 static iree_status_t loom_amdgpu_vopd_plan_write_pair_json(
@@ -2059,11 +2121,17 @@ static iree_status_t loom_amdgpu_vopd_plan_write_pair_json(
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ",\"x\":"));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_write_component_json(
       plan, pair->first_packet_index, pair->first_node_index, pair->op_x,
-      pair->x_vdst, pair->x_src0, pair->x_vsrc1, stream));
+      pair->x_vdst, pair->x_src0, pair->x_vsrc1,
+      iree_any_bit_set(pair->flags,
+                       LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED),
+      stream));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ",\"y\":"));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_write_component_json(
       plan, pair->second_packet_index, pair->second_node_index, pair->op_y,
-      pair->y_vdst, pair->y_src0, pair->y_vsrc1, stream));
+      pair->y_vdst, pair->y_src0, pair->y_vsrc1,
+      iree_any_bit_set(pair->flags,
+                       LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED),
+      stream));
   return loom_output_stream_write_char(stream, '}');
 }
 

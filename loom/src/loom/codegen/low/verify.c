@@ -819,7 +819,6 @@ static iree_status_t loom_low_verify_descriptor_packet_operand_count(
 static bool loom_low_verify_constraint_requires_matching_types(
     loom_low_constraint_kind_t kind) {
   return kind == LOOM_LOW_CONSTRAINT_KIND_TIED ||
-         kind == LOOM_LOW_CONSTRAINT_KIND_COMMUTABLE ||
          kind == LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE;
 }
 

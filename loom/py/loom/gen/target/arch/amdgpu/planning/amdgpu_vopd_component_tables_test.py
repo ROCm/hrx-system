@@ -175,6 +175,42 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
     )
 
 
+def test_vopd_pair_placement_guides_one_commutable_orientation() -> None:
+    component = next(component for component in amdgpu_vopd_component_tables._component_definitions() if component.op_name == "add_u32")
+
+    recipe = amdgpu_vopd_component_tables._pair_placement_recipe(
+        component,
+        component,
+        amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES,
+        amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES,
+    )
+
+    assert len(recipe.alternatives) == 2
+    source_bank_relations = tuple(relation for relation in recipe.alternatives[1] if relation.kind == amdgpu_vopd_component_tables._PLACEMENT_DIFFERENT_MASKED and relation.location_mask == 0x3)
+    assert tuple(
+        (
+            relation.result.component,
+            relation.result.index,
+            relation.source.component,
+            relation.source.index,
+        )
+        for relation in source_bank_relations
+    ) == (
+        (
+            amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST,
+            1,
+            amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_SECOND,
+            0,
+        ),
+        (
+            amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST,
+            0,
+            amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_SECOND,
+            1,
+        ),
+    )
+
+
 def test_vopd_pair_placement_rejects_component_value_out_of_bounds() -> None:
     component = amdgpu_vopd_component_tables._component_definitions()[0]
     invalid_ref = amdgpu_vopd_component_tables._VopdPairPlacementValueRef(
@@ -228,12 +264,14 @@ def test_vopd_pair_affinity_validation_rejects_out_of_bounds_descriptor() -> Non
         descriptor_lookup_rows=(0,),
         pair_placement_recipes=(
             amdgpu_vopd_component_tables._VopdPairPlacementRecipe(
-                relations=(
-                    amdgpu_vopd_component_tables._VopdPairPlacementRelation(
-                        result=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST),
-                        source=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_SECOND),
-                        kind=amdgpu_vopd_component_tables._PLACEMENT_DIFFERENT_MASKED,
-                        location_mask=1,
+                alternatives=(
+                    (
+                        amdgpu_vopd_component_tables._VopdPairPlacementRelation(
+                            result=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST),
+                            source=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_SECOND),
+                            kind=amdgpu_vopd_component_tables._PLACEMENT_DIFFERENT_MASKED,
+                            location_mask=1,
+                        ),
                     ),
                 )
             ),

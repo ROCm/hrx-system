@@ -3151,32 +3151,39 @@ static iree_string_view_t loom_amdgpu_vopd_component_assembly_mnemonic(
 static iree_status_t loom_amdgpu_append_vopd_tied_accumulate_component(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_packet_view_t* packet,
-    const loom_amdgpu_vopd_component_info_t* info,
-    iree_string_view_t mnemonic) {
+    const loom_amdgpu_vopd_component_info_t* info, iree_string_view_t mnemonic,
+    bool sources_swapped) {
   loom_native_assembly_packet_context_t component_context = *context;
   component_context.packet = packet;
+  const uint8_t src0_index =
+      sources_swapped ? info->operands.vsrc1_index : info->operands.src0_index;
+  const uint8_t vsrc1_index =
+      sources_swapped ? info->operands.src0_index : info->operands.vsrc1_index;
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(&component_context,
-                                                  info->operands.src0_index));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_operand(&component_context, src0_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_operand(&component_context,
-                                    info->operands.vsrc1_index);
+  return loom_amdgpu_append_operand(&component_context, vsrc1_index);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_fmaak_component(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_packet_view_t* packet, iree_string_view_t mnemonic,
-    uint32_t literal_u32) {
+    uint32_t literal_u32, bool sources_swapped) {
   loom_native_assembly_packet_context_t component_context = *context;
   component_context.packet = packet;
+  const uint8_t src0_index = sources_swapped ? 1 : 0;
+  const uint8_t vsrc1_index = sources_swapped ? 0 : 1;
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(&component_context, 0));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_operand(&component_context, src0_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(&component_context, 1));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_operand(&component_context, vsrc1_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   return iree_string_builder_append_format(context->builder, "0x%08" PRIx32,
                                            literal_u32);
@@ -3201,15 +3208,19 @@ static iree_status_t loom_amdgpu_append_vopd_fmamk_component(
 
 static iree_status_t loom_amdgpu_append_vopd_binary_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic) {
+    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic,
+    bool sources_swapped) {
   loom_native_assembly_packet_context_t component_context = *context;
   component_context.packet = packet;
+  const uint8_t src0_index = sources_swapped ? 1 : 0;
+  const uint8_t vsrc1_index = sources_swapped ? 0 : 1;
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(&component_context, 0));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_operand(&component_context, src0_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_operand(&component_context, 1);
+  return loom_amdgpu_append_operand(&component_context, vsrc1_index);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_mov_component(
@@ -3226,7 +3237,7 @@ static iree_status_t loom_amdgpu_append_vopd_mov_component(
 static iree_status_t loom_amdgpu_append_vopd_component(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_packet_view_t* packet, uint16_t vopd_op,
-    uint32_t literal_u32) {
+    uint32_t literal_u32, bool sources_swapped) {
   const loom_amdgpu_vopd_component_info_t* info =
       loom_amdgpu_vopd_component_info_for_op(vopd_op);
   if (info == NULL) {
@@ -3234,22 +3245,28 @@ static iree_status_t loom_amdgpu_append_vopd_component(
         "verified AMDGPU VOPD plans must reference supported component ops");
     IREE_BUILTIN_UNREACHABLE();
   }
+  IREE_ASSERT(
+      !sources_swapped ||
+      iree_any_bit_set(info->flags,
+                       LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES));
   const iree_string_view_t mnemonic =
       loom_amdgpu_vopd_component_assembly_mnemonic(context, info);
   switch (info->form) {
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE:
-      return loom_amdgpu_append_vopd_tied_accumulate_component(context, packet,
-                                                               info, mnemonic);
+      return loom_amdgpu_append_vopd_tied_accumulate_component(
+          context, packet, info, mnemonic, sources_swapped);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL:
-      return loom_amdgpu_append_vopd_fmaak_component(context, packet, mnemonic,
-                                                     literal_u32);
+      return loom_amdgpu_append_vopd_fmaak_component(
+          context, packet, mnemonic, literal_u32, sources_swapped);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL:
+      IREE_ASSERT(!sources_swapped);
       return loom_amdgpu_append_vopd_fmamk_component(context, packet, mnemonic,
                                                      literal_u32);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR:
-      return loom_amdgpu_append_vopd_binary_component(context, packet,
-                                                      mnemonic);
+      return loom_amdgpu_append_vopd_binary_component(context, packet, mnemonic,
+                                                      sources_swapped);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV:
+      IREE_ASSERT(!sources_swapped);
       return loom_amdgpu_append_vopd_mov_component(context, packet, mnemonic);
     default:
       IREE_ASSERT_UNREACHABLE(
@@ -3263,11 +3280,15 @@ static iree_status_t loom_amdgpu_append_vopd_pair_packet(
     const loom_low_packet_view_t* second_packet,
     const loom_amdgpu_vopd_pair_t* pair) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_component(
-      context, context->packet, pair->op_x, pair->literal_u32));
+      context, context->packet, pair->op_x, pair->literal_u32,
+      iree_any_bit_set(pair->flags,
+                       LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED)));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " :: "));
-  return loom_amdgpu_append_vopd_component(context, second_packet, pair->op_y,
-                                           pair->literal_u32);
+  return loom_amdgpu_append_vopd_component(
+      context, second_packet, pair->op_y, pair->literal_u32,
+      iree_any_bit_set(pair->flags,
+                       LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED));
 }
 
 static iree_status_t loom_amdgpu_try_append_mnemonic_dispatch_packet(

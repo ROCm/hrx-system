@@ -50,6 +50,7 @@ iree_py_library(
     "amdgpu_vopd_component_tables.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml

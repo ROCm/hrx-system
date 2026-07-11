@@ -1163,6 +1163,7 @@ def _v_dot2_f32_packed_float_overlay(
         constraints=(
             Constraint(ConstraintKind.TIED, 0, 3),
             Constraint(ConstraintKind.DESTRUCTIVE, 0, 3),
+            Constraint(ConstraintKind.COMMUTABLE, 1, 2),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )

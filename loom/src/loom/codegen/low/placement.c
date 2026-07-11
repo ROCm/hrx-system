@@ -305,6 +305,60 @@ static loom_value_id_t loom_low_placement_pair_value(
   }
 }
 
+static bool loom_low_placement_pair_alternative_is_possible(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_relation_t* relations,
+    uint16_t relation_count) {
+  for (uint16_t i = 0; i < relation_count; ++i) {
+    const loom_low_placement_pair_relation_t* relation = &relations[i];
+    if (relation->kind !=
+            LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION &&
+        relation->kind != LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
+      continue;
+    }
+    const loom_value_id_t result_value_id =
+        loom_low_placement_pair_value(use, &relation->result);
+    const loom_value_id_t source_value_id =
+        loom_low_placement_pair_value(use, &relation->source);
+    if (result_value_id != source_value_id) {
+      continue;
+    }
+    if (relation->kind ==
+        LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION) {
+      if (relation->result.unit_offset == relation->source.unit_offset) {
+        return false;
+      }
+    } else {
+      const uint32_t result_end =
+          (uint32_t)relation->result.unit_offset + relation->unit_count;
+      const uint32_t source_end =
+          (uint32_t)relation->source.unit_offset + relation->unit_count;
+      if (relation->result.unit_offset < source_end &&
+          relation->source.unit_offset < result_end) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static const loom_low_placement_pair_relation_t*
+loom_low_placement_select_pair_alternative(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_recipe_t* recipe) {
+  IREE_ASSERT_NE(recipe->relation_count, 0);
+  IREE_ASSERT_NE(recipe->alternative_count, 0);
+  for (uint16_t i = 0; i < recipe->alternative_count; ++i) {
+    const loom_low_placement_pair_relation_t* relations =
+        &recipe->relations[i * recipe->relation_count];
+    if (loom_low_placement_pair_alternative_is_possible(
+            use, relations, recipe->relation_count)) {
+      return relations;
+    }
+  }
+  return recipe->relations;
+}
+
 static iree_status_t loom_low_placement_collect_pair_relations(
     loom_low_placement_build_state_t* state,
     const loom_low_placement_pair_use_t* use) {
@@ -316,9 +370,11 @@ static iree_status_t loom_low_placement_collect_pair_relations(
   IREE_ASSERT_LT(recipe_index, state->pair_uses.placement_recipe_count);
   const loom_low_placement_pair_recipe_t* recipe =
       &state->pair_uses.placement_recipes[recipe_index];
+  const loom_low_placement_pair_relation_t* selected_relations =
+      loom_low_placement_select_pair_alternative(use, recipe);
   for (uint16_t i = 0; i < recipe->relation_count; ++i) {
     const loom_low_placement_pair_relation_t* recipe_relation =
-        &recipe->relations[i];
+        &selected_relations[i];
     const loom_value_id_t result_value_id =
         loom_low_placement_pair_value(use, &recipe_relation->result);
     const loom_value_id_t source_value_id =
