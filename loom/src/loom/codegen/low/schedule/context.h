@@ -75,10 +75,14 @@ typedef struct loom_low_schedule_state_chain_read_record_t {
 } loom_low_schedule_state_chain_read_record_t;
 
 typedef struct loom_low_schedule_pair_affinity_record_t {
-  // Descriptor that can be the second visible packet in a pair.
-  const loom_low_descriptor_t* second_descriptor;
+  // Descriptor-set ordinal that can be the first visible packet.
+  uint32_t first_descriptor_ordinal;
+  // Descriptor-set ordinal that can be the second visible packet.
+  uint32_t second_descriptor_ordinal;
   // Next pair-affinity record for the same first descriptor.
   uint32_t next_record;
+  // Next pair-affinity record for the same second descriptor.
+  uint32_t reverse_next_record;
   // Relative benefit for forming this pair.
   uint16_t priority;
   // Index + 1 into the pair-affinity placement recipe table.
@@ -230,6 +234,9 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_state_chain_read_record_t* state_chain_read_records;
   // Pair-affinity record heads, dense by first descriptor ordinal.
   uint32_t* pair_affinity_heads;
+  // Pair-affinity record heads by second descriptor ordinal when pair setup is
+  // present.
+  uint32_t* pair_affinity_reverse_heads;
   // Pair-affinity records linked from pair_affinity_heads.
   loom_low_schedule_pair_affinity_record_t* pair_affinity_records;
   // Concrete placement-sensitive pair opportunities in scheduled order.
@@ -314,6 +321,8 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_chain_read_record_count;
   // Number of populated pair-affinity records.
   iree_host_size_t pair_affinity_record_count;
+  // Number of detached-copy nodes that can set up placement-sensitive pairs.
+  iree_host_size_t detached_copy_node_count;
   // Number of populated placement-pair use records.
   iree_host_size_t placement_pair_use_count;
   // Allocated state-chain read record capacity.

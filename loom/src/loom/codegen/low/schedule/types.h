@@ -51,6 +51,8 @@ enum loom_low_schedule_node_flag_bits_e {
   LOOM_LOW_SCHEDULE_NODE_FLAG_VALUE_ORDINALS_OVERFLOW = 1u << 0,
   // Descriptor effects require source-order scheduling across this node.
   LOOM_LOW_SCHEDULE_NODE_FLAG_FENCE = 1u << 1,
+  // Structural node can supply dependencies while setting up a target pair.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP = 1u << 2,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 

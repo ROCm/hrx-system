@@ -342,6 +342,23 @@ static bool loom_low_placement_pair_alternative_is_possible(
   return true;
 }
 
+uint16_t loom_low_placement_pair_possible_alternative_count(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_recipe_t* recipe) {
+  IREE_ASSERT_ARGUMENT(use);
+  IREE_ASSERT_ARGUMENT(recipe);
+  uint16_t possible_count = 0;
+  for (uint16_t i = 0; i < recipe->alternative_count; ++i) {
+    const loom_low_placement_pair_relation_t* relations =
+        &recipe->relations[i * recipe->relation_count];
+    if (loom_low_placement_pair_alternative_is_possible(
+            use, relations, recipe->relation_count)) {
+      ++possible_count;
+    }
+  }
+  return possible_count;
+}
+
 static const loom_low_placement_pair_relation_t*
 loom_low_placement_select_pair_alternative(
     const loom_low_placement_pair_use_t* use,

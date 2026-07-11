@@ -53,6 +53,14 @@ typedef struct loom_low_schedule_pressure_state_t {
   uint32_t* candidate_consumer_dependency_counts;
   // Consumer nodes touched in |candidate_consumer_dependency_counts|.
   uint32_t* candidate_consumer_nodes;
+  // Descriptor ordinals present in the bounded ready candidate window.
+  uint32_t* ready_descriptor_ordinals;
+  // True for descriptor ordinals present in |ready_descriptor_ordinals|.
+  uint8_t* ready_descriptor_flags;
+  // Dependencies from ready structural setup nodes, indexed by consumer node.
+  uint32_t* ready_setup_dependency_counts;
+  // Consumer nodes touched in |ready_setup_dependency_counts|.
+  uint32_t* ready_setup_consumer_nodes;
   // Active alias lists keyed by source value ordinal.
   uint32_t* alias_heads;
   // Source value ordinals touched in |alias_heads|.
@@ -73,6 +81,10 @@ typedef struct loom_low_schedule_pressure_state_t {
   iree_host_size_t candidate_operand_count;
   // Number of populated entries in |candidate_consumer_nodes|.
   iree_host_size_t candidate_consumer_count;
+  // Number of populated entries in |ready_descriptor_ordinals|.
+  uint8_t ready_descriptor_count;
+  // Number of populated entries in |ready_setup_consumer_nodes|.
+  iree_host_size_t ready_setup_consumer_count;
   // Number of populated entries in |aliases|.
   iree_host_size_t alias_count;
   // Number of populated entries in |alias_source_ordinals|.
@@ -116,6 +128,8 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t pressure_cliff_penalty;
   // Target pair-affinity reward. Larger scores are better.
   uint16_t pair_affinity_score;
+  // Structurally possible placement alternatives for an equal-benefit pair.
+  uint16_t pair_placement_option_count;
   // Number of storage-relation rows owned by the candidate.
   uint16_t storage_relation_count;
   // Register class for the closest crossed or future pressure cliff.
@@ -381,7 +395,10 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
     }
     const uint32_t first_ordinal =
         loom_low_schedule_descriptor_ordinal(state, affinity->first_descriptor);
-    if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    const uint32_t second_ordinal = loom_low_schedule_descriptor_ordinal(
+        state, affinity->second_descriptor);
+    if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
+        second_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
       continue;
     }
     if (affinity->placement_recipe_index !=
@@ -393,12 +410,40 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
     const uint32_t record_index = (uint32_t)state->pair_affinity_record_count++;
     state->pair_affinity_records[record_index] =
         (loom_low_schedule_pair_affinity_record_t){
-            .second_descriptor = affinity->second_descriptor,
+            .first_descriptor_ordinal = first_ordinal,
+            .second_descriptor_ordinal = second_ordinal,
             .next_record = state->pair_affinity_heads[first_ordinal],
+            .reverse_next_record = LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE,
             .priority = affinity->priority,
             .placement_recipe_index = affinity->placement_recipe_index,
         };
     state->pair_affinity_heads[first_ordinal] = record_index;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_schedule_initialize_pair_setup_index(
+    loom_low_schedule_build_state_t* state) {
+  if (state->detached_copy_node_count == 0 ||
+      state->pair_affinity_record_count == 0) {
+    return iree_ok_status();
+  }
+  const uint32_t descriptor_count =
+      state->target.descriptor_set->descriptor_count;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->arena, descriptor_count,
+                                sizeof(*state->pair_affinity_reverse_heads),
+                                (void**)&state->pair_affinity_reverse_heads));
+  memset(state->pair_affinity_reverse_heads, 0xFF,
+         descriptor_count * sizeof(*state->pair_affinity_reverse_heads));
+  for (uint32_t record_index = 0;
+       record_index < state->pair_affinity_record_count; ++record_index) {
+    loom_low_schedule_pair_affinity_record_t* record =
+        &state->pair_affinity_records[record_index];
+    record->reverse_next_record =
+        state->pair_affinity_reverse_heads[record->second_descriptor_ordinal];
+    state->pair_affinity_reverse_heads[record->second_descriptor_ordinal] =
+        record_index;
   }
   return iree_ok_status();
 }
@@ -891,6 +936,35 @@ static iree_status_t loom_low_schedule_allocate_pressure_state(
     memset(out_pressure_state->candidate_delta_touched_flags, 0,
            reg_class_count *
                sizeof(*out_pressure_state->candidate_delta_touched_flags));
+  }
+  const uint32_t descriptor_count =
+      state->target.descriptor_set->descriptor_count;
+  if (state->pair_affinity_reverse_heads != NULL &&
+      state->detached_copy_node_count != 0 && descriptor_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, LOOM_LOW_SCHEDULE_READY_WINDOW,
+        sizeof(*out_pressure_state->ready_descriptor_ordinals),
+        (void**)&out_pressure_state->ready_descriptor_ordinals));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, descriptor_count,
+        sizeof(*out_pressure_state->ready_descriptor_flags),
+        (void**)&out_pressure_state->ready_descriptor_flags));
+    memset(
+        out_pressure_state->ready_descriptor_flags, 0,
+        descriptor_count * sizeof(*out_pressure_state->ready_descriptor_flags));
+    if (node_count != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->arena, node_count,
+          sizeof(*out_pressure_state->ready_setup_dependency_counts),
+          (void**)&out_pressure_state->ready_setup_dependency_counts));
+      memset(out_pressure_state->ready_setup_dependency_counts, 0,
+             node_count *
+                 sizeof(*out_pressure_state->ready_setup_dependency_counts));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->arena, node_count,
+          sizeof(*out_pressure_state->ready_setup_consumer_nodes),
+          (void**)&out_pressure_state->ready_setup_consumer_nodes));
+    }
   }
   return iree_ok_status();
 }
@@ -1515,7 +1589,10 @@ loom_low_schedule_find_pair_affinity(
   }
   const uint32_t first_ordinal =
       loom_low_schedule_descriptor_ordinal(state, first->descriptor);
-  if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+  const uint32_t second_ordinal =
+      loom_low_schedule_descriptor_ordinal(state, second->descriptor);
+  if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
+      second_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     return NULL;
   }
   for (uint32_t record_index = state->pair_affinity_heads[first_ordinal];
@@ -1523,20 +1600,148 @@ loom_low_schedule_find_pair_affinity(
        record_index = state->pair_affinity_records[record_index].next_record) {
     const loom_low_schedule_pair_affinity_record_t* record =
         &state->pair_affinity_records[record_index];
-    if (record->second_descriptor == second->descriptor) {
+    if (record->second_descriptor_ordinal == second_ordinal) {
       return record;
     }
   }
   return NULL;
 }
 
+static uint16_t loom_low_schedule_ready_pair_affinity_priority(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_pressure_state_t* pressure_state,
+    uint32_t descriptor_ordinal) {
+  if (pressure_state->ready_descriptor_flags == NULL ||
+      descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return 0;
+  }
+  uint16_t priority = 0;
+  for (uint32_t record_index = state->pair_affinity_heads[descriptor_ordinal];
+       record_index != LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
+       record_index = state->pair_affinity_records[record_index].next_record) {
+    const loom_low_schedule_pair_affinity_record_t* record =
+        &state->pair_affinity_records[record_index];
+    if (pressure_state
+            ->ready_descriptor_flags[record->second_descriptor_ordinal]) {
+      priority = iree_max(priority, record->priority);
+    }
+  }
+  for (uint32_t record_index =
+           state->pair_affinity_reverse_heads[descriptor_ordinal];
+       record_index != LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
+       record_index =
+           state->pair_affinity_records[record_index].reverse_next_record) {
+    const loom_low_schedule_pair_affinity_record_t* record =
+        &state->pair_affinity_records[record_index];
+    if (pressure_state
+            ->ready_descriptor_flags[record->first_descriptor_ordinal]) {
+      priority = iree_max(priority, record->priority);
+    }
+  }
+  return priority;
+}
+
+static bool loom_low_schedule_node_is_pair_setup(
+    const loom_low_schedule_node_t* node) {
+  return iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP);
+}
+
+static void loom_low_schedule_begin_ready_descriptor_window(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    const uint32_t* node_indices, iree_host_size_t node_count) {
+  IREE_ASSERT_EQ(pressure_state->ready_descriptor_count, 0);
+  if (pressure_state->ready_descriptor_flags == NULL) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < node_count; ++i) {
+    const uint32_t node_index = node_indices[i];
+    const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    const loom_low_descriptor_t* descriptor = node->descriptor;
+    if (descriptor == NULL) {
+      if (!loom_low_schedule_node_is_pair_setup(node)) {
+        continue;
+      }
+      for (uint32_t dependency_index = state->outgoing_heads[node_index];
+           dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
+           dependency_index = state->outgoing_next_indices[dependency_index]) {
+        const loom_low_schedule_dependency_t* dependency =
+            &state->dependencies[dependency_index];
+        if (dependency->producer_node != node_index) {
+          continue;
+        }
+        const uint32_t consumer_node = dependency->consumer_node;
+        if (state->nodes[consumer_node].block_index != node->block_index ||
+            state->nodes[consumer_node].scheduled_ordinal !=
+                LOOM_LOW_SCHEDULE_NODE_NONE) {
+          continue;
+        }
+        uint32_t* dependency_count =
+            &pressure_state->ready_setup_dependency_counts[consumer_node];
+        if (*dependency_count == 0) {
+          pressure_state->ready_setup_consumer_nodes
+              [pressure_state->ready_setup_consumer_count++] = consumer_node;
+        }
+        ++*dependency_count;
+      }
+    } else {
+      const uint32_t descriptor_ordinal =
+          loom_low_schedule_descriptor_ordinal(state, descriptor);
+      IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
+      if (pressure_state->ready_descriptor_flags[descriptor_ordinal]) {
+        continue;
+      }
+      IREE_ASSERT_LT(pressure_state->ready_descriptor_count,
+                     LOOM_LOW_SCHEDULE_READY_WINDOW);
+      pressure_state->ready_descriptor_ordinals
+          [pressure_state->ready_descriptor_count++] = descriptor_ordinal;
+      pressure_state->ready_descriptor_flags[descriptor_ordinal] = 1;
+    }
+  }
+}
+
+static void loom_low_schedule_end_ready_descriptor_window(
+    loom_low_schedule_pressure_state_t* pressure_state) {
+  for (uint8_t i = 0; i < pressure_state->ready_descriptor_count; ++i) {
+    pressure_state
+        ->ready_descriptor_flags[pressure_state->ready_descriptor_ordinals[i]] =
+        0;
+  }
+  pressure_state->ready_descriptor_count = 0;
+  for (iree_host_size_t i = 0; i < pressure_state->ready_setup_consumer_count;
+       ++i) {
+    pressure_state->ready_setup_dependency_counts
+        [pressure_state->ready_setup_consumer_nodes[i]] = 0;
+  }
+  pressure_state->ready_setup_consumer_count = 0;
+}
+
 static uint16_t loom_low_schedule_pair_affinity_priority(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* first,
-    const loom_low_schedule_node_t* second) {
+    const loom_low_schedule_node_t* second,
+    uint16_t* out_placement_option_count) {
+  *out_placement_option_count = 0;
   const loom_low_schedule_pair_affinity_record_t* record =
       loom_low_schedule_find_pair_affinity(state, first, second);
-  return record != NULL ? record->priority : 0;
+  if (record == NULL || loom_low_schedule_node_result_used_by(first, second)) {
+    return 0;
+  }
+  if (record->placement_recipe_index == LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE) {
+    return record->priority;
+  }
+  const uint16_t recipe_index = (uint16_t)(record->placement_recipe_index - 1u);
+  const loom_low_placement_pair_recipe_t* recipe =
+      &state->options->pair_affinities.placement_recipes[recipe_index];
+  const loom_low_placement_pair_use_t use = {
+      .first_op = first->op,
+      .second_op = second->op,
+      .placement_recipe_index = record->placement_recipe_index,
+      .priority = record->priority,
+  };
+  *out_placement_option_count =
+      loom_low_placement_pair_possible_alternative_count(&use, recipe);
+  return *out_placement_option_count != 0 ? record->priority : 0;
 }
 
 static bool loom_low_schedule_node_can_start_pair_affinity(
@@ -1555,13 +1760,22 @@ static bool loom_low_schedule_node_can_start_pair_affinity(
          LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
 }
 
+static bool loom_low_schedule_node_can_unlock_pair_affinity(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node) {
+  return state->pending_pair_affinity_node == LOOM_LOW_SCHEDULE_NODE_NONE &&
+         loom_low_schedule_node_is_pair_setup(node);
+}
+
 static uint16_t loom_low_schedule_scale_direct_pair_affinity(
     uint16_t priority) {
   return priority > UINT16_MAX / 2u ? UINT16_MAX : (uint16_t)(priority * 2u);
 }
 
 static uint16_t loom_low_schedule_score_candidate_pair_affinity(
-    const loom_low_schedule_build_state_t* state, uint32_t node_index) {
+    const loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t* out_placement_option_count) {
+  *out_placement_option_count = 0;
   if (loom_low_schedule_pair_affinity_list_is_empty(
           state->options->pair_affinities) ||
       state->pending_pair_affinity_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
@@ -1570,10 +1784,9 @@ static uint16_t loom_low_schedule_score_candidate_pair_affinity(
   const loom_low_schedule_node_t* anchor =
       &state->nodes[state->pending_pair_affinity_node];
   const loom_low_schedule_node_t* candidate = &state->nodes[node_index];
-  uint16_t priority =
-      loom_low_schedule_pair_affinity_priority(state, anchor, candidate);
-  if (priority != 0 &&
-      !loom_low_schedule_node_result_used_by(anchor, candidate)) {
+  uint16_t priority = loom_low_schedule_pair_affinity_priority(
+      state, anchor, candidate, out_placement_option_count);
+  if (priority != 0) {
     return loom_low_schedule_scale_direct_pair_affinity(priority);
   }
 
@@ -1592,10 +1805,11 @@ static uint16_t loom_low_schedule_score_candidate_pair_affinity(
     }
     const loom_low_schedule_node_t* consumer =
         &state->nodes[dependency->consumer_node];
-    priority =
-        loom_low_schedule_pair_affinity_priority(state, anchor, consumer);
-    if (priority != 0 &&
-        !loom_low_schedule_node_result_used_by(anchor, consumer)) {
+    uint16_t placement_option_count = 0;
+    priority = loom_low_schedule_pair_affinity_priority(
+        state, anchor, consumer, &placement_option_count);
+    if (priority != 0) {
+      *out_placement_option_count = placement_option_count;
       return priority;
     }
   }
@@ -1606,8 +1820,10 @@ static uint32_t loom_low_schedule_score_candidate_pressure_demand(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     const uint32_t* indegrees, uint32_t node_index,
-    bool* out_unlocks_descriptor, uint32_t* out_activation_units) {
+    bool* out_unlocks_descriptor, uint32_t* out_activation_units,
+    uint16_t* out_pair_affinity_score) {
   *out_unlocks_descriptor = false;
+  *out_pair_affinity_score = 0;
   *out_activation_units =
       state->node_pressure_activation_units != NULL
           ? state->node_pressure_activation_units[node_index]
@@ -1644,6 +1860,10 @@ static uint32_t loom_low_schedule_score_candidate_pressure_demand(
   }
 
   uint32_t unlocked_demand_units = 0;
+  const bool can_unlock_pair_affinity =
+      pressure_state->ready_setup_dependency_counts != NULL &&
+      loom_low_schedule_node_can_unlock_pair_affinity(
+          state, &state->nodes[node_index]);
   for (iree_host_size_t i = 0; i < pressure_state->candidate_consumer_count;
        ++i) {
     const uint32_t consumer_node = pressure_state->candidate_consumer_nodes[i];
@@ -1659,6 +1879,18 @@ static uint32_t loom_low_schedule_score_candidate_pressure_demand(
           state->node_pressure_activation_units[consumer_node]);
       *out_unlocks_descriptor = *out_unlocks_descriptor ||
                                 state->nodes[consumer_node].descriptor != NULL;
+    }
+    if (can_unlock_pair_affinity &&
+        state->nodes[consumer_node].descriptor != NULL &&
+        pressure_state->ready_setup_dependency_counts[consumer_node] ==
+            indegrees[consumer_node]) {
+      const uint32_t consumer_descriptor_ordinal =
+          loom_low_schedule_descriptor_ordinal(
+              state, state->nodes[consumer_node].descriptor);
+      *out_pair_affinity_score =
+          iree_max(*out_pair_affinity_score,
+                   loom_low_schedule_ready_pair_affinity_priority(
+                       state, pressure_state, consumer_descriptor_ordinal));
     }
   }
   pressure_state->candidate_consumer_count = 0;
@@ -1747,10 +1979,11 @@ static iree_status_t loom_low_schedule_score_candidate(
   loom_low_schedule_reset_candidate_operand_uses(pressure_state);
   bool unlocks_descriptor = false;
   uint32_t pressure_activation_units = 0;
+  uint16_t unlocked_pair_affinity_score = 0;
   const uint32_t pressure_demand_units =
       loom_low_schedule_score_candidate_pressure_demand(
           state, pressure_state, indegrees, node_index, &unlocks_descriptor,
-          &pressure_activation_units);
+          &pressure_activation_units, &unlocked_pair_affinity_score);
   uint16_t dependency_latency_cycles = 0;
   for (uint16_t operand_index = 0; operand_index < node->operand_count;
        ++operand_index) {
@@ -1772,6 +2005,10 @@ static iree_status_t loom_low_schedule_score_candidate(
     data_ready_stall_cycles = loom_low_schedule_positive_delta_u32(
         state->node_ready_issue_cycles[node_index], state->current_issue_cycle);
   }
+  uint16_t pair_placement_option_count = 0;
+  const uint16_t direct_pair_affinity_score =
+      loom_low_schedule_score_candidate_pair_affinity(
+          state, node_index, &pair_placement_option_count);
   *out_score = (loom_low_schedule_candidate_score_t){
       .projected_live_units = projected_live_units,
       .killed_live_units = killed_live_units,
@@ -1790,7 +2027,8 @@ static iree_status_t loom_low_schedule_score_candidate(
               : 0,
       .data_ready_stall_cycles = data_ready_stall_cycles,
       .pair_affinity_score =
-          loom_low_schedule_score_candidate_pair_affinity(state, node_index),
+          iree_max(direct_pair_affinity_score, unlocked_pair_affinity_score),
+      .pair_placement_option_count = pair_placement_option_count,
       .storage_relation_count = storage_relation_count,
       .bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE,
       .pressure_cliff_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
@@ -1897,7 +2135,18 @@ static bool loom_low_schedule_candidate_compacts_live_values(
 static bool loom_low_schedule_candidate_has_better_pair_affinity(
     loom_low_schedule_candidate_score_t lhs,
     loom_low_schedule_candidate_score_t rhs) {
-  return lhs.pair_affinity_score > rhs.pair_affinity_score;
+  if (lhs.pair_affinity_score != rhs.pair_affinity_score) {
+    return lhs.pair_affinity_score > rhs.pair_affinity_score;
+  }
+  return lhs.pair_placement_option_count > rhs.pair_placement_option_count;
+}
+
+static bool loom_low_schedule_candidate_pair_affinity_differs(
+    loom_low_schedule_candidate_score_t lhs,
+    loom_low_schedule_candidate_score_t rhs) {
+  return lhs.pair_affinity_score != rhs.pair_affinity_score ||
+         (lhs.pair_affinity_score != 0 &&
+          lhs.pair_placement_option_count != rhs.pair_placement_option_count);
 }
 
 static bool loom_low_schedule_candidate_threatens_pressure_cliff(
@@ -1949,7 +2198,7 @@ static bool loom_low_schedule_candidate_score_less(
     if (lhs.data_ready_stall_cycles != rhs.data_ready_stall_cycles) {
       return lhs.data_ready_stall_cycles < rhs.data_ready_stall_cycles;
     }
-    if (lhs.pair_affinity_score != rhs.pair_affinity_score) {
+    if (loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs)) {
       return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
     }
     if (live_value_order != 0 &&
@@ -1988,7 +2237,7 @@ static bool loom_low_schedule_candidate_score_less(
   if (lhs.pressure_cliff_penalty != rhs.pressure_cliff_penalty) {
     return lhs.pressure_cliff_penalty < rhs.pressure_cliff_penalty;
   }
-  if (lhs.pair_affinity_score != rhs.pair_affinity_score) {
+  if (loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs)) {
     return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
   }
   if (pressure_efficiency_order != 0) {
@@ -2834,9 +3083,13 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
                 : LOOM_LOW_SCHEDULE_READY_WINDOW;
         ready_candidate_count = (uint32_t)inspected_count;
         for (iree_host_size_t i = 0; i < inspected_count; ++i) {
-          const uint32_t node_index =
+          inspected_nodes[i] =
               loom_low_schedule_ready_heap_pop(state, &ready_heap);
-          inspected_nodes[i] = node_index;
+        }
+        loom_low_schedule_begin_ready_descriptor_window(
+            state, &pressure_state, inspected_nodes, inspected_count);
+        for (iree_host_size_t i = 0; i < inspected_count; ++i) {
+          const uint32_t node_index = inspected_nodes[i];
           IREE_RETURN_IF_ERROR(loom_low_schedule_score_candidate(
               state, &pressure_state, indegrees, node_index,
               &inspected_scores[i]));
@@ -2899,6 +3152,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             }
           }
         }
+        loom_low_schedule_end_ready_descriptor_window(&pressure_state);
         if (chosen_ready_heap_index != IREE_HOST_SIZE_MAX) {
           (void)loom_low_schedule_ready_heap_remove_at(state, &ready_heap,
                                                        chosen_ready_heap_index);
@@ -3022,6 +3276,9 @@ iree_status_t loom_low_schedule_function(
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_fill_nodes(&state);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_initialize_pair_setup_index(&state);
   }
   if (iree_status_is_ok(status)) {
     status =

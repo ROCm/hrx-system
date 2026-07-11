@@ -1389,6 +1389,12 @@ iree_status_t loom_low_schedule_fill_nodes(
         node->kind = LOOM_LOW_SCHEDULE_NODE_TERMINATOR;
       } else if (loom_low_schedule_op_is_descriptor_packet(op)) {
         node->kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
+      } else if (op->region_count == 0 &&
+                 iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION)) {
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP;
+      }
+      if (op->kind == LOOM_OP_LOW_COPY && loom_low_copy_detached(op)) {
+        ++state->detached_copy_node_count;
       }
 
       const loom_low_descriptor_t* descriptor = NULL;
