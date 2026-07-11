@@ -19,9 +19,6 @@
 
 namespace {
 
-// Holds the default 128 KiB module value table and its 64-byte alignment slack.
-constexpr iree_host_size_t kAlignedModuleWorkspaceBlockSize = 128 * 1024 + 64;
-
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateBenchmarkKernelSource;
@@ -501,11 +498,7 @@ static void BM_SpirvI32ChainWorkspaceSmoke(::benchmark::State& state) {
                             nullptr);
 }
 BENCHMARK(BM_SpirvI32ChainWorkspaceSmoke)
-    ->ArgsProduct({{1},
-                   {2},
-                   {16},
-                   {32 * 1024, 64 * 1024, 128 * 1024,
-                    kAlignedModuleWorkspaceBlockSize}})
+    ->ArgsProduct({{1}, {2}, {16}, {32 * 1024, 64 * 1024, 128 * 1024}})
     ->UseRealTime();
 
 static void BM_SpirvI32ChainWorkspaceDirect(::benchmark::State& state) {
@@ -513,11 +506,8 @@ static void BM_SpirvI32ChainWorkspaceDirect(::benchmark::State& state) {
                             nullptr);
 }
 BENCHMARK(BM_SpirvI32ChainWorkspaceDirect)
-    ->ArgsProduct({{1},
-                   {16},
-                   {1, 64, 1024},
-                   {32 * 1024, 64 * 1024, 128 * 1024,
-                    kAlignedModuleWorkspaceBlockSize}})
+    ->ArgsProduct(
+        {{1}, {16}, {1, 64, 1024}, {32 * 1024, 64 * 1024, 128 * 1024}})
     ->UseRealTime();
 
 }  // namespace

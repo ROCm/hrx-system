@@ -8,6 +8,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/context.h"
+#include "loom/ir/module.h"
 #include "loom/target/registers.h"
 
 namespace loom {
@@ -223,45 +225,33 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.reg_class_count=*/IREE_ARRAYSIZE(reg_classes),
   };
   loom_low_schedule_node_t schedule_nodes[13] = {};
-  loom_value_t module_values[7] = {};
-  loom_value_ordinal_t value_ordinals[7] = {
-      LOOM_VALUE_ORDINAL_INVALID, LOOM_VALUE_ORDINAL_INVALID,
-      LOOM_VALUE_ORDINAL_INVALID, LOOM_VALUE_ORDINAL_INVALID,
-      LOOM_VALUE_ORDINAL_INVALID, LOOM_VALUE_ORDINAL_INVALID,
-      LOOM_VALUE_ORDINAL_INVALID,
-  };
-  loom_module_t module = {
-      /*.flags=*/{},
-      /*.reserved=*/{},
-      /*.name_id=*/{},
-      /*.context=*/{},
-      /*.allocator=*/{},
-      /*.arena=*/{},
-      /*.strings=*/{},
-      /*.types=*/{},
-      /*.encodings=*/{},
-      /*.values=*/
-      {
-          /*.count=*/IREE_ARRAYSIZE(module_values),
-          /*.capacity=*/IREE_ARRAYSIZE(module_values),
-          /*.entries=*/module_values,
-      },
-      /*.scratch=*/
-      {
-          /*.values=*/
-          {
-              /*.values_by_value_id=*/value_ordinals,
-              /*.capacity=*/IREE_ARRAYSIZE(value_ordinals),
-              /*.state=*/LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS,
-          },
-      },
-  };
-  module_values[4].type = loom_low_register_type(/*descriptor_set_stable_id=*/1,
-                                                 /*register_class_id=*/0, 1);
-  module_values[5].type = loom_low_register_type(/*descriptor_set_stable_id=*/1,
-                                                 /*register_class_id=*/0, 2);
-  module_values[6].type = loom_low_register_type(/*descriptor_set_stable_id=*/1,
-                                                 /*register_class_id=*/0, 2);
+  iree_arena_block_pool_t block_pool;
+  IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
+      32 * 1024, iree_allocator_system(), &block_pool));
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context, IREE_SV("test"), &block_pool,
+                                      NULL, iree_allocator_system(), &module));
+  for (uint32_t i = 0; i < 7; ++i) {
+    loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_define_value(module, (loom_type_t){0}, &value_id));
+    EXPECT_EQ(value_id, i);
+  }
+  IREE_ASSERT_OK(loom_module_set_value_type(
+      module, 4,
+      loom_low_register_type(/*descriptor_set_stable_id=*/1,
+                             /*register_class_id=*/0, 1)));
+  IREE_ASSERT_OK(loom_module_set_value_type(
+      module, 5,
+      loom_low_register_type(/*descriptor_set_stable_id=*/1,
+                             /*register_class_id=*/0, 2)));
+  IREE_ASSERT_OK(loom_module_set_value_type(
+      module, 6,
+      loom_low_register_type(/*descriptor_set_stable_id=*/1,
+                             /*register_class_id=*/0, 2)));
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   report.requested_detail_flags =
@@ -604,7 +594,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   const uint32_t scheduled_node_indices[] = {0, 1, 2, 3, 4, 5, 6, 7};
   loom_low_schedule_table_t schedule = {};
-  schedule.module = &module;
+  schedule.module = module;
   schedule.target.descriptor_set = &descriptor_set;
   schedule.blocks = schedule_blocks;
   schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
@@ -631,7 +621,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.schedule=*/schedule,
       /*.allocation=*/
       {
-          /*.module=*/&module,
+          /*.module=*/module,
           /*.function_op=*/{}, /*.target=*/
           {
               /*.target_symbol=*/{},
@@ -1166,6 +1156,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_deinitialize(&summary_report);
 
   loom_target_compile_report_deinitialize(&report);
+  loom_module_free(module);
+  loom_context_deinitialize(&context);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 }  // namespace

@@ -62,6 +62,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::util::bstring
+    loom::util::segmented_storage
   PUBLIC
 )
 

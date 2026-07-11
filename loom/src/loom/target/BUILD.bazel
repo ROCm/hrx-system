@@ -571,6 +571,8 @@ loom_cc_test(
     deps = [
         ":compile_report_low",
         ":registers",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

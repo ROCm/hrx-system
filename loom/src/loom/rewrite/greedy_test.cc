@@ -198,8 +198,8 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
   loom_value_fact_table_t seed_facts;
-  IREE_ASSERT_OK(loom_value_fact_table_initialize(&seed_facts, &seed_arena,
-                                                  module_->values.capacity));
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(
+      &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
   seed_facts.context.target_bundle = &target_bundle;
   seed_facts.context.target_data = &target_data;
 

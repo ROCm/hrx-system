@@ -1049,7 +1049,7 @@ static loom_low_register_part_mask_t loom_low_verify_value_defined_mask(
   IREE_ASSERT_EQ(scratch->state, LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
   IREE_ASSERT(value_id != LOOM_VALUE_ID_INVALID &&
               value_id < function_state->state->module->values.count);
-  return scratch->values_by_value_id[value_id];
+  return loom_value_u32_scratch_load(scratch, value_id);
 }
 
 static void loom_low_verify_set_value_defined_mask(
@@ -1060,7 +1060,7 @@ static void loom_low_verify_set_value_defined_mask(
   IREE_ASSERT_EQ(scratch->state, LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
   IREE_ASSERT(value_id != LOOM_VALUE_ID_INVALID &&
               value_id < function_state->state->module->values.count);
-  scratch->values_by_value_id[value_id] = mask;
+  loom_value_u32_scratch_store(scratch, value_id, mask);
 }
 
 static loom_low_register_part_mask_t
@@ -2021,17 +2021,8 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
   IREE_ASSERT_ARGUMENT(scratch);
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_low_verify_result_t){0};
-  if (scratch->value_scratch == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low verifier requires value scratch");
-  }
-  if (scratch->value_scratch->capacity < module->values.count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low verifier scratch capacity %" PRIhsz
-                            " is smaller than module value count %" PRIhsz,
-                            scratch->value_scratch->capacity,
-                            module->values.count);
-  }
+  IREE_ASSERT(scratch->value_scratch != NULL);
+  IREE_ASSERT_EQ(scratch->value_scratch->value_table, &module->values);
   loom_low_verify_state_t state = {
       .module = module,
       .registry = options->descriptor_registry,

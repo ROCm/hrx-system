@@ -58,7 +58,7 @@ static iree_status_t loom_pass_value_fact_scope_validate(
 
 static iree_status_t loom_pass_value_fact_owner_ensure_table(
     loom_pass_value_fact_owner_t* owner, loom_module_t* module) {
-  iree_host_size_t capacity = module->values.capacity;
+  iree_host_size_t capacity = loom_value_table_capacity(&module->values);
   if (iree_any_bit_set(owner->flags,
                        LOOM_PASS_VALUE_FACT_OWNER_FLAG_TABLE_INITIALIZED) &&
       owner->module == module && owner->table.capacity >= capacity) {
