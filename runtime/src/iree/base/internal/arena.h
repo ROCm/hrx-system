@@ -43,6 +43,18 @@ IREE_TYPED_ATOMIC_SLIST_WRAPPER(iree_atomic_arena_block, iree_arena_block_t,
 #define iree_arena_block_trailer(block_pool, ptr) \
   (iree_arena_block_t*)((const uint8_t*)(ptr) + (block_pool)->usable_block_size)
 
+// Monotonic system allocation statistics for one block pool.
+typedef struct iree_arena_block_pool_statistics_t {
+  // Number of fixed-size blocks allocated from the system.
+  uint64_t block_system_allocation_count;
+  // Total bytes of fixed-size blocks allocated from the system.
+  uint64_t block_system_allocation_bytes;
+  // Number of oversized arena allocations made from the system.
+  uint64_t oversized_allocation_count;
+  // Total bytes of oversized arena allocations made from the system.
+  uint64_t oversized_allocation_bytes;
+} iree_arena_block_pool_statistics_t;
+
 // A simple atomic fixed-size block pool.
 // Blocks are allocated from the system as required and kept in the pool to
 // satisfy future requests. Blocks are all of a uniform size specified when the
@@ -62,6 +74,14 @@ typedef struct iree_arena_block_pool_t {
   iree_allocator_t block_allocator;
   // Linked list of free blocks (LIFO).
   iree_atomic_arena_block_slist_t available_slist;
+  IREE_STATISTICS(struct {
+    // Number of fixed-size blocks allocated from the system.
+    iree_atomic_int64_t block_system_allocation_count;
+    // Number of oversized arena allocations made from the system.
+    iree_atomic_int64_t oversized_allocation_count;
+    // Total bytes of oversized arena allocations made from the system.
+    iree_atomic_int64_t oversized_allocation_bytes;
+  } statistics;)
 } iree_arena_block_pool_t;
 
 // Initializes a new block pool in |out_block_pool|.
@@ -86,6 +106,18 @@ iree_status_t iree_arena_block_pool_preallocate(
 // Trims the pool by freeing unused blocks back to the allocator.
 // Acquired blocks are not freed and remain valid.
 void iree_arena_block_pool_trim(iree_arena_block_pool_t* block_pool);
+
+// Queries a monotonic snapshot of system allocation statistics.
+//
+// Individual fields may be sampled at adjacent instants when workers are
+// concurrently acquiring blocks. The snapshot is exact when the pool is
+// quiescent and is always safe to use for before/after deltas. Fixed-size block
+// preallocation and free-list misses are counted while free-list reuse is not.
+// Oversized allocation sizes include the arena tracking header. All fields are
+// zero when statistics are disabled at compile time.
+void iree_arena_block_pool_query_statistics(
+    const iree_arena_block_pool_t* block_pool,
+    iree_arena_block_pool_statistics_t* out_statistics);
 
 // Acquires a single block from the pool and returns it in |out_block|.
 // The first usable byte of the block is returned in |out_ptr|.

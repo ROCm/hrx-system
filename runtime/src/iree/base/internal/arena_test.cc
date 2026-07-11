@@ -75,6 +75,62 @@ TEST(ArenaBlockPool, Trim) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
+TEST(ArenaBlockPool, StatisticsTrackOnlySystemAllocations) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+
+  iree_arena_block_pool_statistics_t statistics;
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_bytes, 0u);
+
+  IREE_ASSERT_OK(iree_arena_block_pool_preallocate(&pool, 2));
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 2u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, kBlockSize * 2);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_block_t* first_block = NULL;
+  void* first_ptr = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_block_pool_acquire(&pool, &first_block, &first_ptr));
+  iree_arena_block_t* second_block = NULL;
+  void* second_ptr = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_block_pool_acquire(&pool, &second_block, &second_ptr));
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 2u);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_block_pool_release(&pool, first_block, first_block);
+  iree_arena_block_pool_release(&pool, second_block, second_block);
+  iree_arena_block_pool_trim(&pool);
+
+  iree_arena_block_t* cold_block = NULL;
+  void* cold_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_block_pool_acquire(&pool, &cold_block, &cold_ptr));
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 3u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, kBlockSize * 3);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_block_pool_release(&pool, cold_block, cold_block);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 //===----------------------------------------------------------------------===//
 // iree_arena_allocator_t
 //===----------------------------------------------------------------------===//
@@ -217,6 +273,67 @@ TEST(Arena, Reset) {
     ASSERT_NE(ptr, nullptr);
     iree_arena_reset(&arena);
   }
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, StatisticsTrackSystemAllocationAcrossRestoreAndReuse) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  void* ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &ptr));
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(&arena);
+
+  const iree_host_size_t half_plus_one = pool.usable_block_size / 2 + 1;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, half_plus_one, &ptr));
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, half_plus_one, &ptr));
+  const iree_host_size_t oversized_payload_bytes = kBlockSize * 2;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, oversized_payload_bytes, &ptr));
+#if IREE_STATISTICS_ENABLE
+  const iree_host_size_t oversized_allocation_bytes =
+      sizeof(iree_arena_oversized_allocation_t) + oversized_payload_bytes;
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_block_pool_statistics_t statistics;
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 2u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, kBlockSize * 2);
+  EXPECT_EQ(statistics.oversized_allocation_count, 1u);
+  EXPECT_EQ(statistics.oversized_allocation_bytes, oversized_allocation_bytes);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.block_system_allocation_bytes, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_bytes, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_checkpoint_restore(&checkpoint);
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 2u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 1u);
+  EXPECT_EQ(statistics.oversized_allocation_bytes, oversized_allocation_bytes);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_bytes, 0u);
+#endif  // IREE_STATISTICS_ENABLE
+
+  iree_arena_reset(&arena);
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &ptr));
+  iree_arena_block_pool_query_statistics(&pool, &statistics);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(statistics.block_system_allocation_count, 2u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 1u);
+#else
+  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
+  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
+#endif  // IREE_STATISTICS_ENABLE
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
