@@ -79,6 +79,7 @@ static void SetThroughputCounters(::benchmark::State& state,
   state.counters["artifact_bytes"] = (double)total_artifact_bytes;
   state.counters["artifact_bytes/kernel"] =
       total_jobs == 0 ? 0.0 : (double)total_artifact_bytes / (double)total_jobs;
+  scenario.SetWorkspaceAllocationCounters(state, total_jobs);
   scenario.SetExtraCounters(state);
 }
 
@@ -193,11 +194,18 @@ iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
                           (int)identifier.size, identifier.data);
 }
 
-iree_status_t CreateWorkspace(WorkspacePtr* out_workspace) {
+iree_status_t CreateWorkspace(iree_host_size_t usable_block_size,
+                              WorkspacePtr* out_workspace) {
   out_workspace->reset();
+  const loomc_workspace_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.usable_block_size=*/usable_block_size,
+  };
   loomc_workspace_t* workspace = nullptr;
-  IREE_RETURN_IF_ERROR(to_iree_status(loomc_workspace_create(
-      /*options=*/nullptr, loom_allocator(), &workspace)));
+  IREE_RETURN_IF_ERROR(to_iree_status(
+      loomc_workspace_create(&options, loom_allocator(), &workspace)));
   out_workspace->reset(workspace);
   return iree_ok_status();
 }
@@ -262,6 +270,9 @@ iree_status_t PreparePassProgram(loomc_context_t* context,
   return iree_ok_status();
 }
 
+CompileScenario::CompileScenario(iree_host_size_t workspace_usable_block_size)
+    : workspace_usable_block_size_(workspace_usable_block_size) {}
+
 CompileScenario::~CompileScenario() = default;
 
 iree_status_t CompileScenario::SetUp(iree_host_size_t worker_count) {
@@ -285,16 +296,63 @@ void CompileScenario::SetExtraCounters(::benchmark::State& state) const {
 
 void CompileScenario::ResetCounters() {
   artifact_bytes_.store(0, std::memory_order_relaxed);
+  for (WorkerSlot& worker : workers_) {
+    loomc_workspace_query_statistics(worker.workspace.get(),
+                                     &worker.allocation_baseline);
+  }
 }
 
 int64_t CompileScenario::artifact_bytes() const {
   return artifact_bytes_.load(std::memory_order_relaxed);
 }
 
+void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
+                                                     int64_t total_jobs) const {
+  loomc_workspace_statistics_t total = {0};
+  for (const WorkerSlot& worker : workers_) {
+    loomc_workspace_statistics_t current;
+    loomc_workspace_query_statistics(worker.workspace.get(), &current);
+    total.block_system_allocation_count +=
+        current.block_system_allocation_count -
+        worker.allocation_baseline.block_system_allocation_count;
+    total.block_system_allocation_bytes +=
+        current.block_system_allocation_bytes -
+        worker.allocation_baseline.block_system_allocation_bytes;
+    total.oversized_allocation_count +=
+        current.oversized_allocation_count -
+        worker.allocation_baseline.oversized_allocation_count;
+    total.oversized_allocation_bytes +=
+        current.oversized_allocation_bytes -
+        worker.allocation_baseline.oversized_allocation_bytes;
+  }
+
+  const double job_count = (double)total_jobs;
+  if (!workers_.empty()) {
+    loomc_workspace_statistics_t statistics;
+    loomc_workspace_query_statistics(workers_.front().workspace.get(),
+                                     &statistics);
+    state.counters["workspace_usable_block_size"] =
+        (double)statistics.usable_block_size;
+  }
+  state.counters["workspace_block_allocations/kernel"] =
+      total_jobs == 0 ? 0.0
+                      : (double)total.block_system_allocation_count / job_count;
+  state.counters["workspace_block_bytes/kernel"] =
+      total_jobs == 0 ? 0.0
+                      : (double)total.block_system_allocation_bytes / job_count;
+  state.counters["workspace_oversized_allocations/kernel"] =
+      total_jobs == 0 ? 0.0
+                      : (double)total.oversized_allocation_count / job_count;
+  state.counters["workspace_oversized_bytes/kernel"] =
+      total_jobs == 0 ? 0.0
+                      : (double)total.oversized_allocation_bytes / job_count;
+}
+
 iree_status_t CompileScenario::SetUpWorkerSlots(iree_host_size_t worker_count) {
   workers_.resize(worker_count);
   for (WorkerSlot& worker : workers_) {
-    IREE_RETURN_IF_ERROR(CreateWorkspace(&worker.workspace));
+    IREE_RETURN_IF_ERROR(
+        CreateWorkspace(workspace_usable_block_size_, &worker.workspace));
   }
   return iree_ok_status();
 }

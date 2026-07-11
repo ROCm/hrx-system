@@ -16,6 +16,9 @@
 
 namespace {
 
+// Holds the default 128 KiB module value table and its 64-byte alignment slack.
+constexpr iree_host_size_t kAlignedModuleWorkspaceBlockSize = 128 * 1024 + 64;
+
 using loomc::bench::AddSourceToIndex;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateTextSource;
@@ -35,8 +38,9 @@ using loomc::bench::WorkspacePtr;
 
 class TunerFlowScenario final : public CompileScenario {
  public:
-  explicit TunerFlowScenario(iree_host_size_t job_count)
-      : job_count_(job_count) {}
+  explicit TunerFlowScenario(iree_host_size_t job_count,
+                             iree_host_size_t workspace_usable_block_size = 0)
+      : CompileScenario(workspace_usable_block_size), job_count_(job_count) {}
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(CompileScenario::SetUp(worker_count));
@@ -365,6 +369,13 @@ static std::unique_ptr<CompileScenario> CreateTunerFlowScenario(
   return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1));
 }
 
+static std::unique_ptr<CompileScenario> CreateTunerFlowWorkspaceScenario(
+    const ::benchmark::State& state, void* user_data) {
+  (void)user_data;
+  return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1),
+                                             (iree_host_size_t)state.range(2));
+}
+
 static void BM_TunerFlowSmoke(::benchmark::State& state) {
   RunCompileBenchmark(state, CreateTunerFlowScenario, nullptr);
 }
@@ -382,6 +393,26 @@ BENCHMARK(BM_TunerFlow)
     ->Args({32, 2048})
     ->Args({64, 4096})
     ->Args({96, 6144})
+    ->UseRealTime();
+
+static void BM_TunerFlowWorkspaceSmoke(::benchmark::State& state) {
+  RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
+}
+BENCHMARK(BM_TunerFlowWorkspaceSmoke)
+    ->ArgsProduct({{1},
+                   {2},
+                   {32 * 1024, 64 * 1024, 128 * 1024,
+                    kAlignedModuleWorkspaceBlockSize}})
+    ->UseRealTime();
+
+static void BM_TunerFlowWorkspace(::benchmark::State& state) {
+  RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
+}
+BENCHMARK(BM_TunerFlowWorkspace)
+    ->ArgsProduct({{1},
+                   {64},
+                   {32 * 1024, 64 * 1024, 128 * 1024,
+                    kAlignedModuleWorkspaceBlockSize}})
     ->UseRealTime();
 
 static std::unique_ptr<CompileScenario> CreateModelFlowScenario(
