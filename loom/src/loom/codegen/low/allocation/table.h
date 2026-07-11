@@ -338,6 +338,8 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_packet_move_temporary_t* packet_move_temporaries;
   // Number of records in |packet_move_temporaries|.
   iree_host_size_t packet_move_temporary_count;
+  // Number of target-register unit moves across packet-local move sets.
+  iree_host_size_t packet_move_count;
   // Target storage-lease facts consumed by this allocation.
   loom_low_storage_lease_table_t storage_leases;
   // Assignment-backed storage-lease records in storage-lease table order.

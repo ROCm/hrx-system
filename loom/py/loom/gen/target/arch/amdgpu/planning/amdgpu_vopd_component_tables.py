@@ -46,6 +46,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
 from loom.target.low_descriptors import ConstraintKind, Descriptor, DescriptorSet  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
+_VOPD_COMPONENT_REGISTER_UNIT_COUNT = 1
 
 _DESCRIPTOR_SET_GROUP_RDNA_VOPD = "rdna_vopd"
 _DESCRIPTOR_SET_GROUP_GFX11_GFX12 = "gfx11_gfx12"
@@ -155,6 +156,7 @@ class _VopdPairPlacementRelation:
 @dataclass(frozen=True, slots=True)
 class _VopdPairPlacementRecipe:
     alternatives: tuple[tuple[_VopdPairPlacementRelation, ...], ...]
+    packet_savings: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -878,6 +880,9 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
         _validate_uint16(owner, "first relation", placement_relation_count)
         _validate_uint16(owner, "relation count", relation_count)
         _validate_uint16(owner, "alternative count", len(recipe.alternatives))
+        if recipe.packet_savings <= 0:
+            raise ValueError(f"{owner} has no packet savings")
+        _validate_uint16(owner, "packet savings", recipe.packet_savings)
         relations = (relation for alternative in recipe.alternatives for relation in alternative)
         for relation in relations:
             for field_name, ref in (
@@ -899,6 +904,12 @@ def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
             if relation.unit_count <= 0:
                 raise ValueError(f"{owner} has an empty relation")
             _validate_uint16(owner, "unit count", relation.unit_count)
+            for field_name, ref in (
+                ("result", relation.result),
+                ("source", relation.source),
+            ):
+                if ref.unit_offset + relation.unit_count > _VOPD_COMPONENT_REGISTER_UNIT_COUNT:
+                    raise ValueError(f"{owner} {field_name} range exceeds one VOPD register unit")
             if relation.kind == _PLACEMENT_DIFFERENT_MASKED:
                 if relation.location_mask <= 0:
                     raise ValueError(f"{owner} has an empty location mask")
@@ -1164,7 +1175,7 @@ def _pair_placement_recipe_initializer(
         [
             "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(",
             f"    {recipe_index}, {first_relation}, {relation_count},",
-            f"    {len(recipe.alternatives)})",
+            f"    {len(recipe.alternatives)}, {recipe.packet_savings})",
         ]
     )
 

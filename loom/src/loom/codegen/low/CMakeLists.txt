@@ -381,12 +381,14 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::storage
     loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::ops::low
     loom::ops::op_defs
     loom::rewrite::rewriter
+    loom::target::registers
   PUBLIC
 )
 

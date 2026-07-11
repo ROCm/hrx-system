@@ -89,6 +89,13 @@ typedef struct loom_low_schedule_pair_affinity_record_t {
   uint16_t placement_recipe_index;
 } loom_low_schedule_pair_affinity_record_t;
 
+typedef struct loom_low_schedule_preferred_pair_node_t {
+  // Preferred predecessor node, or LOOM_LOW_SCHEDULE_NODE_NONE.
+  uint32_t predecessor_node;
+  // Preferred successor node, or LOOM_LOW_SCHEDULE_NODE_NONE.
+  uint32_t successor_node;
+} loom_low_schedule_preferred_pair_node_t;
+
 typedef struct loom_low_schedule_storage_read_record_t {
   // Node that reads a value whose storage may later be consumed by a tied op.
   uint32_t reader_node;
@@ -239,6 +246,8 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* pair_affinity_reverse_heads;
   // Pair-affinity records linked from pair_affinity_heads.
   loom_low_schedule_pair_affinity_record_t* pair_affinity_records;
+  // Concrete preferred-pair neighbors indexed by schedule node.
+  loom_low_schedule_preferred_pair_node_t* preferred_pair_nodes;
   // Concrete placement-sensitive pair opportunities in scheduled order.
   loom_low_placement_pair_use_t* placement_pair_uses;
   // Per-block readers of values whose storage may be consumed by tied ops.

@@ -68,6 +68,8 @@ enum loom_low_placement_relation_flag_bits_e {
   LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD = 1u << 0,
   // The relation removes a move when allocation can satisfy it.
   LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED = 1u << 1,
+  // The relation can justify overlapping target-visible storage.
+  LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE = 1u << 2,
 };
 
 // Bitset of loom_low_placement_relation_flag_bits_e values.
@@ -135,6 +137,8 @@ typedef struct loom_low_placement_pair_recipe_t {
   uint16_t relation_count;
   // Number of ordered alternative relation conjunctions.
   uint16_t alternative_count;
+  // Native packet count saved when one concrete use satisfies this recipe.
+  uint16_t packet_savings;
 } loom_low_placement_pair_recipe_t;
 
 // One concrete pair opportunity retained from the final schedule.
@@ -160,6 +164,20 @@ typedef struct loom_low_placement_pair_use_list_t {
   // Number of entries in placement_recipes.
   iree_host_size_t placement_recipe_count;
 } loom_low_placement_pair_use_list_t;
+
+// Resolves one recipe value reference against a concrete scheduled pair.
+loom_value_id_t loom_low_placement_pair_value_id(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_value_ref_t* ref);
+
+// Returns true when assigning |separated_ref| a fresh SSA value removes every
+// structural identity contradiction from one placement-recipe alternative.
+// Physical-location feasibility remains an allocation decision.
+bool loom_low_placement_pair_alternative_can_separate_ref(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_relation_t* relations,
+    uint16_t relation_count,
+    const loom_low_placement_pair_value_ref_t* separated_ref);
 
 // Counts placement-recipe alternatives that are structurally possible for a
 // concrete scheduled pair. This only considers SSA identity contradictions;
@@ -233,9 +251,9 @@ typedef struct loom_low_placement_table_t {
   const loom_low_placement_relation_range_t* ranges_by_source_ordinal;
 } loom_low_placement_table_t;
 
-// Returns true when relations with |cause| can justify two otherwise
-// conflicting allocation assignments sharing target-visible storage.
-bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause);
+// Returns true when |relation| can justify overlapping target-visible storage.
+bool loom_low_placement_relation_can_alias(
+    const loom_low_placement_relation_t* relation);
 
 // Returns true when |cause| is a control-flow edge payload relation.
 bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause);

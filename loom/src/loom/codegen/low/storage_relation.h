@@ -31,6 +31,8 @@ typedef enum loom_low_storage_relation_kind_e {
   LOOM_LOW_STORAGE_RELATION_SUBRANGE = 2,
   // Destination units occupy a contiguous packed range of source values.
   LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART = 3,
+  // Destination and source unit ranges should occupy disjoint storage.
+  LOOM_LOW_STORAGE_RELATION_DISJOINT_STORAGE = 4,
 } loom_low_storage_relation_kind_t;
 
 typedef enum loom_low_storage_relation_cause_e {

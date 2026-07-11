@@ -47,6 +47,26 @@ typedef struct loom_low_allocation_live_range_split_result_t {
   uint32_t rewritten_operand_count;
 } loom_low_allocation_live_range_split_result_t;
 
+// One committed detached-copy edit used to repair placement-sensitive pairs.
+typedef struct loom_low_allocation_pair_replication_edit_t {
+  // Detached low.copy inserted for this source value.
+  loom_op_t* copy_op;
+  // Original value replicated by |copy_op|.
+  loom_value_id_t source_value_id;
+  // Detached copy result used by rewritten pair operands.
+  loom_value_id_t replica_value_id;
+} loom_low_allocation_pair_replication_edit_t;
+
+// Transactional result from placement-sensitive pair source replication.
+typedef struct loom_low_allocation_pair_replication_result_t {
+  // Arena-owned committed edit records.
+  loom_low_allocation_pair_replication_edit_t* edits;
+  // Number of records in |edits|.
+  iree_host_size_t edit_count;
+  // Satisfied pair-recipe packet savings before replication.
+  uint64_t baseline_satisfied_packet_savings;
+} loom_low_allocation_pair_replication_result_t;
+
 // Attempts to repair one predicted spill plan by detaching an overlapping
 // fixed value from its fixed physical location.
 //
@@ -57,6 +77,31 @@ iree_status_t loom_low_allocation_split_fixed_value_spill_plan(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     iree_arena_allocator_t* arena,
     loom_low_allocation_live_range_split_result_t* out_result);
+
+// Replicates shared operands when concrete placement-pair recipes prove that
+// one detached copy can recover more native packets than it costs.
+//
+// Only |pair_uses| and allocation tables are inspected; this does not walk the
+// function IR. All profitable replicas are committed as one transaction so
+// callers can rebuild scheduling and allocation once. A non-empty result must
+// either be retained or passed to
+// loom_low_allocation_rollback_pair_replication before consulting the old
+// schedule or allocation tables again.
+iree_status_t loom_low_allocation_replicate_pair_sources(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_low_placement_pair_use_list_t pair_uses, iree_arena_allocator_t* arena,
+    loom_low_allocation_pair_replication_result_t* out_result);
+
+// Sums native packet savings for pair recipes satisfied by |table|.
+iree_status_t loom_low_allocation_satisfied_pair_packet_savings(
+    const loom_low_allocation_table_t* table,
+    loom_low_placement_pair_use_list_t pair_uses, uint64_t* out_packet_savings);
+
+// Restores all operands rewritten by |result| and erases its detached copies.
+iree_status_t loom_low_allocation_rollback_pair_replication(
+    loom_module_t* module,
+    const loom_low_allocation_pair_replication_result_t* result,
+    iree_arena_allocator_t* arena);
 
 // Emits a structured remark describing a successful live-range split result.
 iree_status_t loom_low_allocation_live_range_split_emit_decision(

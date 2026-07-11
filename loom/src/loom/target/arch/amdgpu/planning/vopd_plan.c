@@ -258,7 +258,7 @@ static const loom_amdgpu_vopd_pair_affinity_range_t
 
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(                     \
     recipe_index_value, first_relation_value, relation_count_value, \
-    alternative_count_value)
+    alternative_count_value, packet_savings_value)
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(                        \
     result_component_value, result_kind_value, result_index_value,       \
     result_unit_offset_value, source_component_value, source_kind_value, \
@@ -294,11 +294,12 @@ static const loom_low_placement_pair_relation_t kVopdPairPlacementRelations[] =
 
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(                        \
     recipe_index_value, first_relation_value, relation_count_value,    \
-    alternative_count_value)                                           \
+    alternative_count_value, packet_savings_value)                     \
   [recipe_index_value] = {                                             \
       .relations = &kVopdPairPlacementRelations[first_relation_value], \
       .relation_count = relation_count_value,                          \
       .alternative_count = alternative_count_value,                    \
+      .packet_savings = packet_savings_value,                          \
   },
 #define LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(                        \
     result_component_value, result_kind_value, result_index_value,       \

@@ -711,6 +711,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.packet_move_temporary_group_count=*/{},
           /*.packet_move_temporaries=*/{},
           /*.packet_move_temporary_count=*/{},
+          /*.packet_move_count=*/{},
           /*.storage_leases=*/{},
           /*.storage_lease_instances=*/{},
           /*.storage_lease_instance_count=*/{},
