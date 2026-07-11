@@ -251,6 +251,55 @@ low.func.def target(@test_target) @resource_stall_stays_below_near_pressure_clif
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_accounts_for_cfg_live_through_pressure strategy=resource-stall diagnostics=candidates cliff=test.i32:9:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_accounts_for_cfg_live_through_pressure(
+    %pad: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
+    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>) {
+  low.br ^schedule
+^schedule:
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = low.op<test.load.v4i32>(%ptr0) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %use0 = low.op<test.add.v4i32>(%load0, %lhs) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.load.v4i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
+  %load1 = low.op<test.load.v4i32>(%ptr1) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %use1 = low.op<test.add.v4i32>(%load1, %use0) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.br ^exit
+^exit:
+  low.return %pad, %use1 : reg<test.i32 x8>, reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_ends_cfg_block_arguments_at_definition strategy=resource-stall diagnostics=candidates cliff=test.i32:14:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_ends_cfg_block_arguments_at_definition(
+    %seed: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) ->
+    (reg<test.i32 x8>, reg<test.i32>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = low.op<test.load.v4i32>(%ptr0) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="14"}
+  %lane = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
+      (reg<test.i32 x4>) -> reg<test.i32>
+  %load1 = low.op<test.load.v4i32>(%ptr1) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.br ^exit(%seed: reg<test.i32 x8>, %lane: reg<test.i32>,
+      %load1: reg<test.i32 x4>)
+^exit(%state: reg<test.i32 x8>, %result_lane: reg<test.i32>,
+      %result_load: reg<test.i32 x4>):
+  low.return %state, %result_lane, %result_load : reg<test.i32 x8>,
+      reg<test.i32>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_avoids_allocation_budget strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
@@ -287,39 +336,39 @@ low.func.def target(@test_target) @resource_stall_does_not_persist_speculative_r
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_reduces_existing_pressure_cliff_debt strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_ignores_authored_cliff_and_protects_next strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 cliff=test.i32:72:14:13 output=none
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @resource_stall_reduces_existing_pressure_cliff_debt(
+low.func.def target(@test_target) @resource_stall_ignores_authored_cliff_and_protects_next(
     %pad: reg<test.i32 x66>, %lhs: reg<test.i32 x4>,
     %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>) {
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", chosen_projected_live_units="68", rejected_projected_live_units="74"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", chosen_projected_live_units="68", rejected_projected_live_units="74", rejected_pressure_cliff_units="72"}
   %lane = low.op<test.extract_lane.i32>(%lhs) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
   %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
   low.return %pad, %lane, %load : reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_hides_latency_above_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_hides_latency_above_authored_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @resource_stall_hides_latency_above_pressure_cliff(
+low.func.def target(@test_target) @resource_stall_hides_latency_above_authored_pressure_cliff(
     %pad: reg<test.i32 x70>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) ->
     (reg<test.i32 x70>, reg<test.i32>, reg<test.i32 x4>) {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
   %source = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
   %lane = low.op<test.extract_lane.i32>(%source) {lane = 0} :
       (reg<test.i32 x4>) -> reg<test.i32>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="3", chosen_pressure_cliff_penalty="1", rejected_pressure_cliff_penalty="1"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="3", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
   %independent = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
   low.return %pad, %lane, %independent : reg<test.i32 x70>, reg<test.i32>,
       reg<test.i32 x4>
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_accounts_for_collective_descriptor_frontier strategy=resource-stall diagnostics=candidates cliff=test.i32:29:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_accounts_for_collective_descriptor_frontier strategy=resource-stall diagnostics=candidates test.i32=29 output=none
 
 test.target<low_core> @test_target
 
@@ -335,7 +384,7 @@ low.func.def target(@test_target) @resource_stall_accounts_for_collective_descri
       (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
   %load2 = low.op<test.add.v4i32>(%load1, %scale) :
       (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", chosen_projected_live_units="25", rejected_projected_live_units="32"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="4", chosen_projected_live_units="25", rejected_projected_live_units="32"}
   %shared = low.op<test.add.v4i32>(%lhs, %rhs) :
       (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="3", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_projected_live_units="25", chosen_killed_live_units="4", chosen_produced_live_units="4"}
@@ -349,21 +398,21 @@ low.func.def target(@test_target) @resource_stall_accounts_for_collective_descri
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_scores_pressure_cliff_debt_for_neutral_work strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_scores_pressure_limit_debt_for_neutral_work strategy=resource-stall diagnostics=candidates test.i32=69 output=none
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @resource_stall_scores_pressure_cliff_debt_for_neutral_work(
+low.func.def target(@test_target) @resource_stall_scores_pressure_limit_debt_for_neutral_work(
     %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) ->
     (reg<test.i32 x66>, reg<test.i32>) {
   %scratch = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="low.slice", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="low.slice", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="2"}
   %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
   low.return %pad, %lane : reg<test.i32 x66>, reg<test.i32>
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates cliff=test.i32:72:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -381,7 +430,7 @@ low.func.def target(@test_target) @resource_stall_counts_live_slice_as_alias(
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_caps_repeated_source_alias_units strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_caps_repeated_source_alias_units strategy=resource-stall diagnostics=candidates test.i32=70 output=none
 
 test.target<low_core> @test_target
 
@@ -480,7 +529,7 @@ low.func.def target(@test_target) @resource_stall_opens_pressure_releasing_front
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_uses_bounded_extended_window_for_pressure_relief strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule-json @resource_stall_uses_bounded_extended_window_for_pressure_relief strategy=resource-stall diagnostics=candidates test.i32=69 output=none
 
 test.target<low_core> @test_target
 
@@ -530,7 +579,7 @@ low.func.def target(@test_target) @resource_stall_uses_bounded_extended_window_f
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="16", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
   %load15 = low.op<test.load.v4i32>(%ptr15) : (reg<test.ptr>) -> reg<test.i32 x4>
   %load16 = low.op<test.load.v4i32>(%ptr16) : (reg<test.ptr>) -> reg<test.i32 x4>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="17", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="17", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="6"}
   %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
   low.return %pad, %use0, %load1, %load2, %load3, %load4, %load5, %load6,
       %load7, %load8, %load9, %load10, %load11, %load12, %load13, %load14,
