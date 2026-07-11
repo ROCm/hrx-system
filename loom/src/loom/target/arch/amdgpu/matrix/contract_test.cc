@@ -607,7 +607,7 @@ TEST(MatrixContractTest, Gfx12SwmmacBaseDescriptors) {
   EXPECT_EQ(f16_descriptor->family, LOOM_AMDGPU_MATRIX_FAMILY_SWMMAC);
   EXPECT_EQ(f16_descriptor->required_feature_bits,
             LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12);
-  EXPECT_EQ(f16_descriptor->wave_size_bits, LOOM_AMDGPU_MATRIX_WAVE_SIZE_ANY);
+  EXPECT_EQ(f16_descriptor->wave_size_bits, LOOM_AMDGPU_MATRIX_WAVE_SIZE_32);
   EXPECT_EQ(f16_descriptor->tile_shape.reduction_count, 32);
   EXPECT_EQ(f16_descriptor->lhs_payload.numeric_type,
             LOOM_AMDGPU_MATRIX_NUMERIC_F16);
@@ -709,22 +709,70 @@ TEST(MatrixContractTest, SparseFp8CrossProductDescriptors) {
             LOOM_AMDGPU_MATRIX_NUMERIC_F16);
 }
 
-TEST(MatrixContractTest, Rdna4SwmmacDescriptorsRequireFragmentLayout) {
+TEST(MatrixContractTest, SparseDescriptorsCarryCompressedFragmentLayouts) {
   for (iree_host_size_t i = 0;
        i < loom_amdgpu_matrix_contract_descriptor_count(); ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
     ASSERT_NE(descriptor, nullptr);
-    if (descriptor->family != LOOM_AMDGPU_MATRIX_FAMILY_SWMMAC) {
+    if (!iree_any_bit_set(descriptor->flags,
+                          LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE)) {
       continue;
     }
-    EXPECT_EQ(descriptor->fragment_layout_kind,
-              LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN)
+    const loom_amdgpu_matrix_fragment_layout_t* layout =
+        loom_amdgpu_matrix_contract_descriptor_fragment_layout(descriptor);
+    ASSERT_NE(layout, nullptr) << ToString(descriptor->name);
+    ASSERT_TRUE(descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC ||
+                descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SWMMAC)
+        << ToString(descriptor->name);
+    const uint32_t expected_wave_size =
+        descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC ? 64 : 32;
+    const loom_amdgpu_matrix_wave_size_bits_t expected_wave_size_bits =
+        expected_wave_size == 64 ? LOOM_AMDGPU_MATRIX_WAVE_SIZE_64
+                                 : LOOM_AMDGPU_MATRIX_WAVE_SIZE_32;
+    EXPECT_EQ(layout->wave_size, expected_wave_size)
+        << ToString(descriptor->name);
+    EXPECT_EQ(descriptor->wave_size_bits, expected_wave_size_bits)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->tile_shape.result_row_count,
+              descriptor->tile_shape.result_row_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->tile_shape.result_column_count,
+              descriptor->tile_shape.result_column_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->tile_shape.reduction_count,
+              descriptor->tile_shape.reduction_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->lhs.reduction_group.storage_element_count, 2)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->lhs.reduction_group.logical_element_count, 4)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->rhs.reduction_group.storage_element_count, 0)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->rhs.reduction_group.logical_element_count, 0)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->lhs.register_count,
+              descriptor->lhs_payload.register_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->lhs.payload_element_count,
+              descriptor->lhs_payload.element_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->rhs.register_count,
+              descriptor->rhs_payload.register_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->rhs.payload_element_count,
+              descriptor->rhs_payload.element_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->accumulator.register_count,
+              descriptor->accumulator_payload.register_count)
+        << ToString(descriptor->name);
+    EXPECT_EQ(layout->result.register_count,
+              descriptor->result_payload.register_count)
         << ToString(descriptor->name);
     EXPECT_EQ(
         descriptor->source_requirement_flags &
             LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT,
-        LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT)
+        0u)
         << ToString(descriptor->name);
   }
 }

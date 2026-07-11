@@ -61,6 +61,7 @@ iree_py_library(
   SRCS
     "matrix_contracts.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
     loom::py::loom::target::arch::package
 )
 

@@ -104,6 +104,7 @@ def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:
         if (
             source_role.element_bit_count != 32
             or destination_role.element_bit_count != 16
+            or destination_role.reduction_group is not None
             or layout.tile_shape[2] != layout.tile_shape[3]
             or not role_has_contiguous_lane_xor1_columns(layout, source_role)
         ):

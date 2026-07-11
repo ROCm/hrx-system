@@ -138,7 +138,7 @@ def test_generation_resolves_gfx1250_supplemental_matrix_descriptors() -> None:
 
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X128_FP8_BF8" in wmma
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_BF8_FP8" in swmmac
-    assert ".source_requirement_flags = LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT" in swmmac
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_16BIT_16X16X128_PACKED8" in swmmac
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE16_F32_32X16X128_F4" in scaled_f4
 
 
@@ -148,10 +148,14 @@ def test_generation_emits_gfx950_implicit_scale_format_masks() -> None:
     assert (".implicit_scale_format_selector_bits = (loom_amdgpu_matrix_scale_format_selector_bits_t)((1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0))") in initializer
 
 
-def test_generation_emits_source_requirement_flags() -> None:
-    initializer = _contract_initializer(_contract("swmmac.f32.16x16x32.f16"))
+def test_generation_resolves_sparse_fragment_layouts() -> None:
+    rdna = _contract_initializer(_contract("swmmac.f32.16x16x32.f16"))
+    cdna = _contract_initializer(_contract("smfmac.f32.16x16x32.f16"))
 
-    assert ".source_requirement_flags = LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT" in initializer
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16" in rdna
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X32_PACKED16" in cdna
+    assert ".source_requirement_flags = 0" in rdna
+    assert ".source_requirement_flags = 0" in cdna
 
 
 def test_generation_uses_static_aggregate_initializers() -> None:
@@ -279,16 +283,16 @@ def test_generation_resolves_gfx11_wmma_wave64_abi_shape_variants() -> None:
 
 
 def test_generation_rejects_low_descriptor_payload_shape_drift() -> None:
-    contract = _contract("swmmac.f32.16x16x32.f16")
-    drifted_contract = replace(contract, lhs=payload("f16", 0, 0))
+    contract = _contract("wmma.i32.16x16x32.iu4")
+    drifted_contract = replace(contract, lhs=payload("iu4", 0, 0))
 
     try:
         _contract_initializer(drifted_contract)
     except ValueError as exc:
         message = str(exc)
-        assert "AMDGPU matrix contract 'swmmac.f32.16x16x32.f16'" in message
+        assert "AMDGPU matrix contract 'wmma.i32.16x16x32.iu4'" in message
         assert "payload shape" in message
-        assert "descriptor key(s) amdgpu.v_swmmac_f32_16x16x32_f16" in message
+        assert "descriptor key(s) amdgpu.v_wmma_i32_16x16x32_iu4" in message
     else:
         raise AssertionError("expected payload shape validation to fail")
 
