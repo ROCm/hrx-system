@@ -224,6 +224,14 @@ static uint32_t loom_low_schedule_max_u32(uint32_t lhs, uint32_t rhs) {
   return lhs > rhs ? lhs : rhs;
 }
 
+static bool loom_low_schedule_uses_pressure_strategy(
+    const loom_low_schedule_build_state_t* state) {
+  return state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE ||
+         state->options->strategy ==
+             LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING ||
+         state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+}
+
 static void loom_low_schedule_count_nodes(const loom_region_t* body,
                                           iree_host_size_t* out_node_count) {
   iree_host_size_t node_count = 0;
@@ -298,9 +306,9 @@ static iree_status_t loom_low_schedule_initialize_storage(
         (void**)&state->state_chain_read_heads));
     memset(state->state_chain_read_heads, 0xFF,
            node_count * sizeof(*state->state_chain_read_heads));
-    if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE ||
-        state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING ||
-        state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+    if (loom_low_schedule_uses_pressure_strategy(state) &&
+        iree_any_bit_set(state->options->flags,
+                         LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS)) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, node_count, sizeof(*state->pressure_steps),
           (void**)&state->pressure_steps));
@@ -801,14 +809,6 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     state->hazard_use_capacity = hazard_use_capacity;
   }
   return iree_ok_status();
-}
-
-static bool loom_low_schedule_uses_pressure_strategy(
-    const loom_low_schedule_build_state_t* state) {
-  return state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE ||
-         state->options->strategy ==
-             LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING ||
-         state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
 }
 
 static bool loom_low_schedule_strategy_is_valid(

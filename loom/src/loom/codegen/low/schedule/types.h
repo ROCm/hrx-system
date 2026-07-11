@@ -129,6 +129,8 @@ typedef uint32_t loom_low_schedule_diagnostic_flags_t;
 enum loom_low_schedule_flag_bits_e {
   // Retains source-order liveness analysis in the returned schedule table.
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS = 1u << 0,
+  // Retains per-node pressure-model steps for detailed schedule inspection.
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS = 1u << 1,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -668,8 +670,8 @@ typedef struct loom_low_schedule_table_t {
   uint32_t error_count;
   // Terminal hard-scheduling failure when |error_count| is non-zero.
   loom_low_schedule_failure_t failure;
-  // Pressure-model steps in scheduled order when the selected strategy records
-  // them. Empty for the default source-priority strategy.
+  // Pressure-model steps in scheduled order when explicitly retained for a
+  // scored strategy. Empty unless RETAIN_PRESSURE_STEPS was requested.
   const loom_low_schedule_pressure_step_t* pressure_steps;
   // Number of pressure-model steps.
   iree_host_size_t pressure_step_count;

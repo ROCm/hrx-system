@@ -1098,7 +1098,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
       .allocation_budget_count = budget_count,
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
-      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS,
+      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
       .strategy = strategy,
   };
   loom_low_schedule_table_t table = {0};
