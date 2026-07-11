@@ -462,7 +462,8 @@ iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
 }
 
 void RunCompileBenchmark(::benchmark::State& state,
-                         CompileScenarioFactory factory, void* user_data) {
+                         CompileScenarioFactory factory,
+                         const void* user_data) {
   const int64_t worker_count = state.range(0);
   if (ShouldSkipWorkerCount(state, worker_count)) {
     return;
@@ -523,7 +524,7 @@ void RunCompileBenchmark(::benchmark::State& state,
 
 void RunCompileBenchmarkDirect(::benchmark::State& state,
                                CompileScenarioFactory factory,
-                               void* user_data) {
+                               const void* user_data) {
   constexpr int64_t kWorkerCount = 1;
   std::unique_ptr<CompileScenario> scenario = factory(state, user_data);
   if (!scenario) {
