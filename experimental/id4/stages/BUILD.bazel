@@ -140,6 +140,7 @@ iree_runtime_cc_library(
     hdrs = ["ideogram4_dit_program.h"],
     deps = [
         "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_matrix",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -186,6 +187,7 @@ iree_runtime_cc_library(
     deps = [
         "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_matrix",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

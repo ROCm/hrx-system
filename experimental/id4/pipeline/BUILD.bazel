@@ -131,6 +131,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "program_matrix",
+    srcs = ["program_matrix.c"],
+    hdrs = ["program_matrix.h"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "program_plan",
     srcs = ["program_plan.c"],
     hdrs = ["program_plan.h"],
@@ -407,6 +417,18 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_matrix_test",
+    srcs = ["program_matrix_test.cc"],
+    deps = [
+        ":program_matrix",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

@@ -158,6 +158,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_matrix
     iree::hal
   PUBLIC
 )
@@ -216,6 +217,7 @@ iree_cc_library(
     iree::base
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_matrix
     iree::hal
   PUBLIC
 )

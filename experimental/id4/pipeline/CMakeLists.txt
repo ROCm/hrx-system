@@ -154,6 +154,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    program_matrix
+  HDRS
+    "program_matrix.h"
+  SRCS
+    "program_matrix.c"
+  DEPS
+    ::program
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     program_plan
   HDRS
     "program_plan.h"
@@ -458,6 +471,19 @@ iree_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    program_matrix_test
+  SRCS
+    "program_matrix_test.cc"
+  DEPS
+    ::program_matrix
+    iree::base
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
 )
