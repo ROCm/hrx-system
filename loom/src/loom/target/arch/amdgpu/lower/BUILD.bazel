@@ -164,6 +164,7 @@ loom_cc_library(
         "materializers.c",
         "matrix.c",
         "matrix_fragment.c",
+        "matrix_fragment_repack.c",
         "memory.c",
         "memory_bank_conflict.c",
         "memory_cache.c",
@@ -217,6 +218,7 @@ loom_cc_library(
         "mask.h",
         "matrix.h",
         "matrix_fragment.h",
+        "matrix_fragment_repack.h",
         "memory.h",
         "memory_bank_conflict.h",
         "narrow_float/bf16.h",
@@ -314,6 +316,7 @@ loom_cc_library(
         "//loom/src/loom/util:math",
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

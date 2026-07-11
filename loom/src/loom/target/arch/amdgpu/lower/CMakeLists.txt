@@ -202,6 +202,7 @@ loom_cc_library(
     "mask.h"
     "matrix.h"
     "matrix_fragment.h"
+    "matrix_fragment_repack.h"
     "memory.h"
     "memory_bank_conflict.h"
     "narrow_float/bf16.h"
@@ -261,6 +262,7 @@ loom_cc_library(
     "materializers.c"
     "matrix.c"
     "matrix_fragment.c"
+    "matrix_fragment_repack.c"
     "memory.c"
     "memory_bank_conflict.c"
     "memory_cache.c"
@@ -296,6 +298,7 @@ loom_cc_library(
     ::kinds
     ::materializers
     iree::base
+    iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::symbolic_expr
