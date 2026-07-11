@@ -17,6 +17,16 @@
 extern "C" {
 #endif
 
+// Selects the preferred DPP descriptor available on the active target.
+loom_amdgpu_descriptor_ref_t loom_amdgpu_select_dpp_descriptor_ref(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Selects the cheapest direct permutation for |lane_xor| within aligned
+// |width|-lane groups.
+bool loom_amdgpu_select_direct_xor_lane_recipe(
+    const loom_low_descriptor_set_t* descriptor_set, uint32_t width,
+    uint32_t lane_xor, loom_amdgpu_direct_xor_lane_recipe_t* out_recipe);
+
 // Emits one ds_bpermute_b32 cross-lane read for a 32-bit payload register.
 iree_status_t loom_amdgpu_emit_subgroup_bpermute_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -25,11 +35,13 @@ iree_status_t loom_amdgpu_emit_subgroup_bpermute_register(
     loom_value_id_t low_source_value, loom_type_t lane_type,
     loom_value_id_t* out_low_result);
 
-// Emits one DPP cross-lane read for a 32-bit payload register.
-iree_status_t loom_amdgpu_emit_subgroup_dpp_register(
+// Emits one direct DPP or DS swizzle cross-lane read for a 32-bit payload
+// register.
+iree_status_t loom_amdgpu_emit_direct_crosslane_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor,
-    loom_value_id_t low_source_value, uint32_t dpp_ctrl, loom_type_t lane_type,
+    loom_amdgpu_crosslane_kind_t crosslane_kind,
+    loom_value_id_t low_source_value, uint32_t immediate, loom_type_t lane_type,
     loom_value_id_t* out_low_result);
 
 // Emits the byte-addressed lane offset expected by ds_bpermute_b32 from a

@@ -701,6 +701,20 @@ TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR = Descriptor(
+    key="test.convergent.explicit.state.read.i32",
+    mnemonic="test.convergent.explicit.state.read.i32",
+    semantic_tag="test.convergent.explicit.state.read.i32",
+    operands=(
+        _i32_result(),
+        _i32_operand("value"),
+        _special_state_operand("state"),
+    ),
+    effects=(_CONVERGENT_EFFECT,),
+    asm_forms=_asm(results=("dst",), operands=("value", "state")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+)
+
 TEST_LOW_STATE_ADD_I32_DESCRIPTOR = Descriptor(
     key="test.state.add.i32",
     mnemonic="test.state.add.i32",
@@ -1129,6 +1143,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR,
+        TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_LOAD_V4I32_DESCRIPTOR,

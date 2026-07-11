@@ -290,6 +290,7 @@ class Operand:
     unit_count: int = 1
     address_map_kind: OperandAddressMapKind = OperandAddressMapKind.DIRECT
     addressable_unit_count: int = 0
+    address_state_slot: int = 0
     encoding_field_id: int = 0
     data_format_id: int = 0
     register_part: str | None = None

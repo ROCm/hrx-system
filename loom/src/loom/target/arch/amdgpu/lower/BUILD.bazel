@@ -297,6 +297,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/abi:signal",
         "//loom/src/loom/target/arch/amdgpu/abi:tsan",
         "//loom/src/loom/target/arch/amdgpu/contracts",
+        "//loom/src/loom/target/arch/amdgpu/encoding:encoding_defs",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:arithmetic_candidates",
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:async_gather_candidates",

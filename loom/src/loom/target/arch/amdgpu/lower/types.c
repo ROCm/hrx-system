@@ -522,6 +522,12 @@ iree_status_t loom_amdgpu_make_scc_type(loom_low_lower_context_t* context,
       context, LOOM_AMDGPU_REG_CLASS_ID_SCC, 1, out_type);
 }
 
+iree_status_t loom_amdgpu_make_vcc_type(loom_low_lower_context_t* context,
+                                        loom_type_t* out_type) {
+  return loom_low_lower_make_register_type(
+      context, LOOM_AMDGPU_REG_CLASS_ID_VCC, 1, out_type);
+}
+
 iree_status_t loom_amdgpu_make_vgpr_range_type(
     loom_low_lower_context_t* context, uint32_t unit_count,
     loom_type_t* out_type) {

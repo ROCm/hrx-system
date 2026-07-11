@@ -16,6 +16,7 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/target/arch/amdgpu/encoding/encoding.h"
 
 typedef struct loom_value_fact_table_t loom_value_fact_table_t;
 
@@ -25,14 +26,6 @@ enum {
   LOOM_AMDGPU_SOURCE_INLINE_U32_MAX = 64u,
   // Number of lanes in one DPP row.
   LOOM_AMDGPU_DPP_ROW_LANE_COUNT = 16u,
-  // DPP control immediate swapping lanes 0<->1 and 2<->3 in each quad.
-  LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_1 = 0x0B1u,
-  // DPP control immediate swapping lanes 0<->2 and 1<->3 in each quad.
-  LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_2 = 0x04Eu,
-  // DPP control immediate mirroring each half row.
-  LOOM_AMDGPU_DPP_CTRL_ROW_HALF_MIRROR = 0x141u,
-  // DPP control immediate mirroring the full row.
-  LOOM_AMDGPU_DPP_CTRL_ROW_MIRROR = 0x140u,
 };
 
 #ifdef __cplusplus

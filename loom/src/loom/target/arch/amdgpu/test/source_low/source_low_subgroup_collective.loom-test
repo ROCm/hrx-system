@@ -3976,11 +3976,75 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %16 = v_lshlrev_b32_src0_inline %tid, 2
   %value = global_load_b32_saddr %16, %input_view
-  %18 = v_xor_b32_src0_inline %tid, 4
-  %21 = v_lshlrev_b32_src0_inline %18, 2
-  %shuffle = ds_bpermute_b32 %21, %value
-  %23 = v_lshlrev_b32_src0_inline %tid, 2
-  global_store_b32_saddr %23, %shuffle, %output_view
+  %shuffle = v_mov_b32_dpp16 %value {dpp_ctrl = 356}
+  %21 = v_lshlrev_b32_src0_inline %tid, 2
+  global_store_b32_saddr %21, %shuffle, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster16_wave64() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
+  %offset = scalar.constant 8 : i32
+  %width = scalar.constant 16 : i32
+  %shuffle, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width : f32, i32, i32
+  view.store %shuffle, %output_view[%tid] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster16_wave64() asm<amdgpu.rdna3.core> {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %16, %input_view
+  %shuffle = v_mov_b32_dpp16 %value {dpp_ctrl = 360}
+  %21 = v_lshlrev_b32_src0_inline %tid, 2
+  global_store_b32_saddr %21, %shuffle, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster32_wave64() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
+  %offset = scalar.constant 16 : i32
+  %width = scalar.constant 32 : i32
+  %shuffle, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width : f32, i32, i32
+  view.store %shuffle, %output_view[%tid] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster32_wave64() asm<amdgpu.rdna3.core> {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %16, %input_view
+  %shuffle = ds_swizzle_b32 %value {offset = 16415}
+  %21 = v_lshlrev_b32_src0_inline %tid, 2
+  global_store_b32_saddr %21, %shuffle, %output_view
   return
 }
 

@@ -1000,6 +1000,33 @@ ERR_AMDGPU_043 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_044: AMDGPU DPP control encoding is reserved.
+ERR_AMDGPU_044 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=44,
+    severity=Severity.ERROR,
+    summary="AMDGPU DPP control encoding is reserved.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' uses "
+        "reserved DPP control value {immediate_value} for immediate "
+        "'{immediate_name}' in descriptor set '{descriptor_set_name}' "
+        "under contract '{constraint_key}' for reason '{reason_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("immediate_name", ParamKind.STRING),
+        ErrorParam("immediate_value", ParamKind.U32),
+        ErrorParam("constraint_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a legal quad, row, or wave DPP lane-control encoding for the "
+        "selected descriptor"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -1043,4 +1070,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_041,
     ERR_AMDGPU_042,
     ERR_AMDGPU_043,
+    ERR_AMDGPU_044,
 )

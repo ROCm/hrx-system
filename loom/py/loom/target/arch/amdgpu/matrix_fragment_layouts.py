@@ -387,12 +387,14 @@ def layout_roles(
     return (layout.lhs, layout.rhs, layout.accumulator, layout.result)
 
 
-def _role_coordinate(
+def role_coordinate(
     layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
     lane: int,
     payload_element_index: int,
 ) -> tuple[int | None, ...] | None:
+    """Returns the logical coordinate stored at one physical role location."""
+
     if (
         lane < 0
         or lane >= layout.wave_size
@@ -458,8 +460,8 @@ def role_has_contiguous_lane_xor1_columns(
         return False
     for payload_element_index in range(role.payload_element_count):
         for lane in range(0, layout.wave_size, 2):
-            coordinate = _role_coordinate(layout, role, lane, payload_element_index)
-            paired_coordinate = _role_coordinate(
+            coordinate = role_coordinate(layout, role, lane, payload_element_index)
+            paired_coordinate = role_coordinate(
                 layout, role, lane ^ 1, payload_element_index
             )
             if coordinate is None or paired_coordinate is None:

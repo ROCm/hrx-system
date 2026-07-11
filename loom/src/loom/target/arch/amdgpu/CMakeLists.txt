@@ -259,8 +259,10 @@ loom_cc_library(
     ::low_aliases
     iree::base
     loom::codegen::low::diagnostics
+    loom::codegen::low::packet
     loom::codegen::low::verify
     loom::error::error_defs
+    loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::ops
   PUBLIC
 )

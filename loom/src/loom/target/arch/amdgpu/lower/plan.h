@@ -689,12 +689,27 @@ typedef struct loom_amdgpu_subgroup_broadcast_first_plan_t {
   uint32_t register_count;
 } loom_amdgpu_subgroup_broadcast_first_plan_t;
 
-typedef enum loom_amdgpu_subgroup_shuffle_crosslane_kind_e {
+typedef enum loom_amdgpu_crosslane_kind_e {
   // Use DS bpermute with a byte-addressed source lane.
-  LOOM_AMDGPU_SUBGROUP_SHUFFLE_CROSSLANE_BPERMUTE = 0,
+  LOOM_AMDGPU_CROSSLANE_BPERMUTE = 0,
   // Use DPP row-lane moves with an immediate control value.
-  LOOM_AMDGPU_SUBGROUP_SHUFFLE_CROSSLANE_DPP = 1,
-} loom_amdgpu_subgroup_shuffle_crosslane_kind_t;
+  LOOM_AMDGPU_CROSSLANE_DPP = 1,
+  // Use DS swizzle with a bitmask permutation immediate.
+  LOOM_AMDGPU_CROSSLANE_SWIZZLE = 2,
+} loom_amdgpu_crosslane_kind_t;
+
+typedef struct loom_amdgpu_direct_xor_lane_recipe_t {
+  // Descriptor row implementing the lane exchange.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // Optional descriptor fusing the exchange into a conditional false operand.
+  loom_amdgpu_descriptor_ref_t conditional_ref;
+  // Optional tied descriptor updating selected DPP destination banks.
+  loom_amdgpu_descriptor_ref_t masked_move_ref;
+  // DPP control or DS swizzle offset interpreted by |crosslane_kind|.
+  uint32_t immediate;
+  // Native packet family selected for the lane exchange.
+  loom_amdgpu_crosslane_kind_t crosslane_kind;
+} loom_amdgpu_direct_xor_lane_recipe_t;
 
 typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   // Source value moved across subgroup lanes.
@@ -710,11 +725,11 @@ typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   // Number of 32-bit registers in the shuffled payload.
   uint32_t register_count;
   // Cross-lane packet family selected for the shuffle.
-  loom_amdgpu_subgroup_shuffle_crosslane_kind_t crosslane_kind;
+  loom_amdgpu_crosslane_kind_t crosslane_kind;
   // Full-width lane addressing mode selected by the source op.
   loom_kernel_subgroup_shuffle_mode_t mode;
-  // DPP control immediate used when the selected packet family is DPP.
-  uint32_t dpp_ctrl;
+  // DPP control or DS swizzle offset used by direct cross-lane packets.
+  uint32_t crosslane_immediate;
   // Exact lane offset or lane index interpreted by mode.
   uint32_t offset;
   // Exact shuffle segment width from the source op.
@@ -1229,12 +1244,15 @@ typedef enum loom_amdgpu_fragment_repack_strategy_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE = 0,
   // Source and result share the same physical fragment representation.
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS = 1,
-  // Adjacent source lanes are packed with DPP before bpermute selection.
-  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_DPP_BPERMUTE = 2,
+  // Adjacent source lanes are packed before bpermute selection.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_PACKED_BPERMUTE = 2,
   // F32 result registers are permuted and packed into BF16 LHS registers.
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE = 3,
+  // Packed source registers are partially transposed before reduced gathers.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_TRANSPOSE_BPERMUTE =
+      4,
   // Source and result require a target strategy that is not implemented.
-  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 4,
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 5,
 } loom_amdgpu_fragment_repack_strategy_t;
 
 typedef enum loom_amdgpu_fragment_repack_reason_e {
@@ -1258,22 +1276,50 @@ typedef enum loom_amdgpu_fragment_repack_reason_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_PACKETS = 8,
 } loom_amdgpu_fragment_repack_reason_t;
 
-enum loom_amdgpu_fragment_repack_lane_transform_e {
-  // The transformed lane coordinate is statically zero.
-  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_ZERO = 0,
-  // Mask the lane coordinate with the immediate.
-  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_AND = 1,
-  // Shift the lane coordinate right by the immediate.
-  LOOM_AMDGPU_FRAGMENT_REPACK_LANE_TRANSFORM_SHIFT_RIGHT = 2,
-};
-typedef uint8_t loom_amdgpu_fragment_repack_lane_transform_t;
-
 typedef struct loom_amdgpu_fragment_repack_lane_recipe_t {
-  // Arithmetic transform applied to the lane coordinate.
-  loom_amdgpu_fragment_repack_lane_transform_t transform;
-  // Mask or shift immediate interpreted by transform.
-  uint16_t immediate;
+  // Bit mask applied before shifting; zero produces zero and UINT16_MAX is an
+  // identity mask.
+  uint16_t and_mask;
+  // Logical right shift applied after masking.
+  uint16_t right_shift;
 } loom_amdgpu_fragment_repack_lane_recipe_t;
+
+typedef enum loom_amdgpu_fragment_repack_packed_pair_kind_e {
+  // No adjacent-lane pair construction is selected.
+  LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_NONE = 0,
+  // Exchange the adjacent lane, then convert and pack both values.
+  LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_EXCHANGE_THEN_PACK = 1,
+  // Exchange and pack two already-rounded BF16 bit payloads with DPP.
+  LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_DPP_PACK_U16 = 2,
+  // Exchange and convert two f32 values to a packed BF16 payload with DPP.
+  LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_DPP_PACK_BF16 = 3,
+} loom_amdgpu_fragment_repack_packed_pair_kind_t;
+
+typedef struct loom_amdgpu_fragment_repack_packed_pair_recipe_t {
+  // Pair-construction operation selected for the target descriptor set.
+  loom_amdgpu_fragment_repack_packed_pair_kind_t kind;
+  // Descriptor implementing the selected exchange or fused conversion.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // DPP control or DS swizzle offset interpreted by the selected kind.
+  uint32_t immediate;
+  // Packet family used by an explicit exchange-then-pack recipe.
+  loom_amdgpu_crosslane_kind_t crosslane_kind;
+} loom_amdgpu_fragment_repack_packed_pair_recipe_t;
+
+// Maximum low register bits exchangeable within one 16-lane DPP row after
+// adjacent source lanes have been packed.
+#define LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY 3
+
+typedef struct loom_amdgpu_fragment_repack_transpose_stage_t {
+  // Cross-lane exchange selected for this butterfly stage.
+  loom_amdgpu_direct_xor_lane_recipe_t exchange;
+  // Constant wave32 predicate selecting lanes whose exchanged bit is set.
+  // Zero indicates that the stage materializes its predicate from lane ids.
+  uint32_t lane_bit_set_mask;
+  // DPP destination banks corresponding to set lane-id bits.
+  // Zero indicates that both register halves use conditional exchanges.
+  uint8_t lane_bit_set_bank_mask;
+} loom_amdgpu_fragment_repack_transpose_stage_t;
 
 typedef struct loom_amdgpu_fragment_repack_plan_t {
   // Source fragment value being repacked.
@@ -1294,6 +1340,10 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t source_register_count;
   // Number of 32-bit result registers produced by the selected strategy.
   uint16_t result_register_count;
+  // Number of low register/lane index bits exchanged before gathering.
+  uint16_t transpose_bit_count;
+  // Number of source-register candidates remaining after the transpose.
+  uint16_t transposed_source_register_candidate_count;
   // Number of lanes that share one logical result-fragment register row group.
   uint16_t lane_group_count;
   // Tile row divisor used to derive target-row and target-reduction lane ids.
@@ -1306,6 +1356,20 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   loom_amdgpu_fragment_repack_lane_recipe_t source_register_selector;
   // Recipe selecting the source lane group from lane_mod.
   loom_amdgpu_fragment_repack_lane_recipe_t source_lane_group;
+  // Recipe constructing one packed pair from adjacent source columns.
+  loom_amdgpu_fragment_repack_packed_pair_recipe_t packed_pair;
+  // Cross-lane exchange recipes in increasing transposed-bit order.
+  loom_amdgpu_fragment_repack_transpose_stage_t
+      transpose_stages[LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY];
+  // Physical VCC predicates enabling fused conditional transpose stages.
+  struct {
+    // Descriptor materializing a constant wave32 predicate into VCC_LO.
+    loom_amdgpu_descriptor_ref_t constant;
+    // Descriptor comparing a lane bit equal to inline zero.
+    loom_amdgpu_descriptor_ref_t equal_zero;
+    // Descriptor comparing a lane bit not equal to inline zero.
+    loom_amdgpu_descriptor_ref_t not_equal_zero;
+  } transpose_predicate;
   // Source fragment role fact bitset.
   uint32_t source_role_flags;
   // Result fragment role fact bitset.

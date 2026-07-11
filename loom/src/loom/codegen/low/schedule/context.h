@@ -216,6 +216,8 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* pressure_limit_units_by_reg_class;
   // Most recent architectural-state writer node, dense by register class.
   uint32_t* state_last_write_nodes;
+  // Most recent non-writing state-ordering node, dense by register class.
+  uint32_t* state_ordering_frontier_nodes;
   // Outstanding architectural-state read lists, dense by register class.
   uint32_t* state_read_heads;
   // Outstanding state-read records used by state_read_heads.

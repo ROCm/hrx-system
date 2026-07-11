@@ -1358,6 +1358,7 @@ def test_generator_emits_operand_target_state_address_map() -> None:
                 base_descriptor.operands[0],
                 address_map_kind=OperandAddressMapKind.TARGET_STATE,
                 addressable_unit_count=256,
+                address_state_slot=3,
             ),
             *base_descriptor.operands[1:],
         ),
@@ -1368,6 +1369,26 @@ def test_generator_emits_operand_target_state_address_map() -> None:
 
     assert ".address_map_kind = LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE" in generated.source
     assert ".addressable_unit_count = 256" in generated.source
+    assert ".address_state_slot = 3" in generated.source
+
+
+def test_generator_rejects_target_state_address_map_without_slot() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    descriptor = replace(
+        base_descriptor,
+        operands=(
+            replace(
+                base_descriptor.operands[0],
+                address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                addressable_unit_count=256,
+            ),
+            *base_descriptor.operands[1:],
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(ValueError, match="target-state address map must set"):
+        generate_descriptor_set(descriptor_set)
 
 
 def test_generator_rejects_direct_address_map_with_unit_count() -> None:
