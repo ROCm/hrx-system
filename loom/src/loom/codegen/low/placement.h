@@ -161,6 +161,13 @@ typedef struct loom_low_placement_pair_use_list_t {
   iree_host_size_t placement_recipe_count;
 } loom_low_placement_pair_use_list_t;
 
+// Counts placement-recipe alternatives that are structurally possible for a
+// concrete scheduled pair. This only considers SSA identity contradictions;
+// physical-location legality remains an allocation decision.
+uint16_t loom_low_placement_pair_possible_alternative_count(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_recipe_t* recipe);
+
 static inline loom_low_placement_pair_use_list_t
 loom_low_placement_pair_use_list_empty(void) {
   return (loom_low_placement_pair_use_list_t){0};
