@@ -222,6 +222,24 @@ typedef enum loom_amdgpu_vopd_rejection_reason_e {
   LOOM_AMDGPU_VOPD_REJECTION_REASON_TRANS_RESULT_WINDOW = 6,
 } loom_amdgpu_vopd_rejection_reason_t;
 
+typedef enum loom_amdgpu_vopd_register_constraint_flag_bits_e {
+  // Component destination VGPRs have the same parity.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_DESTINATION_PARITY = 1u << 0,
+  // Component SRC0 VGPRs occupy the same register bank.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_SRC0_BANK = 1u << 1,
+  // Component VSRC1 VGPRs occupy the same register bank.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_VSRC1_BANK = 1u << 2,
+  // X destination aliases the Y SRC0 VGPR.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_X_DESTINATION_Y_SRC0 = 1u << 3,
+  // X destination aliases the Y VSRC1 VGPR.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_X_DESTINATION_Y_VSRC1 = 1u << 4,
+  // Y destination aliases the X SRC0 VGPR.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_Y_DESTINATION_X_SRC0 = 1u << 5,
+  // Y destination aliases the X VSRC1 VGPR.
+  LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_Y_DESTINATION_X_VSRC1 = 1u << 6,
+} loom_amdgpu_vopd_register_constraint_flag_bits_t;
+typedef uint8_t loom_amdgpu_vopd_register_constraint_flags_t;
+
 typedef enum loom_amdgpu_vopd_pair_flag_bits_e {
   // VOPD pair has no additional payload flags.
   LOOM_AMDGPU_VOPD_PAIR_FLAG_NONE = 0u,
@@ -295,6 +313,8 @@ typedef struct loom_amdgpu_vopd_pair_t {
 typedef struct loom_amdgpu_vopd_rejection_t {
   // Why this adjacent packet pair could not form a VOPD pair.
   loom_amdgpu_vopd_rejection_reason_t reason;
+  // Failed register constraints when reason is REGISTER_CONSTRAINTS.
+  loom_amdgpu_vopd_register_constraint_flags_t register_constraint_flags;
   // Region block containing both component packets.
   uint32_t block_index;
   // Scheduled packet index for the first visible component.

@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-typedef enum loom_low_placement_relation_kind_e {
+typedef enum loom_low_placement_relation_kind_bits_e {
   // Unknown or uninitialized placement relation kind.
   LOOM_LOW_PLACEMENT_RELATION_UNKNOWN = 0,
   // Result and source unit ranges should occupy identical storage units.
@@ -34,9 +34,14 @@ typedef enum loom_low_placement_relation_kind_e {
   LOOM_LOW_PLACEMENT_RELATION_SUBRANGE = 2,
   // Result units should occupy a contiguous packed range of source values.
   LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART = 3,
-} loom_low_placement_relation_kind_t;
+  // Result and source locations should differ under location_mask.
+  LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION = 4,
+  // Result and source unit ranges should occupy disjoint storage.
+  LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE = 5,
+} loom_low_placement_relation_kind_bits_t;
+typedef uint8_t loom_low_placement_relation_kind_t;
 
-typedef enum loom_low_placement_cause_e {
+typedef enum loom_low_placement_cause_bits_e {
   // Unknown or uninitialized placement cause.
   LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN = 0,
   // Descriptor tied result requiring source/result storage identity.
@@ -53,7 +58,10 @@ typedef enum loom_low_placement_cause_e {
   LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR = 6,
   // low.scf.yield payload/result or backedge affinity.
   LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD = 7,
-} loom_low_placement_cause_t;
+  // Scheduled target-packet pair location affinity.
+  LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY = 8,
+} loom_low_placement_cause_bits_t;
+typedef uint8_t loom_low_placement_cause_t;
 
 enum loom_low_placement_relation_flag_bits_e {
   // The relation is required for the selected target operation semantics.
@@ -64,6 +72,94 @@ enum loom_low_placement_relation_flag_bits_e {
 
 // Bitset of loom_low_placement_relation_flag_bits_e values.
 typedef uint16_t loom_low_placement_relation_flags_t;
+
+// Sentinel for pair affinities without a placement recipe. Nonzero indexes are
+// stored as recipe index + 1 so zero-initialized affinity rows stay
+// recipe-free.
+#define LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE 0
+
+typedef enum loom_low_placement_pair_component_bits_e {
+  // Unknown or uninitialized pair component.
+  LOOM_LOW_PLACEMENT_PAIR_COMPONENT_UNKNOWN = 0,
+  // First scheduled operation in the pair.
+  LOOM_LOW_PLACEMENT_PAIR_COMPONENT_FIRST = 1,
+  // Second scheduled operation in the pair.
+  LOOM_LOW_PLACEMENT_PAIR_COMPONENT_SECOND = 2,
+} loom_low_placement_pair_component_bits_t;
+typedef uint8_t loom_low_placement_pair_component_t;
+
+typedef enum loom_low_placement_pair_value_kind_bits_e {
+  // Unknown or uninitialized pair value kind.
+  LOOM_LOW_PLACEMENT_PAIR_VALUE_UNKNOWN = 0,
+  // Operation operand selected by index.
+  LOOM_LOW_PLACEMENT_PAIR_VALUE_OPERAND = 1,
+  // Operation result selected by index.
+  LOOM_LOW_PLACEMENT_PAIR_VALUE_RESULT = 2,
+} loom_low_placement_pair_value_kind_bits_t;
+typedef uint8_t loom_low_placement_pair_value_kind_t;
+
+// One operation value and unit offset referenced by a pair recipe.
+typedef struct loom_low_placement_pair_value_ref_t {
+  // Pair component containing the value.
+  loom_low_placement_pair_component_t component;
+  // Whether index selects an operand or result.
+  loom_low_placement_pair_value_kind_t kind;
+  // Operand or result index within the selected operation.
+  uint16_t index;
+  // Allocation-unit offset within the selected value.
+  uint16_t unit_offset;
+} loom_low_placement_pair_value_ref_t;
+
+// One target-provided location relation within a scheduled pair recipe.
+typedef struct loom_low_placement_pair_relation_t {
+  // First value participating in the relation.
+  loom_low_placement_pair_value_ref_t result;
+  // Second value participating in the relation.
+  loom_low_placement_pair_value_ref_t source;
+  // Number of contiguous allocation units covered by the relation.
+  uint16_t unit_count;
+  // Location relation applied to the selected values.
+  loom_low_placement_relation_kind_t kind;
+  // Low location bits compared by DIFFERENT_MASKED_LOCATION.
+  uint32_t location_mask;
+} loom_low_placement_pair_relation_t;
+
+// Target-provided placement recipe shared by compatible descriptor pairs.
+typedef struct loom_low_placement_pair_recipe_t {
+  // Borrowed relation rows in the recipe.
+  const loom_low_placement_pair_relation_t* relations;
+  // Number of entries in relations.
+  uint16_t relation_count;
+} loom_low_placement_pair_recipe_t;
+
+// One concrete pair opportunity retained from the final schedule.
+typedef struct loom_low_placement_pair_use_t {
+  // First visible scheduled operation.
+  const loom_op_t* first_op;
+  // Second visible scheduled operation.
+  const loom_op_t* second_op;
+  // Index + 1 into the containing list placement_recipes table.
+  uint16_t placement_recipe_index;
+  // Relative benefit of satisfying this pair opportunity.
+  uint16_t priority;
+} loom_low_placement_pair_use_t;
+
+// Concrete pair opportunities retained from one schedule.
+typedef struct loom_low_placement_pair_use_list_t {
+  // Borrowed pair-use rows.
+  const loom_low_placement_pair_use_t* values;
+  // Number of entries in values.
+  iree_host_size_t count;
+  // Borrowed target-provided placement recipes referenced by values.
+  const loom_low_placement_pair_recipe_t* placement_recipes;
+  // Number of entries in placement_recipes.
+  iree_host_size_t placement_recipe_count;
+} loom_low_placement_pair_use_list_t;
+
+static inline loom_low_placement_pair_use_list_t
+loom_low_placement_pair_use_list_empty(void) {
+  return (loom_low_placement_pair_use_list_t){0};
+}
 
 // One directional placement relation keyed by result and source value ordinals.
 typedef struct loom_low_placement_relation_t {
@@ -79,12 +175,16 @@ typedef struct loom_low_placement_relation_t {
   uint32_t source_unit_offset;
   // Number of units covered by this relation.
   uint32_t unit_count;
+  // Low location bits compared by DIFFERENT_MASKED_LOCATION.
+  uint32_t location_mask;
   // Structural relation shape.
   loom_low_placement_relation_kind_t kind;
   // IR feature that created the relation.
   loom_low_placement_cause_t cause;
   // Hard/soft relation behavior.
   loom_low_placement_relation_flags_t flags;
+  // Relative benefit of satisfying this relation.
+  uint16_t priority;
 } loom_low_placement_relation_t;
 
 // Contiguous relation range for one result value ordinal.
@@ -109,6 +209,8 @@ typedef struct loom_low_placement_table_t {
   const loom_low_placement_relation_t* relations;
   // Number of relation records.
   iree_host_size_t relation_count;
+  // Number of relations constraining concrete location choice.
+  iree_host_size_t location_relation_count;
   // Relation ranges into |relations| indexed by result value ordinal.
   const loom_low_placement_relation_range_t* ranges_by_result_ordinal;
   // Relation indices grouped by source value ordinal. Each entry indexes
@@ -131,7 +233,8 @@ bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause);
 iree_status_t loom_low_placement_analyze_region(
     loom_module_t* module, const loom_region_t* region,
     const loom_local_value_domain_t* value_domain,
-    const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,
+    const loom_liveness_analysis_t* liveness,
+    loom_low_placement_pair_use_list_t pair_uses, iree_arena_allocator_t* arena,
     loom_low_placement_table_t* out_table);
 
 // Returns the relation range for |result_ordinal|. The ordinal must belong to

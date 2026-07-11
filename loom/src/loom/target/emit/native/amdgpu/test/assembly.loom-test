@@ -3245,17 +3245,17 @@ low.func.def target(@gfx11_target) @gfx11_grouped_trans_lanes(%input0: reg<amdgp
   v_add_f32 v7, v7, v0
   s_waitcnt_depctr depctr(0)
   v_add_f32 v8, v8, v0
-  v_add_f32 v0, v9, v0
-  v_rcp_f32 v6, v6
-  v_rcp_f32 v7, v7
-  v_rcp_f32 v8, v8
-  v_rcp_f32 v0, v0
-  v_mul_f32 v12, v6, v1
-  v_mul_f32 v13, v7, v2
+  v_add_f32 v9, v9, v0
+  v_rcp_f32 v0, v6
+  v_rcp_f32 v6, v7
+  v_rcp_f32 v7, v8
+  v_rcp_f32 v8, v9
+  v_mul_f32 v0, v0, v1
+  v_mul_f32 v1, v6, v2
   s_waitcnt_depctr depctr(0)
-  v_mul_f32 v14, v8, v3
-  v_mul_f32 v15, v0, v4
-  buffer_store_b128 v[12:15], v5, s[0:3], s4 offen offset:0
+  v_mul_f32 v2, v7, v3
+  v_mul_f32 v3, v8, v4
+  buffer_store_b128 v[0:3], v5, s[0:3], s4 offen offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -3319,24 +3319,24 @@ low.func.def target(@gfx11_target) @gfx11_grouped_trans_lanes_b128_tail_depctr(%
   v_add_f32 v14, v14, v0
   v_add_f32 v15, v15, v0
   v_add_f32 v16, v16, v0
-  v_add_f32 v0, v17, v0
-  v_rcp_f32 v10, v10
-  v_rcp_f32 v11, v11
-  v_rcp_f32 v12, v12
-  v_rcp_f32 v13, v13
-  v_rcp_f32 v14, v14
-  v_rcp_f32 v15, v15
-  v_rcp_f32 v16, v16
-  v_rcp_f32 v0, v0
-  v_mul_f32 v20, v10, v1
-  v_mul_f32 v21, v11, v2
-  v_mul_f32 v22, v12, v3
-  v_mul_f32 v23, v13, v4
-  v_mul_f32 v4, v14, v5
-  v_mul_f32 v5, v15, v6
-  v_mul_f32 v6, v16, v7
-  v_mul_f32 v7, v0, v8
-  buffer_store_b128 v[20:23], v9, s[0:3], s4 offen offset:0
+  v_add_f32 v17, v17, v0
+  v_rcp_f32 v0, v10
+  v_rcp_f32 v10, v11
+  v_rcp_f32 v11, v12
+  v_rcp_f32 v12, v13
+  v_rcp_f32 v13, v14
+  v_rcp_f32 v14, v15
+  v_rcp_f32 v15, v16
+  v_rcp_f32 v16, v17
+  v_mul_f32 v0, v0, v1
+  v_mul_f32 v1, v10, v2
+  v_mul_f32 v2, v11, v3
+  v_mul_f32 v3, v12, v4
+  v_mul_f32 v4, v13, v5
+  v_mul_f32 v5, v14, v6
+  v_mul_f32 v6, v15, v7
+  v_mul_f32 v7, v16, v8
+  buffer_store_b128 v[0:3], v9, s[0:3], s4 offen offset:0
   buffer_store_b128 v[4:7], v9, s[0:3], s4 offen offset:16
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

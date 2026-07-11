@@ -188,6 +188,7 @@ static iree_status_t loom_low_emission_frame_build_with_allocation_emitter(
       .reserved_ranges = options->allocation_reserved_ranges,
       .reserved_range_count = options->allocation_reserved_range_count,
       .storage_leases = storage_leases,
+      .placement_pair_uses = out_frame->schedule.placement_pair_uses,
       .emitter = allocation_emitter,
       .diagnostic_flags = options->allocation_diagnostic_flags,
   };

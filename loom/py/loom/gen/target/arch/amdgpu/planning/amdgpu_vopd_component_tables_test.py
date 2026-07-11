@@ -51,6 +51,10 @@ def test_vopd_component_fragment_is_data_only() -> None:
         component=component,
         descriptor_set_keys=("amdgpu.rdna3.core",),
     )
+    placement_recipe = amdgpu_vopd_component_tables._pair_placement_recipe(
+        component,
+        component,
+    )
     tables = amdgpu_vopd_component_tables._VopdComponentTables(
         rules=(rule,),
         descriptor_lookup_ranges=(
@@ -75,8 +79,10 @@ def test_vopd_component_fragment_is_data_only() -> None:
                 first_descriptor_ordinal=1,
                 second_descriptor_ordinal=1,
                 priority=2,
+                placement_recipe_index=0,
             ),
         ),
+        pair_placement_recipes=(placement_recipe,),
     )
     fragments = (
         amdgpu_vopd_component_tables._emit_component_rules(tables),
@@ -84,6 +90,7 @@ def test_vopd_component_fragment_is_data_only() -> None:
         amdgpu_vopd_component_tables._emit_descriptor_lookup_rows(tables),
         amdgpu_vopd_component_tables._emit_pair_affinity_ranges(tables),
         amdgpu_vopd_component_tables._emit_pair_affinity_rows(tables),
+        amdgpu_vopd_component_tables._emit_pair_placement_recipes(tables),
     )
     fragment = "\n".join(fragments)
 
@@ -93,6 +100,8 @@ def test_vopd_component_fragment_is_data_only() -> None:
     assert "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP(" in fragment
     assert "LOOM_AMDGPU_VOPD_PAIR_AFFINITY_RANGE(" in fragment
     assert "LOOM_AMDGPU_VOPD_PAIR_AFFINITY(" in fragment
+    assert "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RECIPE(" in fragment
+    assert "LOOM_AMDGPU_VOPD_PAIR_PLACEMENT_RELATION(" in fragment
     assert "typedef " not in fragment
     assert "struct " not in fragment
     assert "static " not in fragment
@@ -129,9 +138,12 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
         ),
     )
 
+    placement_recipes: list[amdgpu_vopd_component_tables._VopdPairPlacementRecipe] = []
     rows = amdgpu_vopd_component_tables._pair_affinity_rows_for_set(
         rules,
         (1, 2),
+        placement_recipes,
+        {},
     )
 
     assert (
@@ -139,6 +151,7 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
             first_descriptor_ordinal=0,
             second_descriptor_ordinal=0,
             priority=2,
+            placement_recipe_index=0,
         )
         in rows
     )
@@ -147,6 +160,7 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
             first_descriptor_ordinal=1,
             second_descriptor_ordinal=0,
             priority=1,
+            placement_recipe_index=0,
         )
         not in rows
     )
@@ -155,9 +169,28 @@ def test_vopd_pair_affinities_use_descriptor_ordinals_and_priority() -> None:
             first_descriptor_ordinal=0,
             second_descriptor_ordinal=1,
             priority=1,
+            placement_recipe_index=1,
         )
         in rows
     )
+
+
+def test_vopd_pair_placement_rejects_component_value_out_of_bounds() -> None:
+    component = amdgpu_vopd_component_tables._component_definitions()[0]
+    invalid_ref = amdgpu_vopd_component_tables._VopdPairPlacementValueRef(
+        component=amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST,
+        kind=amdgpu_vopd_component_tables._PLACEMENT_VALUE_RESULT,
+        index=1,
+    )
+
+    with pytest.raises(ValueError, match="outside count 1"):
+        amdgpu_vopd_component_tables._validate_pair_placement_ref(
+            "test recipe",
+            "result",
+            invalid_ref,
+            component,
+            component,
+        )
 
 
 def test_vopd_descriptor_lookup_validation_rejects_out_of_bounds_rule() -> None:
@@ -174,6 +207,7 @@ def test_vopd_descriptor_lookup_validation_rejects_out_of_bounds_rule() -> None:
         descriptor_lookup_rows=(1,),
         pair_affinity_ranges=(),
         pair_affinity_rows=(),
+        pair_placement_recipes=(),
     )
 
     with pytest.raises(ValueError, match="out-of-bounds rule"):
@@ -192,6 +226,18 @@ def test_vopd_pair_affinity_validation_rejects_out_of_bounds_descriptor() -> Non
             ),
         ),
         descriptor_lookup_rows=(0,),
+        pair_placement_recipes=(
+            amdgpu_vopd_component_tables._VopdPairPlacementRecipe(
+                relations=(
+                    amdgpu_vopd_component_tables._VopdPairPlacementRelation(
+                        result=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_FIRST),
+                        source=amdgpu_vopd_component_tables._placement_result_ref(amdgpu_vopd_component_tables._PLACEMENT_COMPONENT_SECOND),
+                        kind=amdgpu_vopd_component_tables._PLACEMENT_DIFFERENT_MASKED,
+                        location_mask=1,
+                    ),
+                )
+            ),
+        ),
         pair_affinity_ranges=(
             amdgpu_vopd_component_tables._VopdPairAffinityRange(
                 descriptor_set_key="amdgpu.rdna3.core",
@@ -205,6 +251,7 @@ def test_vopd_pair_affinity_validation_rejects_out_of_bounds_descriptor() -> Non
                 first_descriptor_ordinal=1,
                 second_descriptor_ordinal=0,
                 priority=1,
+                placement_recipe_index=0,
             ),
         ),
     )

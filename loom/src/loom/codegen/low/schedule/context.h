@@ -81,6 +81,8 @@ typedef struct loom_low_schedule_pair_affinity_record_t {
   uint32_t next_record;
   // Relative benefit for forming this pair.
   uint16_t priority;
+  // Index + 1 into the pair-affinity placement recipe table.
+  uint16_t placement_recipe_index;
 } loom_low_schedule_pair_affinity_record_t;
 
 typedef struct loom_low_schedule_storage_read_record_t {
@@ -230,6 +232,8 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* pair_affinity_heads;
   // Pair-affinity records linked from pair_affinity_heads.
   loom_low_schedule_pair_affinity_record_t* pair_affinity_records;
+  // Concrete placement-sensitive pair opportunities in scheduled order.
+  loom_low_placement_pair_use_t* placement_pair_uses;
   // Per-block readers of values whose storage may be consumed by tied ops.
   struct {
     // Outstanding read lists, dense by local value ordinal.
@@ -310,6 +314,8 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_chain_read_record_count;
   // Number of populated pair-affinity records.
   iree_host_size_t pair_affinity_record_count;
+  // Number of populated placement-pair use records.
+  iree_host_size_t placement_pair_use_count;
   // Allocated state-chain read record capacity.
   iree_host_size_t state_chain_read_record_capacity;
   // Allocated effect-frontier read scratch capacity.

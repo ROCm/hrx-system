@@ -58,6 +58,8 @@ typedef struct loom_low_allocation_options_t {
   // Optional target storage leases built over the same scheduled low function
   // represented by |liveness_order|.
   loom_low_storage_lease_table_t storage_leases;
+  // Concrete placement-sensitive pair opportunities from the final schedule.
+  loom_low_placement_pair_use_list_t placement_pair_uses;
   // Structured diagnostic emitter for allocation failures and feedback.
   iree_diagnostic_emitter_t emitter;
   // Optional structured allocation feedback to emit.

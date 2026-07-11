@@ -38,6 +38,7 @@ loom_low_allocation_assignment_t Assignment(
   assignment.location_kind = location_kind;
   assignment.location_base = location_base;
   assignment.location_count = location_count;
+  assignment.unit_count = location_count;
   return assignment;
 }
 
@@ -120,6 +121,46 @@ TEST(LowAllocationStorageTest, MatchesAndOverlapsAliasSubranges) {
       &descriptor_set, &lhs, 1, &rhs, 0, /*unit_count=*/2));
   EXPECT_FALSE(loom_low_allocation_storage_assignment_subranges_overlap(
       &descriptor_set, &lhs, 0, &rhs, 4, /*unit_count=*/2));
+}
+
+TEST(LowAllocationStorageTest, EvaluatesConcretePlacementRelations) {
+  const loom_low_reg_class_t reg_class = RegClass(/*alias_set_id=*/0);
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(&reg_class, /*reg_class_count=*/1);
+  const loom_low_allocation_assignment_t result = Assignment(
+      /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/4,
+      /*location_count=*/2);
+  const loom_low_allocation_assignment_t source = Assignment(
+      /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/5,
+      /*location_count=*/2);
+  const loom_low_allocation_assignment_t alias = Assignment(
+      /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/4,
+      /*location_count=*/2);
+
+  loom_low_placement_relation_t relation = {
+      /*.op=*/nullptr,
+      /*.result_ordinal=*/0,
+      /*.source_ordinal=*/1,
+      /*.result_unit_offset=*/0,
+      /*.source_unit_offset=*/0,
+      /*.unit_count=*/1,
+      /*.location_mask=*/1,
+      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+  };
+  EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
+      &descriptor_set, &relation, &result, &source));
+  EXPECT_FALSE(loom_low_allocation_storage_placement_relation_satisfied(
+      &descriptor_set, &relation, &result, &alias));
+
+  relation.kind = LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE;
+  relation.location_mask = 0;
+  EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
+      &descriptor_set, &relation, &result, &source));
+  EXPECT_FALSE(loom_low_allocation_storage_placement_relation_satisfied(
+      &descriptor_set, &relation, &result, &alias));
 }
 
 TEST(LowAllocationStorageTest, SharesRegisterClassAliasSets) {

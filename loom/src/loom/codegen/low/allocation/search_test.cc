@@ -139,6 +139,218 @@ loom_liveness_block_info_t Block(uint32_t start_point, uint32_t end_point) {
   return block;
 }
 
+loom_low_placement_relation_t LocationRelation(
+    loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal,
+    loom_low_placement_relation_kind_t kind, uint32_t location_mask,
+    uint16_t priority = 2) {
+  loom_low_placement_relation_t relation = {};
+  relation.result_ordinal = result_ordinal;
+  relation.source_ordinal = source_ordinal;
+  relation.unit_count = 1;
+  relation.location_mask = location_mask;
+  relation.kind = kind;
+  relation.cause = LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY;
+  relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED;
+  relation.priority = priority;
+  return relation;
+}
+
+uint32_t FindFreeLocationWithPlacement(
+    loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_value_id_t candidate_value, loom_value_id_t counterpart_value,
+    uint32_t max_units, const loom_low_placement_relation_t* relation) {
+  loom_module_value_ordinal_scratch_acquire(module);
+  loom_module_value_ordinal_scratch_set(module, candidate_value,
+                                        /*ordinal=*/0);
+  loom_module_value_ordinal_scratch_set(module, counterpart_value,
+                                        /*ordinal=*/1);
+
+  const uint64_t descriptor_set_id = 5;
+  const loom_liveness_value_class_t value_class =
+      RegisterValueClass(descriptor_set_id);
+  const loom_liveness_interval_t intervals[] = {
+      Interval(candidate_value, /*start=*/2, /*end=*/6, value_class,
+               /*unit_count=*/1),
+      Interval(counterpart_value, /*start=*/0, /*end=*/1, value_class,
+               /*unit_count=*/1),
+  };
+  const uint32_t interval_indices[] = {0, 1};
+  const loom_value_id_t value_ids[] = {candidate_value, counterpart_value};
+  const loom_liveness_block_info_t blocks[] = {
+      Block(/*start_point=*/0, /*end_point=*/8),
+  };
+  loom_liveness_analysis_t liveness = {};
+  liveness.blocks = blocks;
+  liveness.block_count = IREE_ARRAYSIZE(blocks);
+  liveness.intervals = intervals;
+  liveness.interval_count = IREE_ARRAYSIZE(intervals);
+  liveness.value_ids = value_ids;
+  liveness.value_count = IREE_ARRAYSIZE(value_ids);
+  liveness.value_interval_indices = interval_indices;
+
+  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_end_points[] = {6, 1};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+
+  const loom_low_reg_class_t reg_class =
+      RegClass(max_units, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(&reg_class, descriptor_set_id);
+  const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
+  uint32_t max_assigned_location_end_by_reg_class[] = {1};
+  loom_low_allocation_target_constraints_t target_constraints = {};
+  target_constraints.target = &target;
+  target_constraints.max_assigned_location_end_by_reg_class =
+      max_assigned_location_end_by_reg_class;
+
+  const loom_low_allocation_assignment_t assignments[] = {
+      Assignment(counterpart_value, /*start=*/0, /*end=*/1, value_class,
+                 /*location_base=*/0, /*location_count=*/1,
+                 /*unit_end_point_start=*/1),
+  };
+  const uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
+  loom_low_allocation_assignment_map_t assignment_map = {};
+  assignment_map.module = module;
+  assignment_map.liveness = &liveness;
+  assignment_map.assignments = assignments;
+  assignment_map.assignment_count = IREE_ARRAYSIZE(assignments);
+  assignment_map.assignment_indices_by_value_ordinal =
+      assignment_indices_by_value_ordinal;
+
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_CHECK_OK(loom_low_allocation_active_set_initialize(
+      &kEmptyLiveness, /*assignment_capacity=*/1, max_units, arena,
+      &active_set));
+  loom_low_allocation_storage_lease_state_t storage_leases = {};
+
+  loom_low_placement_relation_range_t result_ranges[2] = {};
+  loom_low_placement_relation_range_t source_ranges[2] = {};
+  const uint32_t source_relation_indices[] = {0};
+  loom_low_placement_table_t placement = {};
+  if (relation != nullptr) {
+    result_ranges[relation->result_ordinal] = {
+        /*.start=*/0,
+        /*.count=*/1,
+    };
+    source_ranges[relation->source_ordinal] = {
+        /*.start=*/0,
+        /*.count=*/1,
+    };
+    placement.value_ids = value_ids;
+    placement.value_count = IREE_ARRAYSIZE(value_ids);
+    placement.relations = relation;
+    placement.relation_count = 1;
+    placement.location_relation_count = 1;
+    placement.ranges_by_result_ordinal = result_ranges;
+    placement.relation_indices_by_source_ordinal = source_relation_indices;
+    placement.ranges_by_source_ordinal = source_ranges;
+  }
+
+  loom_low_allocation_search_context_t context = {};
+  context.module = module;
+  context.descriptor_set = &descriptor_set;
+  context.liveness = &liveness;
+  context.unit_liveness = &unit_liveness;
+  context.target_constraints = &target_constraints;
+  context.assignment_map = &assignment_map;
+  context.placement = relation != nullptr ? &placement : nullptr;
+  context.active_set = &active_set;
+  context.storage_leases = &storage_leases;
+
+  uint32_t location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(max_units), &location_base));
+
+  loom_module_value_ordinal_scratch_clear(module, candidate_value);
+  loom_module_value_ordinal_scratch_clear(module, counterpart_value);
+  loom_module_value_ordinal_scratch_release(module);
+  return location_base;
+}
+
+TEST_F(LowAllocationSearchTest, PreservesFirstFitWithoutPlacementPreference) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(
+                module, &arena_, candidate_value, counterpart_value,
+                /*max_units=*/4, /*relation=*/nullptr),
+            0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, SelectsDifferentMaskedResultLocation) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+  const loom_low_placement_relation_t relation = LocationRelation(
+      /*result_ordinal=*/0, /*source_ordinal=*/1,
+      LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      /*location_mask=*/1);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/4, &relation),
+            1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, SelectsDifferentMaskedSourceLocation) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+  const loom_low_placement_relation_t relation = LocationRelation(
+      /*result_ordinal=*/1, /*source_ordinal=*/0,
+      LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      /*location_mask=*/1);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/4, &relation),
+            1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, SelectsDisjointStorage) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+  const loom_low_placement_relation_t relation = LocationRelation(
+      /*result_ordinal=*/0, /*source_ordinal=*/1,
+      LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE,
+      /*location_mask=*/0, /*priority=*/1);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/4, &relation),
+            1u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, FallsBackWhenPreferenceCannotBeSatisfied) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+  const loom_low_placement_relation_t relation = LocationRelation(
+      /*result_ordinal=*/0, /*source_ordinal=*/1,
+      LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      /*location_mask=*/1);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/1, &relation),
+            0u);
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t candidate_value = DefineValue(module);

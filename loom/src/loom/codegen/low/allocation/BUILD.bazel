@@ -118,11 +118,13 @@ loom_cc_library(
         ":live_range",
         ":spill_plan",
         ":spill_traffic",
+        ":storage",
         ":storage_lease",
         ":target_constraints",
         ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -291,6 +293,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//runtime/src/iree/base",
     ],
 )

@@ -19,8 +19,16 @@ typedef struct loom_low_placement_build_state_t {
   const loom_local_value_domain_t* value_domain;
   // Liveness analysis over |value_domain|.
   const loom_liveness_analysis_t* liveness;
+  // Concrete scheduled pair opportunities to convert into relations.
+  loom_low_placement_pair_use_list_t pair_uses;
   // Arena owning placement table storage.
   iree_arena_allocator_t* arena;
+  // Resettable arena owning transient collected relations.
+  iree_arena_allocator_t* scratch_arena;
+  // Transient relations collected during the single IR walk.
+  loom_low_placement_relation_t* collected_relations;
+  // Allocated collected_relations capacity.
+  iree_host_size_t collected_relation_capacity;
   // Mutable relation records being populated.
   loom_low_placement_relation_t* relations;
   // Relation ranges indexed by result value ordinal.
@@ -30,7 +38,9 @@ typedef struct loom_low_placement_build_state_t {
   // Relation ranges indexed by source value ordinal.
   loom_low_placement_relation_range_t* ranges_by_source_ordinal;
   // Number of relation records counted or populated.
-  iree_host_size_t relation_count;
+  uint32_t relation_count;
+  // Number of collected concrete-location relations.
+  iree_host_size_t location_relation_count;
   // Number of relation records appended after range prefixing.
   iree_host_size_t appended_relation_count;
   // Number of source relation indices appended after range prefixing.
@@ -83,42 +93,32 @@ static const loom_liveness_interval_t* loom_low_placement_interval_for_ordinal(
   return interval;
 }
 
-static iree_status_t loom_low_placement_increment_relation_count(
+static iree_status_t loom_low_placement_collect_relation(
     loom_low_placement_build_state_t* state,
-    loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal) {
-  if (state->relation_count >= UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low placement relation count exceeds u32 range");
-  }
+    const loom_low_placement_relation_t* relation) {
+  IREE_ASSERT_LT(state->relation_count, UINT32_MAX);
   loom_low_placement_relation_range_t* result_range =
-      &state->ranges_by_result_ordinal[result_ordinal];
-  if (result_range->count == UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low placement result relation count exceeds u32 "
-                            "range");
-  }
+      &state->ranges_by_result_ordinal[relation->result_ordinal];
+  IREE_ASSERT_LT(result_range->count, UINT32_MAX);
   loom_low_placement_relation_range_t* source_range =
-      &state->ranges_by_source_ordinal[source_ordinal];
-  if (source_range->count == UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low placement source relation count exceeds u32 "
-                            "range");
+      &state->ranges_by_source_ordinal[relation->source_ordinal];
+  IREE_ASSERT_LT(source_range->count, UINT32_MAX);
+  if (state->relation_count == state->collected_relation_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->scratch_arena, state->relation_count, state->relation_count + 1,
+        sizeof(*state->collected_relations),
+        &state->collected_relation_capacity,
+        (void**)&state->collected_relations));
+  }
+  state->collected_relations[state->relation_count] = *relation;
+  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION ||
+      relation->kind == LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
+    ++state->location_relation_count;
   }
   ++result_range->count;
   ++source_range->count;
   ++state->relation_count;
   return iree_ok_status();
-}
-
-static iree_status_t loom_low_placement_count_relation(
-    loom_low_placement_build_state_t* state, loom_value_id_t result_value_id,
-    loom_value_id_t source_value_id) {
-  const loom_value_ordinal_t result_ordinal =
-      loom_low_placement_value_ordinal(state, result_value_id);
-  const loom_value_ordinal_t source_ordinal =
-      loom_low_placement_value_ordinal(state, source_value_id);
-  return loom_low_placement_increment_relation_count(state, result_ordinal,
-                                                     source_ordinal);
 }
 
 static void loom_low_placement_prefix_range_array(
@@ -237,19 +237,7 @@ static void loom_low_placement_assert_storage_relation_units(
               "verified low storage source range must fit liveness units");
 }
 
-static iree_status_t loom_low_placement_count_op_relations(
-    loom_low_placement_build_state_t* state, const loom_op_t* op) {
-  loom_low_storage_relation_iterator_t iterator;
-  loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
-  loom_low_storage_relation_t relation;
-  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-    IREE_RETURN_IF_ERROR(loom_low_placement_count_relation(
-        state, relation.destination_value_id, relation.source_value_id));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_placement_append_op_relations(
+static iree_status_t loom_low_placement_collect_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
   loom_low_storage_relation_iterator_t iterator;
   loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
@@ -277,21 +265,110 @@ static iree_status_t loom_low_placement_append_op_relations(
             storage_relation.cause),
         .flags = loom_low_placement_flags_from_storage_relation(
             storage_relation.flags),
+        .priority = 1,
     };
-    loom_low_placement_append_relation(state, &placement_relation);
+    IREE_RETURN_IF_ERROR(
+        loom_low_placement_collect_relation(state, &placement_relation));
+  }
+  return iree_ok_status();
+}
+
+static const loom_op_t* loom_low_placement_pair_component_op(
+    const loom_low_placement_pair_use_t* use,
+    loom_low_placement_pair_component_t component) {
+  switch (component) {
+    case LOOM_LOW_PLACEMENT_PAIR_COMPONENT_FIRST:
+      return use->first_op;
+    case LOOM_LOW_PLACEMENT_PAIR_COMPONENT_SECOND:
+      return use->second_op;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown low placement pair component");
+      return NULL;
+  }
+}
+
+static loom_value_id_t loom_low_placement_pair_value(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_value_ref_t* ref) {
+  const loom_op_t* op =
+      loom_low_placement_pair_component_op(use, ref->component);
+  switch (ref->kind) {
+    case LOOM_LOW_PLACEMENT_PAIR_VALUE_OPERAND:
+      IREE_ASSERT_LT(ref->index, op->operand_count);
+      return loom_op_const_operands(op)[ref->index];
+    case LOOM_LOW_PLACEMENT_PAIR_VALUE_RESULT:
+      IREE_ASSERT_LT(ref->index, op->result_count);
+      return loom_op_const_results(op)[ref->index];
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown low placement pair value kind");
+      return LOOM_VALUE_ID_INVALID;
+  }
+}
+
+static iree_status_t loom_low_placement_collect_pair_relations(
+    loom_low_placement_build_state_t* state,
+    const loom_low_placement_pair_use_t* use) {
+  IREE_ASSERT(use->first_op != NULL);
+  IREE_ASSERT(use->second_op != NULL);
+  IREE_ASSERT(use->placement_recipe_index !=
+              LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE);
+  const uint16_t recipe_index = (uint16_t)(use->placement_recipe_index - 1u);
+  IREE_ASSERT_LT(recipe_index, state->pair_uses.placement_recipe_count);
+  const loom_low_placement_pair_recipe_t* recipe =
+      &state->pair_uses.placement_recipes[recipe_index];
+  for (uint16_t i = 0; i < recipe->relation_count; ++i) {
+    const loom_low_placement_pair_relation_t* recipe_relation =
+        &recipe->relations[i];
+    const loom_value_id_t result_value_id =
+        loom_low_placement_pair_value(use, &recipe_relation->result);
+    const loom_value_id_t source_value_id =
+        loom_low_placement_pair_value(use, &recipe_relation->source);
+    if (result_value_id == source_value_id) {
+      continue;
+    }
+    const loom_value_ordinal_t result_ordinal =
+        loom_low_placement_value_ordinal(state, result_value_id);
+    const loom_value_ordinal_t source_ordinal =
+        loom_low_placement_value_ordinal(state, source_value_id);
+    const loom_liveness_interval_t* result_interval =
+        loom_low_placement_interval_for_ordinal(state, result_ordinal);
+    const loom_liveness_interval_t* source_interval =
+        loom_low_placement_interval_for_ordinal(state, source_ordinal);
+    IREE_ASSERT_LE(recipe_relation->result.unit_offset,
+                   result_interval->unit_count);
+    IREE_ASSERT_LE(
+        recipe_relation->unit_count,
+        result_interval->unit_count - recipe_relation->result.unit_offset);
+    IREE_ASSERT_LE(recipe_relation->source.unit_offset,
+                   source_interval->unit_count);
+    IREE_ASSERT_LE(
+        recipe_relation->unit_count,
+        source_interval->unit_count - recipe_relation->source.unit_offset);
+    const loom_low_placement_relation_t relation = {
+        .op = use->second_op,
+        .result_ordinal = result_ordinal,
+        .source_ordinal = source_ordinal,
+        .result_unit_offset = recipe_relation->result.unit_offset,
+        .source_unit_offset = recipe_relation->source.unit_offset,
+        .unit_count = recipe_relation->unit_count,
+        .location_mask = recipe_relation->location_mask,
+        .kind = recipe_relation->kind,
+        .cause = LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY,
+        .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED,
+        .priority = use->priority,
+    };
+    IREE_RETURN_IF_ERROR(loom_low_placement_collect_relation(state, &relation));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_placement_visit_region_ops(
-    loom_low_placement_build_state_t* state, const loom_region_t* region,
-    iree_status_t (*visit)(loom_low_placement_build_state_t* state,
-                           const loom_op_t* op)) {
+    loom_low_placement_build_state_t* state, const loom_region_t* region) {
   const loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      IREE_RETURN_IF_ERROR(visit(state, op));
+      IREE_RETURN_IF_ERROR(loom_low_placement_collect_op_relations(state, op));
       if (!iree_any_bit_set(state->value_domain->flags,
                             LOOM_LOCAL_VALUE_DOMAIN_FLAG_REGION_TREE)) {
         continue;
@@ -302,7 +379,7 @@ static iree_status_t loom_low_placement_visit_region_ops(
           continue;
         }
         IREE_RETURN_IF_ERROR(
-            loom_low_placement_visit_region_ops(state, regions[i], visit));
+            loom_low_placement_visit_region_ops(state, regions[i]));
       }
     }
   }
@@ -310,16 +387,74 @@ static iree_status_t loom_low_placement_visit_region_ops(
 }
 
 static iree_status_t loom_low_placement_visit_ops(
+    loom_low_placement_build_state_t* state) {
+  return loom_low_placement_visit_region_ops(state, state->region);
+}
+
+static iree_status_t loom_low_placement_build(
     loom_low_placement_build_state_t* state,
-    iree_status_t (*visit)(loom_low_placement_build_state_t* state,
-                           const loom_op_t* op)) {
-  return loom_low_placement_visit_region_ops(state, state->region, visit);
+    loom_low_placement_table_t* out_table) {
+  const loom_value_ordinal_t value_count = state->value_domain->value_count;
+  if (value_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, value_count, sizeof(*state->ranges_by_result_ordinal),
+        (void**)&state->ranges_by_result_ordinal));
+    memset(state->ranges_by_result_ordinal, 0,
+           value_count * sizeof(*state->ranges_by_result_ordinal));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, value_count, sizeof(*state->ranges_by_source_ordinal),
+        (void**)&state->ranges_by_source_ordinal));
+    memset(state->ranges_by_source_ordinal, 0,
+           value_count * sizeof(*state->ranges_by_source_ordinal));
+  }
+
+  IREE_RETURN_IF_ERROR(loom_low_placement_visit_ops(state));
+  for (iree_host_size_t i = 0; i < state->pair_uses.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_placement_collect_pair_relations(
+        state, &state->pair_uses.values[i]));
+  }
+
+  const iree_host_size_t relation_count = state->relation_count;
+  if (relation_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->arena, relation_count,
+                                                   sizeof(*state->relations),
+                                                   (void**)&state->relations));
+    memset(state->relations, 0, relation_count * sizeof(*state->relations));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, relation_count,
+        sizeof(*state->relation_indices_by_source_ordinal),
+        (void**)&state->relation_indices_by_source_ordinal));
+    memset(state->relation_indices_by_source_ordinal, 0,
+           relation_count * sizeof(*state->relation_indices_by_source_ordinal));
+  }
+  loom_low_placement_prefix_ranges(state);
+  for (iree_host_size_t i = 0; i < relation_count; ++i) {
+    loom_low_placement_append_relation(state, &state->collected_relations[i]);
+  }
+  IREE_ASSERT_EQ(state->appended_relation_count, relation_count);
+  IREE_ASSERT_EQ(state->appended_source_relation_count, relation_count);
+
+  *out_table = (loom_low_placement_table_t){
+      .module = state->module,
+      .region = state->region,
+      .value_ids = state->liveness->value_ids,
+      .value_count = (loom_value_ordinal_t)state->liveness->value_count,
+      .relations = state->relations,
+      .relation_count = relation_count,
+      .location_relation_count = state->location_relation_count,
+      .ranges_by_result_ordinal = state->ranges_by_result_ordinal,
+      .relation_indices_by_source_ordinal =
+          state->relation_indices_by_source_ordinal,
+      .ranges_by_source_ordinal = state->ranges_by_source_ordinal,
+  };
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_placement_analyze_region(
     loom_module_t* module, const loom_region_t* region,
     const loom_local_value_domain_t* value_domain,
-    const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,
+    const loom_liveness_analysis_t* liveness,
+    loom_low_placement_pair_use_list_t pair_uses, iree_arena_allocator_t* arena,
     loom_low_placement_table_t* out_table) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
   *out_table = (loom_low_placement_table_t){0};
@@ -328,62 +463,20 @@ iree_status_t loom_low_placement_analyze_region(
               "low placement requires liveness over the same local value "
               "domain");
 
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(arena->block_pool, &scratch_arena);
   loom_low_placement_build_state_t state = {
       .module = module,
       .region = region,
       .value_domain = value_domain,
       .liveness = liveness,
+      .pair_uses = pair_uses,
       .arena = arena,
+      .scratch_arena = &scratch_arena,
   };
-  if (value_domain->value_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, value_domain->value_count,
-                                  sizeof(*state.ranges_by_result_ordinal),
-                                  (void**)&state.ranges_by_result_ordinal));
-    memset(state.ranges_by_result_ordinal, 0,
-           value_domain->value_count * sizeof(*state.ranges_by_result_ordinal));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, value_domain->value_count,
-                                  sizeof(*state.ranges_by_source_ordinal),
-                                  (void**)&state.ranges_by_source_ordinal));
-    memset(state.ranges_by_source_ordinal, 0,
-           value_domain->value_count * sizeof(*state.ranges_by_source_ordinal));
-  }
-
-  IREE_RETURN_IF_ERROR(loom_low_placement_visit_ops(
-      &state, loom_low_placement_count_op_relations));
-  const iree_host_size_t relation_count = state.relation_count;
-  if (relation_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, relation_count,
-                                                   sizeof(*state.relations),
-                                                   (void**)&state.relations));
-    memset(state.relations, 0, relation_count * sizeof(*state.relations));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, relation_count,
-        sizeof(*state.relation_indices_by_source_ordinal),
-        (void**)&state.relation_indices_by_source_ordinal));
-    memset(state.relation_indices_by_source_ordinal, 0,
-           relation_count * sizeof(*state.relation_indices_by_source_ordinal));
-  }
-  loom_low_placement_prefix_ranges(&state);
-  IREE_RETURN_IF_ERROR(loom_low_placement_visit_ops(
-      &state, loom_low_placement_append_op_relations));
-  IREE_ASSERT_EQ(state.appended_relation_count, relation_count);
-  IREE_ASSERT_EQ(state.appended_source_relation_count, relation_count);
-
-  *out_table = (loom_low_placement_table_t){
-      .module = module,
-      .region = region,
-      .value_ids = liveness->value_ids,
-      .value_count = (loom_value_ordinal_t)liveness->value_count,
-      .relations = state.relations,
-      .relation_count = relation_count,
-      .ranges_by_result_ordinal = state.ranges_by_result_ordinal,
-      .relation_indices_by_source_ordinal =
-          state.relation_indices_by_source_ordinal,
-      .ranges_by_source_ordinal = state.ranges_by_source_ordinal,
-  };
-  return iree_ok_status();
+  const iree_status_t status = loom_low_placement_build(&state, out_table);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 loom_low_placement_relation_range_t
