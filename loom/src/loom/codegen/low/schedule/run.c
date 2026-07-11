@@ -3030,6 +3030,44 @@ static bool loom_low_schedule_node_is_unscheduled_in_block(
              LOOM_LOW_SCHEDULE_NODE_NONE;
 }
 
+static bool loom_low_schedule_node_is_source_order_boundary(
+    const loom_low_schedule_node_t* node) {
+  return iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY);
+}
+
+// Returns the exclusive end of the next independently reorderable source
+// range. Boundary nodes occupy one-node ranges so every earlier range is fully
+// scheduled before the boundary and every later range begins after it.
+static uint32_t loom_low_schedule_source_range_end(
+    const loom_low_schedule_build_state_t* state, uint32_t range_start,
+    uint32_t block_node_end) {
+  if (loom_low_schedule_node_is_source_order_boundary(
+          &state->nodes[range_start])) {
+    return range_start + 1;
+  }
+  uint32_t range_end = range_start + 1;
+  while (range_end < block_node_end &&
+         !loom_low_schedule_node_is_source_order_boundary(
+             &state->nodes[range_end])) {
+    ++range_end;
+  }
+  return range_end;
+}
+
+static void loom_low_schedule_initialize_source_range_ready_heap(
+    const loom_low_schedule_build_state_t* state, const uint32_t* indegrees,
+    uint32_t range_start, uint32_t range_end,
+    loom_low_schedule_ready_heap_t* ready_heap) {
+  ready_heap->count = 0;
+  for (uint32_t node_index = range_start; node_index < range_end;
+       ++node_index) {
+    if (indegrees[node_index] == 0) {
+      loom_low_schedule_ready_heap_push(state, ready_heap, node_index);
+    }
+  }
+}
+
 static uint32_t loom_low_schedule_count_unscheduled_nodes_in_block(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_block_t* block_record) {
@@ -3436,14 +3474,15 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             state, &pressure_state);
       }
     }
-    ready_heap.count = 0;
-    for (uint32_t node_index = block_record->node_start;
-         node_index < block_node_end; ++node_index) {
-      if (indegrees[node_index] == 0) {
-        loom_low_schedule_ready_heap_push(state, &ready_heap, node_index);
-      }
-    }
     uint32_t scheduled_in_block = 0;
+    uint32_t range_start = block_record->node_start;
+    uint32_t range_end = range_start < block_node_end
+                             ? loom_low_schedule_source_range_end(
+                                   state, range_start, block_node_end)
+                             : range_start;
+    loom_low_schedule_initialize_source_range_ready_heap(
+        state, indegrees, range_start, range_end, &ready_heap);
+    uint32_t scheduled_in_range = 0;
     while (scheduled_in_block < block_record->node_count) {
       state->current_issue_cycle = scheduled_in_block;
       uint32_t chosen_node = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -3564,6 +3603,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       }
 
       state->nodes[chosen_node].scheduled_ordinal = scheduled_in_block++;
+      ++scheduled_in_range;
       state->current_issue_cycle = state->nodes[chosen_node].scheduled_ordinal;
       state->scheduled_node_indices[state->scheduled_node_count++] =
           chosen_node;
@@ -3605,11 +3645,21 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             }
           }
           if (indegrees[dependency->consumer_node] == 0 &&
-              state->nodes[dependency->consumer_node].block_index ==
-                  block_index) {
+              dependency->consumer_node >= range_start &&
+              dependency->consumer_node < range_end) {
             loom_low_schedule_ready_heap_push(state, &ready_heap,
                                               dependency->consumer_node);
           }
+        }
+      }
+      if (scheduled_in_range == range_end - range_start) {
+        range_start = range_end;
+        if (range_start < block_node_end) {
+          range_end = loom_low_schedule_source_range_end(state, range_start,
+                                                         block_node_end);
+          scheduled_in_range = 0;
+          loom_low_schedule_initialize_source_range_ready_heap(
+              state, indegrees, range_start, range_end, &ready_heap);
         }
       }
     }
