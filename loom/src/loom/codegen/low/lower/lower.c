@@ -3086,6 +3086,8 @@ static iree_status_t loom_low_lower_emit_selected_plan(
 static iree_status_t loom_low_lower_emit_region_ops(
     loom_low_lower_context_t* context, loom_region_t* source_region,
     bool map_source_blocks) {
+  // A rejected plan leaves its low results unbound, so emission cannot resume
+  // elsewhere in the region after any diagnostic error.
   iree_status_t status = iree_ok_status();
   for (uint16_t block_index = 0;
        block_index < source_region->block_count && iree_status_is_ok(status);
@@ -3109,7 +3111,7 @@ static iree_status_t loom_low_lower_emit_region_ops(
         break;
       }
       if (context->result->error_count != before_error_count) {
-        break;
+        return iree_ok_status();
       }
       if (!handled) {
         if (loom_low_lower_op_is_source_metadata(source_op->kind)) {
@@ -3120,7 +3122,7 @@ static iree_status_t loom_low_lower_emit_region_ops(
           break;
         }
         if (context->result->error_count != before_error_count) {
-          break;
+          return iree_ok_status();
         }
       }
     }

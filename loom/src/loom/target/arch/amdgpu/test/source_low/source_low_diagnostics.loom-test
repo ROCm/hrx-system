@@ -808,8 +808,6 @@ kernel.def target(@target) @fragment_static_vaddr_offset_range_rejected() {
 
 // ====
 
-// RUN: emit source-low diagnostics=all output=low
-
 amdgpu.target<gfx1100> @target
 
 func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vector<8xf32>) -> (vector<16xf16>) {
@@ -824,6 +822,22 @@ func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vecto
 // ====
 
 // RUN: emit source-low diagnostics=all output=low
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @fragment_repack_rejection_stops_multiblock_emission(%payload: vector<8xf32>, %value: f32) -> (vector<16xbf16>, f32) {
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  // ERROR@+1: AMDGPU/041 {source_role_key="unknown", result_role_key="lhs", source_type="vector<8xf32>", result_type="vector<16xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="source_fragment_facts"}
+  %repacked = vector.fragment.repack<lhs> %payload shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+  %after_rejection = scalar.addf %value, %value : f32
+  cfg.br ^next
+^next:
+  %next = scalar.mulf %after_rejection, %value : f32
+  func.return %repacked, %next : vector<16xbf16>, f32
+}
+
+// ====
 
 amdgpu.target<gfx950> @target
 
