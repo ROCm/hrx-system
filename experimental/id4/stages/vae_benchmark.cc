@@ -54,6 +54,8 @@ struct VaeBenchmarkShape {
   id4_vae_tiling_config_t tiling;
   // Activation and parameter-storage route configured on the stage.
   id4_vae_activation_format_t activation_format;
+  // Attention implementation used by the decoder mid-block.
+  id4_vae_attention_implementation_t attention_implementation;
   // File name used when --id4_plan_output_dir requests a plan dump.
   const char* plan_file_name;
 };
@@ -110,6 +112,8 @@ static constexpr VaeBenchmarkShape kFlux2FullImageShape = {
     /*.tiling=*/DisabledTiling(),
     // Canonical F32 activation storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
+    // F32 attention computes online without quadratic storage.
+    /*.attention_implementation=*/ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_full_frame.json",
 };
@@ -128,6 +132,8 @@ static constexpr VaeBenchmarkShape kFlux2TiledFullImageShape = {
     ExplicitTileSizeTiling(kFlux2TileLatentWidth, kFlux2TileLatentHeight, 0.5f),
     // Canonical F32 activation storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
+    // F32 attention computes online without quadratic storage.
+    /*.attention_implementation=*/ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_tiled.json",
 };
@@ -145,6 +151,8 @@ static constexpr VaeBenchmarkShape kFlux2TileLocalShape = {
     /*.tiling=*/DisabledTiling(),
     // Canonical F32 activation storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
+    // F32 attention computes online without quadratic storage.
+    /*.attention_implementation=*/ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_tile_local.json",
 };
@@ -162,8 +170,30 @@ static constexpr VaeBenchmarkShape kFlux2Bf16FullImageShape = {
     /*.tiling=*/DisabledTiling(),
     // BF16 prelude activation and post-quant storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Materialized WMMA attention is the throughput-oriented control.
+    /*.attention_implementation=*/
+    ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_bf16_full_frame.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16OnlineFullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Single-image decode batch.
+    /*.latent_batch_count=*/kFlux2LatentBatchCount,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Full-frame VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Online attention avoids token-squared transient tensors.
+    /*.attention_implementation=*/ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_online_full_frame.json",
 };
 
 static constexpr VaeBenchmarkShape kFlux2Bf16SmallImageShape = {
@@ -179,6 +209,9 @@ static constexpr VaeBenchmarkShape kFlux2Bf16SmallImageShape = {
     /*.tiling=*/DisabledTiling(),
     // BF16 prelude activation and post-quant storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Materialized WMMA attention is the throughput-oriented control.
+    /*.attention_implementation=*/
+    ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_bf16_small_frame.json",
 };
@@ -197,8 +230,31 @@ static constexpr VaeBenchmarkShape kFlux2Bf16TiledFullImageShape = {
     ExplicitTileSizeTiling(kFlux2TileLatentWidth, kFlux2TileLatentHeight, 0.5f),
     // BF16 prelude activation and post-quant storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Materialized WMMA attention is the throughput-oriented control.
+    /*.attention_implementation=*/
+    ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_bf16_tiled.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16Tiled40Overlap25FullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Single-image decode batch.
+    /*.latent_batch_count=*/kFlux2LatentBatchCount,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Four 40x40 latent tiles with 25% requested overlap.
+    /*.tiling=*/ExplicitTileSizeTiling(40, 40, 0.25f),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Materialized WMMA attention is the throughput-oriented control.
+    /*.attention_implementation=*/
+    ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_tiled_40_overlap_25.json",
 };
 
 static constexpr VaeBenchmarkShape kFlux2Bf16TileLocalShape = {
@@ -214,6 +270,9 @@ static constexpr VaeBenchmarkShape kFlux2Bf16TileLocalShape = {
     /*.tiling=*/DisabledTiling(),
     // BF16 prelude activation and post-quant storage.
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Materialized WMMA attention is the throughput-oriented control.
+    /*.attention_implementation=*/
+    ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_bf16_tile_local.json",
 };
@@ -346,6 +405,8 @@ static iree_status_t LoadFixtureVaeBenchmarkShape(
   out_shape->decoded_element_count = decoded_element_count;
   out_shape->tiling = DisabledTiling();
   out_shape->activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
+  out_shape->attention_implementation =
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
   out_shape->plan_file_name = "decode_bf16_fixture.json";
   return iree_ok_status();
 }
@@ -364,6 +425,7 @@ static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
       shape.latent_width, shape.latent_height, kFlux2LatentChannelCount,
       shape.latent_batch_count);
   vae_options.request.tiling = shape.tiling;
+  vae_options.request.attention_implementation = shape.attention_implementation;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -488,17 +550,17 @@ static const iree_benchmark_def_t* RegisterVaeBenchmark(
           RegisterVaeBenchmark(iree_make_cstring_view(#name), name, \
                                IREE_BENCHMARK_UNIT_##time_unit)
 
-IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
+static iree_status_t RunVaeStagePlan(iree_benchmark_state_t* benchmark_state,
+                                     VaeBenchmarkShape shape) {
   VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
-      &context, kFlux2FullImageShape.activation_format));
   IREE_RETURN_IF_ERROR(
-      WritePlanJsonIfRequested(&context, kFlux2FullImageShape));
+      CreateLoadedVaeStageContext(&context, shape.activation_format));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(&context, shape));
 
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
     id4_pipeline_plan_t* plan = nullptr;
-    IREE_RETURN_IF_ERROR(CreateVaePlan(&context, kFlux2FullImageShape, &plan));
+    IREE_RETURN_IF_ERROR(CreateVaePlan(&context, shape, &plan));
     iree_optimization_barrier(plan);
     id4_pipeline_plan_release(plan);
     ++iteration_count;
@@ -506,52 +568,27 @@ IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
   iree_benchmark_set_items_processed(benchmark_state,
                                      static_cast<int64_t>(iteration_count));
   return iree_ok_status();
+}
+
+IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
+  return RunVaeStagePlan(benchmark_state, kFlux2FullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Decode, MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2TiledDecode) {
-  VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
-      &context, kFlux2TiledFullImageShape.activation_format));
-  IREE_RETURN_IF_ERROR(
-      WritePlanJsonIfRequested(&context, kFlux2TiledFullImageShape));
-
-  uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
-    id4_pipeline_plan_t* plan = nullptr;
-    IREE_RETURN_IF_ERROR(
-        CreateVaePlan(&context, kFlux2TiledFullImageShape, &plan));
-    iree_optimization_barrier(plan);
-    id4_pipeline_plan_release(plan);
-    ++iteration_count;
-  }
-  iree_benchmark_set_items_processed(benchmark_state,
-                                     static_cast<int64_t>(iteration_count));
-  return iree_ok_status();
+  return RunVaeStagePlan(benchmark_state, kFlux2TiledFullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2TiledDecode, MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Bf16Decode) {
-  VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
-      &context, kFlux2Bf16FullImageShape.activation_format));
-  IREE_RETURN_IF_ERROR(
-      WritePlanJsonIfRequested(&context, kFlux2Bf16FullImageShape));
-
-  uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
-    id4_pipeline_plan_t* plan = nullptr;
-    IREE_RETURN_IF_ERROR(
-        CreateVaePlan(&context, kFlux2Bf16FullImageShape, &plan));
-    iree_optimization_barrier(plan);
-    id4_pipeline_plan_release(plan);
-    ++iteration_count;
-  }
-  iree_benchmark_set_items_processed(benchmark_state,
-                                     static_cast<int64_t>(iteration_count));
-  return iree_ok_status();
+  return RunVaeStagePlan(benchmark_state, kFlux2Bf16FullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Bf16Decode, MICROSECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Bf16OnlineDecode) {
+  return RunVaeStagePlan(benchmark_state, kFlux2Bf16OnlineFullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Bf16OnlineDecode, MICROSECOND);
 
 static iree_status_t RunVaeStagePrepareCachedKernels(
     iree_benchmark_state_t* benchmark_state, VaeBenchmarkShape shape) {
@@ -652,20 +689,26 @@ static void SetVaeBenchmarkLabel(
       shape.activation_format == ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT
           ? IREE_SV("bf16_conv_input")
           : IREE_SV("f32_canonical");
+  const iree_string_view_t attention_implementation =
+      shape.attention_implementation == ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE
+          ? IREE_SV("online")
+          : IREE_SV("materialized");
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   IREE_CHECK_OK(iree_string_builder_append_format(
       &label_builder,
       "input=%.*s latent=%" PRIu32 "x%" PRIu32 "x%" PRIu32 " image=%" PRIu64
       "x%" PRIu64
-      " activation=%.*s"
+      " activation=%.*s attention=%.*s"
       " param_total=%" PRIu64 "MiB param_source=%" PRIu64
       "MiB local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
       " dispatches=%" PRIhsz " regions=%" PRIhsz,
       static_cast<int>(input_kind.size), input_kind.data, shape.latent_width,
       shape.latent_height, shape.latent_batch_count, decoded_width,
       decoded_height, static_cast<int>(activation_format.size),
-      activation_format.data, CeilMiB(statistics.parameter_slab_byte_length),
+      activation_format.data, static_cast<int>(attention_implementation.size),
+      attention_implementation.data,
+      CeilMiB(statistics.parameter_slab_byte_length),
       CeilMiB(statistics.parameter_source_byte_length),
       CeilMiB(statistics.memory_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
@@ -782,6 +825,12 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueBf16EndToEnd) {
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16EndToEnd, MILLISECOND);
 
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16OnlineEndToEnd) {
+  return RunSyntheticVaeStageIssueEndToEnd(benchmark_state,
+                                           kFlux2Bf16OnlineFullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16OnlineEndToEnd, MILLISECOND);
+
 IREE_BENCHMARK_FN(BM_VaeStageIssueBf16SmallImageEndToEnd) {
   return RunSyntheticVaeStageIssueEndToEnd(benchmark_state,
                                            kFlux2Bf16SmallImageShape);
@@ -798,11 +847,46 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueBf16FixtureEndToEnd) {
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16FixtureEndToEnd, MILLISECOND);
 
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16FixtureOnlineEndToEnd) {
+  VaeBenchmarkContext context;
+  VaeBenchmarkShape shape;
+  IREE_RETURN_IF_ERROR(LoadFixtureVaeBenchmarkShape(&context, &shape));
+  shape.attention_implementation =
+      kFlux2Bf16OnlineFullImageShape.attention_implementation;
+  shape.plan_file_name = kFlux2Bf16OnlineFullImageShape.plan_file_name;
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context, shape));
+  return RunVaeStageIssueEndToEnd(benchmark_state, &context, shape,
+                                  IREE_SV("fixture"), QueueFixtureVaeInput);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16FixtureOnlineEndToEnd,
+                           MILLISECOND);
+
 IREE_BENCHMARK_FN(BM_VaeStageIssueBf16TiledEndToEnd) {
   return RunSyntheticVaeStageIssueEndToEnd(benchmark_state,
                                            kFlux2Bf16TiledFullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16TiledEndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16Tiled40Overlap25EndToEnd) {
+  return RunSyntheticVaeStageIssueEndToEnd(
+      benchmark_state, kFlux2Bf16Tiled40Overlap25FullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16Tiled40Overlap25EndToEnd,
+                           MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16FixtureTiled40Overlap25EndToEnd) {
+  VaeBenchmarkContext context;
+  VaeBenchmarkShape shape;
+  IREE_RETURN_IF_ERROR(LoadFixtureVaeBenchmarkShape(&context, &shape));
+  shape.tiling = kFlux2Bf16Tiled40Overlap25FullImageShape.tiling;
+  shape.plan_file_name =
+      kFlux2Bf16Tiled40Overlap25FullImageShape.plan_file_name;
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context, shape));
+  return RunVaeStageIssueEndToEnd(benchmark_state, &context, shape,
+                                  IREE_SV("fixture"), QueueFixtureVaeInput);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16FixtureTiled40Overlap25EndToEnd,
+                           MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStageIssueBf16TileLocalEndToEnd) {
   return RunSyntheticVaeStageIssueEndToEnd(benchmark_state,

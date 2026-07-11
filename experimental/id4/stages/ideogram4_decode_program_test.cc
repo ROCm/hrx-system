@@ -111,6 +111,9 @@ static id4_ideogram4_decode_request_config_t MakeRequest(
           // Memory budget.
           /*.memory_budget=*/0,
       },
+      // VAE attention implementation used by the decoder mid-block.
+      /*.vae_attention_implementation=*/
+      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
   };
   return request;
 }

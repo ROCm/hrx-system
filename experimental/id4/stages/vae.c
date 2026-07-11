@@ -59,6 +59,7 @@ static iree_status_t id4_vae_stage_validate_model_config(
       model.min_tile_size_x, model.min_tile_size_y, model.latent_channel_count,
       1);
   request.tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  request.attention_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
   id4_vae_decode_tiling_plan_t tiling_plan;
   return id4_vae_program_resolve_decode_tiling(model, request, &tiling_plan);
 }

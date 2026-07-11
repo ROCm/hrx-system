@@ -320,6 +320,8 @@ static iree_status_t PlanDecodeStage(
     decode_options.request.vae_tiling.tile_size_y = 32;
     decode_options.request.vae_tiling.overlap = 0.5f;
   }
+  decode_options.request.vae_attention_implementation =
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
 
   const iree_string_view_t diagnostic_tap_names[] = {
       IREE_SV("vae.flux2.internal_latent"),

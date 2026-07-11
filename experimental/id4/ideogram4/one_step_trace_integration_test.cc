@@ -606,6 +606,8 @@ static iree_status_t PlanDecodeStage(
   decode_options.structure_size = sizeof(decode_options);
   decode_options.request.diffusion_latent_shape = diffusion_latent_shape;
   decode_options.request.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  decode_options.request.vae_attention_implementation =
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));

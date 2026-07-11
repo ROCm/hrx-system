@@ -173,6 +173,17 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
                               " is invalid",
                               (uint32_t)policy.vae_tiling.mode);
   }
+  switch (policy.vae_attention_implementation) {
+    case ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE:
+    case ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation VAE attention implementation %" PRIu32
+          " is invalid",
+          (uint32_t)policy.vae_attention_implementation);
+  }
   return iree_ok_status();
 }
 
@@ -372,6 +383,8 @@ static iree_status_t id4_ideogram4_plan_generation_decode(
   decode_options.request.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
   decode_options.request.vae_tiling = options->policy.vae_tiling;
+  decode_options.request.vae_attention_implementation =
+      options->policy.vae_attention_implementation;
   return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
                                   session->decode_stage, &decode_options,
                                   options, out_plan);
@@ -453,6 +466,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
     plan->summary.dit_feed_forward_implementation =
         options->policy.dit_feed_forward_implementation;
     plan->summary.vae_tiling = options->policy.vae_tiling;
+    plan->summary.vae_attention_implementation =
+        options->policy.vae_attention_implementation;
   }
 
   if (iree_status_is_ok(status)) {
@@ -1832,13 +1847,15 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       "\"qwen_weight_execution_strategy\":%u,"
       "\"qwen_attention_implementation\":%u,"
       "\"dit_attention_implementation\":%u,"
-      "\"dit_feed_forward_implementation\":%u,\"vae_tiling\":",
+      "\"dit_feed_forward_implementation\":%u,"
+      "\"vae_attention_implementation\":%u,\"vae_tiling\":",
       (uint32_t)plan->summary.dit_activation_format,
       (uint32_t)plan->summary.dit_weight_execution_format,
       (uint32_t)plan->summary.qwen_weight_execution_strategy,
       (uint32_t)plan->summary.qwen_attention_implementation,
       (uint32_t)plan->summary.dit_attention_implementation,
-      (uint32_t)plan->summary.dit_feed_forward_implementation));
+      (uint32_t)plan->summary.dit_feed_forward_implementation,
+      (uint32_t)plan->summary.vae_attention_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(
       builder, plan->summary.vae_tiling));
   IREE_RETURN_IF_ERROR(

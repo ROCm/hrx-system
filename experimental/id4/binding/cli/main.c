@@ -76,6 +76,8 @@ IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
 IREE_FLAG(string, vae_tiling_mode, "disabled",
           "VAE tiling mode: disabled, explicit_tile_size, relative_tile_size, "
           "or memory_budget.");
+IREE_FLAG(string, vae_attention_implementation, "materialized",
+          "VAE attention implementation: online or materialized.");
 IREE_FLAG(int32_t, vae_tile_size_x, 0,
           "VAE latent tile width for --vae_tiling_mode=explicit_tile_size.");
 IREE_FLAG(int32_t, vae_tile_size_y, 0,
@@ -559,6 +561,24 @@ static iree_status_t id4_cli_parse_vae_tiling_config(
       IREE_STATUS_INVALID_ARGUMENT,
       "--vae_tiling_mode must be disabled, explicit_tile_size, "
       "relative_tile_size, or memory_budget");
+}
+
+static iree_status_t id4_cli_parse_vae_attention_implementation(
+    id4_vae_attention_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  iree_string_view_t value =
+      iree_make_cstring_view(FLAG_vae_attention_implementation);
+  if (iree_string_view_equal(value, IREE_SV("online"))) {
+    *out_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("materialized"))) {
+    *out_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--vae_attention_implementation must be online or materialized");
 }
 
 static iree_status_t id4_cli_parse_generation_residency_request_mode(
@@ -1785,6 +1805,8 @@ static iree_status_t id4_cli_make_generation_plan_policy(
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_feed_forward_implementation(
       &policy.dit_feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_cli_parse_vae_tiling_config(&policy.vae_tiling));
+  IREE_RETURN_IF_ERROR(id4_cli_parse_vae_attention_implementation(
+      &policy.vae_attention_implementation));
   *out_policy = policy;
   return iree_ok_status();
 }

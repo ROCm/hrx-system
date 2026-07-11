@@ -32,6 +32,8 @@ typedef struct id4_ideogram4_decode_request_config_t {
   id4_pipeline_program_shape_t diffusion_latent_shape;
   // VAE tiling policy for the diffusion latent.
   id4_vae_tiling_config_t vae_tiling;
+  // VAE attention implementation used by the decoder mid-block.
+  id4_vae_attention_implementation_t vae_attention_implementation;
 } id4_ideogram4_decode_request_config_t;
 
 // Options for authoring an Ideogram4 latent-to-image decode program.

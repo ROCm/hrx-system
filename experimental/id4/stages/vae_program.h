@@ -66,6 +66,17 @@ typedef enum id4_vae_activation_format_e {
   ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT = 2,
 } id4_vae_activation_format_t;
 
+// Attention implementation selected while authoring VAE decode.
+typedef enum id4_vae_attention_implementation_e {
+  // Invalid attention implementation.
+  ID4_VAE_ATTENTION_IMPLEMENTATION_INVALID = 0,
+  // Exact online softmax that does not materialize token-squared tensors.
+  ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE = 1,
+  // Exact QK, softmax, and PV schedule with materialized score/probability
+  // tensors.
+  ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED = 2,
+} id4_vae_attention_implementation_t;
+
 // Static VAE model and implementation capabilities.
 typedef struct id4_vae_model_config_t {
   // Latent-to-image scale factor along the width axis.
@@ -118,6 +129,8 @@ typedef struct id4_vae_decode_request_config_t {
   id4_pipeline_program_shape_t latent_shape;
   // Tiling policy for this decode request.
   id4_vae_tiling_config_t tiling;
+  // Attention implementation used by the decoder mid-block.
+  id4_vae_attention_implementation_t attention_implementation;
 } id4_vae_decode_request_config_t;
 
 // Concrete VAE tiling facts derived during planning.

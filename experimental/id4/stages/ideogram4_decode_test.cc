@@ -119,6 +119,8 @@ TEST(Ideogram4DecodeStage, PlansLatentToImageDecode) {
   decode_options.request.vae_tiling.tile_size_x = 2;
   decode_options.request.vae_tiling.tile_size_y = 2;
   decode_options.request.vae_tiling.overlap = 0.0f;
+  decode_options.request.vae_attention_implementation =
+      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

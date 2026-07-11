@@ -115,6 +115,8 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
       dit_feed_forward_implementation;
   // VAE tiling policy used by the final latent decode stage.
   id4_vae_tiling_config_t vae_tiling;
+  // VAE attention implementation used by the final latent decode stage.
+  id4_vae_attention_implementation_t vae_attention_implementation;
 } id4_ideogram4_generation_plan_policy_t;
 
 // Bitmask selecting coarse generation stage bundles.
@@ -194,6 +196,8 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
       dit_feed_forward_implementation;
   // VAE tiling policy selected by the plan.
   id4_vae_tiling_config_t vae_tiling;
+  // VAE attention implementation selected by the plan.
+  id4_vae_attention_implementation_t vae_attention_implementation;
 } id4_ideogram4_generation_plan_summary_t;
 
 // Parameter providers used when preparing one generation plan.

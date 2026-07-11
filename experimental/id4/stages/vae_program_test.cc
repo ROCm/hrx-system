@@ -105,6 +105,8 @@ static id4_vae_decode_request_config_t MakeExplicitRequest(
           // Memory budget.
           /*.memory_budget=*/0,
       },
+      // Attention implementation used by the decoder mid-block.
+      /*.attention_implementation=*/ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
   };
   return request;
 }
@@ -233,6 +235,7 @@ TEST(VaeProgram, ResolvesMemoryBudgetTiling) {
   request.tiling.mode = ID4_VAE_TILING_MODE_MEMORY_BUDGET;
   request.tiling.overlap = 0.0f;
   request.tiling.memory_budget = 4 * 4 * sizeof(float);
+  request.attention_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
 
   id4_vae_decode_tiling_plan_t tiling_plan;
   IREE_ASSERT_OK(
@@ -292,6 +295,25 @@ TEST(VaeProgram, AuthorsFlux2Bf16PreludeContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(VaeProgram, AuthorsFlux2Bf16OnlineAttentionWithoutQuadraticTensor) {
+  const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(64, 64, 128, 1), 64, 64, 0.0f);
+  request.attention_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+  options.activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
+  id4_pipeline_program_t* program = CreateVaeProgram(&options);
+
+  EXPECT_FALSE(ProgramContainsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank3(1, 16384, 16384)));
+  EXPECT_FALSE(ProgramContainsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank3(1, 16384, 16384)));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(VaeProgram, AuthorsFlux2TiledDecodeBoundaryContract) {
   const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
@@ -337,6 +359,33 @@ TEST(VaeProgram, RejectsInvalidActivationFormat) {
       id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 2, 2, 0.0f);
   id4_vae_program_options_t options = MakeProgramOptions(model, request);
   options.activation_format = ID4_VAE_ACTIVATION_FORMAT_INVALID;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_vae_program_author_decode(&options, builder_scope.builder()));
+}
+
+TEST(VaeProgram, RejectsInvalidAttentionImplementation) {
+  ProgramBuilderScope builder_scope;
+  id4_vae_model_config_t model = MakeSmallModelConfig();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 2, 2, 0.0f);
+  request.attention_implementation = ID4_VAE_ATTENTION_IMPLEMENTATION_INVALID;
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_vae_program_author_decode(&options, builder_scope.builder()));
+}
+
+TEST(VaeProgram, RejectsMaterializedAttentionWithF32Activations) {
+  ProgramBuilderScope builder_scope;
+  id4_vae_model_config_t model = MakeSmallModelConfig();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 2, 2, 0.0f);
+  request.attention_implementation =
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

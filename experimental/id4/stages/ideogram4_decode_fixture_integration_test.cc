@@ -35,6 +35,25 @@ namespace {
 
 constexpr uint8_t kOutputSentinel = 0xA5;
 
+typedef uint32_t FinalLatentFixtureValidationFlags;
+enum FinalLatentFixtureValidationFlagBits {
+  // Compare the requested full-frame diagnostic taps with the fixture.
+  kValidateDiagnosticTaps = 1u << 0,
+  // Compare the decoded image boundary with the fixture.
+  kValidateDecodedImage = 1u << 1,
+};
+
+struct FinalLatentFixtureOptions {
+  // Activation storage route used by the VAE decode program.
+  id4_vae_activation_format_t vae_activation_format;
+  // Attention implementation used by the VAE decoder mid-block.
+  id4_vae_attention_implementation_t vae_attention_implementation;
+  // Fixture outputs that this integration run validates.
+  FinalLatentFixtureValidationFlags validation_flags;
+  // Stable identifier used when capturing this integration run.
+  iree_string_view_t capture_run_id;
+};
+
 static iree_status_t FindFixtureTensor(
     const id4::test::FixtureTensorSet& fixture_tensors, iree_string_view_t role,
     iree_string_view_t name, const id4::test::FixtureTensor** out_tensor) {
@@ -240,9 +259,7 @@ static iree_status_t VerifyDecodedImageContents(
   return iree_ok_status();
 }
 
-static void RunFinalLatentFixture(
-    id4_vae_activation_format_t vae_activation_format,
-    iree_string_view_t capture_run_id) {
+static void RunFinalLatentFixture(FinalLatentFixtureOptions options) {
   iree_string_view_t fixture_directory =
       iree_make_cstring_view(FLAG_id4_fixture_dir);
   ASSERT_FALSE(iree_string_view_is_empty(fixture_directory))
@@ -273,7 +290,7 @@ static void RunFinalLatentFixture(
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
   IREE_ASSERT_OK(
-      CreateDecodeStage(context, vae_activation_format, stage.out()));
+      CreateDecodeStage(context, options.vae_activation_format, stage.out()));
   id4::test::OwningRef<iree_io_parameter_provider_t,
                        iree_io_parameter_provider_release>
       parameter_provider;
@@ -295,6 +312,8 @@ static void RunFinalLatentFixture(
   decode_options.structure_size = sizeof(decode_options);
   decode_options.request.diffusion_latent_shape = diffusion_latent_shape;
   decode_options.request.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  decode_options.request.vae_attention_implementation =
+      options.vae_attention_implementation;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -318,11 +337,13 @@ static void RunFinalLatentFixture(
       IREE_SV("vae.decoder.mid.attn_1.output"),
       IREE_SV("vae.decoder.mid.block_2.output"),
   };
-  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
-  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
-      IREE_ARRAYSIZE(diagnostic_tap_names),
-      diagnostic_tap_names,
-  };
+  if (iree_all_bits_set(options.validation_flags, kValidateDiagnosticTaps)) {
+    plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+    plan_options.diagnostic_tap_names = (iree_string_view_list_t){
+        IREE_ARRAYSIZE(diagnostic_tap_names),
+        diagnostic_tap_names,
+    };
+  }
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &diagnostics_sink;
@@ -444,7 +465,7 @@ static void RunFinalLatentFixture(
     id4_tooling_capture_execution_options_t capture_options;
     std::memset(&capture_options, 0, sizeof(capture_options));
     capture_options.structure_size = sizeof(capture_options);
-    capture_options.run_id = capture_run_id;
+    capture_options.run_id = options.capture_run_id;
     capture_options.output_directory = capture_directory;
     capture_options.plan = plan.get();
     capture_options.device = context.device.get();
@@ -483,21 +504,23 @@ static void RunFinalLatentFixture(
     image_options.host_allocator = iree_allocator_system();
     IREE_ASSERT_OK(id4_tooling_write_f32_rgb_ppm(&image_options));
   }
-  for (iree_string_view_t diagnostic_tap_name : diagnostic_tap_names) {
-    if (!ShouldCompareF32FixtureTap(vae_activation_format,
-                                    diagnostic_tap_name)) {
-      continue;
+  if (iree_all_bits_set(options.validation_flags, kValidateDiagnosticTaps)) {
+    for (iree_string_view_t diagnostic_tap_name : diagnostic_tap_names) {
+      if (!ShouldCompareF32FixtureTap(options.vae_activation_format,
+                                      diagnostic_tap_name)) {
+        continue;
+      }
+      const id4::test::FixtureTensor* expected_tap = nullptr;
+      IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
+                                       diagnostic_tap_name, &expected_tap));
+      IREE_ASSERT_OK(CompareDiagnosticTapWithFixtureTensor(
+          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+          diagnostic_tap_bindings, options.vae_activation_format, *expected_tap,
+          read_wait.list()));
     }
-    const id4::test::FixtureTensor* expected_tap = nullptr;
-    IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                     diagnostic_tap_name, &expected_tap));
-    IREE_ASSERT_OK(CompareDiagnosticTapWithFixtureTensor(
-        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-        diagnostic_tap_bindings, vae_activation_format, *expected_tap,
-        read_wait.list()));
   }
 
-  if (vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL) {
+  if (iree_all_bits_set(options.validation_flags, kValidateDecodedImage)) {
     IREE_ASSERT_OK(CompareBoundaryWithFixtureTensor(
         context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
         boundary_bindings, IREE_SV("media.image.decoded"),
@@ -507,14 +530,44 @@ static void RunFinalLatentFixture(
 
 TEST(Ideogram4DecodeStageFixtureIntegration,
      PrepareAndIssueFinalLatentFixture) {
-  RunFinalLatentFixture(ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
-                        IREE_SV("ideogram4_decode_fixture_f32"));
+  RunFinalLatentFixture({
+      // Activation storage route used by the VAE decode program.
+      ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
+      // F32 reference attention computes online without quadratic storage.
+      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE,
+      // Validate both internal stage taps and the exported image.
+      kValidateDiagnosticTaps | kValidateDecodedImage,
+      // Stable identifier used when capturing this integration run.
+      IREE_SV("ideogram4_decode_fixture_f32"),
+  });
 }
 
 TEST(Ideogram4DecodeStageFixtureIntegration,
      IssueFinalLatentFixtureBf16PreludeSmoke) {
-  RunFinalLatentFixture(ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
-                        IREE_SV("ideogram4_decode_fixture_bf16"));
+  RunFinalLatentFixture({
+      // Activation storage route used by the VAE decode program.
+      ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+      // Materialized attention remains the full-frame performance control.
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
+      // Internal taps provide the narrow BF16 correctness checkpoints.
+      kValidateDiagnosticTaps,
+      // Stable identifier used when capturing this integration run.
+      IREE_SV("ideogram4_decode_fixture_bf16"),
+  });
+}
+
+TEST(Ideogram4DecodeStageFixtureIntegration,
+     IssueFinalLatentFixtureBf16FullFrame) {
+  RunFinalLatentFixture({
+      // Activation storage route used by the production VAE decode program.
+      ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+      // Materialized attention remains the full-frame performance control.
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED,
+      // Validate the exported image without retaining internal stage taps.
+      kValidateDecodedImage,
+      // Stable identifier used when capturing this integration run.
+      IREE_SV("ideogram4_decode_fixture_bf16_full_frame"),
+  });
 }
 
 }  // namespace
