@@ -153,26 +153,33 @@ void ExpectOccupancyRegisterClass(const loom_amdgpu_occupancy_model_t* model,
       << ToString(expected_name);
   EXPECT_EQ(reg_class->allocation_granularity, expected_allocation_granularity)
       << ToString(expected_name);
-  ASSERT_EQ(reg_class->pressure_cliff_count, expected_cliff_count)
+  const loom_low_pressure_cliff_range_t cliff_range =
+      loom_low_pressure_cliff_table_range(&model->pressure_cliffs,
+                                          reg_class->descriptor_reg_class_id);
+  ASSERT_EQ(cliff_range.count, expected_cliff_count) << ToString(expected_name);
+  ASSERT_LE(cliff_range.start + cliff_range.count, model->pressure_cliffs.count)
       << ToString(expected_name);
-  ASSERT_NE(reg_class->pressure_cliffs, nullptr) << ToString(expected_name);
-  for (iree_host_size_t i = 0; i < reg_class->pressure_cliff_count; ++i) {
-    const loom_amdgpu_occupancy_pressure_cliff_model_t* cliff =
-        &reg_class->pressure_cliffs[i];
+  for (iree_host_size_t i = 0; i < cliff_range.count; ++i) {
+    const loom_low_pressure_cliff_t* cliff =
+        &model->pressure_cliffs.values[cliff_range.start + i];
+    EXPECT_EQ(cliff->descriptor_reg_class_id,
+              reg_class->descriptor_reg_class_id)
+        << ToString(expected_name) << " cliff " << i;
     EXPECT_GT(cliff->tier_before, cliff->tier_after)
         << ToString(expected_name) << " cliff " << i;
     if (i > 0) {
-      const loom_amdgpu_occupancy_pressure_cliff_model_t* previous =
-          &reg_class->pressure_cliffs[i - 1];
+      const loom_low_pressure_cliff_t* previous =
+          &model->pressure_cliffs.values[cliff_range.start + i - 1];
       EXPECT_GT(cliff->cliff_units, previous->cliff_units)
           << ToString(expected_name) << " cliff " << i;
       EXPECT_EQ(cliff->tier_before, previous->tier_after)
           << ToString(expected_name) << " cliff " << i;
     }
   }
-  EXPECT_EQ(reg_class->pressure_cliffs[reg_class->pressure_cliff_count - 1]
-                .tier_after,
-            0u)
+  EXPECT_EQ(
+      model->pressure_cliffs.values[cliff_range.start + cliff_range.count - 1]
+          .tier_after,
+      0u)
       << ToString(expected_name);
 }
 
@@ -441,9 +448,9 @@ TEST_F(AmdgpuRegistersTest, OccupancyPoolsStaySeparateFromAddressability) {
             c.descriptor_set_ordinal);
     ASSERT_NE(model, nullptr);
     EXPECT_EQ(model->descriptor_set_ordinal, c.descriptor_set_ordinal);
-    EXPECT_EQ(model->pressure_cliff_count, c.sgpr_pressure_cliff_count +
-                                               c.vgpr_pressure_cliff_count +
-                                               c.agpr_pressure_cliff_count);
+    EXPECT_EQ(model->pressure_cliffs.count, c.sgpr_pressure_cliff_count +
+                                                c.vgpr_pressure_cliff_count +
+                                                c.agpr_pressure_cliff_count);
     ExpectOccupancyRegisterClass(
         model, 0, IREE_SV("amdgpu.sgpr"), c.sgpr_pool_units,
         c.sgpr_allocation_granularity, c.sgpr_pressure_cliff_count);

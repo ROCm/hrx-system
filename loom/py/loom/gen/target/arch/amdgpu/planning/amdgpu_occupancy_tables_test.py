@@ -28,9 +28,11 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert "\nif " not in source
     assert "\nreturn " not in source
     assert "loom_amdgpu_occupancy_model_for_descriptor_set_ordinal" not in source
-    assert "loom_amdgpu_occupancy_pressure_cliff_model_t" in source
+    assert "loom_low_pressure_cliff_t" in source
+    assert "loom_low_pressure_cliff_range_t" in source
     assert ".pressure_cliffs =" in source
-    assert ".pressure_cliff_count =" in source
+    assert ".ranges =" in source
+    assert ".range_count =" in source
     assert "RegisterClassIndexByDescriptorRegClassId" in source
     assert ".register_class_indices_by_descriptor_reg_class_id =" in source
     assert ".descriptor_reg_class_count =" in source

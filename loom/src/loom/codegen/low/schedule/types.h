@@ -23,6 +23,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
+#include "loom/codegen/low/pressure.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -160,43 +161,6 @@ typedef enum loom_low_schedule_strategy_e {
 
 #define LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE UINT32_MAX
 #define LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE UINT32_MAX
-
-// One target-provided register-pressure cliff.
-//
-// Cliffs are keyed by descriptor-set-local register-class ID so the scheduler
-// can direct-index them after resolving low register types. The list passed to
-// the scheduler must be sorted by descriptor_reg_class_id and then cliff_units.
-// A candidate whose projected live pressure remains at or above |cliff_units|
-// receives a penalty based on the resident-wave drop so existing pressure debt
-// loses to candidates that can pay it down.
-typedef struct loom_low_schedule_pressure_cliff_t {
-  // Descriptor-set-local register class affected by this cliff.
-  uint16_t descriptor_reg_class_id;
-  // Live allocation units at which this cliff is crossed.
-  uint32_t cliff_units;
-  // Occupancy or throughput tier before crossing the cliff.
-  uint32_t tier_before;
-  // Occupancy or throughput tier after crossing the cliff.
-  uint32_t tier_after;
-} loom_low_schedule_pressure_cliff_t;
-
-// List of target-provided register-pressure cliffs.
-typedef struct loom_low_schedule_pressure_cliff_list_t {
-  // Borrowed pressure cliff rows.
-  const loom_low_schedule_pressure_cliff_t* values;
-  // Number of entries in |values|.
-  iree_host_size_t count;
-} loom_low_schedule_pressure_cliff_list_t;
-
-static inline loom_low_schedule_pressure_cliff_list_t
-loom_low_schedule_pressure_cliff_list_empty(void) {
-  return (loom_low_schedule_pressure_cliff_list_t){0};
-}
-
-static inline bool loom_low_schedule_pressure_cliff_list_is_empty(
-    loom_low_schedule_pressure_cliff_list_t list) {
-  return list.count == 0;
-}
 
 // One target-provided pair-affinity row.
 //
@@ -696,7 +660,7 @@ typedef struct loom_low_schedule_options_t {
   // conservative descriptor effect summaries.
   loom_low_memory_access_table_t memory_access_table;
   // Optional target-provided register-pressure cliff table.
-  loom_low_schedule_pressure_cliff_list_t pressure_cliffs;
+  loom_low_pressure_cliff_table_t pressure_cliffs;
   // Optional explicit allocation budgets. These are interpreted as hard
   // pressure limits by the scheduler so resource-stall scheduling can shorten
   // live ranges before allocation reaches the final physical storage ceiling.

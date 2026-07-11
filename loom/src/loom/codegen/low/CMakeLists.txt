@@ -27,6 +27,16 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    pressure
+  HDRS
+    "pressure.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     descriptor_traits
   HDRS
     "descriptor_traits.h"

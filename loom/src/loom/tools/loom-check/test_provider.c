@@ -305,7 +305,7 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
       options.allocation_budgets, options.allocation_budget_count,
       options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count,
-      loom_low_schedule_pressure_cliff_list_empty(),
+      loom_low_pressure_cliff_table_empty(),
       loom_low_schedule_pair_affinity_list_empty(),
       loom_low_schedule_structural_state_read_list_empty(),
       /*storage_lease_provider=*/NULL, /*spill_free_options=*/NULL, &frame));

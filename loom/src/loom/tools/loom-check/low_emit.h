@@ -94,7 +94,7 @@ iree_status_t loom_check_low_emit_packetize_function(
     iree_host_size_t allocation_budget_count,
     const loom_check_low_emit_fixed_value_spec_t* allocation_fixed_specs,
     iree_host_size_t allocation_fixed_spec_count,
-    loom_low_schedule_pressure_cliff_list_t schedule_pressure_cliffs,
+    loom_low_pressure_cliff_table_t pressure_cliffs,
     loom_low_schedule_pair_affinity_list_t schedule_pair_affinities,
     loom_low_schedule_structural_state_read_list_t
         schedule_structural_state_reads,

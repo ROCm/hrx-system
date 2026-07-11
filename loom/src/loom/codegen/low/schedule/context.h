@@ -53,13 +53,6 @@ typedef struct loom_low_schedule_hazard_state_t {
   loom_low_hazard_flags_t hazard_flags;
 } loom_low_schedule_hazard_state_t;
 
-typedef struct loom_low_schedule_pressure_cliff_range_t {
-  // First pressure cliff row for the register class.
-  uint32_t start;
-  // Number of pressure cliff rows for the register class.
-  uint32_t count;
-} loom_low_schedule_pressure_cliff_range_t;
-
 typedef struct loom_low_schedule_state_read_record_t {
   // Node that reads an architectural state register.
   uint32_t node_index;
@@ -223,8 +216,6 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.
   uint8_t* reg_class_state_flags;
-  // Pressure cliff ranges indexed by descriptor register-class ID.
-  loom_low_schedule_pressure_cliff_range_t* pressure_cliff_ranges;
   // Hard live-unit limits indexed by descriptor register-class ID.
   uint32_t* pressure_limit_units_by_reg_class;
   // Most recent architectural-state writer node, dense by register class.

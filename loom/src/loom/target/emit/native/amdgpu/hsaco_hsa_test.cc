@@ -802,7 +802,7 @@ class LowKernelEmitter {
         /*.descriptor_registry=*/&target_registry_.registry,
         /*.target_selection=*/{},
         /*.memory_access_table=*/{},
-        /*.schedule_pressure_cliffs=*/{},
+        /*.pressure_cliffs=*/{},
         /*.schedule_pair_affinities=*/{},
         /*.schedule_structural_state_reads=*/{},
         /*.schedule_strategy=*/{},

@@ -489,73 +489,6 @@ static iree_status_t loom_low_schedule_initialize_pair_setup_index(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_schedule_initialize_pressure_cliff_ranges(
-    loom_low_schedule_build_state_t* state) {
-  if (loom_low_schedule_pressure_cliff_list_is_empty(
-          state->options->pressure_cliffs)) {
-    return iree_ok_status();
-  }
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->target.descriptor_set;
-  if (descriptor_set->reg_class_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule pressure cliffs require descriptor register classes");
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->arena, descriptor_set->reg_class_count,
-                                sizeof(*state->pressure_cliff_ranges),
-                                (void**)&state->pressure_cliff_ranges));
-  memset(
-      state->pressure_cliff_ranges, 0,
-      descriptor_set->reg_class_count * sizeof(*state->pressure_cliff_ranges));
-
-  uint16_t previous_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-  uint32_t previous_cliff_units = 0;
-  for (iree_host_size_t i = 0; i < state->options->pressure_cliffs.count; ++i) {
-    if (i > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low schedule pressure cliff index exceeds uint32_t");
-    }
-    const loom_low_schedule_pressure_cliff_t* cliff =
-        &state->options->pressure_cliffs.values[i];
-    if (cliff->descriptor_reg_class_id >= descriptor_set->reg_class_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule pressure cliff references invalid register class "
-          "%" PRIu16,
-          cliff->descriptor_reg_class_id);
-    }
-    if (cliff->cliff_units == 0) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "low schedule pressure cliff cannot be zero");
-    }
-    if (cliff->tier_after >= cliff->tier_before) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule pressure cliff must lower the target tier");
-    }
-    if (i != 0 && (cliff->descriptor_reg_class_id < previous_reg_class_id ||
-                   (cliff->descriptor_reg_class_id == previous_reg_class_id &&
-                    cliff->cliff_units <= previous_cliff_units))) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule pressure cliffs must be sorted by register class and "
-          "cliff units");
-    }
-    loom_low_schedule_pressure_cliff_range_t* range =
-        &state->pressure_cliff_ranges[cliff->descriptor_reg_class_id];
-    if (range->count == 0) {
-      range->start = (uint32_t)i;
-    }
-    ++range->count;
-    previous_reg_class_id = cliff->descriptor_reg_class_id;
-    previous_cliff_units = cliff->cliff_units;
-  }
-  return iree_ok_status();
-}
-
 static void loom_low_schedule_record_pressure_limit(uint32_t* limits,
                                                     uint16_t reg_class_id,
                                                     uint32_t limit_units) {
@@ -711,8 +644,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         state->arena, reg_class_count, sizeof(*state->state_read_heads),
         (void**)&state->state_read_heads));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_low_schedule_initialize_pressure_cliff_ranges(state));
+  IREE_ASSERT(
+      loom_low_pressure_cliff_table_is_empty(state->options->pressure_cliffs) ||
+      state->options->pressure_cliffs.range_count == reg_class_count);
   IREE_RETURN_IF_ERROR(loom_low_schedule_initialize_pressure_limits(state));
   for (uint32_t operand_index = 0;
        operand_index < descriptor_set->operand_count; ++operand_index) {
@@ -1432,11 +1366,12 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
   const uint64_t projected_live_units =
       loom_low_schedule_project_reg_class_live_units(current_live_units,
                                                      delta_units);
-  const loom_low_schedule_pressure_cliff_range_t range =
-      state->pressure_cliff_ranges[reg_class_id];
+  const loom_low_pressure_cliff_range_t range =
+      loom_low_pressure_cliff_table_range(&state->options->pressure_cliffs,
+                                          reg_class_id);
   for (uint32_t cliff_index = range.start;
        cliff_index < range.start + range.count; ++cliff_index) {
-    const loom_low_schedule_pressure_cliff_t* cliff =
+    const loom_low_pressure_cliff_t* cliff =
         &state->options->pressure_cliffs.values[cliff_index];
     // Score the projected pressure state, not only a below-to-above
     // transition. Once a schedule is already over a cliff, remaining over it
@@ -1469,7 +1404,7 @@ static void loom_low_schedule_score_candidate_pressure_cliffs(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     loom_low_schedule_candidate_score_t* score) {
-  if (state->pressure_cliff_ranges == NULL ||
+  if (loom_low_pressure_cliff_table_is_empty(state->options->pressure_cliffs) ||
       pressure_state->current_live_units_by_reg_class == NULL) {
     return;
   }
