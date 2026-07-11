@@ -114,12 +114,14 @@ operation is inherently about FP8 storage or expansion.
 Keep logical kernel contracts target-independent: operation inputs, outputs,
 configuration facts, accumulation behavior, and tolerance model should remain
 stable while implementation blocks specialize for the target. The active
-sequence after BF16 is PyTorch-structural FP8 parity: official FP8 e4m3 source
-weights plus their checkpoint scale tensors prepare into BF16 execution layouts
-and run through BF16-activation WMMA kernels. Direct in-kernel FP8 decode on
-gfx1100 and native FP8-weight execution on gfx942 are follow-on target
-specializations behind the same semantic fixtures. Later gfx12-class FP8 paths
-should fit behind the same operation boundary.
+sequence after the BF16 correctness baseline is PyTorch-structural FP8 parity:
+official FP8 e4m3 source weights plus their checkpoint scale tensors remain in
+compact FP8 execution layouts and feed BF16-activation, F32-accumulate WMMA
+kernels. Gfx1100 kernels decode and scale FP8 operands in software inside the
+consumer; gfx942 kernels may use native FP8 matrix instructions behind the same
+semantic fixtures. Later gfx12-class FP8 paths should fit behind the same
+operation boundary. A server configuration must not keep a model-scale BF16
+weight expansion beside the resident compact FP8 weights.
 
 Official FP8 DiT safetensors are complete branch parameter providers: linear
 weights are FP8 e4m3 with F32 row scales, while non-linear weights, biases, and

@@ -76,7 +76,7 @@ typedef struct id4_pipeline_program_matrix_candidate_t {
   uint32_t n_multiple;
   // Required K divisibility.
   uint32_t k_multiple;
-  // Relative preference among semantically compatible candidates.
+  // Relative preference among fused or composed schedules for the same result.
   uint32_t selection_priority;
   // Loom kernel implementing the candidate.
   id4_pipeline_kernel_ref_t kernel;
@@ -99,8 +99,181 @@ typedef struct id4_pipeline_program_swiglu_prepared_operands_t {
   id4_pipeline_program_tensor_t output;
 } id4_pipeline_program_swiglu_prepared_operands_t;
 
+typedef enum id4_pipeline_program_matrix_composition_operation_e {
+  ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_ADD = 0,
+  ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_SWIGLU = 1,
+} id4_pipeline_program_matrix_composition_operation_t;
+
+typedef struct id4_pipeline_program_matrix_composition_candidate_t {
+  // Semantic operation completed after the plain contraction dispatches.
+  id4_pipeline_program_matrix_composition_operation_t operation;
+  // Execution weight type required from the selected contraction schedule.
+  id4_pipeline_program_dtype_t weight_dtype;
+  // Execution weight layout required from the selected contraction schedule.
+  id4_pipeline_program_matrix_layout_t weight_layout;
+  // Execution scale layout required from the selected contraction schedule.
+  id4_pipeline_program_matrix_scale_layout_t scale_layout;
+  // Activation scalar type accepted by the pointwise kernel.
+  id4_pipeline_program_dtype_t input_dtype;
+  // Activation physical layout accepted by the pointwise kernel.
+  id4_pipeline_program_matrix_layout_t input_layout;
+  // Output scalar type produced by the pointwise kernel.
+  id4_pipeline_program_dtype_t output_dtype;
+  // Output physical layout produced by the pointwise kernel.
+  id4_pipeline_program_matrix_layout_t output_layout;
+  // Loom kernel completing the composed operation.
+  id4_pipeline_kernel_ref_t kernel;
+  // Config key receiving the dispatched M extent.
+  iree_string_view_t m_key;
+  // Config key receiving the output N extent.
+  iree_string_view_t n_key;
+} id4_pipeline_program_matrix_composition_candidate_t;
+
+typedef struct id4_pipeline_program_matrix_schedule_t {
+  // Candidate implementing the fused operation or its contraction prefix.
+  const id4_pipeline_program_matrix_candidate_t* primary_candidate;
+  // Pointwise continuation for a composed schedule, or NULL when fused.
+  const id4_pipeline_program_matrix_composition_candidate_t*
+      composition_candidate;
+} id4_pipeline_program_matrix_schedule_t;
+
+static const id4_pipeline_program_matrix_composition_candidate_t
+    id4_pipeline_program_matrix_composition_candidates[] = {
+        {
+            .operation = ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_ADD,
+            .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
+            .scale_layout =
+                ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+            .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            .kernel =
+                {
+                    IREE_SVL("qwen3_vl/residual_add_f32"),
+                    IREE_SVL("id4_qwen3_vl_residual_add_bf16"),
+                },
+            .m_key = IREE_SVL("id4.qwen3_vl.residual_add.token_count"),
+            .n_key = IREE_SVL("id4.qwen3_vl.residual_add.hidden_size"),
+        },
+        {
+            .operation =
+                ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_SWIGLU,
+            .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
+            .scale_layout =
+                ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+            .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+            .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            .kernel =
+                {
+                    IREE_SVL("qwen3_vl/silu_gate_f32"),
+                    IREE_SVL("id4_qwen3_vl_silu_gate_bf16"),
+                },
+            .m_key = IREE_SVL("id4.qwen3_vl.silu_gate.token_count"),
+            .n_key = IREE_SVL("id4.qwen3_vl.silu_gate.intermediate_size"),
+        },
+};
+
 static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix_candidates[] = {
     // Qwen block-scaled plain contractions, fastest schedule first.
+    {
+        .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+        .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .source_weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .source_scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .source_scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+        .weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE,
+        .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
+        .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+        .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
+        .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .minimum_m_capacity = 128,
+        .m_multiple = 128,
+        .minimum_n = 128,
+        .n_multiple = 128,
+        .k_multiple = 128,
+        .selection_priority = 4,
+        .kernel =
+            {
+                IREE_SVL("qwen3_vl/linear_fp8_block_scaled_bf16_wmma_"
+                         "m128n128_4wave_workgroup_staged"),
+                IREE_SVL("id4_qwen3_vl_linear_fp8_block_scaled_bf16_"
+                         "wmma_m128n128_4wave_workgroup_staged"),
+            },
+        .config =
+            {
+                .dispatch_m_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma."
+                    "dispatch_token_count"),
+                .k_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma."
+                    "input_size"),
+                .n_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma."
+                    "output_size"),
+            },
+    },
+    {
+        .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+        .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .source_weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .source_scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .source_scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+        .weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE,
+        .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
+        .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+        .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
+        .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .minimum_m_capacity = 64,
+        .m_multiple = 64,
+        .minimum_n = 128,
+        .n_multiple = 128,
+        .k_multiple = 128,
+        .selection_priority = 2,
+        .kernel =
+            {
+                IREE_SVL("qwen3_vl/linear_fp8_block_scaled_bf16_wmma_"
+                         "m64n128_4wave_workgroup_staged"),
+                IREE_SVL("id4_qwen3_vl_linear_fp8_block_scaled_bf16_"
+                         "wmma_m64n128_4wave_workgroup_staged"),
+            },
+        .config =
+            {
+                .dispatch_m_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma."
+                    "dispatch_token_count"),
+                .k_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma."
+                    "input_size"),
+                .n_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma."
+                    "output_size"),
+            },
+    },
     {
         .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
         .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
@@ -850,25 +1023,54 @@ static bool id4_pipeline_program_matrix_candidate_matches_execution(
          candidate->scale_layout == execution->scale_layout;
 }
 
-static iree_status_t id4_pipeline_program_matrix_select_parameter_candidate(
+static const id4_pipeline_program_matrix_candidate_t*
+id4_pipeline_program_matrix_find_parameter_candidate(
     id4_pipeline_program_matrix_operation_t operation,
     const id4_pipeline_program_matrix_problem_t* problem,
-    const id4_pipeline_program_matrix_parameter_t* parameter,
-    const id4_pipeline_program_matrix_candidate_t** out_candidate) {
-  *out_candidate = NULL;
+    const id4_pipeline_program_matrix_parameter_t* parameter) {
+  const id4_pipeline_program_matrix_candidate_t* best_candidate = NULL;
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(id4_pipeline_program_matrix_candidates); ++i) {
     const id4_pipeline_program_matrix_candidate_t* candidate =
         &id4_pipeline_program_matrix_candidates[i];
     if (id4_pipeline_program_matrix_candidate_matches_parameter(
             candidate, operation, problem, parameter)) {
-      if (!*out_candidate || candidate->selection_priority >
-                                 (*out_candidate)->selection_priority) {
-        *out_candidate = candidate;
+      if (!best_candidate ||
+          candidate->selection_priority > best_candidate->selection_priority) {
+        best_candidate = candidate;
       }
     }
   }
-  if (*out_candidate) return iree_ok_status();
+  return best_candidate;
+}
+
+static const id4_pipeline_program_matrix_candidate_t*
+id4_pipeline_program_matrix_find_parameter_pair_candidate(
+    id4_pipeline_program_matrix_operation_t operation,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_parameter_t* lhs_parameter,
+    const id4_pipeline_program_matrix_parameter_t* rhs_parameter) {
+  const id4_pipeline_program_matrix_candidate_t* best_candidate = NULL;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_pipeline_program_matrix_candidates); ++i) {
+    const id4_pipeline_program_matrix_candidate_t* candidate =
+        &id4_pipeline_program_matrix_candidates[i];
+    if (id4_pipeline_program_matrix_candidate_matches_parameter(
+            candidate, operation, problem, lhs_parameter) &&
+        id4_pipeline_program_matrix_candidate_matches_parameter(
+            candidate, operation, problem, rhs_parameter) &&
+        (!best_candidate ||
+         candidate->selection_priority > best_candidate->selection_priority)) {
+      best_candidate = candidate;
+    }
+  }
+  return best_candidate;
+}
+
+static iree_status_t id4_pipeline_program_matrix_unsupported_parameter(
+    id4_pipeline_program_matrix_operation_t operation,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_parameter_t* parameter) {
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
       "no full-coverage matrix schedule supports provider operation=%u "
@@ -884,24 +1086,30 @@ static iree_status_t id4_pipeline_program_matrix_select_parameter_candidate(
       (uint32_t)problem->output_layout);
 }
 
-static iree_status_t id4_pipeline_program_matrix_select_prepared_candidate(
+static const id4_pipeline_program_matrix_candidate_t*
+id4_pipeline_program_matrix_find_prepared_candidate(
     id4_pipeline_program_matrix_operation_t operation,
     const id4_pipeline_program_matrix_problem_t* problem,
-    const id4_pipeline_program_matrix_execution_t* execution,
-    const id4_pipeline_program_matrix_candidate_t** out_candidate) {
-  *out_candidate = NULL;
+    const id4_pipeline_program_matrix_execution_t* execution) {
+  const id4_pipeline_program_matrix_candidate_t* best_candidate = NULL;
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(id4_pipeline_program_matrix_candidates); ++i) {
     const id4_pipeline_program_matrix_candidate_t* candidate =
         &id4_pipeline_program_matrix_candidates[i];
     if (id4_pipeline_program_matrix_candidate_matches_execution(
             candidate, operation, problem, execution) &&
-        (!*out_candidate || candidate->selection_priority >
-                                (*out_candidate)->selection_priority)) {
-      *out_candidate = candidate;
+        (!best_candidate ||
+         candidate->selection_priority > best_candidate->selection_priority)) {
+      best_candidate = candidate;
     }
   }
-  if (*out_candidate) return iree_ok_status();
+  return best_candidate;
+}
+
+static iree_status_t id4_pipeline_program_matrix_unsupported_prepared(
+    id4_pipeline_program_matrix_operation_t operation,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_execution_t* execution) {
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
       "no full-coverage matrix schedule supports prepared operation=%u "
@@ -915,6 +1123,30 @@ static iree_status_t id4_pipeline_program_matrix_select_prepared_candidate(
       (uint32_t)execution->scale_layout, (uint32_t)problem->accumulator_dtype,
       (uint32_t)problem->epilogue, (uint32_t)problem->output_dtype,
       (uint32_t)problem->output_layout);
+}
+
+static const id4_pipeline_program_matrix_composition_candidate_t*
+id4_pipeline_program_matrix_find_composition_candidate(
+    id4_pipeline_program_matrix_composition_operation_t operation,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* contraction_candidate) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_pipeline_program_matrix_composition_candidates);
+       ++i) {
+    const id4_pipeline_program_matrix_composition_candidate_t* candidate =
+        &id4_pipeline_program_matrix_composition_candidates[i];
+    if (candidate->operation == operation &&
+        candidate->weight_dtype == contraction_candidate->weight_dtype &&
+        candidate->weight_layout == contraction_candidate->weight_layout &&
+        candidate->scale_layout == contraction_candidate->scale_layout &&
+        candidate->input_dtype == problem->input_dtype &&
+        candidate->input_layout == problem->input_layout &&
+        candidate->output_dtype == problem->output_dtype &&
+        candidate->output_layout == problem->output_layout) {
+      return candidate;
+    }
+  }
+  return NULL;
 }
 
 static iree_status_t id4_pipeline_program_matrix_append_config(
@@ -978,6 +1210,79 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_candidate(
       .bindings = bindings,
   };
   return id4_pipeline_program_dispatch_loom(builder, &dispatch_options);
+}
+
+static iree_status_t id4_pipeline_program_matrix_dispatch_composition_candidate(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_composition_candidate_t* candidate,
+    id4_pipeline_program_tensor_t lhs, id4_pipeline_program_tensor_t rhs,
+    id4_pipeline_program_tensor_t output) {
+  char value_buffers[ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_CAPACITY]
+                    [ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_VALUE_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_CAPACITY];
+  iree_host_size_t config_binding_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_config(
+      candidate->m_key, problem->m_capacity,
+      value_buffers[config_binding_count], &config_binding_count,
+      config_bindings));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_config(
+      candidate->n_key, problem->n, value_buffers[config_binding_count],
+      &config_binding_count, config_bindings));
+  const id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(lhs),
+      id4_pipeline_program_read(rhs),
+      id4_pipeline_program_write(output),
+  };
+  const id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+      .structure_size = sizeof(dispatch_options),
+      .name = name,
+      .kernel = candidate->kernel,
+      .config_binding_count = config_binding_count,
+      .config_bindings = config_bindings,
+      .binding_count = IREE_ARRAYSIZE(bindings),
+      .bindings = bindings,
+  };
+  return id4_pipeline_program_dispatch_loom(builder, &dispatch_options);
+}
+
+static iree_status_t id4_pipeline_program_matrix_format_child_name(
+    iree_string_view_t parent_name, iree_string_view_t child_name, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_name) {
+  int name_length =
+      snprintf(buffer, buffer_capacity, "%.*s.%.*s", (int)parent_name.size,
+               parent_name.data, (int)child_name.size, child_name.data);
+  if (name_length < 0 || (iree_host_size_t)name_length >= buffer_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "failed to format program matrix child name");
+  }
+  *out_name = iree_make_string_view(buffer, (iree_host_size_t)name_length);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_matrix_acquire_intermediate(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_acquire_tensor_options_t acquire_options = {
+      .structure_size = sizeof(acquire_options),
+      .name = name,
+      .dtype = problem->output_dtype,
+      .shape = id4_pipeline_program_make_shape_rank2(problem->m_capacity,
+                                                     problem->n),
+  };
+  return id4_pipeline_program_acquire_tensor(builder, &acquire_options,
+                                             out_tensor);
+}
+
+static iree_status_t id4_pipeline_program_matrix_barrier(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
+  const id4_pipeline_program_barrier_options_t barrier_options = {
+      .structure_size = sizeof(barrier_options),
+      .name = name,
+  };
+  return id4_pipeline_program_barrier(builder, &barrier_options);
 }
 
 static bool id4_pipeline_program_matrix_encoding_uses_scale_source(
@@ -1093,6 +1398,234 @@ static iree_status_t id4_pipeline_program_swiglu_dispatch_prepared(
       builder, name, problem, candidate, binding_count, bindings);
 }
 
+static bool id4_pipeline_program_matrix_should_compose(
+    const id4_pipeline_program_matrix_candidate_t* fused_candidate,
+    const id4_pipeline_program_matrix_candidate_t* contraction_candidate,
+    const id4_pipeline_program_matrix_composition_candidate_t*
+        composition_candidate) {
+  return contraction_candidate && composition_candidate &&
+         (!fused_candidate || contraction_candidate->selection_priority >
+                                  fused_candidate->selection_priority);
+}
+
+static id4_pipeline_program_matrix_schedule_t
+id4_pipeline_program_matrix_resolve_parameter_schedule(
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_parameter_t* parameter) {
+  id4_pipeline_program_matrix_schedule_t schedule = {
+      .primary_candidate = id4_pipeline_program_matrix_find_parameter_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, problem,
+          parameter),
+  };
+  if (problem->epilogue != ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD) {
+    return schedule;
+  }
+
+  id4_pipeline_program_matrix_problem_t contraction_problem = *problem;
+  contraction_problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE;
+  const id4_pipeline_program_matrix_candidate_t* contraction_candidate =
+      id4_pipeline_program_matrix_find_parameter_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+          &contraction_problem, parameter);
+  const id4_pipeline_program_matrix_composition_candidate_t*
+      composition_candidate = NULL;
+  if (contraction_candidate) {
+    composition_candidate =
+        id4_pipeline_program_matrix_find_composition_candidate(
+            ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_ADD, problem,
+            contraction_candidate);
+  }
+  if (id4_pipeline_program_matrix_should_compose(schedule.primary_candidate,
+                                                 contraction_candidate,
+                                                 composition_candidate)) {
+    schedule.primary_candidate = contraction_candidate;
+    schedule.composition_candidate = composition_candidate;
+  }
+  return schedule;
+}
+
+static id4_pipeline_program_matrix_schedule_t
+id4_pipeline_program_matrix_resolve_prepared_schedule(
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_execution_t* execution) {
+  id4_pipeline_program_matrix_schedule_t schedule = {
+      .primary_candidate = id4_pipeline_program_matrix_find_prepared_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, problem,
+          execution),
+  };
+  if (problem->epilogue != ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD) {
+    return schedule;
+  }
+
+  id4_pipeline_program_matrix_problem_t contraction_problem = *problem;
+  contraction_problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE;
+  const id4_pipeline_program_matrix_candidate_t* contraction_candidate =
+      id4_pipeline_program_matrix_find_prepared_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+          &contraction_problem, execution);
+  const id4_pipeline_program_matrix_composition_candidate_t*
+      composition_candidate = NULL;
+  if (contraction_candidate) {
+    composition_candidate =
+        id4_pipeline_program_matrix_find_composition_candidate(
+            ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_ADD, problem,
+            contraction_candidate);
+  }
+  if (id4_pipeline_program_matrix_should_compose(schedule.primary_candidate,
+                                                 contraction_candidate,
+                                                 composition_candidate)) {
+    schedule.primary_candidate = contraction_candidate;
+    schedule.composition_candidate = composition_candidate;
+  }
+  return schedule;
+}
+
+static id4_pipeline_program_matrix_schedule_t
+id4_pipeline_program_swiglu_resolve_parameter_schedule(
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_parameter_t* gate_parameter,
+    const id4_pipeline_program_matrix_parameter_t* up_parameter) {
+  const id4_pipeline_program_matrix_candidate_t* fused_candidate =
+      id4_pipeline_program_matrix_find_parameter_pair_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU, problem, gate_parameter,
+          up_parameter);
+  const id4_pipeline_program_matrix_candidate_t* contraction_candidate =
+      id4_pipeline_program_matrix_find_parameter_pair_candidate(
+          ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, problem,
+          gate_parameter, up_parameter);
+  const id4_pipeline_program_matrix_composition_candidate_t*
+      composition_candidate = NULL;
+  if (contraction_candidate) {
+    composition_candidate =
+        id4_pipeline_program_matrix_find_composition_candidate(
+            ID4_PIPELINE_PROGRAM_MATRIX_COMPOSITION_OPERATION_SWIGLU, problem,
+            contraction_candidate);
+  }
+  if (id4_pipeline_program_matrix_should_compose(
+          fused_candidate, contraction_candidate, composition_candidate)) {
+    return (id4_pipeline_program_matrix_schedule_t){
+        .primary_candidate = contraction_candidate,
+        .composition_candidate = composition_candidate,
+    };
+  }
+  return (id4_pipeline_program_matrix_schedule_t){
+      .primary_candidate = fused_candidate,
+  };
+}
+
+static iree_status_t id4_pipeline_program_matrix_dispatch_composed_add(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* contraction_candidate,
+    const id4_pipeline_program_matrix_composition_candidate_t*
+        composition_candidate,
+    const id4_pipeline_program_matrix_prepared_operands_t* operands) {
+  id4_pipeline_program_matrix_problem_t contraction_problem = *problem;
+  contraction_problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE;
+
+  char child_name_buffer[IREE_MAX_PATH];
+  iree_string_view_t child_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("contraction.output"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  id4_pipeline_program_tensor_t contraction_output =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_acquire_intermediate(
+      builder, child_name, &contraction_problem, &contraction_output));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("contraction"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  const id4_pipeline_program_matrix_prepared_operands_t contraction_operands = {
+      .input = operands->input,
+      .weight = operands->weight,
+      .scale = operands->scale,
+      .addend = id4_pipeline_program_tensor_invalid(),
+      .output = contraction_output,
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
+      builder, child_name, &contraction_problem, contraction_candidate,
+      &contraction_operands));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("contraction_ready"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_barrier(builder, child_name));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("epilogue"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  return id4_pipeline_program_matrix_dispatch_composition_candidate(
+      builder, child_name, problem, composition_candidate, contraction_output,
+      operands->addend, operands->output);
+}
+
+static iree_status_t id4_pipeline_program_swiglu_dispatch_composed(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* contraction_candidate,
+    const id4_pipeline_program_matrix_composition_candidate_t*
+        composition_candidate,
+    const id4_pipeline_program_swiglu_prepared_operands_t* operands) {
+  char child_name_buffer[IREE_MAX_PATH];
+  iree_string_view_t child_name = iree_string_view_empty();
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("gate.output"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  id4_pipeline_program_tensor_t gate_output =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_acquire_intermediate(
+      builder, child_name, problem, &gate_output));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("up.output"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  id4_pipeline_program_tensor_t up_output =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_acquire_intermediate(
+      builder, child_name, problem, &up_output));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("gate"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  const id4_pipeline_program_matrix_prepared_operands_t gate_operands = {
+      .input = operands->input,
+      .weight = operands->gate_weight,
+      .scale = operands->gate_scale,
+      .addend = id4_pipeline_program_tensor_invalid(),
+      .output = gate_output,
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
+      builder, child_name, problem, contraction_candidate, &gate_operands));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("up"), child_name_buffer, IREE_ARRAYSIZE(child_name_buffer),
+      &child_name));
+  const id4_pipeline_program_matrix_prepared_operands_t up_operands = {
+      .input = operands->input,
+      .weight = operands->up_weight,
+      .scale = operands->up_scale,
+      .addend = id4_pipeline_program_tensor_invalid(),
+      .output = up_output,
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
+      builder, child_name, problem, contraction_candidate, &up_operands));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("projections_ready"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_barrier(builder, child_name));
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
+      name, IREE_SV("product"), child_name_buffer,
+      IREE_ARRAYSIZE(child_name_buffer), &child_name));
+  return id4_pipeline_program_matrix_dispatch_composition_candidate(
+      builder, child_name, problem, composition_candidate, gate_output,
+      up_output, operands->output);
+}
+
 iree_status_t id4_pipeline_program_matrix(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_matrix_options_t* options) {
@@ -1128,20 +1661,31 @@ iree_status_t id4_pipeline_program_matrix(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_validate_addend(
       &options->problem, options->operands.addend));
 
-  const id4_pipeline_program_matrix_candidate_t* candidate = NULL;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_select_parameter_candidate(
-      ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, &options->problem,
-      &options->operands.parameter, &candidate));
+  const id4_pipeline_program_matrix_schedule_t schedule =
+      id4_pipeline_program_matrix_resolve_parameter_schedule(
+          &options->problem, &options->operands.parameter);
+  if (!schedule.primary_candidate) {
+    return id4_pipeline_program_matrix_unsupported_parameter(
+        ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, &options->problem,
+        &options->operands.parameter);
+  }
   id4_pipeline_program_matrix_prepared_operands_t prepared_operands = {
       .input = options->operands.input,
       .addend = options->operands.addend,
       .output = options->operands.output,
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_materialize_parameter(
-      builder, &options->problem, &options->operands.parameter, candidate,
-      &prepared_operands.weight, &prepared_operands.scale));
+      builder, &options->problem, &options->operands.parameter,
+      schedule.primary_candidate, &prepared_operands.weight,
+      &prepared_operands.scale));
+  if (schedule.composition_candidate) {
+    return id4_pipeline_program_matrix_dispatch_composed_add(
+        builder, options->name, &options->problem, schedule.primary_candidate,
+        schedule.composition_candidate, &prepared_operands);
+  }
   return id4_pipeline_program_matrix_dispatch_prepared(
-      builder, options->name, &options->problem, candidate, &prepared_operands);
+      builder, options->name, &options->problem, schedule.primary_candidate,
+      &prepared_operands);
 }
 
 iree_status_t id4_pipeline_program_matrix_prepared(
@@ -1183,12 +1727,22 @@ iree_status_t id4_pipeline_program_matrix_prepared(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_validate_addend(
       &options->problem, options->operands.addend));
 
-  const id4_pipeline_program_matrix_candidate_t* candidate = NULL;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_select_prepared_candidate(
-      ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, &options->problem,
-      &options->execution, &candidate));
+  const id4_pipeline_program_matrix_schedule_t schedule =
+      id4_pipeline_program_matrix_resolve_prepared_schedule(
+          &options->problem, &options->execution);
+  if (!schedule.primary_candidate) {
+    return id4_pipeline_program_matrix_unsupported_prepared(
+        ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION, &options->problem,
+        &options->execution);
+  }
+  if (schedule.composition_candidate) {
+    return id4_pipeline_program_matrix_dispatch_composed_add(
+        builder, options->name, &options->problem, schedule.primary_candidate,
+        schedule.composition_candidate, &options->operands);
+  }
   return id4_pipeline_program_matrix_dispatch_prepared(
-      builder, options->name, &options->problem, candidate, &options->operands);
+      builder, options->name, &options->problem, schedule.primary_candidate,
+      &options->operands);
 }
 
 iree_status_t id4_pipeline_program_swiglu(
@@ -1231,16 +1785,24 @@ iree_status_t id4_pipeline_program_swiglu(
                             "program SwiGLU input and output are required");
   }
 
-  const id4_pipeline_program_matrix_candidate_t* candidate = NULL;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_select_parameter_candidate(
-      ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU, &options->projection,
-      &options->operands.gate_parameter, &candidate));
-  if (!id4_pipeline_program_matrix_candidate_matches_parameter(
-          candidate, ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU,
-          &options->projection, &options->operands.up_parameter)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "program SwiGLU gate and up parameters require the same schedule");
+  const id4_pipeline_program_matrix_schedule_t schedule =
+      id4_pipeline_program_swiglu_resolve_parameter_schedule(
+          &options->projection, &options->operands.gate_parameter,
+          &options->operands.up_parameter);
+  if (!schedule.primary_candidate) {
+    if (id4_pipeline_program_matrix_find_parameter_candidate(
+            ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU, &options->projection,
+            &options->operands.gate_parameter) ||
+        id4_pipeline_program_matrix_find_parameter_candidate(
+            ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU, &options->projection,
+            &options->operands.up_parameter)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program SwiGLU gate and up parameters require one common schedule");
+    }
+    return id4_pipeline_program_matrix_unsupported_parameter(
+        ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU, &options->projection,
+        &options->operands.gate_parameter);
   }
   id4_pipeline_program_swiglu_prepared_operands_t prepared_operands = {
       .input = options->operands.input,
@@ -1248,12 +1810,19 @@ iree_status_t id4_pipeline_program_swiglu(
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_materialize_parameter(
       builder, &options->projection, &options->operands.gate_parameter,
-      candidate, &prepared_operands.gate_weight,
+      schedule.primary_candidate, &prepared_operands.gate_weight,
       &prepared_operands.gate_scale));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_materialize_parameter(
-      builder, &options->projection, &options->operands.up_parameter, candidate,
-      &prepared_operands.up_weight, &prepared_operands.up_scale));
+      builder, &options->projection, &options->operands.up_parameter,
+      schedule.primary_candidate, &prepared_operands.up_weight,
+      &prepared_operands.up_scale));
+  if (schedule.composition_candidate) {
+    return id4_pipeline_program_swiglu_dispatch_composed(
+        builder, options->name, &options->projection,
+        schedule.primary_candidate, schedule.composition_candidate,
+        &prepared_operands);
+  }
   return id4_pipeline_program_swiglu_dispatch_prepared(
-      builder, options->name, &options->projection, candidate,
+      builder, options->name, &options->projection, schedule.primary_candidate,
       &prepared_operands);
 }

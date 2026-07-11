@@ -341,9 +341,11 @@ individual tensors.
 Weight loaders should preserve enough metadata for compressed-weight paths. For
 FP8 sources this includes the element format, per-tensor or per-channel scale
 tensors, scale application order, and the exact BF16 expansion rule used by the
-reference. BF16 execution consumes prepared BF16 views derived from the FP8
-files; FP8 execution consumes the compact view plus scale metadata while
-producing outputs compared against the same semantic goldens.
+reference. Dense BF16 weights remain a correctness and schedule baseline.
+Product FP8 execution consumes a compact target-friendly FP8 layout plus scale
+metadata directly, forms BF16 matrix operands inside the consumer kernel where
+the target requires software conversion, and compares outputs against the same
+semantic goldens.
 
 Preparation has an explicit parameter source and residency policy. Performance
 mode loads a baked execution-layout archive directly into long-lived resident
@@ -555,13 +557,13 @@ target specialization. When a fusion removes an intermediate tensor from the
 production path, retain a diagnostic mode or reduced fixture strategy that can
 still prove the fused result against the original stage boundaries.
 
-For linear and attention-heavy regions, the first implementation target is
-BF16 correctness. The next implementation target is an FP8-weight variant on
-gfx1100 that software-expands compact weights to BF16 inside the kernel. The
-third target is a native FP8-weight variant on gfx942. Those variants should
-share source-level operation declarations and test fixtures where possible, with
-target-specific implementation blocks and tolerances that name the exact
-numeric mechanism under test.
+For linear and attention-heavy regions, BF16 establishes the correctness
+baseline. The gfx1100 product path keeps static weights in compact FP8 storage
+and software-forms scaled BF16 matrix operands inside cooperative consumer
+kernels. Gfx942 should use a native FP8-weight implementation behind the same
+semantic operation. These variants share source-level operation declarations
+and test fixtures where possible, with target-specific implementation blocks
+and tolerances that name the exact numeric mechanism under test.
 
 ## Correctness Strategy
 
