@@ -765,8 +765,17 @@ def _fragment_role_initializer(
         f"    .coordinate_element_stride = {role.coordinate_element_stride},",
         f"    .flags = {flags},",
         f"    .coordinate_flags = {coordinate_flags},",
-        "    .axes = {",
     ]
+    if role.reduction_group is not None:
+        lines.extend(
+            [
+                "    .reduction_group = {",
+                f"        .storage_element_count = {role.reduction_group.storage_element_count},",
+                f"        .logical_element_count = {role.reduction_group.logical_element_count},",
+                "    },",
+            ]
+        )
+    lines.append("    .axes = {")
     for axis_name, axis in zip(_AXIS_C_NAMES, role.axes, strict=True):
         if axis is None:
             continue

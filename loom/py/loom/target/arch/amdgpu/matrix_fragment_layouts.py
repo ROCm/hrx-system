@@ -32,6 +32,14 @@ class MatrixFragmentAxisLayout:
 
 
 @dataclass(frozen=True, slots=True)
+class MatrixFragmentReductionGroup:
+    """Physical storage density for a compressed reduction axis."""
+
+    storage_element_count: int
+    logical_element_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class MatrixFragmentRoleLayout:
     """One matrix role's payload storage and semantic coordinate layout."""
 
@@ -40,6 +48,7 @@ class MatrixFragmentRoleLayout:
     element_bit_count: int
     coordinate_element_offset: int
     coordinate_element_stride: int
+    reduction_group: MatrixFragmentReductionGroup | None
     axes: tuple[MatrixFragmentAxisLayout | None, ...]
 
     @property
@@ -106,6 +115,7 @@ def _role(
     *,
     coordinate_element_offset: int = 0,
     coordinate_element_stride: int = 1,
+    reduction_group: MatrixFragmentReductionGroup | None = None,
 ) -> MatrixFragmentRoleLayout:
     return MatrixFragmentRoleLayout(
         role=role,
@@ -113,6 +123,7 @@ def _role(
         element_bit_count=element_bit_count,
         coordinate_element_offset=coordinate_element_offset,
         coordinate_element_stride=coordinate_element_stride,
+        reduction_group=reduction_group,
         axes=axes,
     )
 
@@ -270,6 +281,26 @@ def _validate_role(
             f"matrix fragment layout '{layout.key}' role '{role.role}' has "
             "an invalid coordinate element mapping"
         )
+    reduction_group = role.reduction_group
+    if reduction_group is not None:
+        reduction_axis = _AXIS_NAMES.index("reduction")
+        if role.role not in ("lhs", "rhs") or role.axes[reduction_axis] is None:
+            raise ValueError(
+                f"matrix fragment layout '{layout.key}' role '{role.role}' "
+                "compresses a missing reduction axis"
+            )
+        if (
+            reduction_group.storage_element_count <= 0
+            or reduction_group.logical_element_count <= 0
+            or reduction_group.storage_element_count
+            >= reduction_group.logical_element_count
+            or layout.tile_shape[reduction_axis] % reduction_group.logical_element_count
+            != 0
+        ):
+            raise ValueError(
+                f"matrix fragment layout '{layout.key}' role '{role.role}' "
+                "has an invalid reduction storage group"
+            )
     last_payload_element = (
         role.coordinate_element_offset
         + (role.coordinate_element_count - 1) * role.coordinate_element_stride
@@ -308,6 +339,12 @@ def _validate_role(
                 f"has an empty {axis_name} axis"
             )
         expected_extent = layout.tile_shape[axis_index]
+        if axis_name == "reduction" and reduction_group is not None:
+            expected_extent = (
+                expected_extent
+                // reduction_group.logical_element_count
+                * reduction_group.storage_element_count
+            )
         actual_extent = axis.outer_count * axis.thread_count * axis.element_count
         if actual_extent != expected_extent:
             raise ValueError(
@@ -396,7 +433,8 @@ def role_coordinate(
     """Returns the logical coordinate stored at one physical role location."""
 
     if (
-        lane < 0
+        role.reduction_group is not None
+        or lane < 0
         or lane >= layout.wave_size
         or payload_element_index < role.coordinate_element_offset
         or payload_element_index >= role.payload_element_count

@@ -103,6 +103,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
         /*.axes=*/
         {
             /*block=*/{},
@@ -122,6 +123,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
         /*.axes=*/
         {
             /*block=*/{},
@@ -141,6 +143,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.reduction_group=*/{},
         /*.axes=*/
         {
             /*block=*/{},
@@ -160,6 +163,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.reduction_group=*/{},
         /*.axes=*/
         {
             /*block=*/{},
