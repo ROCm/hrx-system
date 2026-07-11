@@ -331,9 +331,12 @@ loom_low_allocation_coalescing_copy_source_used_after_tied_consume(
       query, tied_relation->op, *out_copy_source_id, &use, out_used_after);
 }
 
-static bool loom_low_allocation_coalescing_storage_alias_cause(
-    loom_low_placement_cause_t cause) {
-  switch (cause) {
+static bool loom_low_allocation_coalescing_storage_alias_relation(
+    const loom_low_placement_relation_t* relation) {
+  if (!loom_low_placement_relation_can_alias(relation)) {
+    return false;
+  }
+  switch (relation->cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
@@ -412,7 +415,7 @@ static bool loom_low_allocation_coalescing_exact_storage_alias_relation(
     const loom_low_allocation_coalescing_context_t* context,
     const loom_low_placement_relation_t* relation) {
   if (loom_low_placement_cause_is_edge(relation->cause) ||
-      !loom_low_placement_cause_can_alias(relation->cause) ||
+      !loom_low_placement_relation_can_alias(relation) ||
       relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
       relation->result_unit_offset != 0 || relation->source_unit_offset != 0) {
     return false;
@@ -523,7 +526,7 @@ loom_low_allocation_coalescing_collect_tied_storage_aliases(
   for (uint32_t i = 0; i < range.count; ++i) {
     const loom_low_placement_relation_t* relation =
         &context->placement->relations[range.start + i];
-    if (!loom_low_allocation_coalescing_storage_alias_cause(relation->cause)) {
+    if (!loom_low_allocation_coalescing_storage_alias_relation(relation)) {
       continue;
     }
     const loom_value_id_t source_value_id = loom_low_placement_value_id(
@@ -679,7 +682,7 @@ static iree_status_t loom_low_allocation_coalescing_append_relation_interval(
       &interval_reg_class_id, NULL));
   const loom_value_id_t* ignored_storage_lease_value_ids = NULL;
   uint16_t ignored_storage_lease_value_count = 0;
-  if (loom_low_allocation_coalescing_storage_alias_cause(relation->cause)) {
+  if (loom_low_allocation_coalescing_storage_alias_relation(relation)) {
     ignored_storage_lease_value_ids = ignored_value_ids;
     ignored_storage_lease_value_count = ignored_value_count;
   }
@@ -1648,6 +1651,9 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
   for (uint32_t i = 0; i < range.count; ++i) {
     const loom_low_placement_relation_t* relation =
         &context->placement->relations[range.start + i];
+    if (!loom_low_placement_relation_can_alias(relation)) {
+      continue;
+    }
     switch (relation->cause) {
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY: {
         IREE_RETURN_IF_ERROR(

@@ -43,6 +43,8 @@ typedef struct loom_low_allocation_packet_move_context_t {
 
 // Packet-local move temporary table rows.
 typedef struct loom_low_allocation_packet_move_plan_t {
+  // Number of target-register unit moves across all packet-local move sets.
+  iree_host_size_t move_count;
   // Per-packet groups indexing |temporaries|.
   loom_low_allocation_packet_move_temporary_group_t* groups;
   // Number of records in |groups|.

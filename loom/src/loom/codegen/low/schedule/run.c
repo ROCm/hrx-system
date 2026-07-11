@@ -249,6 +249,13 @@ static iree_status_t loom_low_schedule_initialize_storage(
                                     sizeof(*state->placement_pair_uses),
                                     (void**)&state->placement_pair_uses));
     }
+    if (state->options->preferred_pair_uses.count != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->arena, node_count, sizeof(*state->preferred_pair_nodes),
+          (void**)&state->preferred_pair_nodes));
+      memset(state->preferred_pair_nodes, 0xFF,
+             node_count * sizeof(*state->preferred_pair_nodes));
+    }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->state_chain_read_heads),
         (void**)&state->state_chain_read_heads));
@@ -1716,6 +1723,17 @@ static void loom_low_schedule_end_ready_descriptor_window(
   pressure_state->ready_setup_consumer_count = 0;
 }
 
+static bool loom_low_schedule_pair_is_preferred(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* first,
+    const loom_low_schedule_node_t* second) {
+  if (state->preferred_pair_nodes == NULL) {
+    return false;
+  }
+  return state->preferred_pair_nodes[first->source_ordinal].successor_node ==
+         second->source_ordinal;
+}
+
 static uint16_t loom_low_schedule_pair_affinity_priority(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* first,
@@ -1728,7 +1746,9 @@ static uint16_t loom_low_schedule_pair_affinity_priority(
     return 0;
   }
   if (record->placement_recipe_index == LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE) {
-    return record->priority;
+    return loom_low_schedule_pair_is_preferred(state, first, second)
+               ? UINT16_MAX
+               : record->priority;
   }
   const uint16_t recipe_index = (uint16_t)(record->placement_recipe_index - 1u);
   const loom_low_placement_pair_recipe_t* recipe =
@@ -1741,7 +1761,12 @@ static uint16_t loom_low_schedule_pair_affinity_priority(
   };
   *out_placement_option_count =
       loom_low_placement_pair_possible_alternative_count(&use, recipe);
-  return *out_placement_option_count != 0 ? record->priority : 0;
+  if (*out_placement_option_count == 0) {
+    return 0;
+  }
+  return loom_low_schedule_pair_is_preferred(state, first, second)
+             ? UINT16_MAX
+             : record->priority;
 }
 
 static bool loom_low_schedule_node_can_start_pair_affinity(
@@ -1816,6 +1841,40 @@ static uint16_t loom_low_schedule_score_candidate_pair_affinity(
   return 0;
 }
 
+static uint16_t loom_low_schedule_preferred_pair_member_priority(
+    const loom_low_schedule_build_state_t* state, uint32_t node_index) {
+  if (state->pending_pair_affinity_node != LOOM_LOW_SCHEDULE_NODE_NONE ||
+      state->preferred_pair_nodes == NULL ||
+      state->nodes[node_index].descriptor == NULL) {
+    return 0;
+  }
+  const loom_low_schedule_preferred_pair_node_t* pair_node =
+      &state->preferred_pair_nodes[node_index];
+  return pair_node->predecessor_node != LOOM_LOW_SCHEDULE_NODE_NONE ||
+                 pair_node->successor_node != LOOM_LOW_SCHEDULE_NODE_NONE
+             ? UINT16_MAX
+             : 0;
+}
+
+static uint16_t loom_low_schedule_preferred_pair_anchor_priority(
+    const loom_low_schedule_build_state_t* state, const uint32_t* indegrees,
+    uint32_t node_index) {
+  if (loom_low_schedule_preferred_pair_member_priority(state, node_index) ==
+          0 ||
+      indegrees == NULL) {
+    return 0;
+  }
+  const uint32_t successor_node =
+      state->preferred_pair_nodes[node_index].successor_node;
+  if (successor_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
+      state->nodes[successor_node].scheduled_ordinal !=
+          LOOM_LOW_SCHEDULE_NODE_NONE ||
+      indegrees[successor_node] != 0) {
+    return 0;
+  }
+  return UINT16_MAX;
+}
+
 static uint32_t loom_low_schedule_score_candidate_pressure_demand(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
@@ -1884,6 +1943,10 @@ static uint32_t loom_low_schedule_score_candidate_pressure_demand(
         state->nodes[consumer_node].descriptor != NULL &&
         pressure_state->ready_setup_dependency_counts[consumer_node] ==
             indegrees[consumer_node]) {
+      *out_pair_affinity_score =
+          iree_max(*out_pair_affinity_score,
+                   loom_low_schedule_preferred_pair_member_priority(
+                       state, consumer_node));
       const uint32_t consumer_descriptor_ordinal =
           loom_low_schedule_descriptor_ordinal(
               state, state->nodes[consumer_node].descriptor);
@@ -2009,6 +2072,9 @@ static iree_status_t loom_low_schedule_score_candidate(
   const uint16_t direct_pair_affinity_score =
       loom_low_schedule_score_candidate_pair_affinity(
           state, node_index, &pair_placement_option_count);
+  const uint16_t preferred_anchor_score =
+      loom_low_schedule_preferred_pair_anchor_priority(state, indegrees,
+                                                       node_index);
   *out_score = (loom_low_schedule_candidate_score_t){
       .projected_live_units = projected_live_units,
       .killed_live_units = killed_live_units,
@@ -2026,8 +2092,9 @@ static iree_status_t loom_low_schedule_score_candidate(
               ? pressure_activation_units
               : 0,
       .data_ready_stall_cycles = data_ready_stall_cycles,
-      .pair_affinity_score =
-          iree_max(direct_pair_affinity_score, unlocked_pair_affinity_score),
+      .pair_affinity_score = iree_max(
+          preferred_anchor_score,
+          iree_max(direct_pair_affinity_score, unlocked_pair_affinity_score)),
       .pair_placement_option_count = pair_placement_option_count,
       .storage_relation_count = storage_relation_count,
       .bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE,
@@ -3217,6 +3284,65 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   return iree_ok_status();
 }
 
+static uint32_t loom_low_schedule_find_node_for_preferred_op(
+    const loom_low_schedule_build_state_t* state, const loom_op_t* op) {
+  if (op == NULL || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
+    return LOOM_LOW_SCHEDULE_NODE_NONE;
+  }
+  uint16_t block_index = 0;
+  if (!loom_region_try_block_index(state->body, op->parent_block,
+                                   &block_index)) {
+    return LOOM_LOW_SCHEDULE_NODE_NONE;
+  }
+  const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
+  uint32_t begin = block_record->node_start;
+  uint32_t end = begin + block_record->node_count;
+  while (begin < end) {
+    const uint32_t middle = begin + (end - begin) / 2;
+    const loom_op_t* candidate_op = state->nodes[middle].op;
+    if (candidate_op->block_ordinal < op->block_ordinal) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  const uint32_t block_end =
+      block_record->node_start + block_record->node_count;
+  return begin < block_end && state->nodes[begin].op == op
+             ? begin
+             : LOOM_LOW_SCHEDULE_NODE_NONE;
+}
+
+static void loom_low_schedule_initialize_preferred_pair_index(
+    loom_low_schedule_build_state_t* state) {
+  if (state->preferred_pair_nodes == NULL) {
+    return;
+  }
+  const loom_low_placement_pair_use_list_t preferred_pairs =
+      state->options->preferred_pair_uses;
+  for (iree_host_size_t i = 0; i < preferred_pairs.count; ++i) {
+    const loom_low_placement_pair_use_t* pair = &preferred_pairs.values[i];
+    const uint32_t first_node =
+        loom_low_schedule_find_node_for_preferred_op(state, pair->first_op);
+    const uint32_t second_node =
+        loom_low_schedule_find_node_for_preferred_op(state, pair->second_op);
+    if (first_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
+        second_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
+      continue;
+    }
+    IREE_ASSERT(state->preferred_pair_nodes[first_node].successor_node ==
+                    LOOM_LOW_SCHEDULE_NODE_NONE ||
+                state->preferred_pair_nodes[first_node].successor_node ==
+                    second_node);
+    IREE_ASSERT(state->preferred_pair_nodes[second_node].predecessor_node ==
+                    LOOM_LOW_SCHEDULE_NODE_NONE ||
+                state->preferred_pair_nodes[second_node].predecessor_node ==
+                    first_node);
+    state->preferred_pair_nodes[first_node].successor_node = second_node;
+    state->preferred_pair_nodes[second_node].predecessor_node = first_node;
+  }
+}
+
 iree_status_t loom_low_schedule_function(
     loom_module_t* module, const loom_op_t* low_func_op,
     const loom_low_schedule_options_t* options, iree_arena_allocator_t* arena,
@@ -3276,6 +3402,9 @@ iree_status_t loom_low_schedule_function(
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_fill_nodes(&state);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_low_schedule_initialize_preferred_pair_index(&state);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_initialize_pair_setup_index(&state);

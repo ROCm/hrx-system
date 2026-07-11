@@ -966,6 +966,7 @@ low_copy = Op(
             ATTR_TYPE_BOOL,
             default=False,
             elide_default=True,
+            doc="Prefer physical storage disjoint from the copy source.",
         ),
     ],
     results=[Result("result", REGISTER, allocates=True)],

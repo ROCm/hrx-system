@@ -56,10 +56,43 @@ low.func.def target(@target) @gfx1250_vopd_placement(%acc: reg<amdgpu.vgpr>, %lh
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_vopd_detached_replica_pair_setup strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast strategy=resource-stall
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @rdna3_vopd_detached_replica_pair_setup(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) @rdna3_vopd_shared_broadcast(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product4 = v_mul_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product5 = v_mul_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product6 = v_mul_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product7 = v_mul_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
+  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
+  v_mov_b32 v2, v8
+  v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
+  v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @rdna3_vopd_explicit_detached_replica strategy=resource-stall
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @rdna3_vopd_explicit_detached_replica(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %shared_replica = copy %shared {detached = true} : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
   %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %product0 = v_mul_f32 %lhs0, %shared
@@ -86,4 +119,126 @@ low.func.def target(@target) @rdna3_vopd_detached_replica_pair_setup(%lhs: reg<a
   v_dual_mul_f32 v0, v2, v8 :: v_dual_mul_f32 v1, v3, v9
   v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v9
   v_dual_mul_f32 v0, v6, v8 :: v_dual_mul_f32 v1, v7, v9
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @rdna4_vopd_shared_broadcast strategy=resource-stall
+
+amdgpu.target<gfx1200> @target
+low.func.def target(@target) @rdna4_vopd_shared_broadcast(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product4 = v_mul_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product5 = v_mul_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product6 = v_mul_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product7 = v_mul_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
+  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
+  v_mov_b32 v2, v8
+  v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
+  v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vopd_shared_broadcast strategy=resource-stall
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @gfx1250_vopd_shared_broadcast(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product4 = v_mul_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product5 = v_mul_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product6 = v_mul_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product7 = v_mul_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
+  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
+  v_mov_b32 v2, v8
+  v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
+  v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_rhs_sub strategy=resource-stall
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @rdna3_vopd_shared_rhs_sub(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference0 = v_sub_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference1 = v_sub_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference2 = v_sub_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference3 = v_sub_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference4 = v_sub_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference5 = v_sub_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference6 = v_sub_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %difference7 = v_sub_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_mov_b32 v9, v8
+  v_dual_sub_f32 v0, v0, v8 :: v_dual_sub_f32 v1, v1, v9
+  v_dual_sub_f32 v0, v2, v8 :: v_dual_sub_f32 v1, v3, v9
+  v_dual_sub_f32 v0, v4, v8 :: v_dual_sub_f32 v1, v5, v9
+  v_dual_sub_f32 v0, v6, v8 :: v_dual_sub_f32 v1, v7, v9
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast_break_even strategy=resource-stall
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @rdna3_vopd_shared_broadcast_break_even(%lhs: reg<amdgpu.vgpr x4>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  return
+}
+
+// ----
+  v_mul_f32 v0, v0, v4
+  v_dual_mul_f32 v1, v4, v1 :: v_dual_mul_f32 v0, v2, v4
+  v_mul_f32 v1, v3, v4
   s_endpgm

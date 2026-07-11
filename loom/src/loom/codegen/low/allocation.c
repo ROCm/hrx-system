@@ -244,6 +244,7 @@ iree_status_t loom_low_allocate_function(
         .packet_move_temporary_group_count = state.packet_move_plan.group_count,
         .packet_move_temporaries = state.packet_move_plan.temporaries,
         .packet_move_temporary_count = state.packet_move_plan.temporary_count,
+        .packet_move_count = state.packet_move_plan.move_count,
         .storage_leases = options->storage_leases,
         .storage_lease_instances = state.storage_leases.instances,
         .storage_lease_instance_count = state.storage_leases.instance_count,

@@ -705,6 +705,8 @@ typedef struct loom_low_schedule_options_t {
   iree_host_size_t allocation_budget_count;
   // Optional target-provided pair-affinity table.
   loom_low_schedule_pair_affinity_list_t pair_affinities;
+  // Optional concrete pair groups preferred when rescheduling rewritten IR.
+  loom_low_placement_pair_use_list_t preferred_pair_uses;
   // Optional target-provided implicit state reads for structural low
   // materializations that emit target packets without descriptor rows.
   loom_low_schedule_structural_state_read_list_t structural_state_reads;

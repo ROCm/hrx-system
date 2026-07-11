@@ -47,7 +47,8 @@ typedef struct loom_low_placement_build_state_t {
   iree_host_size_t appended_source_relation_count;
 } loom_low_placement_build_state_t;
 
-bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause) {
+static bool loom_low_placement_cause_can_alias(
+    loom_low_placement_cause_t cause) {
   switch (cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
@@ -60,6 +61,13 @@ bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause) {
     default:
       return false;
   }
+}
+
+bool loom_low_placement_relation_can_alias(
+    const loom_low_placement_relation_t* relation) {
+  IREE_ASSERT_ARGUMENT(relation);
+  return iree_any_bit_set(relation->flags,
+                          LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE);
 }
 
 bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause) {
@@ -110,7 +118,15 @@ static iree_status_t loom_low_placement_collect_relation(
         &state->collected_relation_capacity,
         (void**)&state->collected_relations));
   }
-  state->collected_relations[state->relation_count] = *relation;
+  loom_low_placement_relation_t* collected_relation =
+      &state->collected_relations[state->relation_count];
+  *collected_relation = *relation;
+  if (relation->kind >= LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
+      relation->kind <= LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART &&
+      loom_low_placement_cause_can_alias(relation->cause)) {
+    collected_relation->flags |=
+        LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+  }
   if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION ||
       relation->kind == LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
     ++state->location_relation_count;
@@ -174,6 +190,8 @@ loom_low_placement_kind_from_storage_relation(
       return LOOM_LOW_PLACEMENT_RELATION_SUBRANGE;
     case LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART:
       return LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART;
+    case LOOM_LOW_STORAGE_RELATION_DISJOINT_STORAGE:
+      return LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE;
     case LOOM_LOW_STORAGE_RELATION_UNKNOWN:
       return LOOM_LOW_PLACEMENT_RELATION_UNKNOWN;
   }
@@ -287,9 +305,11 @@ static const loom_op_t* loom_low_placement_pair_component_op(
   }
 }
 
-static loom_value_id_t loom_low_placement_pair_value(
+loom_value_id_t loom_low_placement_pair_value_id(
     const loom_low_placement_pair_use_t* use,
     const loom_low_placement_pair_value_ref_t* ref) {
+  IREE_ASSERT_ARGUMENT(use);
+  IREE_ASSERT_ARGUMENT(ref);
   const loom_op_t* op =
       loom_low_placement_pair_component_op(use, ref->component);
   switch (ref->kind) {
@@ -305,10 +325,18 @@ static loom_value_id_t loom_low_placement_pair_value(
   }
 }
 
-static bool loom_low_placement_pair_alternative_is_possible(
+static bool loom_low_placement_pair_value_ref_equal(
+    const loom_low_placement_pair_value_ref_t* lhs,
+    const loom_low_placement_pair_value_ref_t* rhs) {
+  return lhs->component == rhs->component && lhs->kind == rhs->kind &&
+         lhs->index == rhs->index;
+}
+
+static bool loom_low_placement_pair_alternative_is_possible_after_separation(
     const loom_low_placement_pair_use_t* use,
     const loom_low_placement_pair_relation_t* relations,
-    uint16_t relation_count) {
+    uint16_t relation_count,
+    const loom_low_placement_pair_value_ref_t* separated_ref) {
   for (uint16_t i = 0; i < relation_count; ++i) {
     const loom_low_placement_pair_relation_t* relation = &relations[i];
     if (relation->kind !=
@@ -316,10 +344,19 @@ static bool loom_low_placement_pair_alternative_is_possible(
         relation->kind != LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
       continue;
     }
+    if (separated_ref != NULL) {
+      const bool separates_result = loom_low_placement_pair_value_ref_equal(
+          separated_ref, &relation->result);
+      const bool separates_source = loom_low_placement_pair_value_ref_equal(
+          separated_ref, &relation->source);
+      if (separates_result != separates_source) {
+        continue;
+      }
+    }
     const loom_value_id_t result_value_id =
-        loom_low_placement_pair_value(use, &relation->result);
+        loom_low_placement_pair_value_id(use, &relation->result);
     const loom_value_id_t source_value_id =
-        loom_low_placement_pair_value(use, &relation->source);
+        loom_low_placement_pair_value_id(use, &relation->source);
     if (result_value_id != source_value_id) {
       continue;
     }
@@ -342,6 +379,18 @@ static bool loom_low_placement_pair_alternative_is_possible(
   return true;
 }
 
+bool loom_low_placement_pair_alternative_can_separate_ref(
+    const loom_low_placement_pair_use_t* use,
+    const loom_low_placement_pair_relation_t* relations,
+    uint16_t relation_count,
+    const loom_low_placement_pair_value_ref_t* separated_ref) {
+  IREE_ASSERT_ARGUMENT(use);
+  IREE_ASSERT_ARGUMENT(relations);
+  IREE_ASSERT_ARGUMENT(separated_ref);
+  return loom_low_placement_pair_alternative_is_possible_after_separation(
+      use, relations, relation_count, separated_ref);
+}
+
 uint16_t loom_low_placement_pair_possible_alternative_count(
     const loom_low_placement_pair_use_t* use,
     const loom_low_placement_pair_recipe_t* recipe) {
@@ -351,8 +400,9 @@ uint16_t loom_low_placement_pair_possible_alternative_count(
   for (uint16_t i = 0; i < recipe->alternative_count; ++i) {
     const loom_low_placement_pair_relation_t* relations =
         &recipe->relations[i * recipe->relation_count];
-    if (loom_low_placement_pair_alternative_is_possible(
-            use, relations, recipe->relation_count)) {
+    if (loom_low_placement_pair_alternative_is_possible_after_separation(
+            use, relations, recipe->relation_count,
+            /*separated_ref=*/NULL)) {
       ++possible_count;
     }
   }
@@ -368,8 +418,9 @@ loom_low_placement_select_pair_alternative(
   for (uint16_t i = 0; i < recipe->alternative_count; ++i) {
     const loom_low_placement_pair_relation_t* relations =
         &recipe->relations[i * recipe->relation_count];
-    if (loom_low_placement_pair_alternative_is_possible(
-            use, relations, recipe->relation_count)) {
+    if (loom_low_placement_pair_alternative_is_possible_after_separation(
+            use, relations, recipe->relation_count,
+            /*separated_ref=*/NULL)) {
       return relations;
     }
   }
@@ -393,9 +444,9 @@ static iree_status_t loom_low_placement_collect_pair_relations(
     const loom_low_placement_pair_relation_t* recipe_relation =
         &selected_relations[i];
     const loom_value_id_t result_value_id =
-        loom_low_placement_pair_value(use, &recipe_relation->result);
+        loom_low_placement_pair_value_id(use, &recipe_relation->result);
     const loom_value_id_t source_value_id =
-        loom_low_placement_pair_value(use, &recipe_relation->source);
+        loom_low_placement_pair_value_id(use, &recipe_relation->source);
     if (result_value_id == source_value_id) {
       continue;
     }
