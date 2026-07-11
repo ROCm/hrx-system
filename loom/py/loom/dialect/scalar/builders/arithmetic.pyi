@@ -347,6 +347,7 @@ class ScalarArithmeticMixin:
     def copysignf(
         self,
         *,
+        fastmath: str = ...,
         lhs: ValueRef,
         rhs: ValueRef,
         results: list[Type | TiedResultSpec],
