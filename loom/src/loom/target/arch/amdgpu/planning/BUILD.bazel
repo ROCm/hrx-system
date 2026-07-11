@@ -461,6 +461,7 @@ loom_generated_cc_library(
     source = "occupancy_model_tables.c",
     visibility = _AMDGPU_ROOT_VISIBILITY,
     deps = [
+        "//loom/src/loom/codegen/low:pressure",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
     ],
@@ -475,7 +476,7 @@ loom_cc_library(
         ":occupancy_model",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:diagnostics",
-        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/codegen/low:pressure",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:launch",

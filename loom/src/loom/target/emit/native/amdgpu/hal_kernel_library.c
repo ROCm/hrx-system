@@ -1030,10 +1030,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
       &low_registry->registry, &plan->entry->bundle_storage.bundle,
       &descriptor_set));
-  loom_low_schedule_pressure_cliff_list_t schedule_pressure_cliffs =
-      loom_low_schedule_pressure_cliff_list_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
-      descriptor_set, table_arena, &schedule_pressure_cliffs));
+  const loom_low_pressure_cliff_table_t pressure_cliffs =
+      loom_amdgpu_occupancy_pressure_cliffs(descriptor_set);
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_resolved_target_t resolved_target = {
@@ -1058,7 +1056,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
               .bundle = &plan->entry->bundle_storage.bundle,
               .data = target_selection.data,
           },
-      .schedule_pressure_cliffs = schedule_pressure_cliffs,
+      .pressure_cliffs = pressure_cliffs,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,

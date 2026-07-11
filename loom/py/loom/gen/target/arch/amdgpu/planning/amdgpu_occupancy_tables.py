@@ -225,22 +225,24 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
         descriptor_reg_class_rows = _descriptor_reg_classes(model.descriptor_set_key)
         register_class_indices = {row.register_class: index for index, row in enumerate(model.register_classes)}
         pressure_cliffs_by_register_class = {row.register_class: _pressure_cliffs(row, model.max_waves_per_simd) for row in model.register_classes}
-        pressure_cliff_count = sum(len(cliffs) for cliffs in pressure_cliffs_by_register_class.values())
-        for row in model.register_classes:
+        pressure_cliff_rows: list[tuple[int, int, int, int]] = []
+        pressure_cliff_ranges: dict[str, tuple[int, int]] = {}
+        for row in sorted(model.register_classes, key=lambda row: descriptor_reg_classes[row.register_class]):
             cliffs = pressure_cliffs_by_register_class[row.register_class]
-            register_class_suffix = _resource_c_suffix(row.register_class)
-            if not cliffs:
-                continue
+            pressure_cliff_ranges[row.register_class] = (len(pressure_cliff_rows), len(cliffs))
+            pressure_cliff_rows.extend((descriptor_reg_classes[row.register_class], cliff_units, tier_before, tier_after) for cliff_units, tier_before, tier_after in cliffs)
+        if pressure_cliff_rows:
             lines.extend(
                 [
                     "",
-                    f"static const loom_amdgpu_occupancy_pressure_cliff_model_t kAmdgpu{suffix}{register_class_suffix}PressureCliffs[] = {{",
+                    f"static const loom_low_pressure_cliff_t kAmdgpu{suffix}PressureCliffs[] = {{",
                 ]
             )
-            for cliff_units, tier_before, tier_after in cliffs:
+            for descriptor_reg_class_id, cliff_units, tier_before, tier_after in pressure_cliff_rows:
                 lines.extend(
                     [
                         "  {",
+                        f"    .descriptor_reg_class_id = {_u16_expr(descriptor_reg_class_id)},",
                         f"    .cliff_units = {_u32_expr(cliff_units)},",
                         f"    .tier_before = {_u32_expr(tier_before)},",
                         f"    .tier_after = {_u32_expr(tier_after)},",
@@ -248,6 +250,22 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                     ]
                 )
             lines.append("};")
+            pressure_cliffs_initializer = f"kAmdgpu{suffix}PressureCliffs"
+            pressure_cliff_count_initializer = f"IREE_ARRAYSIZE(kAmdgpu{suffix}PressureCliffs)"
+        else:
+            pressure_cliffs_initializer = "NULL"
+            pressure_cliff_count_initializer = "0"
+        lines.extend(
+            [
+                "",
+                f"static const loom_low_pressure_cliff_range_t kAmdgpu{suffix}PressureCliffRanges[] = {{",
+            ]
+        )
+        for descriptor_reg_class in descriptor_reg_class_rows:
+            start, count = pressure_cliff_ranges.get(descriptor_reg_class.name, (0, 0))
+            descriptor_reg_class_id = descriptor_reg_classes[descriptor_reg_class.name]
+            lines.append(f"  [{_u16_expr(descriptor_reg_class_id)}] = {{.start = {_u32_expr(start)}, .count = {_u32_expr(count)}}},")
+        lines.append("};")
         lines.extend(
             [
                 "",
@@ -255,14 +273,6 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
             ]
         )
         for row in model.register_classes:
-            cliffs = pressure_cliffs_by_register_class[row.register_class]
-            register_class_suffix = _resource_c_suffix(row.register_class)
-            if cliffs:
-                pressure_cliffs_initializer = f"kAmdgpu{suffix}{register_class_suffix}PressureCliffs"
-                pressure_cliff_count_initializer = f"IREE_ARRAYSIZE(kAmdgpu{suffix}{register_class_suffix}PressureCliffs)"
-            else:
-                pressure_cliffs_initializer = "NULL"
-                pressure_cliff_count_initializer = "0"
             lines.extend(
                 [
                     "  {",
@@ -270,8 +280,6 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                     f"    .descriptor_reg_class_id = {_u16_expr(descriptor_reg_classes[row.register_class])},",
                     f"    .pool_units = {_u32_expr(row.pool_units)},",
                     f"    .allocation_granularity = {_u32_expr(row.allocation_granularity)},",
-                    f"    .pressure_cliffs = {pressure_cliffs_initializer},",
-                    f"    .pressure_cliff_count = {pressure_cliff_count_initializer},",
                     "  },",
                 ]
             )
@@ -338,7 +346,12 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                 f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model.descriptor_set_key))},",
                 f"  .wave_size = {_u32_expr(model.wave_size)},",
                 f"  .max_waves_per_simd = {_u32_expr(model.max_waves_per_simd)},",
-                f"  .pressure_cliff_count = {pressure_cliff_count},",
+                "  .pressure_cliffs = {",
+                f"    .values = {pressure_cliffs_initializer},",
+                f"    .count = {pressure_cliff_count_initializer},",
+                f"    .ranges = kAmdgpu{suffix}PressureCliffRanges,",
+                f"    .range_count = IREE_ARRAYSIZE(kAmdgpu{suffix}PressureCliffRanges),",
+                "  },",
                 f"  .register_classes = kAmdgpu{suffix}RegisterClasses,",
                 f"  .register_class_count = IREE_ARRAYSIZE(kAmdgpu{suffix}RegisterClasses),",
                 f"  .register_class_indices_by_descriptor_reg_class_id = kAmdgpu{suffix}RegisterClassIndexByDescriptorRegClassId,",

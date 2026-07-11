@@ -959,6 +959,62 @@ static iree_status_t loom_check_emit_write_liveness_json(
   return loom_liveness_format_json(&analysis, NULL, &result->actual_output);
 }
 
+static iree_status_t loom_check_emit_index_pressure_cliffs(
+    const loom_low_pressure_cliff_t* values, iree_host_size_t count,
+    iree_host_size_t descriptor_reg_class_count, iree_arena_allocator_t* arena,
+    loom_low_pressure_cliff_table_t* out_table) {
+  loom_low_pressure_cliff_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, descriptor_reg_class_count, sizeof(*ranges), (void**)&ranges));
+  memset(ranges, 0, descriptor_reg_class_count * sizeof(*ranges));
+
+  uint16_t previous_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  uint32_t previous_cliff_units = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_low_pressure_cliff_t* cliff = &values[i];
+    if (cliff->descriptor_reg_class_id >= descriptor_reg_class_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff references an invalid register "
+          "class");
+    }
+    if (cliff->cliff_units == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff units must be nonzero");
+    }
+    if (cliff->tier_after >= cliff->tier_before) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff must lower the target tier");
+    }
+    if (i != 0 && (cliff->descriptor_reg_class_id < previous_reg_class_id ||
+                   (cliff->descriptor_reg_class_id == previous_reg_class_id &&
+                    cliff->cliff_units <= previous_cliff_units))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliffs must be sorted by register "
+          "class and units");
+    }
+    loom_low_pressure_cliff_range_t* range =
+        &ranges[cliff->descriptor_reg_class_id];
+    if (range->count == 0) {
+      range->start = (uint32_t)i;
+    }
+    ++range->count;
+    previous_reg_class_id = cliff->descriptor_reg_class_id;
+    previous_cliff_units = cliff->cliff_units;
+  }
+
+  *out_table = (loom_low_pressure_cliff_table_t){
+      .values = values,
+      .count = count,
+      .ranges = ranges,
+      .range_count = descriptor_reg_class_count,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
@@ -977,7 +1033,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   if (!low_function) {
     return iree_ok_status();
   }
-  const loom_low_schedule_pressure_cliff_t* pressure_cliffs = NULL;
+  loom_low_pressure_cliff_table_t pressure_cliffs =
+      loom_low_pressure_cliff_table_empty();
   if (pressure_cliff_spec_count != 0) {
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
@@ -988,7 +1045,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
           IREE_STATUS_FAILED_PRECONDITION,
           "low-schedule-json target did not resolve descriptor set");
     }
-    loom_low_schedule_pressure_cliff_t* resolved_cliffs = NULL;
+    loom_low_pressure_cliff_t* resolved_cliffs = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         analysis_arena, pressure_cliff_spec_count, sizeof(*resolved_cliffs),
         (void**)&resolved_cliffs));
@@ -1019,7 +1076,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
         pressure_cliffs_resolved = false;
         continue;
       }
-      resolved_cliffs[i] = (loom_low_schedule_pressure_cliff_t){
+      resolved_cliffs[i] = (loom_low_pressure_cliff_t){
           .descriptor_reg_class_id = reg_class_id,
           .cliff_units = spec->cliff_units,
           .tier_before = spec->tier_before,
@@ -1029,15 +1086,14 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     if (!pressure_cliffs_resolved) {
       return iree_ok_status();
     }
-    pressure_cliffs = resolved_cliffs;
+    IREE_RETURN_IF_ERROR(loom_check_emit_index_pressure_cliffs(
+        resolved_cliffs, pressure_cliff_spec_count,
+        target.descriptor_set->reg_class_count, analysis_arena,
+        &pressure_cliffs));
   }
   loom_low_schedule_options_t options = {
       .descriptor_registry = descriptor_registry,
-      .pressure_cliffs =
-          {
-              .values = pressure_cliffs,
-              .count = pressure_cliff_spec_count,
-          },
+      .pressure_cliffs = pressure_cliffs,
       .allocation_budgets = budgets,
       .allocation_budget_count = budget_count,
       .emitter = emitter,

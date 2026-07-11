@@ -152,7 +152,7 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       .descriptor_registry = options->descriptor_registry,
       .target_selection = options->target_selection,
       .memory_access_table = options->memory_access_table,
-      .pressure_cliffs = options->schedule_pressure_cliffs,
+      .pressure_cliffs = options->pressure_cliffs,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,
       .pair_affinities = options->schedule_pair_affinities,
@@ -329,7 +329,7 @@ static uint32_t loom_low_emission_frame_allocated_units_for_reg_class(
 }
 
 static void loom_low_emission_frame_capture_pressure_cliff_units(
-    loom_low_schedule_pressure_cliff_list_t pressure_cliffs,
+    loom_low_pressure_cliff_table_t pressure_cliffs,
     const loom_low_allocation_table_t* allocation, uint32_t* out_units) {
   for (iree_host_size_t i = 0; i < pressure_cliffs.count; ++i) {
     out_units[i] = loom_low_emission_frame_allocated_units_for_reg_class(
@@ -338,12 +338,11 @@ static void loom_low_emission_frame_capture_pressure_cliff_units(
 }
 
 static bool loom_low_emission_frame_crosses_new_pressure_cliff(
-    loom_low_schedule_pressure_cliff_list_t pressure_cliffs,
+    loom_low_pressure_cliff_table_t pressure_cliffs,
     const uint32_t* baseline_units,
     const loom_low_allocation_table_t* allocation) {
   for (iree_host_size_t i = 0; i < pressure_cliffs.count; ++i) {
-    const loom_low_schedule_pressure_cliff_t* cliff =
-        &pressure_cliffs.values[i];
+    const loom_low_pressure_cliff_t* cliff = &pressure_cliffs.values[i];
     if (baseline_units[i] >= cliff->cliff_units) {
       continue;
     }
@@ -578,7 +577,7 @@ iree_status_t loom_low_emission_frame_build_spill_free(
           frame.allocation.spill_plan_count != 0 ||
           frame.allocation.spill_count != 0 ||
           loom_low_emission_frame_crosses_new_pressure_cliff(
-              frame_options->schedule_pressure_cliffs,
+              frame_options->pressure_cliffs,
               pair_replication_baseline_cliff_units, &frame.allocation);
       if (!rejected) {
         uint64_t satisfied_packet_savings = 0;
@@ -648,8 +647,8 @@ iree_status_t loom_low_emission_frame_build_spill_free(
             module, &frame.allocation, frame.schedule.placement_pair_uses,
             arena, &pair_replication));
         if (pair_replication.edit_count != 0) {
-          const loom_low_schedule_pressure_cliff_list_t pressure_cliffs =
-              frame_options->schedule_pressure_cliffs;
+          const loom_low_pressure_cliff_table_t pressure_cliffs =
+              frame_options->pressure_cliffs;
           if (pressure_cliffs.count != 0) {
             IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
                 arena, pressure_cliffs.count,

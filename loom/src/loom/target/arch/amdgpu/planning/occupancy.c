@@ -98,15 +98,14 @@ static uint32_t loom_amdgpu_occupancy_next_cliff_units(
 }
 
 static uint32_t loom_amdgpu_occupancy_next_model_cliff_units(
-    const loom_amdgpu_occupancy_pressure_cliff_model_t* pressure_cliffs,
+    const loom_low_pressure_cliff_t* pressure_cliffs,
     iree_host_size_t pressure_cliff_count, uint32_t allocated_units,
     uint32_t current_wave_limit) {
   if (current_wave_limit == 0) {
     return 0;
   }
   for (iree_host_size_t i = 0; i < pressure_cliff_count; ++i) {
-    const loom_amdgpu_occupancy_pressure_cliff_model_t* cliff =
-        &pressure_cliffs[i];
+    const loom_low_pressure_cliff_t* cliff = &pressure_cliffs[i];
     if (cliff->cliff_units <= allocated_units) {
       continue;
     }
@@ -155,47 +154,12 @@ static bool loom_amdgpu_occupancy_assignment_contributes_register_resources(
   return *out_class_index != LOOM_AMDGPU_OCCUPANCY_CLASS_NONE;
 }
 
-iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena,
-    loom_low_schedule_pressure_cliff_list_t* out_pressure_cliffs) {
-  *out_pressure_cliffs = loom_low_schedule_pressure_cliff_list_empty();
-
+loom_low_pressure_cliff_table_t loom_amdgpu_occupancy_pressure_cliffs(
+    const loom_low_descriptor_set_t* descriptor_set) {
   const loom_amdgpu_occupancy_model_t* model =
       loom_amdgpu_occupancy_select_model(
           descriptor_set->descriptor_set_ordinal);
-  if (model->pressure_cliff_count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_low_schedule_pressure_cliff_t* cliffs = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, model->pressure_cliff_count, sizeof(*cliffs), (void**)&cliffs));
-  iree_host_size_t cliff_count = 0;
-
-  for (iree_host_size_t class_index = 0;
-       class_index < model->register_class_count; ++class_index) {
-    const loom_amdgpu_occupancy_register_class_model_t* class_model =
-        &model->register_classes[class_index];
-    for (iree_host_size_t i = 0; i < class_model->pressure_cliff_count; ++i) {
-      const loom_amdgpu_occupancy_pressure_cliff_model_t* cliff_model =
-          &class_model->pressure_cliffs[i];
-      IREE_ASSERT(cliff_count < model->pressure_cliff_count);
-      cliffs[cliff_count++] = (loom_low_schedule_pressure_cliff_t){
-          .descriptor_reg_class_id = class_model->descriptor_reg_class_id,
-          .cliff_units = cliff_model->cliff_units,
-          .tier_before = cliff_model->tier_before,
-          .tier_after = cliff_model->tier_after,
-      };
-    }
-  }
-  IREE_ASSERT(cliff_count == model->pressure_cliff_count);
-
-  *out_pressure_cliffs = (loom_low_schedule_pressure_cliff_list_t){
-      .values = cliffs,
-      .count = cliff_count,
-  };
-  return iree_ok_status();
+  return model->pressure_cliffs;
 }
 
 static iree_status_t loom_amdgpu_occupancy_collect_allocations(
@@ -329,7 +293,7 @@ static iree_status_t loom_amdgpu_occupancy_flat_workgroup_size(
 static iree_status_t loom_amdgpu_occupancy_finalize_resource_limit(
     uint32_t pool_units, uint32_t allocation_granularity,
     uint32_t max_waves_per_simd, uint32_t allocated_units,
-    const loom_amdgpu_occupancy_pressure_cliff_model_t* pressure_cliffs,
+    const loom_low_pressure_cliff_t* pressure_cliffs,
     iree_host_size_t pressure_cliff_count, uint32_t* out_rounded_units,
     uint32_t* out_wave_limit, uint32_t* out_next_cliff_units,
     uint32_t* out_units_until_next_cliff) {
@@ -363,10 +327,17 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
     loom_amdgpu_occupancy_register_class_t* class_summary = &class_summaries[i];
     const loom_amdgpu_occupancy_register_class_model_t* class_model =
         &model->register_classes[i];
+    const loom_low_pressure_cliff_range_t pressure_cliff_range =
+        loom_low_pressure_cliff_table_range(
+            &model->pressure_cliffs, class_model->descriptor_reg_class_id);
+    const loom_low_pressure_cliff_t* pressure_cliffs =
+        pressure_cliff_range.count == 0
+            ? NULL
+            : &model->pressure_cliffs.values[pressure_cliff_range.start];
     IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_finalize_resource_limit(
         class_model->pool_units, class_model->allocation_granularity,
         table->max_waves_per_simd, class_summary->allocated_units,
-        class_model->pressure_cliffs, class_model->pressure_cliff_count,
+        pressure_cliffs, pressure_cliff_range.count,
         &class_summary->rounded_units, &class_summary->wave_limit,
         &class_summary->next_cliff_units,
         &class_summary->units_until_next_cliff));

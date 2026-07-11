@@ -675,6 +675,7 @@ loom_generated_cc_library(
     "occupancy_model.h"
   DEPS
     iree::base
+    loom::codegen::low::pressure
     loom::target::arch::amdgpu::target_info
 )
 endif()
@@ -693,7 +694,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::schedule
+    loom::codegen::low::pressure
     loom::error::error_defs
     loom::ir
     loom::target::arch::amdgpu::refs::target_refs
