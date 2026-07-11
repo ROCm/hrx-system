@@ -60,10 +60,6 @@ static const char* loom_low_schedule_json_dependency_kind(
       return "ssa";
     case LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT:
       return "effect";
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL:
-      return "control";
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR:
-      return "anchor";
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STATE:
       return "state";
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE:
@@ -228,6 +224,22 @@ iree_status_t loom_low_schedule_format_json(
         ",\"scheduled_node_count\":%" PRIu32 "}",
         i, block->node_start, block->node_count, block->scheduled_node_start,
         block->scheduled_node_count));
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
+      &stream, ",\"source_order_boundaries\":["));
+  bool has_source_order_boundary = false;
+  for (iree_host_size_t i = 0; i < table->node_count; ++i) {
+    if (!iree_any_bit_set(table->nodes[i].flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY)) {
+      continue;
+    }
+    if (has_source_order_boundary) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(&stream, "%zu", i));
+    has_source_order_boundary = true;
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
 

@@ -65,10 +65,6 @@ static iree_string_view_t loom_low_schedule_dependency_kind_name(
       return IREE_SV("ssa");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT:
       return IREE_SV("effect");
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL:
-      return IREE_SV("control");
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR:
-      return IREE_SV("anchor");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STATE:
       return IREE_SV("state");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE:

@@ -126,7 +126,7 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
   node->descriptor = packet.descriptor;
   if (iree_any_bit_set(packet.descriptor->flags,
                        LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
-    node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_FENCE;
+    node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
   }
   node->schedule_class =
       &state->target.descriptor_set
@@ -1218,11 +1218,15 @@ iree_status_t loom_low_schedule_fill_nodes(
       };
       if (loom_low_schedule_op_is_terminator(state->module, op)) {
         node->kind = LOOM_LOW_SCHEDULE_NODE_TERMINATOR;
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       } else if (loom_low_schedule_op_is_descriptor_packet(op)) {
         node->kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
       } else if (op->region_count == 0 &&
                  iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP;
+      }
+      if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
       if (op->kind == LOOM_OP_LOW_COPY && loom_low_copy_detached(op)) {
         ++state->detached_copy_node_count;
@@ -1861,10 +1865,6 @@ iree_status_t loom_low_schedule_build_dependencies(
     node_count += block_record->node_count;
     loom_low_schedule_effect_frontier_t effect_frontier;
     loom_low_schedule_effect_frontier_initialize(state, &effect_frontier);
-    uint32_t last_live_in_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-    uint32_t last_fence_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-    uint32_t fence_segment_start = block_record->node_start;
-    bool live_in_preamble_open = true;
     if (state->state_chain_read_heads != NULL) {
       memset(&state->state_chain_read_heads[block_record->node_start], 0xFF,
              block_record->node_count * sizeof(*state->state_chain_read_heads));
@@ -1888,43 +1888,6 @@ iree_status_t loom_low_schedule_build_dependencies(
     for (uint32_t node_index = block_record->node_start;
          node_index < block_node_end; ++node_index) {
       const loom_low_schedule_node_t* node = &state->nodes[node_index];
-      const loom_op_t* op = node->op;
-      if (last_fence_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
-        IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-            state, last_fence_node, node_index,
-            LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL, UINT32_MAX));
-      }
-      if (iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_FENCE)) {
-        for (uint32_t predecessor_node = fence_segment_start;
-             predecessor_node < node_index; ++predecessor_node) {
-          IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-              state, predecessor_node, node_index,
-              LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL, UINT32_MAX));
-        }
-        last_fence_node = node_index;
-        fence_segment_start = node_index + 1;
-      }
-      if (loom_low_live_in_isa(op)) {
-        if (block_index != 0 || !live_in_preamble_open) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "low schedule requires low.live_in packets in the entry "
-              "preamble");
-        }
-        if (last_live_in_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
-          IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-              state, last_live_in_node, node_index,
-              LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR, UINT32_MAX));
-        }
-        last_live_in_node = node_index;
-      } else {
-        live_in_preamble_open = false;
-        if (last_live_in_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
-          IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-              state, last_live_in_node, node_index,
-              LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR, UINT32_MAX));
-        }
-      }
 
       // Process tied writes before recording this node's operand reads. This
       // keeps overlapping tied operands from depending on their own writer,
@@ -1980,18 +1943,6 @@ iree_status_t loom_low_schedule_build_dependencies(
       } else if (loom_low_schedule_node_has_effects(node, NULL)) {
         IREE_RETURN_IF_ERROR(loom_low_schedule_note_structural_effects(
             state, &effect_frontier, node_index));
-      }
-
-      if (node->kind == LOOM_LOW_SCHEDULE_NODE_TERMINATOR) {
-        for (uint32_t predecessor_node = block_record->node_start;
-             predecessor_node < node_index; ++predecessor_node) {
-          if (predecessor_node == last_fence_node) {
-            continue;
-          }
-          IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-              state, predecessor_node, node_index,
-              LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL, UINT32_MAX));
-        }
       }
     }
     loom_low_schedule_reset_storage_reads(state);

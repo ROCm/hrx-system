@@ -1300,33 +1300,6 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, EmitLowScheduleJsonAnchorsLiveInPreamble) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: emit low-schedule-json @livein\n"
-                   "test.target<low_core> @test_target\n"
-                   "low.func.def target(@test_target) @livein() -> "
-                   "(reg<test.i32>) {\n"
-                   "  %arg0 = low.live_in<test.arg0> : reg<test.i32>\n"
-                   "  %copy = low.copy %arg0 : reg<test.i32> -> "
-                   "reg<test.i32>\n"
-                   "  low.return %copy : reg<test.i32>\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("\"format\":\"loom.low.schedule.v0\""),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"op\":\"low.live_in\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"kind\":\"anchor\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"from\":0,\"to\":1,\"kind\":\"anchor\""),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"from\":0,\"to\":2,\"kind\":\"anchor\""),
-            std::string::npos);
-  loom_check_result_deinitialize(&result);
-}
-
 TEST_F(ExecuteTest, EmitLivenessJsonReportsPressureSummary) {
   loom_check_result_t result;
   IREE_ASSERT_OK(ExecuteFirst(
