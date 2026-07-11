@@ -19,6 +19,9 @@
 
 namespace {
 
+// Holds the default 128 KiB module value table and its 64-byte alignment slack.
+constexpr iree_host_size_t kAlignedModuleWorkspaceBlockSize = 128 * 1024 + 64;
+
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateBenchmarkKernelSource;
@@ -90,6 +93,9 @@ static std::string MakeSpirvI32ChainSource(iree_host_size_t operation_count) {
 
 class SpirvScenarioBase : public CompileScenario {
  protected:
+  explicit SpirvScenarioBase(iree_host_size_t workspace_usable_block_size = 0)
+      : CompileScenario(workspace_usable_block_size) {}
+
   iree_status_t SetUpSpirv(iree_host_size_t worker_count) {
     IREE_RETURN_IF_ERROR(CreateTargetEnvironmentAndContext());
     IREE_RETURN_IF_ERROR(CreateTargetProfileAndSelection());
@@ -324,7 +330,8 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
     IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
         loomc_make_cstring_view("double_i32_at_byte_offset.loom"), &source_));
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
-      IREE_RETURN_IF_ERROR(CreateWorkspace(&template_workspace_));
+      IREE_RETURN_IF_ERROR(
+          CreateWorkspace(/*usable_block_size=*/0, &template_workspace_));
       IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
                                              template_workspace_.get(),
                                              source_.get(), &template_module_));
@@ -384,8 +391,10 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
  public:
   SpirvI32ChainScenario(iree_host_size_t job_count,
                         iree_host_size_t operation_count,
-                        ModuleMaterializationMode materialization_mode)
-      : job_count_(job_count),
+                        ModuleMaterializationMode materialization_mode,
+                        iree_host_size_t workspace_usable_block_size = 0)
+      : SpirvScenarioBase(workspace_usable_block_size),
+        job_count_(job_count),
         operation_count_(std::max<iree_host_size_t>(operation_count, 1)),
         materialization_mode_(materialization_mode) {}
 
@@ -395,7 +404,8 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
     IREE_RETURN_IF_ERROR(
         CreateTextSource("i32_chain.loom", source_text_, &source_));
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
-      IREE_RETURN_IF_ERROR(CreateWorkspace(&template_workspace_));
+      IREE_RETURN_IF_ERROR(
+          CreateWorkspace(/*usable_block_size=*/0, &template_workspace_));
       IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
                                              template_workspace_.get(),
                                              source_.get(), &template_module_));
@@ -487,6 +497,15 @@ static std::unique_ptr<CompileScenario> CreateSpirvI32ChainCloneScenario(
   return std::make_unique<SpirvI32ChainScenario>(
       (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),
       ModuleMaterializationMode::kCloneTemplate);
+}
+
+static std::unique_ptr<CompileScenario> CreateSpirvI32ChainWorkspaceScenario(
+    const ::benchmark::State& state, void* user_data) {
+  (void)user_data;
+  return std::make_unique<SpirvI32ChainScenario>(
+      (iree_host_size_t)state.range(1), (iree_host_size_t)state.range(2),
+      ModuleMaterializationMode::kCloneTemplate,
+      (iree_host_size_t)state.range(3));
 }
 
 static void BM_SpirvTunerFlowParseSmoke(::benchmark::State& state) {
@@ -613,6 +632,30 @@ BENCHMARK(BM_SpirvI32ChainClone)
     ->Args({96, 1536, 64})
     ->Args({96, 1536, 256})
     ->Args({96, 384, 1024})
+    ->UseRealTime();
+
+static void BM_SpirvI32ChainWorkspaceSmoke(::benchmark::State& state) {
+  RunCompileBenchmarkDirect(state, CreateSpirvI32ChainWorkspaceScenario,
+                            nullptr);
+}
+BENCHMARK(BM_SpirvI32ChainWorkspaceSmoke)
+    ->ArgsProduct({{1},
+                   {2},
+                   {16},
+                   {32 * 1024, 64 * 1024, 128 * 1024,
+                    kAlignedModuleWorkspaceBlockSize}})
+    ->UseRealTime();
+
+static void BM_SpirvI32ChainWorkspaceDirect(::benchmark::State& state) {
+  RunCompileBenchmarkDirect(state, CreateSpirvI32ChainWorkspaceScenario,
+                            nullptr);
+}
+BENCHMARK(BM_SpirvI32ChainWorkspaceDirect)
+    ->ArgsProduct({{1},
+                   {16},
+                   {1, 64, 1024},
+                   {32 * 1024, 64 * 1024, 128 * 1024,
+                    kAlignedModuleWorkspaceBlockSize}})
     ->UseRealTime();
 
 }  // namespace
