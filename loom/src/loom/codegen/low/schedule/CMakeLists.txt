@@ -13,11 +13,13 @@ loom_cc_library(
   NAME
     schedule
   HDRS
+    "dependencies.h"
     "json.h"
     "run.h"
     "types.h"
   SRCS
     "context.h"
+    "dependencies.c"
     "descriptor_rows.c"
     "descriptor_rows.h"
     "diagnostics.c"
@@ -52,8 +54,20 @@ loom_cc_library(
     loom::util::cfg_graph
     loom::util::json
     loom::util::math
+    loom::util::segmented_storage
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependencies_test
+  SRCS
+    "dependencies_test.cc"
+  DEPS
+    ::schedule
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

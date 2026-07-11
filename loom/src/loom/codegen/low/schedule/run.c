@@ -1790,7 +1790,8 @@ static void loom_low_schedule_begin_ready_descriptor_window(
            dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
            dependency_index = state->outgoing_next_indices[dependency_index]) {
         const loom_low_schedule_dependency_t* dependency =
-            &state->dependencies[dependency_index];
+            loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                           dependency_index);
         if (dependency->producer_node != node_index) {
           continue;
         }
@@ -1940,7 +1941,8 @@ static uint16_t loom_low_schedule_score_candidate_pair_affinity(
        dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
        dependency_index = state->outgoing_next_indices[dependency_index]) {
     const loom_low_schedule_dependency_t* dependency =
-        &state->dependencies[dependency_index];
+        loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                       dependency_index);
     if (dependency->kind != LOOM_LOW_SCHEDULE_DEPENDENCY_SSA ||
         dependency->producer_node != node_index) {
       continue;
@@ -2112,7 +2114,8 @@ loom_low_schedule_score_candidate_pressure_demand(
        dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
        dependency_index = state->outgoing_next_indices[dependency_index]) {
     const loom_low_schedule_dependency_t* dependency =
-        &state->dependencies[dependency_index];
+        loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                       dependency_index);
     if (dependency->producer_node != node_index) {
       continue;
     }
@@ -3107,8 +3110,9 @@ static iree_status_t loom_low_schedule_record_first_unresolved_dependency(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_block_t* block_record, iree_host_size_t node_count,
     uint32_t scheduled_in_block) {
-  for (iree_host_size_t i = 0; i < state->dependency_count; ++i) {
-    const loom_low_schedule_dependency_t* dependency = &state->dependencies[i];
+  for (uint32_t i = 0; i < state->dependencies.ordering.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_ordering_at(&state->dependencies, i);
     if (!loom_low_schedule_node_is_unscheduled_in_block(
             state, dependency->consumer_node, node_count,
             state->current_block_index)) {
@@ -3188,7 +3192,8 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
         stack_next_dependencies[stack_count - 1] =
             state->outgoing_next_indices[dependency_index];
         const loom_low_schedule_dependency_t* dependency =
-            &state->dependencies[dependency_index];
+            loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                           dependency_index);
         if (!loom_low_schedule_node_is_unscheduled_in_block(
                 state, dependency->consumer_node, node_count,
                 state->current_block_index)) {
@@ -3264,7 +3269,8 @@ static void loom_low_schedule_compute_node_priorities(
            dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
            dependency_index = outgoing_next_indices[dependency_index]) {
         const loom_low_schedule_dependency_t* dependency =
-            &state->dependencies[dependency_index];
+            loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                           dependency_index);
         if (dependency->producer_node != node_index ||
             dependency->consumer_node >= node_count) {
           continue;
@@ -3348,7 +3354,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   uint32_t* inspected_nodes = NULL;
   loom_low_schedule_candidate_score_t* inspected_scores = NULL;
   loom_low_schedule_pressure_state_t pressure_state = {0};
-  if (state->dependency_count > UINT32_MAX) {
+  if (state->dependencies.ordering.count > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "low schedule dependency count exceeds uint32_t adjacency capacity");
@@ -3365,12 +3371,12 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         state->arena, node_count, sizeof(*ready_heap.node_indices),
         (void**)&ready_heap.node_indices));
   }
-  if (state->dependency_count != 0) {
+  if (state->dependencies.ordering.count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, state->dependency_count, sizeof(*outgoing_next_indices),
-        (void**)&outgoing_next_indices));
+        state->arena, state->dependencies.ordering.count,
+        sizeof(*outgoing_next_indices), (void**)&outgoing_next_indices));
     memset(outgoing_next_indices, 0xFF,
-           state->dependency_count * sizeof(*outgoing_next_indices));
+           state->dependencies.ordering.count * sizeof(*outgoing_next_indices));
   }
   if (loom_low_schedule_uses_pressure_strategy(state)) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -3395,8 +3401,9 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   }
   IREE_RETURN_IF_ERROR(loom_low_schedule_allocate_pressure_state(
       state, node_count, &pressure_state));
-  for (iree_host_size_t i = 0; i < state->dependency_count; ++i) {
-    const loom_low_schedule_dependency_t* dependency = &state->dependencies[i];
+  for (uint32_t i = 0; i < state->dependencies.ordering.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_ordering_at(&state->dependencies, i);
     if (dependency->consumer_node < node_count) {
       ++indegrees[dependency->consumer_node];
     }
@@ -3583,7 +3590,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
            dependency_index != LOOM_LOW_SCHEDULE_NODE_NONE;
            dependency_index = outgoing_next_indices[dependency_index]) {
         const loom_low_schedule_dependency_t* dependency =
-            &state->dependencies[dependency_index];
+            loom_low_schedule_dependency_graph_ordering_at(&state->dependencies,
+                                                           dependency_index);
         if (dependency->producer_node != chosen_node) {
           continue;
         }
@@ -3694,6 +3702,7 @@ iree_status_t loom_low_schedule_function(
       .function_op = low_func_op,
       .body = loom_low_function_body((loom_op_t*)low_func_op),
   };
+  loom_low_schedule_dependency_graph_initialize(&state.dependencies);
   IREE_ASSERT(state.body != NULL);
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_memory_access_table(
       options->memory_access_table, low_func_op, state.body));
@@ -3798,10 +3807,6 @@ iree_status_t loom_low_schedule_function(
         .block_count = state.body->block_count,
         .nodes = state.nodes,
         .node_count = node_count,
-        .dependencies = state.dependencies,
-        .dependency_count = state.dependency_count,
-        .visibility_dependencies = state.visibility_dependencies,
-        .visibility_dependency_count = state.visibility_dependency_count,
         .scheduled_node_indices = state.scheduled_node_indices,
         .scheduled_node_count = state.scheduled_node_count,
         .placement_pair_uses =
@@ -3831,6 +3836,8 @@ iree_status_t loom_low_schedule_function(
         .resource_summaries = state.resource_summaries,
         .resource_summary_count = state.resource_summary_count,
     };
+    loom_low_schedule_dependency_graph_move(&state.dependencies,
+                                            &out_table->dependencies);
     loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   }
   loom_local_value_domain_release(&value_domain);

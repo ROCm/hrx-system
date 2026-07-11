@@ -24,6 +24,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/pressure.h"
+#include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -58,23 +59,6 @@ enum loom_low_schedule_node_flag_bits_e {
 typedef uint16_t loom_low_schedule_node_flags_t;
 
 #define LOOM_LOW_SCHEDULE_NODE_INLINE_VALUE_ORDINAL_CAPACITY 4
-
-typedef enum loom_low_schedule_dependency_kind_e {
-  // Unknown or uninitialized dependency kind.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_UNKNOWN = 0,
-  // SSA producer-to-consumer dependency.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_SSA = 1,
-  // Conservative side-effect ordering dependency.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT = 2,
-  // Block-control dependency keeping terminators after block contents.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL = 3,
-  // Structural anchoring dependency keeping fixed-position packets in place.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR = 4,
-  // Target architectural state dependency such as flags or special registers.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_STATE = 5,
-  // Tied-result storage dependency keeping older readers before an overwrite.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE = 6,
-} loom_low_schedule_dependency_kind_t;
 
 #define LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY 16
 
@@ -324,30 +308,6 @@ loom_low_schedule_node_const_result_ordinals(
   return loom_low_schedule_node_const_value_ordinals(node) +
          node->operand_count;
 }
-
-// One dependency edge between two schedule nodes.
-typedef struct loom_low_schedule_dependency_t {
-  // Producer node index.
-  uint32_t producer_node;
-  // Consumer node index.
-  uint32_t consumer_node;
-  // Dependency kind.
-  loom_low_schedule_dependency_kind_t kind;
-  // Operand index for SSA dependencies, or UINT32_MAX.
-  uint32_t operand_index;
-} loom_low_schedule_dependency_t;
-
-// One memory-visibility edge between two schedule nodes. Visibility edges are
-// consumed by target overlays such as wait insertion; they do not constrain the
-// block-local list scheduler.
-typedef struct loom_low_schedule_visibility_dependency_t {
-  // Producer node whose memory effect must be visible first.
-  uint32_t producer_node;
-  // Consumer node that observes or overwrites the producer's memory effect.
-  uint32_t consumer_node;
-  // Dependency kind. Currently always EFFECT.
-  loom_low_schedule_dependency_kind_t kind;
-} loom_low_schedule_visibility_dependency_t;
 
 // Pressure-model step recorded while scheduling one node. This is an aggregate
 // target-independent register-pressure estimate across all register classes,
@@ -709,15 +669,9 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_node_t* nodes;
   // Number of schedule nodes.
   iree_host_size_t node_count;
-  // Dependency edges between schedule nodes.
-  const loom_low_schedule_dependency_t* dependencies;
-  // Number of dependency edges.
-  iree_host_size_t dependency_count;
-  // Cross-block visibility edges between schedule nodes. These are not part of
-  // the list-scheduler DAG.
-  const loom_low_schedule_visibility_dependency_t* visibility_dependencies;
-  // Number of cross-block visibility edges.
-  iree_host_size_t visibility_dependency_count;
+  // Stable dependency graph consumed by scheduling and target visibility
+  // planning.
+  loom_low_schedule_dependency_graph_t dependencies;
   // Node indices in scheduled order, grouped by block.
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.
