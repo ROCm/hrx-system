@@ -128,18 +128,9 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
                        LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
     node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_FENCE;
   }
-  node->effect_count = packet.descriptor->effect_count;
-  node->schedule_class_id = packet.descriptor->schedule_class_id;
-  const loom_low_schedule_class_t* schedule_class =
+  node->schedule_class =
       &state->target.descriptor_set
            ->schedule_classes[packet.descriptor->schedule_class_id];
-  node->latency_cycles = schedule_class->latency_cycles;
-  node->latency_kind = schedule_class->latency_kind;
-  node->model_quality = schedule_class->model_quality;
-  node->issue_use_count = schedule_class->issue_use_count;
-  node->hazard_count = schedule_class->hazard_count;
-  node->schedule_class_name = loom_low_descriptor_set_string(
-      state->target.descriptor_set, schedule_class->name_string_offset);
   *out_descriptor = packet.descriptor;
   return iree_ok_status();
 }
@@ -1221,9 +1212,9 @@ iree_status_t loom_low_schedule_fill_nodes(
           .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
           .traits = loom_op_effective_traits(state->module, op),
           .descriptor = NULL,
+          .schedule_class = NULL,
           .memory_access_record_index =
               LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE,
-          .schedule_class_id = LOOM_LOW_SCHEDULE_CLASS_NONE,
       };
       if (loom_low_schedule_op_is_terminator(state->module, op)) {
         node->kind = LOOM_LOW_SCHEDULE_NODE_TERMINATOR;

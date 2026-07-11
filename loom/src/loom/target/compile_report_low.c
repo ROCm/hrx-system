@@ -142,26 +142,10 @@ static bool loom_target_compile_report_string_contains(
          IREE_STRING_VIEW_NPOS;
 }
 
-static const loom_low_schedule_class_t*
-loom_target_compile_report_descriptor_schedule_class(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  if (descriptor_set == NULL || descriptor == NULL ||
-      descriptor->schedule_class_id >= descriptor_set->schedule_class_count) {
-    return NULL;
-  }
-  return &descriptor_set->schedule_classes[descriptor->schedule_class_id];
-}
-
 static iree_string_view_t loom_target_compile_report_schedule_class_name(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_schedule_node_t* node) {
-  if (!iree_string_view_is_empty(node->schedule_class_name)) {
-    return node->schedule_class_name;
-  }
-  const loom_low_schedule_class_t* schedule_class =
-      loom_target_compile_report_descriptor_schedule_class(descriptor_set,
-                                                           node->descriptor);
+  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
   if (schedule_class == NULL ||
       schedule_class->name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
     return iree_string_view_empty();
@@ -300,9 +284,7 @@ loom_target_compile_report_classify_low_node_features(
     return features;
   }
   const loom_low_descriptor_t* descriptor = node->descriptor;
-  const loom_low_schedule_class_t* schedule_class =
-      loom_target_compile_report_descriptor_schedule_class(descriptor_set,
-                                                           descriptor);
+  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
   const iree_string_view_t schedule_class_name =
       loom_target_compile_report_schedule_class_name(descriptor_set, node);
   const iree_string_view_t semantic_tag =

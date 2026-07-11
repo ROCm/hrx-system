@@ -36,15 +36,34 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr uint32_t kResultAssignmentIndex = 1;
   constexpr uint32_t kEdgeCopyCount = 1;
   constexpr uint32_t kRegisterCopyTagOffset = 0;
-  constexpr uint32_t kMemoryGlobalTagOffset = 18;
-  constexpr uint32_t kMemoryStackLoadTagOffset = 41;
-  constexpr uint32_t kMemoryStackStoreTagOffset = 63;
-  constexpr uint32_t kMatrixWmmaTagOffset = 87;
-  constexpr uint32_t kMatrixSwmmacTagOffset = 103;
-  constexpr uint32_t kMatrixSmfmacTagOffset = 121;
-  constexpr uint32_t kRegisterClassGprOffset = 139;
-  constexpr uint32_t kBufferLoadKeyOffset = 148;
-  constexpr uint32_t kGlobalLoadKeyOffset = 173;
+  constexpr uint32_t kMemoryGlobalTagOffset =
+      kRegisterCopyTagOffset + sizeof("register.copy.b32");
+  constexpr uint32_t kMemoryStackLoadTagOffset =
+      kMemoryGlobalTagOffset + sizeof("memory.global.load.u32");
+  constexpr uint32_t kMemoryStackStoreTagOffset =
+      kMemoryStackLoadTagOffset + sizeof("memory.stack.load.u32");
+  constexpr uint32_t kMatrixWmmaTagOffset =
+      kMemoryStackStoreTagOffset + sizeof("memory.stack.store.u128");
+  constexpr uint32_t kMatrixSwmmacTagOffset =
+      kMatrixWmmaTagOffset + sizeof("matrix.wmma.f32");
+  constexpr uint32_t kMatrixSmfmacTagOffset =
+      kMatrixSwmmacTagOffset + sizeof("matrix.swmmac.f32");
+  constexpr uint32_t kRegisterClassGprOffset =
+      kMatrixSmfmacTagOffset + sizeof("matrix.smfmac.f32");
+  constexpr uint32_t kBufferLoadKeyOffset =
+      kRegisterClassGprOffset + sizeof("test.gpr");
+  constexpr uint32_t kGlobalLoadKeyOffset =
+      kBufferLoadKeyOffset + sizeof("amdgpu.buffer_load_dword");
+  constexpr uint32_t kScheduleValuOffset =
+      kGlobalLoadKeyOffset + sizeof("amdgpu.global_load_b32_saddr");
+  constexpr uint32_t kScheduleVmemLoadOffset =
+      kScheduleValuOffset + sizeof("amdgpu.valu");
+  constexpr uint32_t kScheduleVmemStoreOffset =
+      kScheduleVmemLoadOffset + sizeof("amdgpu.vmem.load");
+  constexpr uint32_t kScheduleWmmaOffset =
+      kScheduleVmemStoreOffset + sizeof("amdgpu.vmem.store");
+  constexpr uint32_t kScheduleMfmaOffset =
+      kScheduleWmmaOffset + sizeof("amdgpu.wmma");
   static const uint8_t kDescriptorStringTable[] =
       "\x11"
       "register.copy.b32"
@@ -65,8 +84,18 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       "\x18"
       "amdgpu.buffer_load_dword"
       "\x1c"
-      "amdgpu.global_load_b32_saddr";
-  const loom_low_descriptor_t descriptors[] = {
+      "amdgpu.global_load_b32_saddr"
+      "\x0b"
+      "amdgpu.valu"
+      "\x10"
+      "amdgpu.vmem.load"
+      "\x11"
+      "amdgpu.vmem.store"
+      "\x0b"
+      "amdgpu.wmma"
+      "\x0b"
+      "amdgpu.mfma";
+  loom_low_descriptor_t descriptors[] = {
       {
           /*.key_string_offset=*/{},
           /*.stable_id=*/{},
@@ -160,6 +189,23 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.width_bits=*/128,
       },
   };
+  const loom_low_schedule_class_t schedule_classes[] = {
+      {
+          /*.name_string_offset=*/kScheduleValuOffset,
+      },
+      {
+          /*.name_string_offset=*/kScheduleVmemLoadOffset,
+      },
+      {
+          /*.name_string_offset=*/kScheduleVmemStoreOffset,
+      },
+      {
+          /*.name_string_offset=*/kScheduleWmmaOffset,
+      },
+      {
+          /*.name_string_offset=*/kScheduleMfmaOffset,
+      },
+  };
   const loom_low_reg_class_t reg_classes[] = {
       {
           /*.name_string_offset=*/kRegisterClassGprOffset,
@@ -223,7 +269,21 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.operand_form_operand_index_count=*/{},
       /*.reg_classes=*/reg_classes,
       /*.reg_class_count=*/IREE_ARRAYSIZE(reg_classes),
+      /*.register_parts=*/{},
+      /*.register_part_count=*/{},
+      /*.reg_class_alts=*/{},
+      /*.reg_class_alt_count=*/{},
+      /*.schedule_classes=*/schedule_classes,
+      /*.schedule_class_count=*/IREE_ARRAYSIZE(schedule_classes),
   };
+  descriptors[0].schedule_class_id = 0;
+  descriptors[1].schedule_class_id = 1;
+  descriptors[2].schedule_class_id = 1;
+  descriptors[3].schedule_class_id = 2;
+  descriptors[4].schedule_class_id = 3;
+  descriptors[5].schedule_class_id = 1;
+  descriptors[6].schedule_class_id = 3;
+  descriptors[7].schedule_class_id = 4;
   loom_low_schedule_node_t schedule_nodes[13] = {};
   iree_arena_block_pool_t block_pool;
   IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
@@ -453,136 +513,22 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.record_count=*/IREE_ARRAYSIZE(materialized_spills),
       /*.next=*/{},
   };
-  schedule_nodes[0] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/{},
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[0],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.valu"),
-      /*.latency_cycles=*/{},
-      /*.latency_kind=*/{},
-      /*.model_quality=*/{},
-      /*.issue_use_count=*/{},
-      /*.hazard_count=*/{},
-      /*.effect_count=*/{},
-      /*.operand_count=*/1,
-      /*.result_count=*/1,
-      /*.flags=*/{},
-      /*.value_ordinals=*/
-      {
-          /*.inline_value_ordinals=*/{0, 1},
-      },
-  };
-  schedule_nodes[1] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/1,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[1],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.vmem.load"),
-      /*.latency_cycles=*/{},
-      /*.latency_kind=*/{},
-      /*.model_quality=*/{},
-      /*.issue_use_count=*/{},
-      /*.hazard_count=*/{},
-      /*.effect_count=*/{},
-      /*.operand_count=*/0,
-      /*.result_count=*/1,
-      /*.flags=*/{},
-      /*.value_ordinals=*/
-      {
-          /*.inline_value_ordinals=*/{2},
-      },
-  };
-  schedule_nodes[2] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/2,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[2],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.vmem.load"),
-  };
-  schedule_nodes[3] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/3,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[3],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.vmem.store"),
-  };
-  schedule_nodes[4] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/4,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[4],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.wmma"),
-  };
-  schedule_nodes[5] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/5,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[5],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.vmem.load"),
-  };
-  schedule_nodes[6] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/6,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[6],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.wmma"),
-  };
-  schedule_nodes[7] = (loom_low_schedule_node_t){
-      /*.op=*/{},
-      /*.block=*/{},
-      /*.block_index=*/{},
-      /*.source_ordinal=*/{},
-      /*.scheduled_ordinal=*/7,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/&descriptors[7],
-      /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/IREE_SVL("amdgpu.mfma"),
-  };
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
+    schedule_nodes[i].descriptor = &descriptors[i];
+    schedule_nodes[i].schedule_class =
+        &schedule_classes[descriptors[i].schedule_class_id];
+    schedule_nodes[i].source_ordinal = i;
+    schedule_nodes[i].scheduled_ordinal = i;
+    schedule_nodes[i].memory_access_record_index =
+        LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE;
+    schedule_nodes[i].kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
+  }
+  schedule_nodes[0].operand_count = 1;
+  schedule_nodes[0].result_count = 1;
+  schedule_nodes[0].value_ordinals.inline_value_ordinals[0] = 0;
+  schedule_nodes[0].value_ordinals.inline_value_ordinals[1] = 1;
+  schedule_nodes[1].result_count = 1;
+  schedule_nodes[1].value_ordinals.inline_value_ordinals[0] = 2;
   const loom_low_schedule_block_t schedule_blocks[] = {
       {
           /*.block=*/{},
