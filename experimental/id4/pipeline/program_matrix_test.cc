@@ -66,12 +66,19 @@ class ProgramMatrixTest : public ::testing::Test {
     return tensor;
   }
 
+  void SealAndRelease() {
+    id4_pipeline_program_t* program = nullptr;
+    IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+        builder_, iree_allocator_system(), &program));
+    id4_pipeline_program_release(program);
+  }
+
   id4_pipeline_program_matrix_options_t MakeBlockScaledOptions() {
     id4_pipeline_program_matrix_options_t options = {
         /*.structure_size=*/sizeof(options),
         /*.next=*/nullptr,
         /*.name=*/IREE_SV("layer.linear"),
-        /*.request=*/
+        /*.problem=*/
         {
             /*.valid_m=*/451,
             /*.m_capacity=*/512,
@@ -79,12 +86,6 @@ class ProgramMatrixTest : public ::testing::Test {
             /*.k=*/4096,
             /*.input_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
             /*.input_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
-            /*.weight_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-            /*.weight_layout=*/
-            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
-            /*.scale_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
-            /*.scale_layout=*/
-            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
             /*.accumulator_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
             /*.epilogue=*/ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
             /*.output_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -94,12 +95,26 @@ class ProgramMatrixTest : public ::testing::Test {
     options.operands.input =
         Import(IREE_SV("input"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                id4_pipeline_program_make_shape_rank2(512, 4096));
-    options.operands.weight =
-        Import(IREE_SV("weight"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-               id4_pipeline_program_make_shape_rank2(1024, 4096));
-    options.operands.scale =
-        Import(IREE_SV("scale"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
-               id4_pipeline_program_make_shape_rank2(8, 32));
+    options.operands.parameter = {
+        /*.weight=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("weight"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(1024, 4096),
+        },
+        /*.weight_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        /*.scale=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("scale"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 32),
+        },
+        /*.scale_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+    };
     options.operands.output =
         Acquire(IREE_SV("output"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                 id4_pipeline_program_make_shape_rank2(512, 1024));
@@ -112,7 +127,7 @@ class ProgramMatrixTest : public ::testing::Test {
         /*.structure_size=*/sizeof(options),
         /*.next=*/nullptr,
         /*.name=*/IREE_SV("transformer.linear"),
-        /*.request=*/
+        /*.problem=*/
         {
             /*.valid_m=*/113,
             /*.m_capacity=*/128,
@@ -120,12 +135,6 @@ class ProgramMatrixTest : public ::testing::Test {
             /*.k=*/4608,
             /*.input_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
             /*.input_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
-            /*.weight_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-            /*.weight_layout=*/
-            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
-            /*.scale_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
-            /*.scale_layout=*/
-            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
             /*.accumulator_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
             /*.epilogue=*/ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
             /*.output_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -135,12 +144,25 @@ class ProgramMatrixTest : public ::testing::Test {
     options.operands.input =
         Import(IREE_SV("transformer_input"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                id4_pipeline_program_make_shape_rank2(128, 4608));
-    options.operands.weight = Import(
-        IREE_SV("transformer_weight"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-        id4_pipeline_program_make_shape_rank2(4608, 4608));
-    options.operands.scale =
-        Import(IREE_SV("transformer_scale"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
-               id4_pipeline_program_make_shape_rank1(4608));
+    options.operands.parameter = {
+        /*.weight=*/
+        {
+            /*.source_scope=*/IREE_SV("transformer"),
+            /*.key=*/IREE_SV("transformer_weight"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(4608, 4608),
+        },
+        /*.weight_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        /*.scale=*/
+        {
+            /*.source_scope=*/IREE_SV("transformer"),
+            /*.key=*/IREE_SV("transformer_scale"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.shape=*/id4_pipeline_program_make_shape_rank1(4608),
+        },
+        /*.scale_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
+    };
     options.operands.output =
         Acquire(IREE_SV("transformer_output"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                 id4_pipeline_program_make_shape_rank2(128, 4608));
@@ -163,11 +185,6 @@ class ProgramMatrixTest : public ::testing::Test {
             /*.k=*/4096,
             /*.input_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
             /*.input_layout=*/ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
-            /*.weight_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-            /*.weight_layout=*/
-            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
-            /*.scale_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
-            /*.scale_layout=*/scale_layout,
             /*.accumulator_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
             /*.epilogue=*/ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
             /*.output_dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -177,16 +194,44 @@ class ProgramMatrixTest : public ::testing::Test {
     options.operands.input =
         Import(IREE_SV("swiglu_input"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                id4_pipeline_program_make_shape_rank2(512, 4096));
-    options.operands.gate_weight =
-        Import(IREE_SV("gate_weight"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-               id4_pipeline_program_make_shape_rank2(12288, 4096));
-    options.operands.gate_scale = Import(
-        IREE_SV("gate_scale"), ID4_PIPELINE_PROGRAM_DTYPE_F32, scale_shape);
-    options.operands.up_weight =
-        Import(IREE_SV("up_weight"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-               id4_pipeline_program_make_shape_rank2(12288, 4096));
-    options.operands.up_scale = Import(
-        IREE_SV("up_scale"), ID4_PIPELINE_PROGRAM_DTYPE_F32, scale_shape);
+    options.operands.gate_parameter = {
+        /*.weight=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("gate_weight"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(12288, 4096),
+        },
+        /*.weight_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        /*.scale=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("gate_scale"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.shape=*/scale_shape,
+        },
+        /*.scale_layout=*/scale_layout,
+    };
+    options.operands.up_parameter = {
+        /*.weight=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("up_weight"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+            /*.shape=*/id4_pipeline_program_make_shape_rank2(12288, 4096),
+        },
+        /*.weight_layout=*/
+        ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        /*.scale=*/
+        {
+            /*.source_scope=*/IREE_SV("model"),
+            /*.key=*/IREE_SV("up_scale"),
+            /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+            /*.shape=*/scale_shape,
+        },
+        /*.scale_layout=*/scale_layout,
+    };
     options.operands.output =
         Acquire(IREE_SV("swiglu_output"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
                 id4_pipeline_program_make_shape_rank2(512, 12288));
@@ -197,147 +242,61 @@ class ProgramMatrixTest : public ::testing::Test {
   id4_pipeline_program_builder_t* builder_ = nullptr;
 };
 
-TEST_F(ProgramMatrixTest, AuthorsSemanticBlockScaledContraction) {
+TEST_F(ProgramMatrixTest, AcceptsBlockScaledParameterContraction) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
-
-  id4_pipeline_program_t* program = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
-      builder_, iree_allocator_system(), &program));
-
-  const id4_pipeline_program_op_t* dispatch = id4_pipeline_program_operation_at(
-      program, id4_pipeline_program_operation_count(program) - 1);
-  ASSERT_NE(dispatch, nullptr);
-  ASSERT_EQ(dispatch->kind, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM);
-  EXPECT_TRUE(iree_string_view_equal(dispatch->payload.dispatch_loom.name,
-                                     options.name));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.module_path));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.function_name));
-  EXPECT_EQ(dispatch->payload.dispatch_loom.binding_count, 4u);
-  EXPECT_GE(dispatch->payload.dispatch_loom.config_binding_count, 3u);
-  for (iree_host_size_t i = 0;
-       i < dispatch->payload.dispatch_loom.config_binding_count; ++i) {
-    const id4_pipeline_kernel_config_binding_t binding =
-        dispatch->payload.dispatch_loom.config_bindings[i];
-    EXPECT_EQ(iree_string_view_find(binding.key, options.name, 0),
-              IREE_STRING_VIEW_NPOS);
-  }
-
-  id4_pipeline_program_release(program);
+  SealAndRelease();
 }
 
-TEST_F(ProgramMatrixTest, AuthorsSemanticRowScaledContraction) {
+TEST_F(ProgramMatrixTest, AcceptsRowScaledParameterContraction) {
   id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
-
-  id4_pipeline_program_t* program = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
-      builder_, iree_allocator_system(), &program));
-
-  const id4_pipeline_program_op_t* dispatch = id4_pipeline_program_operation_at(
-      program, id4_pipeline_program_operation_count(program) - 1);
-  ASSERT_NE(dispatch, nullptr);
-  ASSERT_EQ(dispatch->kind, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM);
-  EXPECT_TRUE(iree_string_view_equal(dispatch->payload.dispatch_loom.name,
-                                     options.name));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.module_path));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.function_name));
-  EXPECT_EQ(dispatch->payload.dispatch_loom.binding_count, 4u);
-  EXPECT_GE(dispatch->payload.dispatch_loom.config_binding_count, 3u);
-
-  id4_pipeline_program_release(program);
+  SealAndRelease();
 }
 
-TEST_F(ProgramMatrixTest, AuthorsSemanticResidualContraction) {
+TEST_F(ProgramMatrixTest, AcceptsResidualEpilogue) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
-  options.request.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
+  options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
   options.operands.addend =
       Import(IREE_SV("residual"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
              id4_pipeline_program_make_shape_rank2(512, 1024));
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
-
-  id4_pipeline_program_t* program = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
-      builder_, iree_allocator_system(), &program));
-
-  const id4_pipeline_program_op_t* dispatch = id4_pipeline_program_operation_at(
-      program, id4_pipeline_program_operation_count(program) - 1);
-  ASSERT_NE(dispatch, nullptr);
-  ASSERT_EQ(dispatch->kind, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM);
-  EXPECT_TRUE(iree_string_view_equal(dispatch->payload.dispatch_loom.name,
-                                     options.name));
-  EXPECT_EQ(dispatch->payload.dispatch_loom.binding_count, 5u);
-
-  id4_pipeline_program_release(program);
+  SealAndRelease();
 }
 
-TEST_F(ProgramMatrixTest, AuthorsSemanticSwiGLUProjectionPair) {
+TEST_F(ProgramMatrixTest, AcceptsBlockScaledSwiGLUProjectionPair) {
   id4_pipeline_program_swiglu_options_t options = MakeSwiGLUOptions(
       ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
       id4_pipeline_program_make_shape_rank2(96, 32));
   IREE_ASSERT_OK(id4_pipeline_program_swiglu(builder_, &options));
-
-  id4_pipeline_program_t* program = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
-      builder_, iree_allocator_system(), &program));
-
-  const id4_pipeline_program_op_t* dispatch = id4_pipeline_program_operation_at(
-      program, id4_pipeline_program_operation_count(program) - 1);
-  ASSERT_NE(dispatch, nullptr);
-  ASSERT_EQ(dispatch->kind, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM);
-  EXPECT_TRUE(iree_string_view_equal(dispatch->payload.dispatch_loom.name,
-                                     options.name));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.module_path));
-  EXPECT_FALSE(iree_string_view_is_empty(
-      dispatch->payload.dispatch_loom.kernel.function_name));
-  EXPECT_EQ(dispatch->payload.dispatch_loom.binding_count, 6u);
-
-  id4_pipeline_program_release(program);
+  SealAndRelease();
 }
 
-TEST_F(ProgramMatrixTest, AuthorsSemanticRowScaledSwiGLUProjectionPair) {
+TEST_F(ProgramMatrixTest, AcceptsRowScaledSwiGLUProjectionPair) {
   id4_pipeline_program_swiglu_options_t options =
       MakeSwiGLUOptions(ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
                         id4_pipeline_program_make_shape_rank1(12288));
   IREE_ASSERT_OK(id4_pipeline_program_swiglu(builder_, &options));
-
-  id4_pipeline_program_t* program = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
-      builder_, iree_allocator_system(), &program));
-
-  const id4_pipeline_program_op_t* dispatch = id4_pipeline_program_operation_at(
-      program, id4_pipeline_program_operation_count(program) - 1);
-  ASSERT_NE(dispatch, nullptr);
-  ASSERT_EQ(dispatch->kind, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM);
-  EXPECT_TRUE(iree_string_view_equal(dispatch->payload.dispatch_loom.name,
-                                     options.name));
-  EXPECT_EQ(dispatch->payload.dispatch_loom.binding_count, 6u);
-
-  id4_pipeline_program_release(program);
+  SealAndRelease();
 }
 
 TEST_F(ProgramMatrixTest, RejectsValidRowsBeyondCapacity) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
-  options.request.valid_m = options.request.m_capacity + 1;
+  options.problem.valid_m = options.problem.m_capacity + 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_program_matrix(builder_, &options));
 }
 
 TEST_F(ProgramMatrixTest, RequiresScaleTensorForScaledWeights) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
-  options.operands.scale = id4_pipeline_program_tensor_invalid();
+  options.operands.parameter.scale = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_program_matrix(builder_, &options));
 }
 
 TEST_F(ProgramMatrixTest, RequiresAddendForAddEpilogue) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
-  options.request.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
+  options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_program_matrix(builder_, &options));
 }

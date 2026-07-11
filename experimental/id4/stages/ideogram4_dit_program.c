@@ -1940,83 +1940,6 @@ iree_status_t id4_ideogram4_dit_program_dispatch_silu_product_bf16(
       config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
-static iree_status_t
-id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_body(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
-    uint32_t intermediate_size, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t gate_weight,
-    id4_pipeline_program_tensor_t gate_scale,
-    id4_pipeline_program_tensor_t up_weight,
-    id4_pipeline_program_tensor_t up_scale,
-    id4_pipeline_program_tensor_t output,
-    id4_pipeline_program_matrix_layout_t weight_layout) {
-  const id4_pipeline_program_swiglu_options_t options = {
-      .structure_size = sizeof(options),
-      .name = name,
-      .projection =
-          {
-              .valid_m = token_count,
-              .m_capacity = token_capacity,
-              .n = intermediate_size,
-              .k = input_size,
-              .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-              .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
-              .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-              .weight_layout = weight_layout,
-              .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
-              .scale_layout =
-                  ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
-              .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
-              .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
-              .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-              .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
-          },
-      .operands =
-          {
-              .input = input,
-              .gate_weight = gate_weight,
-              .gate_scale = gate_scale,
-              .up_weight = up_weight,
-              .up_scale = up_scale,
-              .output = output,
-          },
-  };
-  return id4_pipeline_program_swiglu(builder, &options);
-}
-
-iree_status_t
-id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
-    uint32_t intermediate_size, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t gate_weight,
-    id4_pipeline_program_tensor_t gate_scale,
-    id4_pipeline_program_tensor_t up_weight,
-    id4_pipeline_program_tensor_t up_scale,
-    id4_pipeline_program_tensor_t output) {
-  return id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_body(
-      builder, name, token_count, token_capacity, input_size, intermediate_size,
-      input, gate_weight, gate_scale, up_weight, up_scale, output,
-      ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR);
-}
-
-iree_status_t
-id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
-    uint32_t intermediate_size, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t gate_weight,
-    id4_pipeline_program_tensor_t gate_scale,
-    id4_pipeline_program_tensor_t up_weight,
-    id4_pipeline_program_tensor_t up_scale,
-    id4_pipeline_program_tensor_t output) {
-  return id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_body(
-      builder, name, token_count, token_capacity, input_size, intermediate_size,
-      input, gate_weight, gate_scale, up_weight, up_scale, output,
-      ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16);
-}
-
 iree_status_t
 id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
@@ -2643,10 +2566,10 @@ id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
     uint32_t output_size, id4_pipeline_program_tensor_t input,
     id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t scale,
     id4_pipeline_program_tensor_t output) {
-  const id4_pipeline_program_matrix_options_t options = {
+  const id4_pipeline_program_matrix_prepared_options_t options = {
       .structure_size = sizeof(options),
       .name = name,
-      .request =
+      .problem =
           {
               .valid_m = token_count,
               .m_capacity = token_capacity,
@@ -2654,16 +2577,19 @@ id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
               .k = input_size,
               .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
               .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+              .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+              .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
+              .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+              .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+          },
+      .execution =
+          {
               .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
               .weight_layout =
                   ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
               .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
               .scale_layout =
                   ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
-              .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
-              .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE,
-              .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-              .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
           },
       .operands =
           {
@@ -2674,7 +2600,7 @@ id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
               .output = output,
           },
   };
-  return id4_pipeline_program_matrix(builder, &options);
+  return id4_pipeline_program_matrix_prepared(builder, &options);
 }
 
 static iree_status_t id4_ideogram4_dit_program_pack_linear_input_f32_bf16(

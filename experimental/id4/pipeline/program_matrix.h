@@ -47,8 +47,8 @@ typedef enum id4_pipeline_program_matrix_epilogue_e {
   ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD = 2,
 } id4_pipeline_program_matrix_epilogue_t;
 
-// Semantic and physical contract for C = A * B.
-typedef struct id4_pipeline_program_matrix_request_t {
+// Semantic tensor contract for C = A * B, independent of weight storage.
+typedef struct id4_pipeline_program_matrix_problem_t {
   // Number of semantically valid M rows.
   uint32_t valid_m;
   // Number of allocated and dispatched M rows, including padding.
@@ -61,14 +61,6 @@ typedef struct id4_pipeline_program_matrix_request_t {
   id4_pipeline_program_dtype_t input_dtype;
   // Physical layout of the MxK activation matrix.
   id4_pipeline_program_matrix_layout_t input_layout;
-  // Scalar storage type of the KxN weight matrix.
-  id4_pipeline_program_dtype_t weight_dtype;
-  // Physical layout of the KxN weight matrix.
-  id4_pipeline_program_matrix_layout_t weight_layout;
-  // Scalar element type of the optional scale tensor.
-  id4_pipeline_program_dtype_t scale_dtype;
-  // Scale semantics applied to the weight matrix.
-  id4_pipeline_program_matrix_scale_layout_t scale_layout;
   // Scalar element type used by matrix accumulators.
   id4_pipeline_program_dtype_t accumulator_dtype;
   // Elementwise operation applied after the contraction.
@@ -77,16 +69,38 @@ typedef struct id4_pipeline_program_matrix_request_t {
   id4_pipeline_program_dtype_t output_dtype;
   // Physical layout of the MxN output matrix.
   id4_pipeline_program_matrix_layout_t output_layout;
-} id4_pipeline_program_matrix_request_t;
+} id4_pipeline_program_matrix_problem_t;
+
+// Provider-side storage for one logical KxN parameter matrix.
+typedef struct id4_pipeline_program_matrix_parameter_t {
+  // Provider tensor containing logical NxK weight rows.
+  id4_pipeline_program_parameter_source_t weight;
+  // Physical layout of the provider weight tensor.
+  id4_pipeline_program_matrix_layout_t weight_layout;
+  // Provider scale tensor, or an invalid source when scale_layout is NONE.
+  id4_pipeline_program_parameter_source_t scale;
+  // Scale semantics applied to the provider weight tensor.
+  id4_pipeline_program_matrix_scale_layout_t scale_layout;
+} id4_pipeline_program_matrix_parameter_t;
+
+// Selected execution storage for a prepared KxN weight matrix.
+typedef struct id4_pipeline_program_matrix_execution_t {
+  // Scalar storage type consumed by the Loom kernel.
+  id4_pipeline_program_dtype_t weight_dtype;
+  // Physical weight layout consumed by the Loom kernel.
+  id4_pipeline_program_matrix_layout_t weight_layout;
+  // Scalar type of the scale tensor consumed by the Loom kernel.
+  id4_pipeline_program_dtype_t scale_dtype;
+  // Scale semantics implemented by the Loom kernel.
+  id4_pipeline_program_matrix_scale_layout_t scale_layout;
+} id4_pipeline_program_matrix_execution_t;
 
 // Program tensor roles consumed by a plain matrix contraction.
 typedef struct id4_pipeline_program_matrix_operands_t {
   // Initialized MxK activation tensor.
   id4_pipeline_program_tensor_t input;
-  // Initialized KxN weight tensor in the requested physical layout.
-  id4_pipeline_program_tensor_t weight;
-  // Initialized scale tensor, or an invalid tensor when scale_layout is NONE.
-  id4_pipeline_program_tensor_t scale;
+  // Provider-side weight and scale parameter storage.
+  id4_pipeline_program_matrix_parameter_t parameter;
   // Initialized MxN addend tensor, or invalid when the epilogue is NONE.
   id4_pipeline_program_tensor_t addend;
   // Uninitialized MxN output tensor written by the contraction.
@@ -101,29 +115,60 @@ typedef struct id4_pipeline_program_matrix_options_t {
   const void* next;
   // Stable operation name used for diagnostics.
   iree_string_view_t name;
-  // Semantic and physical matrix contract.
-  id4_pipeline_program_matrix_request_t request;
+  // Semantic matrix contract independent of selected execution storage.
+  id4_pipeline_program_matrix_problem_t problem;
   // Program tensor roles bound to the selected implementation.
   id4_pipeline_program_matrix_operands_t operands;
 } id4_pipeline_program_matrix_options_t;
 
-// Selects and authors a full-coverage Loom implementation of |options|.
+// Selects parameter preparation and authors a full-coverage implementation.
 iree_status_t id4_pipeline_program_matrix(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_matrix_options_t* options);
+
+// Program tensor roles consumed by a matrix with prepared weight storage.
+typedef struct id4_pipeline_program_matrix_prepared_operands_t {
+  // Initialized MxK activation tensor.
+  id4_pipeline_program_tensor_t input;
+  // Initialized KxN weight tensor in the requested execution layout.
+  id4_pipeline_program_tensor_t weight;
+  // Initialized scale tensor, or invalid when execution scale_layout is NONE.
+  id4_pipeline_program_tensor_t scale;
+  // Initialized MxN addend tensor, or invalid when the epilogue is NONE.
+  id4_pipeline_program_tensor_t addend;
+  // Uninitialized MxN output tensor written by the contraction.
+  id4_pipeline_program_tensor_t output;
+} id4_pipeline_program_matrix_prepared_operands_t;
+
+// Options for authoring a matrix from already-prepared execution storage.
+typedef struct id4_pipeline_program_matrix_prepared_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Stable operation name used for diagnostics.
+  iree_string_view_t name;
+  // Semantic matrix contract.
+  id4_pipeline_program_matrix_problem_t problem;
+  // Explicit execution storage contract of the prepared weight tensor.
+  id4_pipeline_program_matrix_execution_t execution;
+  // Prepared program tensor roles bound to the selected implementation.
+  id4_pipeline_program_matrix_prepared_operands_t operands;
+} id4_pipeline_program_matrix_prepared_options_t;
+
+// Authors a full-coverage implementation using prepared execution storage.
+iree_status_t id4_pipeline_program_matrix_prepared(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_matrix_prepared_options_t* options);
 
 // Program tensor roles consumed by a fused SwiGLU projection pair.
 typedef struct id4_pipeline_program_swiglu_operands_t {
   // Initialized MxK activation tensor shared by both projections.
   id4_pipeline_program_tensor_t input;
-  // Initialized KxN gate-projection weight tensor.
-  id4_pipeline_program_tensor_t gate_weight;
-  // Initialized gate scale tensor, or invalid when scale_layout is NONE.
-  id4_pipeline_program_tensor_t gate_scale;
-  // Initialized KxN up-projection weight tensor.
-  id4_pipeline_program_tensor_t up_weight;
-  // Initialized up scale tensor, or invalid when scale_layout is NONE.
-  id4_pipeline_program_tensor_t up_scale;
+  // Provider-side gate-projection weight and scale storage.
+  id4_pipeline_program_matrix_parameter_t gate_parameter;
+  // Provider-side up-projection weight and scale storage.
+  id4_pipeline_program_matrix_parameter_t up_parameter;
   // Uninitialized MxN output tensor receiving silu(gate) * up.
   id4_pipeline_program_tensor_t output;
 } id4_pipeline_program_swiglu_operands_t;
@@ -137,7 +182,7 @@ typedef struct id4_pipeline_program_swiglu_options_t {
   // Stable operation name used for diagnostics.
   iree_string_view_t name;
   // Shared contract; output_dtype governs projection and product rounding.
-  id4_pipeline_program_matrix_request_t projection;
+  id4_pipeline_program_matrix_problem_t projection;
   // Program tensor roles bound to the selected implementation.
   id4_pipeline_program_swiglu_operands_t operands;
 } id4_pipeline_program_swiglu_options_t;
