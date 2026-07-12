@@ -75,6 +75,8 @@ loom_cc_library(
     "ready_policy.c"
     "ready_policy.h"
     "run.c"
+    "target_pressure.c"
+    "target_pressure.h"
   DEPS
     ::dependencies
     ::dependency_index
