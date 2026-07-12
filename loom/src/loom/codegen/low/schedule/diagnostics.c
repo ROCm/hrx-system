@@ -423,6 +423,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_string(loom_low_diagnostic_block_name(state->module, block)),
       loom_param_u32(decision->scheduled_ordinal),
       loom_param_u32(decision->ready_candidate_count),
+      loom_param_u32(decision->scored_candidate_count),
       loom_param_string(chosen_label),
       loom_param_string(rejected_label),
       loom_param_u32(decision->chosen_dependency_latency_cycles),

@@ -11,6 +11,20 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    ready_frontier
+  HDRS
+    "ready_frontier.h"
+  SRCS
+    "ready_frontier.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     schedule
   HDRS
     "dependencies.h"
@@ -29,6 +43,7 @@ loom_cc_library(
     "json.c"
     "run.c"
   DEPS
+    ::ready_frontier
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -58,6 +73,17 @@ loom_cc_library(
     loom::util::segmented_storage
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    ready_frontier_test
+  SRCS
+    "ready_frontier_test.cc"
+  DEPS
+    ::ready_frontier
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

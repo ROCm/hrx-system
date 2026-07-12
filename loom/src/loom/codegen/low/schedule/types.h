@@ -329,8 +329,10 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
-  // Number of dependency-ready candidates scored at this ordinal.
+  // Number of dependency-ready candidates at this ordinal.
   uint32_t ready_candidate_count;
+  // Number of ready candidates selected for exact scoring.
+  uint32_t scored_candidate_count;
   // Chosen schedule node.
   uint32_t chosen_node;
   // Best rejected schedule node, or LOOM_LOW_SCHEDULE_NODE_NONE.
