@@ -412,10 +412,9 @@ iree_status_t loom_low_schedule_format_json(
           &stream, ",\"chosen_pressure_cliff_penalty\":%" PRIu32,
           decision->chosen_pressure_cliff_penalty));
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-          &stream, ",\"chosen_pressure_cliff_reg_class_id\":"));
-      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_u16_or_null(
-          &stream, decision->chosen_pressure_cliff_reg_class_id,
-          LOOM_LOW_REG_CLASS_NONE));
+          &stream, ",\"chosen_pressure_cliff_source\":"));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_string(
+          &stream, decision->chosen_pressure_cliff_source));
       IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
           &stream, ",\"chosen_pressure_cliff_units\":"));
       IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_u32_or_null(
@@ -443,7 +442,7 @@ iree_status_t loom_low_schedule_format_json(
             ",\"rejected_effective_stall_cycles\":null"
             ",\"rejected_bottleneck_resource_id\":null"
             ",\"rejected_pressure_cliff_penalty\":null"
-            ",\"rejected_pressure_cliff_reg_class_id\":null"
+            ",\"rejected_pressure_cliff_source\":null"
             ",\"rejected_pressure_cliff_units\":null"
             ",\"rejected_units_until_pressure_cliff\":null}"));
       } else {
@@ -483,10 +482,9 @@ iree_status_t loom_low_schedule_format_json(
             &stream, ",\"rejected_pressure_cliff_penalty\":%" PRIu32,
             decision->rejected_pressure_cliff_penalty));
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-            &stream, ",\"rejected_pressure_cliff_reg_class_id\":"));
-        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_u16_or_null(
-            &stream, decision->rejected_pressure_cliff_reg_class_id,
-            LOOM_LOW_REG_CLASS_NONE));
+            &stream, ",\"rejected_pressure_cliff_source\":"));
+        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_string(
+            &stream, decision->rejected_pressure_cliff_source));
         IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
             &stream, ",\"rejected_pressure_cliff_units\":"));
         IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_u32_or_null(

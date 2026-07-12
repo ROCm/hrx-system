@@ -236,18 +236,18 @@ static bool loom_low_schedule_first_pressure_cliff_for_reg_class(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id,
     const loom_low_pressure_cliff_t** out_cliff) {
   *out_cliff = NULL;
-  if (loom_low_pressure_cliff_table_is_empty(state->options->pressure_cliffs) ||
+  if (state->pressure_cliffs == NULL ||
+      loom_low_pressure_cliff_table_is_empty(*state->pressure_cliffs) ||
       reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
       reg_class_id >= state->target.descriptor_set->reg_class_count) {
     return false;
   }
   const loom_low_pressure_cliff_range_t range =
-      loom_low_pressure_cliff_table_range(&state->options->pressure_cliffs,
-                                          reg_class_id);
+      loom_low_pressure_cliff_table_range(state->pressure_cliffs, reg_class_id);
   if (range.count == 0) {
     return false;
   }
-  *out_cliff = &state->options->pressure_cliffs.values[range.start];
+  *out_cliff = &state->pressure_cliffs->values[range.start];
   return true;
 }
 
@@ -439,7 +439,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->chosen_resource_stall_cycles),
       loom_param_u32(decision->chosen_hazard_stall_cycles),
       loom_param_u32(decision->chosen_effective_stall_cycles),
-      loom_param_u32(decision->chosen_pressure_cliff_reg_class_id),
+      loom_param_string(decision->chosen_pressure_cliff_source),
       loom_param_u32(decision->chosen_pressure_cliff_units),
       loom_param_u32(decision->chosen_pressure_cliff_penalty),
       loom_param_u32(decision->chosen_units_until_pressure_cliff),
@@ -453,7 +453,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->rejected_resource_stall_cycles),
       loom_param_u32(decision->rejected_hazard_stall_cycles),
       loom_param_u32(decision->rejected_effective_stall_cycles),
-      loom_param_u32(decision->rejected_pressure_cliff_reg_class_id),
+      loom_param_string(decision->rejected_pressure_cliff_source),
       loom_param_u32(decision->rejected_pressure_cliff_units),
       loom_param_u32(decision->rejected_pressure_cliff_penalty),
       loom_param_u32(decision->rejected_units_until_pressure_cliff),

@@ -249,8 +249,8 @@ ERR_BACKEND_015 = ErrorDef(
         "data/resource/hazard/effective stall "
         "{chosen_data_ready_stall_cycles}/{chosen_resource_stall_cycles}/"
         "{chosen_hazard_stall_cycles}/{chosen_effective_stall_cycles}, chosen "
-        "cliff class/units/penalty/next "
-        "{chosen_pressure_cliff_reg_class_id}/{chosen_pressure_cliff_units}/"
+        "cliff source/units/penalty/next "
+        "{chosen_pressure_cliff_source}/{chosen_pressure_cliff_units}/"
         "{chosen_pressure_cliff_penalty}/"
         "{chosen_units_until_pressure_cliff}, rejected "
         "dep-latency/latency/pair-affinity/projected/killed/produced "
@@ -261,8 +261,8 @@ ERR_BACKEND_015 = ErrorDef(
         "{rejected_data_ready_stall_cycles}/{rejected_resource_stall_cycles}/"
         "{rejected_hazard_stall_cycles}/{rejected_effective_stall_cycles}, "
         "rejected "
-        "cliff class/units/penalty/next "
-        "{rejected_pressure_cliff_reg_class_id}/"
+        "cliff source/units/penalty/next "
+        "{rejected_pressure_cliff_source}/"
         "{rejected_pressure_cliff_units}/{rejected_pressure_cliff_penalty}/"
         "{rejected_units_until_pressure_cliff}"
     ),
@@ -287,7 +287,7 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("chosen_resource_stall_cycles", ParamKind.U32),
         ErrorParam("chosen_hazard_stall_cycles", ParamKind.U32),
         ErrorParam("chosen_effective_stall_cycles", ParamKind.U32),
-        ErrorParam("chosen_pressure_cliff_reg_class_id", ParamKind.U32),
+        ErrorParam("chosen_pressure_cliff_source", ParamKind.STRING),
         ErrorParam("chosen_pressure_cliff_units", ParamKind.U32),
         ErrorParam("chosen_pressure_cliff_penalty", ParamKind.U32),
         ErrorParam("chosen_units_until_pressure_cliff", ParamKind.U32),
@@ -301,7 +301,7 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("rejected_resource_stall_cycles", ParamKind.U32),
         ErrorParam("rejected_hazard_stall_cycles", ParamKind.U32),
         ErrorParam("rejected_effective_stall_cycles", ParamKind.U32),
-        ErrorParam("rejected_pressure_cliff_reg_class_id", ParamKind.U32),
+        ErrorParam("rejected_pressure_cliff_source", ParamKind.STRING),
         ErrorParam("rejected_pressure_cliff_units", ParamKind.U32),
         ErrorParam("rejected_pressure_cliff_penalty", ParamKind.U32),
         ErrorParam("rejected_units_until_pressure_cliff", ParamKind.U32),
