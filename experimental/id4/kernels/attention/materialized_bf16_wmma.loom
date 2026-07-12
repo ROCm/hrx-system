@@ -238,8 +238,43 @@ check.case public @id4_attention_pv_all_heads_bf16_bf16_wmma_small_case {
   check.return
 }
 
+check.case public @id4_attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  %key = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  %scores = check.generate.fill value(1.0) : tensor<18x4096x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<18x4096x4096xf32>
+  func.call @id4_attention_qk_scores_all_heads_bf16_f32_wmma(%query, %key, %scores) : (tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<18x4096x4096xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<18x4096x4096xf32>
+  check.return
+}
+
+check.case public @id4_attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape_case {
+  %scores = check.generate.fill value(0.0) : tensor<18x4096x4096xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<18x4096x4096xbf16>
+  %expected = check.generate.fill value(0.000244140625) : tensor<18x4096x4096xbf16>
+  func.call @id4_attention_softmax_all_heads_f32_bf16(%scores, %probabilities) : (tensor<18x4096x4096xf32>, tensor<18x4096x4096xbf16>)
+  check.expect.close actual(%probabilities) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<18x4096x4096xbf16>
+  check.return
+}
+
+check.case public @id4_attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape_case {
+  %probabilities = check.generate.fill value(0.0) : tensor<18x4096x4096xbf16>
+  %value = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  func.call @id4_attention_pv_all_heads_bf16_bf16_wmma(%probabilities, %value, %output) : (tensor<18x4096x4096xbf16>, tensor<4096x4608xbf16>, tensor<4096x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
+  check.return
+}
+
 check.benchmark<@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small_case> @id4_attention_qk_scores_all_heads_bf16_f32_wmma_small
 
 check.benchmark<@id4_attention_softmax_all_heads_f32_bf16_small_case> @id4_attention_softmax_all_heads_f32_bf16_small
 
 check.benchmark<@id4_attention_pv_all_heads_bf16_bf16_wmma_small_case> @id4_attention_pv_all_heads_bf16_bf16_wmma_small
+
+check.benchmark<@id4_attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape_case> @id4_attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape
+
+check.benchmark<@id4_attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape_case> @id4_attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape
+
+check.benchmark<@id4_attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape_case> @id4_attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape

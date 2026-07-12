@@ -984,7 +984,7 @@ static iree_status_t id4_vae_parameter_cast_config(
       (uint32_t)mapping->element_count, out_config->value_storage[0],
       IREE_ARRAYSIZE(out_config->value_storage[0]), &value_string));
   out_config->bindings[0] = id4_pipeline_make_kernel_config_binding(
-      IREE_SV("id4.elementwise.cast_f32_bf16.element_count"), value_string);
+      IREE_SV("id4.elementwise.cast.element_count"), value_string);
   out_config->count = 1;
   return iree_ok_status();
 }
@@ -1108,7 +1108,7 @@ static iree_status_t id4_vae_parameter_prepare_cast_executable(
 
   const id4_pipeline_kernel_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_kernel_library_lookup(
-      provider->kernel_library, IREE_SV("elementwise/cast_f32_bf16"), &module));
+      provider->kernel_library, IREE_SV("elementwise/cast"), &module));
   id4_vae_parameter_cast_config_t config;
   IREE_RETURN_IF_ERROR(id4_vae_parameter_cast_config(mapping, &config));
 

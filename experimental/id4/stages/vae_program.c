@@ -1010,6 +1010,9 @@ static iree_status_t id4_vae_program_add_group_norm_apply_tile_configs(
   const uint64_t output_tile_element_count = id4_vae_program_ceil_div_u64(
       output_element_count, output_channel_tile_width);
   IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      config_list, IREE_SV("id4.vae.group_norm.output_channel_tile_width"),
+      output_channel_tile_width));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
       config_list, IREE_SV("id4.vae.group_norm.output_channel_tile_count"),
       output_channel_tile_count));
   return id4_vae_program_config_list_add_u64(
@@ -1029,7 +1032,7 @@ static iree_status_t id4_vae_program_build_cast_bf16_f32_configs(
     uint64_t element_count, id4_vae_program_config_list_t* out_config_list) {
   memset(out_config_list, 0, sizeof(*out_config_list));
   return id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.elementwise.cast_bf16_f32.element_count"),
+      out_config_list, IREE_SV("id4.elementwise.cast.element_count"),
       element_count);
 }
 
@@ -2485,31 +2488,20 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
       width, height, channel_count, group_count, batch_count,
       state.output_element_count, &apply_config_list));
   uint32_t output_channel_tile_width = 4;
-  iree_string_view_t apply_module_path = IREE_SV("vae/group_norm_oc4_bf16");
-  iree_string_view_t apply_function_name =
-      iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-          ? IREE_SV("id4_vae_group_norm_silu_ic4_oc4_flat_bf16")
-          : IREE_SV("id4_vae_group_norm_ic4_oc4_flat_bf16");
   if (state.channels_per_group >= 16 && state.channels_per_group % 16 == 0 &&
       channel_count % 16 == 0) {
     output_channel_tile_width = 16;
-    apply_module_path = IREE_SV("vae/group_norm_oc16_bf16");
-    apply_function_name =
-        iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc16_flat_bf16")
-            : IREE_SV("id4_vae_group_norm_ic4_oc16_flat_bf16");
   } else if (state.channels_per_group >= 8 &&
              state.channels_per_group % 8 == 0 && channel_count % 8 == 0) {
     output_channel_tile_width = 8;
-    apply_module_path = IREE_SV("vae/group_norm_oc8_bf16");
-    apply_function_name =
-        iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc8_flat_bf16")
-            : IREE_SV("id4_vae_group_norm_ic4_oc8_flat_bf16");
   }
   IREE_RETURN_IF_ERROR(id4_vae_program_add_group_norm_apply_tile_configs(
       channel_count, state.output_element_count, output_channel_tile_width,
       &apply_config_list));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      &apply_config_list, IREE_SV("id4.vae.group_norm.apply_silu"),
+      iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU) ? 1
+                                                                          : 0));
 
   id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
       id4_pipeline_program_read(input),
@@ -2523,7 +2515,8 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
   apply_dispatch_options.structure_size = sizeof(apply_dispatch_options);
   apply_dispatch_options.name = output_name;
   apply_dispatch_options.kernel =
-      id4_pipeline_make_kernel_ref(apply_module_path, apply_function_name);
+      id4_pipeline_make_kernel_ref(IREE_SV("vae/group_norm_apply_bf16"),
+                                   IREE_SV("id4_vae_group_norm_apply_bf16"));
   apply_dispatch_options.config_binding_count = apply_config_list.count;
   apply_dispatch_options.config_bindings = apply_config_list.bindings;
   apply_dispatch_options.binding_count = IREE_ARRAYSIZE(apply_bindings);
@@ -2847,9 +2840,8 @@ static iree_status_t id4_vae_program_author_cast_bf16_f32(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel =
-      id4_pipeline_make_kernel_ref(IREE_SV("elementwise/cast_bf16_f32"),
-                                   IREE_SV("id4_elementwise_cast_bf16_f32"));
+  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("elementwise/cast"), IREE_SV("id4_elementwise_cast_bf16_f32"));
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
@@ -3014,6 +3006,8 @@ static iree_status_t id4_vae_program_author_materialized_attention_bf16(
   IREE_RETURN_IF_ERROR(
       id4_vae_program_build_materialized_attention_wmma_configs(
           token_count, 1, channel_count, &config_list));
+  const iree_string_view_t module_path =
+      IREE_SV("attention/materialized_bf16_wmma");
   id4_pipeline_program_dispatch_binding_t qk_bindings[] = {
       id4_pipeline_program_read(query),
       id4_pipeline_program_read(key),
@@ -3024,8 +3018,7 @@ static iree_status_t id4_vae_program_author_materialized_attention_bf16(
   qk_dispatch_options.structure_size = sizeof(qk_dispatch_options);
   qk_dispatch_options.name = scores_name;
   qk_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("attention/materialized_bf16_wmma"),
-      IREE_SV("id4_attention_qk_scores_all_heads_bf16_f32_wmma"));
+      module_path, IREE_SV("id4_attention_qk_scores_all_heads_bf16_f32_wmma"));
   qk_dispatch_options.config_binding_count = config_list.count;
   qk_dispatch_options.config_bindings = config_list.bindings;
   qk_dispatch_options.binding_count = IREE_ARRAYSIZE(qk_bindings);
@@ -3061,8 +3054,7 @@ static iree_status_t id4_vae_program_author_materialized_attention_bf16(
   softmax_dispatch_options.structure_size = sizeof(softmax_dispatch_options);
   softmax_dispatch_options.name = probabilities_name;
   softmax_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("attention/materialized_bf16_wmma"),
-      IREE_SV("id4_attention_softmax_all_heads_f32_bf16"));
+      module_path, IREE_SV("id4_attention_softmax_all_heads_f32_bf16"));
   softmax_dispatch_options.config_binding_count = config_list.count;
   softmax_dispatch_options.config_bindings = config_list.bindings;
   softmax_dispatch_options.binding_count = IREE_ARRAYSIZE(softmax_bindings);
@@ -3093,8 +3085,7 @@ static iree_status_t id4_vae_program_author_materialized_attention_bf16(
   pv_dispatch_options.structure_size = sizeof(pv_dispatch_options);
   pv_dispatch_options.name = dispatch_name;
   pv_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("attention/materialized_bf16_wmma"),
-      IREE_SV("id4_attention_pv_all_heads_bf16_bf16_wmma"));
+      module_path, IREE_SV("id4_attention_pv_all_heads_bf16_bf16_wmma"));
   pv_dispatch_options.config_binding_count = config_list.count;
   pv_dispatch_options.config_bindings = config_list.bindings;
   pv_dispatch_options.binding_count = IREE_ARRAYSIZE(pv_bindings);
