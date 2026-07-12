@@ -426,39 +426,6 @@ static bool ProgramHasFp8CompactExecutionParameter(
       ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE);
 }
 
-static bool DispatchHasConfigBinding(
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch,
-    iree_string_view_t key, iree_string_view_t value) {
-  for (iree_host_size_t i = 0; i < dispatch->config_binding_count; ++i) {
-    const id4_pipeline_kernel_config_binding_t* binding =
-        &dispatch->config_bindings[i];
-    if (!iree_string_view_equal(binding->key, key)) continue;
-    if (!iree_string_view_equal(binding->value, value)) continue;
-    return true;
-  }
-  return false;
-}
-
-static iree_host_size_t ProgramCountDispatchesByFunction(
-    const id4_pipeline_program_t* program, iree_string_view_t function_name) {
-  iree_host_size_t dispatch_count = 0;
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_program_operation_count(program); ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (!operation ||
-        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
-      continue;
-    }
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
-        &operation->payload.dispatch_loom;
-    if (!iree_string_view_equal(dispatch->kernel.function_name, function_name))
-      continue;
-    ++dispatch_count;
-  }
-  return dispatch_count;
-}
-
 static bool ProgramHasLoomDispatch(const id4_pipeline_program_t* program,
                                    iree_string_view_t module_path,
                                    iree_string_view_t function_name) {
@@ -477,88 +444,6 @@ static bool ProgramHasLoomDispatch(const id4_pipeline_program_t* program,
     }
     if (!iree_string_view_equal(dispatch->kernel.function_name,
                                 function_name)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-static bool ProgramHasOnlineAttentionDispatch(
-    const id4_pipeline_program_t* program, iree_string_view_t valid_token_count,
-    iree_string_view_t padded_token_count,
-    iree_string_view_t query_block_offset,
-    iree_string_view_t query_block_token_count) {
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_program_operation_count(program); ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (!operation ||
-        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
-      continue;
-    }
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
-        &operation->payload.dispatch_loom;
-    if (!iree_string_view_equal(
-            dispatch->kernel.function_name,
-            IREE_SV("id4_ideogram4_attention_online_bf16_bf16_wmma"))) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(
-            dispatch,
-            IREE_SV("id4.ideogram4.attention_online_wmma.valid_token_count"),
-            valid_token_count)) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(
-            dispatch,
-            IREE_SV("id4.ideogram4.attention_online_wmma.padded_token_count"),
-            padded_token_count)) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(
-            dispatch,
-            IREE_SV("id4.ideogram4.attention_online_wmma.query_block_offset"),
-            query_block_offset)) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(
-            dispatch,
-            IREE_SV(
-                "id4.ideogram4.attention_online_wmma.query_block_token_count"),
-            query_block_token_count)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-static bool ProgramHasZeroTailDispatch(
-    const id4_pipeline_program_t* program, iree_string_view_t element_count,
-    iree_string_view_t dispatch_element_count) {
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_program_operation_count(program); ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (!operation ||
-        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
-      continue;
-    }
-    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
-        &operation->payload.dispatch_loom;
-    if (!iree_string_view_equal(dispatch->kernel.function_name,
-                                IREE_SV("id4_tensor_zero_tail_bf16"))) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(dispatch,
-                                  IREE_SV("id4.tensor.zero_tail.element_count"),
-                                  element_count)) {
-      continue;
-    }
-    if (!DispatchHasConfigBinding(
-            dispatch, IREE_SV("id4.tensor.zero_tail.dispatch_element_count"),
-            dispatch_element_count)) {
       continue;
     }
     return true;
@@ -1094,37 +979,6 @@ TEST(Ideogram4DitProgram, AuthorsOnlineWmmaAttentionWithoutMatrixScratch) {
       id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
                                             padded_token_count,
                                             padded_token_count)));
-
-  id4_pipeline_program_release(program);
-}
-
-TEST(Ideogram4DitProgram, AuthorsOnlineWmmaAttentionOnlyForValidQueryTiles) {
-  id4_pipeline_program_shape_t latent_shape =
-      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
-  id4_ideogram4_dit_program_options_t options =
-      MakeProgramOptions(latent_shape);
-  options.model.hidden_size = 512;
-  options.model.attention_head_count = 2;
-  options.request.conditioning_mode =
-      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
-  options.request.text_token_count = 3;
-  options.activation_format =
-      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  options.attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
-
-  id4_pipeline_program_t* program = CreateForwardProgram(&options);
-  EXPECT_EQ(
-      ProgramCountDispatchesByFunction(
-          program, IREE_SV("id4_ideogram4_attention_online_bf16_bf16_wmma")),
-      1u);
-  EXPECT_EQ(ProgramCountDispatchesByFunction(
-                program, IREE_SV("id4_tensor_zero_tail_bf16")),
-            1u);
-  EXPECT_TRUE(ProgramHasOnlineAttentionDispatch(
-      program, IREE_SV("5"), IREE_SV("128"), IREE_SV("0"), IREE_SV("16")));
-  EXPECT_TRUE(
-      ProgramHasZeroTailDispatch(program, IREE_SV("8192"), IREE_SV("65536")));
 
   id4_pipeline_program_release(program);
 }

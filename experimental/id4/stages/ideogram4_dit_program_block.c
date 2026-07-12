@@ -11,6 +11,8 @@
 enum {
   ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT = 512,
+  ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_BLOCKED_TOKEN_LIMIT = 128,
+  ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_HEAD_SIZE = 256,
   ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT = 8192,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_INPUT_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_OUTPUT_BLOCK = 128,
@@ -897,12 +899,17 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool materialized_wmma_attention =
       attention_implementation ==
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
-  const bool blocked_wmma_attention =
-      attention_implementation ==
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
-  const bool online_wmma_attention =
+  const bool online_wmma_attention_requested =
       attention_implementation ==
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
+  const bool blocked_wmma_attention =
+      attention_implementation ==
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA ||
+      (online_wmma_attention_requested &&
+       total_token_count <=
+           ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_BLOCKED_TOKEN_LIMIT);
+  const bool online_wmma_attention =
+      online_wmma_attention_requested && !blocked_wmma_attention;
   const bool wmma_attention = materialized_wmma_attention ||
                               blocked_wmma_attention || online_wmma_attention;
   const bool bf16_linear_input_attention = !f32_canonical_activations;
@@ -926,6 +933,13 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
                               "Ideogram4 DiT attention implementation %" PRIu32
                               " is invalid",
                               (uint32_t)attention_implementation);
+  }
+  if (online_wmma_attention_requested &&
+      head_size != ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_HEAD_SIZE) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "Ideogram4 online WMMA attention head size %" PRIu32
+                            " is unsupported",
+                            head_size);
   }
   switch (feed_forward_implementation) {
     case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT:

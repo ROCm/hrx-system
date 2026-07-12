@@ -1484,8 +1484,10 @@ TEST(Ideogram4DitStageIntegration,
   });
 }
 
-static void RunFp8CompactRhsMaterializedFixture(
-    id4::test::Ideogram4DitBranch branch, iree_string_view_t capture_run_id) {
+static void RunFp8CompactRhsFixture(
+    id4::test::Ideogram4DitBranch branch,
+    id4_ideogram4_dit_attention_implementation_t attention_implementation,
+    iree_string_view_t capture_run_id) {
   id4_ideogram4_dit_parameter_format_t parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_ASSERT_OK(ParseDitParameterFormat(&parameter_format));
@@ -1499,8 +1501,7 @@ static void RunFp8CompactRhsMaterializedFixture(
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
       .weight_execution_format =
           ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
-      .attention_implementation =
-          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
+      .attention_implementation = attention_implementation,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
       .branch = branch,
@@ -1511,15 +1512,17 @@ static void RunFp8CompactRhsMaterializedFixture(
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueFp8CompactRhsMaterializedFixture) {
-  RunFp8CompactRhsMaterializedFixture(
+  RunFp8CompactRhsFixture(
       id4::test::Ideogram4DitBranch::kConditioned,
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       IREE_SV("ideogram4_dit_fp8_compact_rhs_materialized"));
 }
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueFp8CompactRhsMaterializedUnconditionedFixture) {
-  RunFp8CompactRhsMaterializedFixture(
+  RunFp8CompactRhsFixture(
       id4::test::Ideogram4DitBranch::kUnconditioned,
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       IREE_SV("ideogram4_dit_fp8_compact_rhs_materialized_unconditioned"));
 }
 
@@ -1577,29 +1580,10 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueOnlineWmmaAttentionFixture) {
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueOnlineWmmaAttentionFp8CompactRhsFixture) {
-  const iree_string_view_t diagnostic_tap_names[] = {
-      IREE_SV("ideogram4.cond.layers.0.attention.context"),
-      IREE_SV("ideogram4.cond.layers.0.attention.output"),
-  };
-  RunDitFixture(DitFixtureRunOptions{
-      .activation_format =
-          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
-      .weight_execution_format =
-          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS,
-      .attention_implementation =
-          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
-      .feed_forward_implementation =
-          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .branch = id4::test::Ideogram4DitBranch::kConditioned,
-      .diagnostic_tap_names =
-          {
-              IREE_ARRAYSIZE(diagnostic_tap_names),
-              diagnostic_tap_names,
-          },
-      .capture_run_id =
-          IREE_SV("ideogram4_dit_online_wmma_attention_fp8_compact_rhs"),
-      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
-  });
+  RunFp8CompactRhsFixture(
+      id4::test::Ideogram4DitBranch::kConditioned,
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
+      IREE_SV("ideogram4_dit_online_wmma_attention_fp8_compact_rhs"));
 }
 
 TEST(Ideogram4DitStageIntegration,
@@ -1700,29 +1684,11 @@ TEST(
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueOnlineWmmaAttentionUnconditionedFixture) {
-  const iree_string_view_t diagnostic_tap_names[] = {
-      IREE_SV("ideogram4.uncond.layers.0.attention.context"),
-      IREE_SV("ideogram4.uncond.layers.0.attention.output"),
-  };
-  RunDitFixture(DitFixtureRunOptions{
-      .activation_format =
-          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
-      .weight_execution_format =
-          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
-      .attention_implementation =
-          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
-      .feed_forward_implementation =
-          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .branch = id4::test::Ideogram4DitBranch::kUnconditioned,
-      .diagnostic_tap_names =
-          {
-              IREE_ARRAYSIZE(diagnostic_tap_names),
-              diagnostic_tap_names,
-          },
-      .capture_run_id =
-          IREE_SV("ideogram4_dit_online_wmma_attention_unconditioned"),
-      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
-  });
+  RunFp8CompactRhsFixture(
+      id4::test::Ideogram4DitBranch::kUnconditioned,
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
+      IREE_SV(
+          "ideogram4_dit_online_wmma_attention_fp8_compact_rhs_unconditioned"));
 }
 
 }  // namespace

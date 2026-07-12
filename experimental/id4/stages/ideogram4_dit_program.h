@@ -58,8 +58,8 @@ typedef enum id4_ideogram4_dit_attention_implementation_e {
   ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA = 2,
   // BF16 WMMA attention using reusable query-block score/probability scratch.
   ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA = 3,
-  // BF16 WMMA attention that computes query blocks online without materialized
-  // score/probability tensors.
+  // BF16 WMMA attention selecting bounded normalized scratch for small token
+  // counts and an online recurrence for larger token counts.
   ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA = 4,
 } id4_ideogram4_dit_attention_implementation_t;
 
