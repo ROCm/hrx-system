@@ -715,6 +715,46 @@ TEST_F(RegionBuilderTest, DisjointWritesCanShareEpoch) {
   id4_pipeline_region_builder_destroy(builder);
 }
 
+TEST_F(RegionBuilderTest, ComplementaryFillsInitializeTensor) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t layout =
+      MakeTensorLayout(IREE_SV("scratch"), 16);
+  id4_pipeline_tensor_t tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &layout, &tensor));
+
+  const uint32_t lower_pattern = 0x12345678u;
+  IREE_ASSERT_OK(id4_pipeline_region_fill_tensor(
+      builder, IREE_SV("fill_lower"), tensor, {/*.offset=*/0, /*.length=*/8},
+      &lower_pattern, sizeof(lower_pattern), IREE_HAL_FILL_FLAG_NONE));
+  const uint32_t upper_pattern = 0x9ABCDEF0u;
+  IREE_ASSERT_OK(id4_pipeline_region_fill_tensor(
+      builder, IREE_SV("fill_upper"), tensor, {/*.offset=*/8, /*.length=*/8},
+      &upper_pattern, sizeof(upper_pattern), IREE_HAL_FILL_FLAG_NONE));
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.operation_count, 2u);
+  EXPECT_EQ(statistics.fill_count, 2u);
+  EXPECT_EQ(statistics.dispatch_count, 0u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  id4_pipeline_region_kernel_t read_kernel = MakeDryKernel(IREE_SV("read"), 1);
+  id4_pipeline_region_dispatch_binding_t read_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
 TEST_F(RegionBuilderTest, DisjointWritesAcrossEpochsInitializeTensor) {
   id4_pipeline_region_builder_t* builder = CreateDryBuilder();
   id4_pipeline_tensor_layout_t layout =

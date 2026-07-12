@@ -1202,63 +1202,6 @@ iree_status_t id4_ideogram4_dit_program_encode_fp8_e4m3_scaled_linear_rhs_tile(
       bindings);
 }
 
-iree_status_t id4_ideogram4_dit_program_dispatch_zero_tail_bf16(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t logical_element_count, uint32_t dispatch_element_count,
-    id4_pipeline_program_tensor_t output) {
-  if (logical_element_count >= dispatch_element_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT BF16 zero-tail logical element count %" PRIu32
-        " must be less than dispatch element count %" PRIu32,
-        logical_element_count, dispatch_element_count);
-  }
-  if (dispatch_element_count >
-      ID4_IDEOGRAM4_DIT_ELEMENTWISE_MAX_ELEMENT_COUNT) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Ideogram4 DiT BF16 zero-tail dispatch element count %" PRIu32
-        " exceeds max count %u",
-        dispatch_element_count,
-        ID4_IDEOGRAM4_DIT_ELEMENTWISE_MAX_ELEMENT_COUNT);
-  }
-  const uint32_t tail_element_count =
-      dispatch_element_count - logical_element_count;
-  iree_device_size_t output_offset = 0;
-  iree_device_size_t output_length = 0;
-  if (!iree_device_size_checked_mul((iree_device_size_t)logical_element_count,
-                                    id4_pipeline_program_dtype_byte_length(
-                                        ID4_PIPELINE_PROGRAM_DTYPE_BF16),
-                                    &output_offset) ||
-      !iree_device_size_checked_mul((iree_device_size_t)tail_element_count,
-                                    id4_pipeline_program_dtype_byte_length(
-                                        ID4_PIPELINE_PROGRAM_DTYPE_BF16),
-                                    &output_length)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Ideogram4 DiT BF16 zero-tail output byte range overflow");
-  }
-  const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.tensor.zero_tail.element_count"), logical_element_count},
-      {IREE_SV("id4.tensor.zero_tail.dispatch_element_count"),
-       dispatch_element_count},
-  };
-  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
-                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
-  id4_pipeline_kernel_config_binding_t
-      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
-      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
-      config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_write_range(output, output_offset, output_length),
-  };
-  return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, IREE_SV("tensor/zero_tail_bf16"),
-      IREE_SV("id4_tensor_zero_tail_bf16"), IREE_ARRAYSIZE(config_values),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
-}
-
 iree_status_t id4_ideogram4_dit_program_barrier(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
   id4_pipeline_program_barrier_options_t options = {

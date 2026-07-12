@@ -9516,16 +9516,6 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_residual_add_f32_qwen_slice",
     },
     {
-        "actual_case": "@id4_tensor_zero_tail_bf16_all_case",
-        "benchmark": "@id4_tensor_zero_tail_bf16_all",
-        "configs": [
-            "--config=id4.tensor.zero_tail.element_count=0",
-            "--config=id4.tensor.zero_tail.dispatch_element_count=8",
-        ],
-        "source": "tensor/zero_tail_bf16.loom",
-        "target_name": "tensor_zero_tail_bf16_all",
-    },
-    {
         "actual_case": "@id4_tensor_transpose_bf16_small_case",
         "benchmark": "@id4_tensor_transpose_bf16_small",
         "configs": [
@@ -9909,7 +9899,6 @@ _KERNEL_SOURCES = [
     "sampler/noise_f32.loom",
     "smoke_configured.loom",
     "tensor/transpose_bf16.loom",
-    "tensor/zero_tail_bf16.loom",
     "vae/conv1x1_bias_bf16_wmma.loom",
     "vae/conv1x1_bias_f32.loom",
     "vae/conv1x1_bf16_wmma_inplace_padded.loom",

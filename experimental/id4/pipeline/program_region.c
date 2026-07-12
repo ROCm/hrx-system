@@ -256,6 +256,8 @@ static bool id4_pipeline_program_region_operation_uses_tensor(
         }
       }
       return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+      return op->payload.fill.target.ordinal == tensor.ordinal;
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       return id4_pipeline_program_region_captures_tap(options,
                                                       op->payload.tap.name) &&
@@ -610,6 +612,12 @@ static iree_status_t id4_pipeline_program_region_validate_local_residency(
                   options, op->payload.dispatch_loom.bindings[j].tensor));
         }
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_FILL: {
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_region_validate_local_tensor_range(
+                options, op->payload.fill.target));
+        break;
+      }
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         if (id4_pipeline_program_region_captures_tap(options,
                                                      op->payload.tap.name)) {
@@ -746,6 +754,12 @@ static iree_status_t id4_pipeline_program_region_build_liveness(
               tensor_count, last_use_ordinals));
         }
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_FILL: {
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_region_note_tensor_last_use(
+            op->payload.fill.target, op->ordinal, tensor_count,
+            last_use_ordinals));
+        break;
+      }
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         if (id4_pipeline_program_region_captures_tap(options,
                                                      op->payload.tap.name)) {
@@ -992,6 +1006,9 @@ static iree_status_t id4_pipeline_program_region_release_last_uses(
                 op->ordinal));
       }
       return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+      return id4_pipeline_program_region_release_last_use_tensor(
+          context, op->payload.fill.target, op->ordinal);
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       if (id4_pipeline_program_region_captures_tap(context->options,
                                                    op->payload.tap.name)) {
@@ -1335,19 +1352,42 @@ static iree_status_t id4_pipeline_program_region_lower_dispatch(
   return status;
 }
 
+static iree_status_t id4_pipeline_program_region_lower_fill(
+    id4_pipeline_program_region_context_t* context,
+    const id4_pipeline_program_fill_op_t* fill_op) {
+  id4_pipeline_tensor_t target = id4_pipeline_program_region_invalid_tensor();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_load_tensor(
+      context, fill_op->target, &target));
+  const id4_pipeline_region_tensor_byte_range_t target_range = {
+      // Tensor-relative byte offset receiving the pattern.
+      .offset = fill_op->target_range.offset,
+      // Number of target bytes receiving the pattern.
+      .length = fill_op->target_range.length,
+  };
+  return id4_pipeline_region_fill_tensor(
+      context->options->builder, fill_op->name, target, target_range,
+      fill_op->pattern, fill_op->pattern_length, fill_op->flags);
+}
+
 static iree_status_t id4_pipeline_program_region_lower_barrier(
     id4_pipeline_program_region_context_t* context) {
   const iree_hal_memory_barrier_t memory_barrier = {
-      // Prior dispatch reads/writes that must complete before the next epoch.
+      // Prior dispatch and transfer accesses completing the current epoch.
       .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-      // Following dispatch reads/writes in the next epoch.
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      // Following dispatch and transfer accesses beginning the next epoch.
       .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
   };
   return id4_pipeline_region_barrier(
-      context->options->builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      context->options->builder,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
       /*memory_barrier_count=*/1, /*memory_barriers=*/&memory_barrier,
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
@@ -1553,6 +1593,12 @@ iree_status_t id4_pipeline_program_region_lower(
               &context, &op->payload.dispatch_loom, dispatch_ordinal);
         }
         ++dispatch_ordinal;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+        if (emit_operation) {
+          status = id4_pipeline_program_region_lower_fill(&context,
+                                                          &op->payload.fill);
+        }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
         if (emit_operation) {

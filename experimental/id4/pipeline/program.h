@@ -75,6 +75,8 @@ typedef enum id4_pipeline_program_op_kind_e {
   ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT = 9,
   // Logical tensor view into an acquired transient tensor.
   ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW = 10,
+  // Repeating-pattern fill over a tensor byte range.
+  ID4_PIPELINE_PROGRAM_OP_KIND_FILL = 11,
 } id4_pipeline_program_op_kind_t;
 
 // Tensor access flags observed by a semantic dispatch.
@@ -285,6 +287,22 @@ typedef struct id4_pipeline_program_dispatch_loom_op_t {
   iree_string_pair_list_t semantic_attributes;
 } id4_pipeline_program_dispatch_loom_op_t;
 
+// Tensor fill operation payload.
+typedef struct id4_pipeline_program_fill_op_t {
+  // Stable operation name used for diagnostics.
+  iree_string_view_t name;
+  // Tensor receiving the fill pattern.
+  id4_pipeline_program_tensor_t target;
+  // Tensor-relative byte range receiving the fill pattern.
+  id4_pipeline_program_tensor_byte_range_t target_range;
+  // Repeating fill pattern bytes.
+  uint8_t pattern[4];
+  // Number of pattern bytes; one of 1, 2, or 4.
+  iree_host_size_t pattern_length;
+  // HAL fill behavior flags.
+  iree_hal_fill_flags_t flags;
+} id4_pipeline_program_fill_op_t;
+
 // Execution barrier operation payload.
 typedef struct id4_pipeline_program_barrier_op_t {
   // Stable barrier name used for diagnostics.
@@ -333,6 +351,8 @@ typedef struct id4_pipeline_program_op_t {
     id4_pipeline_program_subview_op_t subview;
     // Loom dispatch operation payload.
     id4_pipeline_program_dispatch_loom_op_t dispatch_loom;
+    // Tensor fill operation payload.
+    id4_pipeline_program_fill_op_t fill;
     // Barrier operation payload.
     id4_pipeline_program_barrier_op_t barrier;
     // Stage-region cut operation payload.
@@ -465,6 +485,26 @@ typedef struct id4_pipeline_program_dispatch_loom_options_t {
   // Semantic diagnostic attributes borrowed for the dispatch call.
   iree_string_pair_list_t semantic_attributes;
 } id4_pipeline_program_dispatch_loom_options_t;
+
+// Options for authoring a repeating-pattern tensor fill.
+typedef struct id4_pipeline_program_fill_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Stable operation name used for diagnostics.
+  iree_string_view_t name;
+  // Tensor receiving the fill pattern.
+  id4_pipeline_program_tensor_t target;
+  // Tensor-relative byte range receiving the fill pattern.
+  id4_pipeline_program_tensor_byte_range_t target_range;
+  // Repeating fill pattern bytes.
+  uint8_t pattern[4];
+  // Number of pattern bytes; one of 1, 2, or 4.
+  iree_host_size_t pattern_length;
+  // HAL fill behavior flags.
+  iree_hal_fill_flags_t flags;
+} id4_pipeline_program_fill_options_t;
 
 // Options for authoring an execution barrier.
 typedef struct id4_pipeline_program_barrier_options_t {
@@ -764,6 +804,11 @@ iree_status_t id4_pipeline_program_subview_tensor(
 iree_status_t id4_pipeline_program_dispatch_loom(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_dispatch_loom_options_t* options);
+
+// Authors a repeating-pattern fill over a tensor byte range.
+iree_status_t id4_pipeline_program_fill(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_fill_options_t* options);
 
 // Authors an execution barrier and advances the planning epoch.
 iree_status_t id4_pipeline_program_barrier(

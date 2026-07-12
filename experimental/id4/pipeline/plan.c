@@ -2761,17 +2761,18 @@ static iree_status_t id4_pipeline_plan_append_region_statistics_json(
   return iree_string_builder_append_format(
       builder,
       "{\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz
-      ",\"copy_count\":%" PRIhsz ",\"barrier_count\":%" PRIhsz
+      ",\"copy_count\":%" PRIhsz ",\"fill_count\":%" PRIhsz
+      ",\"barrier_count\":%" PRIhsz
       ",\"current_epoch\":%u"
       ",\"local_acquire_count\":%" PRIhsz ",\"local_subview_count\":%" PRIhsz
       ",\"local_release_count\":%" PRIhsz ",\"local_reuse_count\":%" PRIhsz
       ",\"bound_import_count\":%" PRIhsz ",\"local_slab_byte_length\":%" PRIu64
       ",\"local_slab_high_water_mark\":%" PRIu64 "}",
       statistics.operation_count, statistics.dispatch_count,
-      statistics.copy_count, statistics.barrier_count, statistics.current_epoch,
-      statistics.local_acquire_count, statistics.local_subview_count,
-      statistics.local_release_count, statistics.local_reuse_count,
-      statistics.bound_import_count,
+      statistics.copy_count, statistics.fill_count, statistics.barrier_count,
+      statistics.current_epoch, statistics.local_acquire_count,
+      statistics.local_subview_count, statistics.local_release_count,
+      statistics.local_reuse_count, statistics.bound_import_count,
       (uint64_t)statistics.local_slab_byte_length,
       (uint64_t)statistics.local_slab_high_water_mark);
 }
@@ -3346,6 +3347,9 @@ static iree_status_t id4_pipeline_plan_append_program_json(
               region_operation_ordinal));
           emitted_dispatch = true;
           ++dispatch_ordinal;
+          ++region_operation_ordinal;
+          break;
+        case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
           ++region_operation_ordinal;
           break;
         case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:

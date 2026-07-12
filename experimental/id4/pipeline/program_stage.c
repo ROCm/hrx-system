@@ -211,6 +211,8 @@ static bool id4_pipeline_program_stage_operation_uses_tensor(
         }
       }
       return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+      return op->payload.fill.target.ordinal == tensor.ordinal;
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       return id4_pipeline_program_stage_tap_name_requested(
                  options, op->payload.tap.name) &&
@@ -416,11 +418,9 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   memset(&local_params, 0, sizeof(local_params));
   local_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   local_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  local_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
-  if (iree_all_bits_set(options->stage_options->flags,
-                        ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
-    local_params.usage |= IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE;
-  }
+  local_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                       IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+                       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
   local_params.queue_affinity = options->stage_options->queue_affinity;
   local_params.min_alignment = options->alignment;
 

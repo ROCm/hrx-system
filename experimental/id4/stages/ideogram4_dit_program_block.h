@@ -179,11 +179,6 @@ iree_status_t id4_ideogram4_dit_program_dispatch_cast_bf16_f32(
     id4_pipeline_program_shape_t shape, id4_pipeline_program_tensor_t input,
     id4_pipeline_program_tensor_t output);
 
-iree_status_t id4_ideogram4_dit_program_dispatch_zero_tail_bf16(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t logical_element_count, uint32_t dispatch_element_count,
-    id4_pipeline_program_tensor_t output);
-
 iree_status_t id4_ideogram4_dit_program_dense_bf16(
     id4_pipeline_program_builder_t* builder,
     const id4_ideogram4_dit_program_dense_options_t* options,

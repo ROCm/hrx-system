@@ -2171,6 +2171,88 @@ iree_status_t id4_pipeline_region_copy_tensor(
   return iree_ok_status();
 }
 
+iree_status_t id4_pipeline_region_fill_tensor(
+    id4_pipeline_region_builder_t* builder, iree_string_view_t name,
+    id4_pipeline_tensor_t target,
+    id4_pipeline_region_tensor_byte_range_t target_range, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(builder);
+  if (iree_string_view_is_empty(name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region fill name is required");
+  }
+  if (!pattern) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region fill %.*s pattern is required",
+                            (int)name.size, name.data);
+  }
+  if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region fill %.*s pattern length %" PRIhsz
+                            " must be 1, 2, or 4",
+                            (int)name.size, name.data, pattern_length);
+  }
+  if (flags != IREE_HAL_FILL_FLAG_NONE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region fill %.*s has unsupported flags 0x%" PRIx64,
+                            (int)name.size, name.data, (uint64_t)flags);
+  }
+  const id4_pipeline_region_kernel_t fill_operation = {
+      // Fill name used by shared binding validation diagnostics.
+      .name = name,
+      // Fill operations do not use an executable.
+      .executable = NULL,
+      // Fill operations do not use an executable function.
+      .function = iree_hal_executable_function_invalid(),
+      // Fill operations write one tensor.
+      .binding_count = 1,
+      // Fill operations do not use push constants.
+      .constant_byte_length = 0,
+  };
+  const id4_pipeline_region_dispatch_binding_t binding = {
+      // Tensor receiving the fill pattern.
+      .tensor = target,
+      // Fill operations only write the target range.
+      .access = ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      // Restrict initialization and dependency tracking to the target range.
+      .flags = ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      // Fill operations do not read tensor contents.
+      .read_range = {0, 0},
+      // Tensor-relative range receiving the fill pattern.
+      .write_range = target_range,
+  };
+  id4_pipeline_region_tensor_record_t* target_record = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_dispatch_binding(
+      builder, &fill_operation, &binding, /*binding_index=*/0, &target_record));
+
+  iree_device_size_t target_offset = 0;
+  if (!iree_device_size_checked_add(target.offset, target_range.offset,
+                                    &target_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "region fill %.*s target offset overflows",
+                            (int)name.size, name.data);
+  }
+  if ((target_offset % pattern_length) != 0 ||
+      (target_range.length % pattern_length) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "region fill %.*s target range must be pattern-aligned", (int)name.size,
+        name.data);
+  }
+  if (builder->mode == ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_fill_buffer(
+        builder->command_buffer,
+        iree_hal_make_indirect_buffer_ref(target.binding_slot, target_offset,
+                                          target_range.length),
+        pattern, pattern_length, flags));
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_apply_dispatch_binding_access(
+      builder, target_record, &binding));
+  ++builder->statistics.operation_count;
+  ++builder->statistics.fill_count;
+  return iree_ok_status();
+}
+
 iree_status_t id4_pipeline_region_dispatch_loom(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_region_loom_kernel_t* kernel,

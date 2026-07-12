@@ -814,18 +814,21 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
   }
   if (query_token_capacity < bf16_token_capacity) {
     uint64_t hidden_size = 0;
-    uint64_t logical_element_count = 0;
-    uint64_t dispatch_element_count = 0;
+    uint64_t tail_byte_offset = 0;
+    uint64_t tail_byte_length = 0;
     if (!id4_ideogram4_dit_program_checked_mul_u64(attention_head_count,
                                                    head_size, &hidden_size) ||
         !id4_ideogram4_dit_program_checked_mul_u64(
-            query_token_capacity, hidden_size, &logical_element_count) ||
+            query_token_capacity, hidden_size, &tail_byte_offset) ||
         !id4_ideogram4_dit_program_checked_mul_u64(
-            bf16_token_capacity, hidden_size, &dispatch_element_count) ||
-        logical_element_count > UINT32_MAX ||
-        dispatch_element_count > UINT32_MAX) {
+            bf16_token_capacity - query_token_capacity, hidden_size,
+            &tail_byte_length) ||
+        !id4_ideogram4_dit_program_checked_mul_u64(
+            tail_byte_offset, sizeof(uint16_t), &tail_byte_offset) ||
+        !id4_ideogram4_dit_program_checked_mul_u64(
+            tail_byte_length, sizeof(uint16_t), &tail_byte_length)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Ideogram4 online WMMA attention tail element "
+                              "Ideogram4 online WMMA attention tail byte "
                               "range overflow");
     }
     char zero_tail_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -834,9 +837,20 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
         branch_name, layer_ordinal, IREE_SV("attention.online.zero_tail"),
         zero_tail_name_buffer, IREE_ARRAYSIZE(zero_tail_name_buffer),
         &zero_tail_name));
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_zero_tail_bf16(
-        builder, zero_tail_name, (uint32_t)logical_element_count,
-        (uint32_t)dispatch_element_count, attention_context));
+    const id4_pipeline_program_fill_options_t fill_options = {
+        .structure_size = sizeof(fill_options),
+        .name = zero_tail_name,
+        .target = attention_context,
+        .target_range =
+            {
+                .offset = (iree_device_size_t)tail_byte_offset,
+                .length = (iree_device_size_t)tail_byte_length,
+            },
+        .pattern = {0, 0, 0, 0},
+        .pattern_length = sizeof(uint16_t),
+        .flags = IREE_HAL_FILL_FLAG_NONE,
+    };
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_fill(builder, &fill_options));
   }
   return iree_ok_status();
 }

@@ -283,6 +283,9 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
         ++counts.dispatch_count;
         ++counts.region_operation_count;
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+        ++counts.region_operation_count;
+        break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
         ++counts.barrier_count;
         ++counts.region_operation_count;
@@ -306,6 +309,7 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
 static bool id4_pipeline_program_plan_op_is_region_operation(
     const id4_pipeline_program_op_t* op) {
   return op && (op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM ||
+                op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_FILL ||
                 op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER);
 }
 
@@ -430,6 +434,8 @@ static bool id4_pipeline_program_plan_operation_uses_tensor(
         }
       }
       return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
+      return op->payload.fill.target.ordinal == tensor.ordinal;
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       return id4_pipeline_program_plan_tap_name_requested(
                  options, op->payload.tap.name) &&
@@ -1865,6 +1871,7 @@ static iree_status_t id4_pipeline_program_plan_build_taps(
       if (!op) continue;
       switch (op->kind) {
         case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+        case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
         case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
           ++region_operation_count;
           break;

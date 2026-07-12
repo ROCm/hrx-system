@@ -297,12 +297,14 @@ typedef struct id4_pipeline_region_dispatch_binding_t {
 
 // Region statistics accumulated by dry-run or record builders.
 typedef struct id4_pipeline_region_statistics_t {
-  // Number of dispatch and barrier operations authored.
+  // Number of executable region operations authored.
   iree_host_size_t operation_count;
   // Number of dispatch operations authored.
   iree_host_size_t dispatch_count;
   // Number of tensor copy operations authored.
   iree_host_size_t copy_count;
+  // Number of tensor fill operations authored.
+  iree_host_size_t fill_count;
   // Number of barrier operations authored.
   iree_host_size_t barrier_count;
   // Current epoch after authored barriers.
@@ -485,6 +487,13 @@ iree_status_t id4_pipeline_region_dispatch_loom(
 iree_status_t id4_pipeline_region_copy_tensor(
     id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
     id4_pipeline_tensor_t target, iree_hal_copy_flags_t flags);
+
+// Authors a repeating-pattern tensor fill and optionally records it.
+iree_status_t id4_pipeline_region_fill_tensor(
+    id4_pipeline_region_builder_t* builder, iree_string_view_t name,
+    id4_pipeline_tensor_t target,
+    id4_pipeline_region_tensor_byte_range_t target_range, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
 
 // Authors an execution barrier, advances the epoch, and optionally records it.
 iree_status_t id4_pipeline_region_barrier(

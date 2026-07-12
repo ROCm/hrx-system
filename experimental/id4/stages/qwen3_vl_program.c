@@ -844,67 +844,65 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M16N32 = 29,
   // Fused MLP gate/up/SwiGLU WMMA kernel for 32-token tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32 = 30,
-  // BF16 tensor tail zeroing kernel.
-  ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16 = 31,
   // Fused residual add followed by RMSNorm kernel.
-  ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM = 32,
+  ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM = 31,
   // Fused BF16 WMMA linear projection followed by residual add.
-  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32 = 33,
+  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32 = 32,
   // Fused BF16 WMMA linear projection followed by residual add.
-  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64 = 34,
+  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64 = 33,
   // Fused head RMSNorm followed by rotary embedding.
-  ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY = 35,
+  ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY = 34,
   // Compact RHS fused MLP gate/up/SwiGLU WMMA kernel for 32-token tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS =
-      36,
+      35,
   // Compact RHS fused BF16 WMMA linear projection followed by residual add.
-  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS = 37,
+  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS = 36,
   // Compact RHS fused BF16 WMMA linear projection followed by residual add.
-  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 38,
+  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 37,
   // Compact RHS BF16 activation/weight WMMA linear kernel for 48x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS = 39,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS = 38,
   // Compact RHS FP8 block-scaled weight WMMA linear kernel for 64x64 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS = 40,
+  ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS = 39,
   // Compact RHS block-scaled FP8 fused MLP gate/up/SwiGLU WMMA kernel.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_FP8_BLOCK_SCALED_BF16_WMMA_M32N32_COMPACT_RHS =
-      41,
+      40,
   // Compact RHS block-scaled FP8 fused MLP down/residual WMMA kernel.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS =
-      42,
+      41,
   // Online attention kernel that avoids materialized scores/probabilities.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 43,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 42,
   // Online BF16 WMMA attention kernel that avoids materialized
   // scores/probabilities.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA = 44,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA = 43,
   // Compact RHS BF16 activation/weight two-wave WMMA linear kernel for 128x64
   // tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS = 45,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS = 44,
   // Compact RHS fused BF16 WMMA linear projection followed by residual add for
   // 128x64 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      46,
+      45,
   // Compact RHS fused MLP gate/up/SwiGLU BF16 WMMA kernel for 128x32 two-wave
   // tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M128N32_2WAVE_COMPACT_RHS =
-      47,
+      46,
   // Compact RHS FP8 block-scaled weight WMMA linear kernel for 128x64 two-wave
   // tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      48,
+      47,
   // Compact RHS block-scaled FP8 fused MLP down/residual WMMA kernel for
   // 128x64 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      49,
+      48,
   // Compact RHS block-scaled FP8 fused MLP gate/up/SwiGLU WMMA kernel for
   // 128x32 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_FP8_BLOCK_SCALED_BF16_WMMA_M128N32_2WAVE_COMPACT_RHS =
-      50,
+      49,
   // Compact RHS BF16 activation/weight WMMA linear kernel for 32x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 51,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 50,
   // Compact RHS BF16 activation/weight 32x32 WMMA linear kernel with packed
   // output.
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS_TRANSPOSE_OUTPUT =
-      52,
+      51,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -2098,9 +2096,6 @@ static const id4_pipeline_kernel_ref_t id4_qwen3_vl_program_kernel_refs[ID4_QWEN
                   "m128n32_2wave_compact_rhs"),
          IREE_SVL("id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_"
                   "m128n32_2wave_compact_rhs")},
-    [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] = {IREE_SVL("tensor/zero_tail_bf16"),
-                                            IREE_SVL(
-                                                "id4_tensor_zero_tail_bf16")},
     [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
         {IREE_SVL("qwen3_vl/residual_add_f32"),
          IREE_SVL("id4_qwen3_vl_residual_add_rmsnorm_bf16")},
@@ -2617,13 +2612,6 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                 [ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE] =
                     IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
                              "intermediate_size"),
-            },
-        [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] =
-            {
-                [ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT] =
-                    IREE_SVL("id4.tensor.zero_tail.element_count"),
-                [ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT] =
-                    IREE_SVL("id4.tensor.zero_tail.dispatch_element_count"),
             },
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
             {
@@ -3570,26 +3558,20 @@ static iree_status_t id4_qwen3_vl_program_zero_bf16_tail(
       tensor_name, IREE_SV("zero_tail"), operation_name_buffer,
       IREE_ARRAYSIZE(operation_name_buffer), &operation_name));
 
-  const id4_qwen3_vl_program_config_value_t config_values[] = {
-      {ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT, coverage->logical_element_count},
-      {ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT,
-       coverage->dispatch_element_count},
+  const id4_pipeline_program_fill_options_t options = {
+      .structure_size = sizeof(options),
+      .name = operation_name,
+      .target = tensor,
+      .target_range =
+          {
+              .offset = coverage->logical_byte_length,
+              .length = tail_byte_length,
+          },
+      .pattern = {0, 0, 0, 0},
+      .pattern_length = sizeof(uint16_t),
+      .flags = IREE_HAL_FILL_FLAG_NONE,
   };
-  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
-                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
-  id4_pipeline_kernel_config_binding_t
-      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-      ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16, IREE_ARRAYSIZE(config_values),
-      config_values, value_buffers, config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_write_range(tensor, coverage->logical_byte_length,
-                                       tail_byte_length),
-  };
-  return id4_qwen3_vl_program_dispatch_named(
-      builder, operation_name, ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16,
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+  return id4_pipeline_program_fill(builder, &options);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_token_embedding(

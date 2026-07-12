@@ -1049,4 +1049,160 @@ TEST(PipelineProgram, RejectsAmbiguousIdentitiesAndInvalidHandles) {
   builder_scope.DestroyBuilder();
 }
 
+TEST(PipelineProgram, ComplementaryFillsEstablishTensorInitialization) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t scratch = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t acquire_options = {
+      /*.structure_size=*/sizeof(acquire_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("scratch"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_U32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_acquire_tensor(builder, &acquire_options, &scratch));
+
+  id4_pipeline_program_fill_options_t lower_fill_options = {
+      /*.structure_size=*/sizeof(lower_fill_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("fill_lower"),
+      /*.target=*/scratch,
+      /*.target_range=*/{/*.offset=*/0, /*.length=*/8},
+      /*.pattern=*/{0x34, 0x12, 0, 0},
+      /*.pattern_length=*/2,
+      /*.flags=*/IREE_HAL_FILL_FLAG_NONE,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_fill(builder, &lower_fill_options));
+
+  id4_pipeline_program_barrier_options_t first_barrier_options = {
+      /*.structure_size=*/sizeof(first_barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_lower"),
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_barrier(builder, &first_barrier_options));
+
+  id4_pipeline_program_dispatch_binding_t read_binding =
+      id4_pipeline_program_read(scratch);
+  id4_pipeline_program_dispatch_loom_options_t read_options = {
+      /*.structure_size=*/sizeof(read_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read_scratch"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_binding,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_program_dispatch_loom(builder, &read_options));
+
+  id4_pipeline_program_fill_options_t upper_fill_options = {
+      /*.structure_size=*/sizeof(upper_fill_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("fill_upper"),
+      /*.target=*/scratch,
+      /*.target_range=*/{/*.offset=*/8, /*.length=*/8},
+      /*.pattern=*/{0x78, 0x56, 0, 0},
+      /*.pattern_length=*/2,
+      /*.flags=*/IREE_HAL_FILL_FLAG_NONE,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_fill(builder, &upper_fill_options));
+
+  id4_pipeline_program_barrier_options_t second_barrier_options = {
+      /*.structure_size=*/sizeof(second_barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_upper"),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_barrier(builder, &second_barrier_options));
+  IREE_ASSERT_OK(id4_pipeline_program_dispatch_loom(builder, &read_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 6u);
+  const id4_pipeline_program_op_t* lower_fill =
+      id4_pipeline_program_operation_at(program, 1);
+  ASSERT_NE(lower_fill, nullptr);
+  ASSERT_EQ(lower_fill->kind, ID4_PIPELINE_PROGRAM_OP_KIND_FILL);
+  ExpectStringViewEqual(lower_fill->payload.fill.name, IREE_SV("fill_lower"));
+  EXPECT_EQ(lower_fill->payload.fill.target.ordinal, scratch.ordinal);
+  EXPECT_EQ(lower_fill->payload.fill.target_range.offset, 0u);
+  EXPECT_EQ(lower_fill->payload.fill.target_range.length, 8u);
+  EXPECT_EQ(lower_fill->payload.fill.pattern[0], 0x34u);
+  EXPECT_EQ(lower_fill->payload.fill.pattern[1], 0x12u);
+  EXPECT_EQ(lower_fill->payload.fill.pattern_length, 2u);
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgram, SubviewPreservesPartialInitializationCoverage) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t scratch = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t acquire_options = {
+      /*.structure_size=*/sizeof(acquire_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("scratch"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_U32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_acquire_tensor(builder, &acquire_options, &scratch));
+
+  id4_pipeline_program_fill_options_t fill_options = {
+      /*.structure_size=*/sizeof(fill_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("fill_lower"),
+      /*.target=*/scratch,
+      /*.target_range=*/{/*.offset=*/0, /*.length=*/8},
+      /*.pattern=*/{0, 0, 0, 0},
+      /*.pattern_length=*/4,
+      /*.flags=*/IREE_HAL_FILL_FLAG_NONE,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_fill(builder, &fill_options));
+
+  id4_pipeline_program_barrier_options_t barrier_options = {
+      /*.structure_size=*/sizeof(barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_fill"),
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_barrier(builder, &barrier_options));
+
+  id4_pipeline_program_tensor_t lower = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_subview_tensor_options_t subview_options = {
+      /*.structure_size=*/sizeof(subview_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("lower"),
+      /*.source=*/scratch,
+      /*.source_byte_offset=*/0,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(2),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_subview_tensor(builder, &subview_options, &lower));
+
+  id4_pipeline_program_dispatch_binding_t read_binding =
+      id4_pipeline_program_read(lower);
+  id4_pipeline_program_dispatch_loom_options_t read_options = {
+      /*.structure_size=*/sizeof(read_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read_lower"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_binding,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_dispatch_loom(builder, &read_options));
+}
+
 }  // namespace

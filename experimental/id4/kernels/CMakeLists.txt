@@ -146,7 +146,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
     "tensor/transpose_bf16.loom"
-    "tensor/zero_tail_bf16.loom"
     "vae/compact_channels_bf16.loom"
     "vae/conv1x1_bf16_wmma_inplace_padded.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
@@ -326,7 +325,6 @@ iree_c_embed_data(
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
     "tensor/transpose_bf16.loom"
-    "tensor/zero_tail_bf16.loom"
     "vae/compact_channels_bf16.loom"
     "vae/conv1x1_bf16_wmma_inplace_padded.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
@@ -14335,22 +14333,6 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.residual_add.token_count=64"
     "--config=id4.qwen3_vl.residual_add.hidden_size=4096"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "tensor_zero_tail_bf16_all_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/zero_tail_bf16.loom}}"
-    "--benchmark=@id4_tensor_zero_tail_bf16_all"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.tensor.zero_tail.element_count=0"
-    "--config=id4.tensor.zero_tail.dispatch_element_count=8"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -31543,26 +31525,6 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=64"
     "--config=id4.qwen3_vl.residual_add.hidden_size=4096"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "tensor_zero_tail_bf16_all_hal_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/zero_tail_bf16.loom}}"
-    "--case=@id4_tensor_zero_tail_bf16_all_case"
-    "--device=amdgpu://0"
-    "--config=id4.tensor.zero_tail.element_count=0"
-    "--config=id4.tensor.zero_tail.dispatch_element_count=8"
   SRC
     loom::tools::iree-test-loom
   LABELS
