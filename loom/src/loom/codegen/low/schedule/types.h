@@ -629,6 +629,12 @@ typedef struct loom_low_schedule_table_t {
   // Stable ordering dependency graph consumed by scheduling and target
   // planning.
   loom_low_schedule_dependency_graph_t dependencies;
+  // Number of distinct producer-to-consumer dependency groups used by list
+  // scheduling.
+  uint32_t dependency_group_count;
+  // Number of consumers published to their final dependency producer while
+  // maintaining pressure summaries.
+  uint64_t unlock_summary_publication_count;
   // Node indices in scheduled order, grouped by block.
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.

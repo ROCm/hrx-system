@@ -17,6 +17,29 @@ package(
 )
 
 loom_cc_library(
+    name = "dependency_index",
+    srcs = ["dependency_index.c"],
+    hdrs = ["dependency_index.h"],
+    deps = [
+        ":dependencies",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "dependencies",
+    srcs = ["dependencies.c"],
+    hdrs = ["dependencies.h"],
+    deps = [
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "ready_frontier",
     srcs = ["ready_frontier.c"],
     hdrs = ["ready_frontier.h"],
@@ -31,7 +54,6 @@ loom_cc_library(
     name = "schedule",
     srcs = [
         "context.h",
-        "dependencies.c",
         "descriptor_rows.c",
         "descriptor_rows.h",
         "diagnostics.c",
@@ -42,12 +64,13 @@ loom_cc_library(
         "run.c",
     ],
     hdrs = [
-        "dependencies.h",
         "json.h",
         "run.h",
         "types.h",
     ],
     deps = [
+        ":dependencies",
+        ":dependency_index",
         ":ready_frontier",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
@@ -81,6 +104,17 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "dependency_index_test",
+    srcs = ["dependency_index_test.cc"],
+    deps = [
+        ":dependencies",
+        ":dependency_index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "ready_frontier_test",
     srcs = ["ready_frontier_test.cc"],
     deps = [
@@ -94,7 +128,7 @@ loom_cc_test(
     name = "dependencies_test",
     srcs = ["dependencies_test.cc"],
     deps = [
-        ":schedule",
+        ":dependencies",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

@@ -148,12 +148,15 @@ iree_status_t loom_low_schedule_format_json(
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       &stream,
       ",\"block_count\":%zu,\"node_count\":%zu,\"dependency_count\":%zu"
+      ",\"dependency_group_count\":%" PRIu32
+      ",\"unlock_summary_publication_count\":%" PRIu64
       ",\"candidate_decision_count\":%zu"
       ",\"resource_use_count\":%zu,\"effect_use_count\":%zu"
       ",\"hazard_use_count\":%zu"
       ",\"hazard_gap_count\":%zu"
       ",\"model_summary_count\":%zu,\"resource_summary_count\":%zu",
       table->block_count, table->node_count, table->dependencies.count,
+      table->dependency_group_count, table->unlock_summary_publication_count,
       table->candidate_decision_count, table->resource_use_count,
       table->effect_use_count, table->hazard_use_count, table->hazard_gap_count,
       table->model_summary_count, table->resource_summary_count));

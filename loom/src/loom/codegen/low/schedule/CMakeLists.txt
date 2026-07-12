@@ -11,6 +11,35 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    dependency_index
+  HDRS
+    "dependency_index.h"
+  SRCS
+    "dependency_index.c"
+  DEPS
+    ::dependencies
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    dependencies
+  HDRS
+    "dependencies.h"
+  SRCS
+    "dependencies.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     ready_frontier
   HDRS
     "ready_frontier.h"
@@ -27,13 +56,11 @@ loom_cc_library(
   NAME
     schedule
   HDRS
-    "dependencies.h"
     "json.h"
     "run.h"
     "types.h"
   SRCS
     "context.h"
-    "dependencies.c"
     "descriptor_rows.c"
     "descriptor_rows.h"
     "diagnostics.c"
@@ -43,6 +70,8 @@ loom_cc_library(
     "json.c"
     "run.c"
   DEPS
+    ::dependencies
+    ::dependency_index
     ::ready_frontier
     iree::base
     iree::base::internal
@@ -77,6 +106,18 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    dependency_index_test
+  SRCS
+    "dependency_index_test.cc"
+  DEPS
+    ::dependencies
+    ::dependency_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     ready_frontier_test
   SRCS
     "ready_frontier_test.cc"
@@ -92,7 +133,7 @@ loom_cc_test(
   SRCS
     "dependencies_test.cc"
   DEPS
-    ::schedule
+    ::dependencies
     iree::testing::gtest
     iree::testing::gtest_main
 )
