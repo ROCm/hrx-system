@@ -984,14 +984,8 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
     }
   }
   if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows) {
-    id4_pipeline_parameter_window_create_options_t window_options;
-    memset(&window_options, 0, sizeof(window_options));
-    window_options.structure_size = sizeof(window_options);
-    window_options.plan = options->plan;
-    window_options.region_offset = region_index;
-    window_options.region_count = 1;
-    status = id4_pipeline_parameter_window_create(
-        &window_options, prepared->host_allocator,
+    status = id4_pipeline_parameter_window_create_for_region(
+        options->plan, region_index, prepared->host_allocator,
         &prepared->parameter_windows[region_index]);
   }
   if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows) {

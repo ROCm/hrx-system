@@ -107,11 +107,29 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_residency
+  HDRS
+    "parameter_residency.h"
+  SRCS
+    "parameter_residency.c"
+  DEPS
+    ::parameter_window
+    ::plan
+    ::program
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_window
   HDRS
     "parameter_window.h"
+    "parameter_window_statistics.h"
   SRCS
     "parameter_window.c"
+    "parameter_window_statistics.c"
   DEPS
     ::parameter_slab
     ::plan
@@ -401,6 +419,22 @@ iree_cc_test(
   LABELS
     "manual"
     "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    parameter_residency_test
+  SRCS
+    "parameter_residency_test.cc"
+  DEPS
+    ::parameter_residency
+    ::program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

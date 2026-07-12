@@ -7,6 +7,8 @@
 #ifndef EXPERIMENTAL_ID4_PIPELINE_PARAMETER_WINDOW_H_
 #define EXPERIMENTAL_ID4_PIPELINE_PARAMETER_WINDOW_H_
 
+#include <stdint.h>
+
 #include "experimental/id4/pipeline/plan.h"
 #include "iree/base/api.h"
 
@@ -20,60 +22,6 @@ typedef struct id4_pipeline_parameter_window_t id4_pipeline_parameter_window_t;
 // Opaque compact parameter loading schedule derived from a window.
 typedef struct id4_pipeline_parameter_window_schedule_t
     id4_pipeline_parameter_window_schedule_t;
-
-// Options for querying compact parameter materialization resource usage.
-typedef struct id4_pipeline_parameter_window_statistics_options_t {
-  // Size of this structure for versioning.
-  iree_host_size_t structure_size;
-  // Extension structure chain; must be NULL for now.
-  const void* next;
-  // Plan whose independently materialized region windows are measured.
-  const id4_pipeline_plan_t* plan;
-  // Maximum number of adjacent region windows live due to prefetch.
-  iree_host_size_t concurrent_window_count;
-  // Maximum provider source bytes packed into one encoder staging chunk.
-  iree_device_size_t encoder_staging_chunk_byte_capacity;
-} id4_pipeline_parameter_window_statistics_options_t;
-
-// Exact resource and transfer statistics for compact parameter windows.
-typedef struct id4_pipeline_parameter_window_statistics_t {
-  // Maximum number of adjacent independently allocated windows considered.
-  iree_host_size_t concurrent_window_count;
-  // Number of independently materialized single-region windows in the plan.
-  iree_host_size_t window_count;
-  // Full target bytes across all resident parameter slabs.
-  iree_device_size_t full_slab_target_byte_length;
-  // Largest simultaneously live compact target allocation set.
-  iree_device_size_t peak_target_byte_length;
-  // Stage-owned encoder staging bytes shared by all compact region windows.
-  iree_device_size_t encoder_staging_byte_length;
-  // Largest simultaneously live target plus staging allocation set.
-  iree_device_size_t peak_live_byte_length;
-  // Largest source transfer volume represented by one concurrent window set.
-  iree_device_size_t peak_source_transfer_byte_length;
-  // Sum of compact target allocation bytes across all region windows.
-  iree_device_size_t total_target_byte_length;
-  // Sum of provider source transfer bytes across all region windows.
-  iree_device_size_t total_source_transfer_byte_length;
-  // Maximum load-group count represented by one concurrent window set.
-  iree_host_size_t peak_load_group_count;
-  // Sum of load groups submitted across all region windows.
-  iree_host_size_t total_load_group_count;
-  // Maximum encoded load-step count in one concurrent window set.
-  iree_host_size_t peak_encode_load_step_count;
-  // Sum of encoded load steps submitted across all region windows.
-  iree_host_size_t total_encode_load_step_count;
-  // Target payload byte length of the largest single load group.
-  iree_device_size_t largest_load_group_target_byte_length;
-  // Plan-local index of the largest single load group.
-  iree_host_size_t largest_load_group_index;
-  // Target payload byte length of the largest single parameter request.
-  iree_device_size_t largest_request_target_byte_length;
-  // Global plan request index of the largest single parameter request.
-  iree_host_size_t largest_request_index;
-  // Plan-local load group containing the largest single parameter request.
-  iree_host_size_t largest_request_load_group_index;
-} id4_pipeline_parameter_window_statistics_t;
 
 // Compact target slab represented inside one parameter materialization window.
 typedef struct id4_pipeline_parameter_window_slab_t {
@@ -112,12 +60,12 @@ typedef struct id4_pipeline_parameter_window_create_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Plan whose parameter load groups define the window.
+  // Plan whose logical parameter tensors are compacted into the window.
   const id4_pipeline_plan_t* plan;
-  // First contiguous region represented by the window.
-  iree_host_size_t region_offset;
-  // Number of contiguous regions represented by the window.
-  iree_host_size_t region_count;
+  // Number of selected semantic program parameter tensor ordinals.
+  iree_host_size_t parameter_tensor_count;
+  // Selected semantic program parameter tensor ordinals.
+  const uint32_t* parameter_tensor_ordinals;
 } id4_pipeline_parameter_window_create_options_t;
 
 // Options for deriving compact parameter loading descriptors from a window.
@@ -128,16 +76,9 @@ typedef struct id4_pipeline_parameter_window_schedule_create_options_t {
   const void* next;
   // Plan that owns the original slab, request, and loading descriptors.
   id4_pipeline_plan_t* plan;
-  // Window selecting the region-local materialization scope.
+  // Window selecting the compact parameter materialization scope.
   const id4_pipeline_parameter_window_t* window;
 } id4_pipeline_parameter_window_schedule_create_options_t;
-
-// Queries exact compact-window allocations and transfer volumes using the same
-// packing and encoder-staging calculations as warm issue.
-iree_status_t id4_pipeline_parameter_window_query_statistics(
-    const id4_pipeline_parameter_window_statistics_options_t* options,
-    iree_allocator_t host_allocator,
-    id4_pipeline_parameter_window_statistics_t* out_statistics);
 
 // Creates a compact parameter materialization window from existing plan
 // metadata.
@@ -146,17 +87,26 @@ iree_status_t id4_pipeline_parameter_window_create(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_t** out_window);
 
+// Creates a compact window for every parameter tensor referenced by one plan
+// region. This is the current semantic-region residency policy; constrained
+// policies select tensors directly with |id4_pipeline_parameter_window_create|.
+iree_status_t id4_pipeline_parameter_window_create_for_region(
+    const id4_pipeline_plan_t* plan, iree_host_size_t region_index,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_window_t** out_window);
+
 // Releases a compact parameter materialization window.
 void id4_pipeline_parameter_window_release(
     id4_pipeline_parameter_window_t* window);
 
-// Returns the first contiguous region represented by |window|.
-iree_host_size_t id4_pipeline_parameter_window_region_offset(
+// Returns the number of selected semantic program parameter tensors.
+iree_host_size_t id4_pipeline_parameter_window_parameter_tensor_count(
     const id4_pipeline_parameter_window_t* window);
 
-// Returns the number of contiguous regions represented by |window|.
-iree_host_size_t id4_pipeline_parameter_window_region_count(
-    const id4_pipeline_parameter_window_t* window);
+// Returns selected semantic program parameter tensor ordinal |index| or
+// UINT32_MAX when out of range.
+uint32_t id4_pipeline_parameter_window_parameter_tensor_ordinal_at(
+    const id4_pipeline_parameter_window_t* window, iree_host_size_t index);
 
 // Returns the number of compact slabs in |window|.
 iree_host_size_t id4_pipeline_parameter_window_slab_count(

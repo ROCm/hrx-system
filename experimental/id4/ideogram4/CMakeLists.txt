@@ -87,6 +87,7 @@ iree_cc_test(
   DEPS
     ::session
     iree::base
+    iree::experimental::id4::pipeline::parameter_residency
     iree::experimental::id4::pipeline::parameter_window
     iree::experimental::id4::stages::qwen3_vl_program
     iree::experimental::id4::stages::test_util

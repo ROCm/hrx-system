@@ -12,7 +12,7 @@
 #include "experimental/id4/ideogram4/session_generation.h"
 #include "experimental/id4/ideogram4/session_state.h"
 #include "experimental/id4/ideogram4/session_support.h"
-#include "experimental/id4/pipeline/parameter_window.h"
+#include "experimental/id4/pipeline/parameter_window_statistics.h"
 #include "experimental/id4/stages/ideogram4_decode.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/qwen3_vl.h"

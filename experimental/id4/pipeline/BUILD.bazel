@@ -93,9 +93,28 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "parameter_residency",
+    srcs = ["parameter_residency.c"],
+    hdrs = ["parameter_residency.h"],
+    deps = [
+        ":parameter_window",
+        ":plan",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "parameter_window",
-    srcs = ["parameter_window.c"],
-    hdrs = ["parameter_window.h"],
+    srcs = [
+        "parameter_window.c",
+        "parameter_window_statistics.c",
+    ],
+    hdrs = [
+        "parameter_window.h",
+        "parameter_window_statistics.h",
+    ],
     deps = [
         ":parameter_slab",
         ":plan",
@@ -350,6 +369,21 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_residency_test",
+    srcs = ["parameter_residency_test.cc"],
+    deps = [
+        ":parameter_residency",
+        ":program",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

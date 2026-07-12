@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 
+#include "experimental/id4/pipeline/parameter_window_statistics.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -120,6 +121,38 @@ static PlanPtr MakeWindowPlan() {
   const id4_pipeline_parameter_request_table_t parameter_request_table =
       id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
+  const id4_pipeline_parameter_tensor_plan_t parameter_tensors[] = {
+      {
+          /*.layout=*/{IREE_SV("layers.0.weight"),
+                       ID4_PIPELINE_TENSOR_DTYPE_BF16, MakeShape1(50), 100, 1},
+          /*.program_tensor_ordinal=*/0,
+          /*.parameter_slab_index=*/0,
+          /*.request_offset=*/0,
+          /*.request_count=*/1,
+          /*.global_request_offset=*/0,
+          /*.offset=*/0,
+      },
+      {
+          /*.layout=*/{IREE_SV("layers.1.weight"),
+                       ID4_PIPELINE_TENSOR_DTYPE_BF16, MakeShape1(100), 200, 1},
+          /*.program_tensor_ordinal=*/1,
+          /*.parameter_slab_index=*/0,
+          /*.request_offset=*/1,
+          /*.request_count=*/1,
+          /*.global_request_offset=*/1,
+          /*.offset=*/100,
+      },
+      {
+          /*.layout=*/{IREE_SV("layers.2.weight"),
+                       ID4_PIPELINE_TENSOR_DTYPE_BF16, MakeShape1(150), 300, 1},
+          /*.program_tensor_ordinal=*/2,
+          /*.parameter_slab_index=*/0,
+          /*.request_offset=*/2,
+          /*.request_count=*/1,
+          /*.global_request_offset=*/2,
+          /*.offset=*/300,
+      },
+  };
   const id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("gather.layers.0.weight"), IREE_SV("model"),
@@ -158,6 +191,8 @@ static PlanPtr MakeWindowPlan() {
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
   options.parameter_request_tables = &parameter_request_table;
+  options.parameter_tensor_count = IREE_ARRAYSIZE(parameter_tensors);
+  options.parameter_tensors = parameter_tensors;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.region_count = IREE_ARRAYSIZE(regions);
@@ -311,14 +346,35 @@ static PlanPtr MakeSchedulePlan() {
           id4_pipeline_parameter_span(/*parameter_offset=*/0,
                                       /*buffer_offset=*/192,
                                       /*length=*/64)),
+      id4_pipeline_parameter_request(
+          IREE_SV("layers.4.weight"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/256,
+                                      /*length=*/64)),
   };
   const id4_pipeline_parameter_slab_plan_t parameter_slab =
       id4_pipeline_make_parameter_slab_plan(
           /*placement_id=*/0, /*binding_slot=*/0, storage_params,
-          /*byte_length=*/256, /*alignment=*/16);
+          /*byte_length=*/320, /*alignment=*/16);
   const id4_pipeline_parameter_request_table_t parameter_request_table =
       id4_pipeline_make_parameter_request_table(
           IREE_ARRAYSIZE(parameter_requests), parameter_requests);
+
+  id4_pipeline_parameter_tensor_plan_t parameter_tensors[5];
+  std::memset(parameter_tensors, 0, sizeof(parameter_tensors));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(parameter_tensors); ++i) {
+    parameter_tensors[i].layout.name = parameter_requests[i].key;
+    parameter_tensors[i].layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_BF16;
+    parameter_tensors[i].layout.shape = MakeShape1(32);
+    parameter_tensors[i].layout.byte_length = 64;
+    parameter_tensors[i].layout.alignment = 16;
+    parameter_tensors[i].program_tensor_ordinal = (uint32_t)i;
+    parameter_tensors[i].parameter_slab_index = 0;
+    parameter_tensors[i].request_offset = i;
+    parameter_tensors[i].request_count = 1;
+    parameter_tensors[i].global_request_offset = i;
+    parameter_tensors[i].offset = i * 64;
+  }
 
   const id4_pipeline_parameter_load_source_t encode1_sources[] = {
       id4_pipeline_parameter_load_source(
@@ -340,7 +396,7 @@ static PlanPtr MakeSchedulePlan() {
           ID4_PIPELINE_TENSOR_DTYPE_F32, MakeShape1(32),
           /*byte_length=*/128),
   };
-  const iree_host_size_t indexed_requests[] = {3, 1};
+  const iree_host_size_t indexed_requests[] = {4, 3};
   id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("gather.layers.0.weight"), IREE_SV("model"),
@@ -355,7 +411,7 @@ static PlanPtr MakeSchedulePlan() {
           encode2_sources,
           /*target_slab_index=*/0, /*request_offset=*/2),
       id4_pipeline_parameter_indexed_gather_load_step(
-          IREE_SV("gather.layers.3.and.1.weight"), IREE_SV("model"),
+          IREE_SV("gather.layers.4.and.3.weight"), IREE_SV("model"),
           /*target_slab_index=*/0, IREE_ARRAYSIZE(indexed_requests),
           indexed_requests),
   };
@@ -386,6 +442,8 @@ static PlanPtr MakeSchedulePlan() {
   options.parameter_slab_count = 1;
   options.parameter_slabs = &parameter_slab;
   options.parameter_request_tables = &parameter_request_table;
+  options.parameter_tensor_count = IREE_ARRAYSIZE(parameter_tensors);
+  options.parameter_tensors = parameter_tensors;
   options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
   options.parameter_load_steps = parameter_load_steps;
   options.region_count = IREE_ARRAYSIZE(regions);
@@ -399,14 +457,14 @@ static PlanPtr MakeSchedulePlan() {
 }
 
 static ParameterWindowPtr MakeParameterWindow(const id4_pipeline_plan_t* plan,
-                                              iree_host_size_t region_offset,
-                                              iree_host_size_t region_count) {
+                                              iree_host_size_t tensor_count,
+                                              const uint32_t* tensor_ordinals) {
   id4_pipeline_parameter_window_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.plan = plan;
-  options.region_offset = region_offset;
-  options.region_count = region_count;
+  options.parameter_tensor_count = tensor_count;
+  options.parameter_tensor_ordinals = tensor_ordinals;
   id4_pipeline_parameter_window_t* raw_window = nullptr;
   IREE_CHECK_OK(id4_pipeline_parameter_window_create(
       &options, iree_allocator_system(), &raw_window));
@@ -485,7 +543,7 @@ TEST(ParameterWindowTest, IncludesEncoderStagingInLivePeak) {
 
   id4_pipeline_parameter_window_statistics_t statistics =
       QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/1);
-  EXPECT_EQ(statistics.full_slab_target_byte_length, 256u);
+  EXPECT_EQ(statistics.full_slab_target_byte_length, 320u);
   EXPECT_EQ(statistics.peak_target_byte_length, 128u);
   EXPECT_EQ(statistics.encoder_staging_byte_length, 320u);
   EXPECT_EQ(statistics.peak_live_byte_length, 448u);
@@ -505,11 +563,18 @@ TEST(ParameterWindowTest, IncludesEncoderStagingInLivePeak) {
 
 TEST(ParameterWindowTest, PacksOnlyRequestsUsedByWindow) {
   PlanPtr plan = MakeWindowPlan();
-  ParameterWindowPtr window =
-      MakeParameterWindow(plan.get(), /*region_offset=*/1, /*region_count=*/2);
+  const uint32_t tensor_ordinals[] = {1, 2};
+  ParameterWindowPtr window = MakeParameterWindow(
+      plan.get(), IREE_ARRAYSIZE(tensor_ordinals), tensor_ordinals);
 
-  EXPECT_EQ(id4_pipeline_parameter_window_region_offset(window.get()), 1u);
-  EXPECT_EQ(id4_pipeline_parameter_window_region_count(window.get()), 2u);
+  EXPECT_EQ(id4_pipeline_parameter_window_parameter_tensor_count(window.get()),
+            2u);
+  EXPECT_EQ(id4_pipeline_parameter_window_parameter_tensor_ordinal_at(
+                window.get(), 0),
+            1u);
+  EXPECT_EQ(id4_pipeline_parameter_window_parameter_tensor_ordinal_at(
+                window.get(), 1),
+            2u);
   ASSERT_EQ(id4_pipeline_parameter_window_slab_count(window.get()), 1u);
   const id4_pipeline_parameter_window_slab_t* slab =
       id4_pipeline_parameter_window_slab_at(window.get(), 0);
@@ -560,8 +625,9 @@ TEST(ParameterWindowTest, PacksOnlyRequestsUsedByWindow) {
 
 TEST(ParameterWindowTest, CoalescesDuplicateGroupsInsideWindow) {
   PlanPtr plan = MakeWindowPlan();
-  ParameterWindowPtr window =
-      MakeParameterWindow(plan.get(), /*region_offset=*/0, /*region_count=*/3);
+  const uint32_t tensor_ordinals[] = {0, 1, 2};
+  ParameterWindowPtr window = MakeParameterWindow(
+      plan.get(), IREE_ARRAYSIZE(tensor_ordinals), tensor_ordinals);
 
   EXPECT_EQ(id4_pipeline_parameter_window_load_group_count(window.get()), 3u);
   EXPECT_EQ(id4_pipeline_parameter_window_request_count(window.get()), 3u);
@@ -577,8 +643,9 @@ TEST(ParameterWindowTest, CoalescesDuplicateGroupsInsideWindow) {
 
 TEST(ParameterWindowTest, PreservesDenseTensorLayoutAcrossSourceSpans) {
   PlanPtr plan = MakeDenseTensorWindowPlan();
-  ParameterWindowPtr window =
-      MakeParameterWindow(plan.get(), /*region_offset=*/0, /*region_count=*/1);
+  const uint32_t tensor_ordinals[] = {0};
+  ParameterWindowPtr window = MakeParameterWindow(
+      plan.get(), IREE_ARRAYSIZE(tensor_ordinals), tensor_ordinals);
 
   ASSERT_EQ(id4_pipeline_parameter_window_slab_count(window.get()), 1u);
   const id4_pipeline_parameter_window_slab_t* slab =
@@ -605,14 +672,15 @@ TEST(ParameterWindowTest, PreservesDenseTensorLayoutAcrossSourceSpans) {
   EXPECT_EQ(second_request->span.length, 8u);
 }
 
-TEST(ParameterWindowTest, RejectsInvalidRegionRange) {
+TEST(ParameterWindowTest, RejectsUnknownParameterTensor) {
   PlanPtr plan = MakeWindowPlan();
+  const uint32_t tensor_ordinals[] = {3};
   id4_pipeline_parameter_window_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.plan = plan.get();
-  options.region_offset = 3;
-  options.region_count = 1;
+  options.parameter_tensor_count = IREE_ARRAYSIZE(tensor_ordinals);
+  options.parameter_tensor_ordinals = tensor_ordinals;
   id4_pipeline_parameter_window_t* window = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         id4_pipeline_parameter_window_create(
@@ -622,8 +690,9 @@ TEST(ParameterWindowTest, RejectsInvalidRegionRange) {
 
 TEST(ParameterWindowScheduleTest, RewritesLoadsAndStepsForWindow) {
   PlanPtr plan = MakeSchedulePlan();
-  ParameterWindowPtr window =
-      MakeParameterWindow(plan.get(), /*region_offset=*/1, /*region_count=*/2);
+  const uint32_t tensor_ordinals[] = {1, 2, 3, 4};
+  ParameterWindowPtr window = MakeParameterWindow(
+      plan.get(), IREE_ARRAYSIZE(tensor_ordinals), tensor_ordinals);
   ParameterWindowSchedulePtr schedule =
       MakeParameterWindowSchedule(plan.get(), window.get());
 
@@ -636,8 +705,8 @@ TEST(ParameterWindowScheduleTest, RewritesLoadsAndStepsForWindow) {
   ASSERT_NE(loads[0].slab, nullptr);
   ASSERT_NE(loads[0].request_table, nullptr);
   EXPECT_EQ(loads[0].slab->binding_slot, 0u);
-  EXPECT_EQ(loads[0].slab->byte_length, 192u);
-  ASSERT_EQ(loads[0].request_table->count, 3u);
+  EXPECT_EQ(loads[0].slab->byte_length, 256u);
+  ASSERT_EQ(loads[0].request_table->count, 4u);
   EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[0].key,
                                      IREE_SV("layers.1.weight")));
   EXPECT_EQ(loads[0].request_table->values[0].span.buffer_offset, 0u);
@@ -647,6 +716,9 @@ TEST(ParameterWindowScheduleTest, RewritesLoadsAndStepsForWindow) {
   EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[2].key,
                                      IREE_SV("layers.3.weight")));
   EXPECT_EQ(loads[0].request_table->values[2].span.buffer_offset, 128u);
+  EXPECT_TRUE(iree_string_view_equal(loads[0].request_table->values[3].key,
+                                     IREE_SV("layers.4.weight")));
+  EXPECT_EQ(loads[0].request_table->values[3].span.buffer_offset, 192u);
 
   ASSERT_EQ(
       id4_pipeline_parameter_window_schedule_load_step_count(schedule.get()),
@@ -675,8 +747,8 @@ TEST(ParameterWindowScheduleTest, RewritesLoadsAndStepsForWindow) {
   EXPECT_EQ(load_steps[2].target_slab_index, 0u);
   ASSERT_NE(load_steps[2].request_indices, nullptr);
   ASSERT_EQ(load_steps[2].request_count, 2u);
-  EXPECT_EQ(load_steps[2].request_indices[0], 2u);
-  EXPECT_EQ(load_steps[2].request_indices[1], 0u);
+  EXPECT_EQ(load_steps[2].request_indices[0], 3u);
+  EXPECT_EQ(load_steps[2].request_indices[1], 2u);
 
   ASSERT_EQ(
       id4_pipeline_parameter_window_schedule_load_group_count(schedule.get()),

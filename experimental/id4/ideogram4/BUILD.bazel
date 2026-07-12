@@ -84,6 +84,7 @@ iree_runtime_cc_test(
     srcs = ["session_test.cc"],
     deps = [
         ":session",
+        "//experimental/id4/pipeline:parameter_residency",
         "//experimental/id4/pipeline:parameter_window",
         "//experimental/id4/stages:qwen3_vl_program",
         "//experimental/id4/stages:test_util",

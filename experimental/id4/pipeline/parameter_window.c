@@ -13,10 +13,10 @@
 struct id4_pipeline_parameter_window_t {
   // Host allocator used for window storage.
   iree_allocator_t host_allocator;
-  // First contiguous region represented by the window.
-  iree_host_size_t region_offset;
-  // Number of contiguous regions represented by the window.
-  iree_host_size_t region_count;
+  // Selected semantic program parameter tensor ordinals in plan order.
+  uint32_t* parameter_tensor_ordinals;
+  // Number of selected semantic program parameter tensor ordinals.
+  iree_host_size_t parameter_tensor_count;
   // Compact slabs in original parameter slab order.
   id4_pipeline_parameter_window_slab_t* slabs;
   // Number of compact slabs.
@@ -87,6 +87,10 @@ typedef struct id4_pipeline_parameter_window_build_state_t {
   iree_host_size_t global_request_count;
   // Parameter tensor ordinal by global original request ordinal.
   iree_host_size_t* parameter_tensor_indices_by_global_request;
+  // True when a plan parameter tensor is selected by the window.
+  uint8_t* parameter_tensor_used_bits;
+  // Number of plan parameter tensors.
+  iree_host_size_t parameter_tensor_count;
 } id4_pipeline_parameter_window_build_state_t;
 
 static iree_status_t id4_pipeline_parameter_window_validate_options_size(
@@ -117,25 +121,16 @@ static iree_status_t id4_pipeline_parameter_window_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter window plan is required");
   }
-  const iree_host_size_t plan_region_count =
-      id4_pipeline_plan_region_count(options->plan);
-  if (options->region_count == 0) {
+  if (options->parameter_tensor_count != 0 &&
+      !options->parameter_tensor_ordinals) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameter window region count must be non-zero");
+                            "parameter window tensor ordinals are required");
   }
-  if (options->region_offset >= plan_region_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter window region offset %" PRIhsz
-                            " exceeds plan region count %" PRIhsz,
-                            options->region_offset, plan_region_count);
-  }
-  if (options->region_count > plan_region_count - options->region_offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter window region range [%" PRIhsz
-                            ", %" PRIhsz ") exceeds plan region count %" PRIhsz,
-                            options->region_offset,
-                            options->region_offset + options->region_count,
-                            plan_region_count);
+  if (options->parameter_tensor_count == 0 &&
+      options->parameter_tensor_ordinals) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter window tensor ordinals require a nonzero count");
   }
   return iree_ok_status();
 }
@@ -235,31 +230,47 @@ static iree_status_t id4_pipeline_parameter_window_step_request_index(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_window_mark_load_group_requests(
-    id4_pipeline_parameter_window_build_state_t* state,
-    iree_host_size_t group_index) {
-  id4_pipeline_parameter_load_group_t group;
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_load_group_at(
-      state->plan, group_index, &group));
-  for (iree_host_size_t step_ordinal = 0; step_ordinal < group.step_count;
-       ++step_ordinal) {
-    const iree_host_size_t step_index = group.step_offset + step_ordinal;
-    const id4_pipeline_parameter_load_step_t* step =
-        id4_pipeline_plan_parameter_load_step_at(state->plan, step_index);
-    if (!step) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "parameter load step %" PRIhsz " is missing",
-                              step_index);
+static iree_status_t id4_pipeline_parameter_window_mark_selected_tensors(
+    const id4_pipeline_parameter_window_create_options_t* options,
+    id4_pipeline_parameter_window_build_state_t* state) {
+  for (iree_host_size_t ordinal_index = 0;
+       ordinal_index < options->parameter_tensor_count; ++ordinal_index) {
+    const uint32_t program_tensor_ordinal =
+        options->parameter_tensor_ordinals[ordinal_index];
+    iree_host_size_t parameter_tensor_index = IREE_HOST_SIZE_MAX;
+    for (iree_host_size_t i = 0; i < state->parameter_tensor_count; ++i) {
+      const id4_pipeline_parameter_tensor_plan_t* tensor =
+          id4_pipeline_plan_parameter_tensor_at(state->plan, i);
+      if (tensor && tensor->program_tensor_ordinal == program_tensor_ordinal) {
+        parameter_tensor_index = i;
+        break;
+      }
     }
-    for (iree_host_size_t request_ordinal = 0;
-         request_ordinal < step->request_count; ++request_ordinal) {
-      iree_host_size_t slab_request_index = IREE_HOST_SIZE_MAX;
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_step_request_index(
-          step, request_ordinal, &slab_request_index));
-      iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_global_request_index(
-          state, step->target_slab_index, slab_request_index,
-          &global_request_index));
+    if (parameter_tensor_index == IREE_HOST_SIZE_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter window program tensor %" PRIu32
+                              " is not a planned parameter tensor",
+                              program_tensor_ordinal);
+    }
+    if (state->parameter_tensor_used_bits[parameter_tensor_index]) {
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "parameter window program tensor %" PRIu32
+                              " is selected more than once",
+                              program_tensor_ordinal);
+    }
+    state->parameter_tensor_used_bits[parameter_tensor_index] = 1;
+    const id4_pipeline_parameter_tensor_plan_t* tensor =
+        id4_pipeline_plan_parameter_tensor_at(state->plan,
+                                              parameter_tensor_index);
+    for (iree_host_size_t i = 0; i < tensor->request_count; ++i) {
+      const iree_host_size_t global_request_index =
+          tensor->global_request_offset + i;
+      if (global_request_index >= state->global_request_count) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter window tensor %.*s request range exceeds the plan",
+            (int)tensor->layout.name.size, tensor->layout.name.data);
+      }
       state->request_used_bits[global_request_index] = 1;
     }
   }
@@ -267,36 +278,39 @@ static iree_status_t id4_pipeline_parameter_window_mark_load_group_requests(
 }
 
 static iree_status_t id4_pipeline_parameter_window_mark_used_groups(
-    const id4_pipeline_parameter_window_create_options_t* options,
     id4_pipeline_parameter_window_build_state_t* state) {
-  const iree_host_size_t region_limit =
-      options->region_offset + options->region_count;
-  for (iree_host_size_t region_index = options->region_offset;
-       region_index < region_limit; ++region_index) {
-    const id4_pipeline_region_plan_t* region =
-        id4_pipeline_plan_region_at(options->plan, region_index);
-    if (!region) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "parameter window region %" PRIhsz " is missing",
-                              region_index);
-    }
-    for (iree_host_size_t group_ordinal = 0;
-         group_ordinal < region->parameter_load_group_count; ++group_ordinal) {
-      const iree_host_size_t group_index =
-          region->parameter_load_groups[group_ordinal];
-      if (group_index >= state->load_group_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "parameter window region %" PRIhsz " load group %" PRIhsz
-            " exceeds load group count %" PRIhsz,
-            region_index, group_index, state->load_group_count);
+  for (iree_host_size_t group_index = 0; group_index < state->load_group_count;
+       ++group_index) {
+    id4_pipeline_parameter_load_group_t group;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_load_group_at(
+        state->plan, group_index, &group));
+    bool group_used = false;
+    for (iree_host_size_t step_ordinal = 0;
+         step_ordinal < group.step_count && !group_used; ++step_ordinal) {
+      const iree_host_size_t step_index = group.step_offset + step_ordinal;
+      const id4_pipeline_parameter_load_step_t* step =
+          id4_pipeline_plan_parameter_load_step_at(state->plan, step_index);
+      if (!step) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter load step %" PRIhsz " is missing",
+                                step_index);
       }
-      if (state->load_group_used_bits[group_index]) continue;
-      state->load_group_used_bits[group_index] = 1;
-      IREE_RETURN_IF_ERROR(
-          id4_pipeline_parameter_window_mark_load_group_requests(state,
-                                                                 group_index));
+      for (iree_host_size_t request_ordinal = 0;
+           request_ordinal < step->request_count; ++request_ordinal) {
+        iree_host_size_t slab_request_index = IREE_HOST_SIZE_MAX;
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_step_request_index(
+            step, request_ordinal, &slab_request_index));
+        iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_global_request_index(
+            state, step->target_slab_index, slab_request_index,
+            &global_request_index));
+        if (state->request_used_bits[global_request_index]) {
+          group_used = true;
+          break;
+        }
+      }
     }
+    state->load_group_used_bits[group_index] = group_used ? 1 : 0;
   }
   return iree_ok_status();
 }
@@ -394,10 +408,9 @@ static iree_host_size_t id4_pipeline_parameter_window_count_used_bits(
 }
 
 static iree_status_t id4_pipeline_parameter_window_create_empty(
-    const id4_pipeline_parameter_window_create_options_t* options,
-    iree_host_size_t slab_count, iree_host_size_t request_count,
-    iree_host_size_t load_group_count, iree_host_size_t global_request_count,
-    iree_allocator_t host_allocator,
+    iree_host_size_t parameter_tensor_count, iree_host_size_t slab_count,
+    iree_host_size_t request_count, iree_host_size_t load_group_count,
+    iree_host_size_t global_request_count, iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_t** out_window) {
   *out_window = NULL;
   id4_pipeline_parameter_window_t* window = NULL;
@@ -405,15 +418,20 @@ static iree_status_t id4_pipeline_parameter_window_create_empty(
       iree_allocator_malloc(host_allocator, sizeof(*window), (void**)&window));
   memset(window, 0, sizeof(*window));
   window->host_allocator = host_allocator;
-  window->region_offset = options->region_offset;
-  window->region_count = options->region_count;
+  window->parameter_tensor_count = parameter_tensor_count;
   window->slab_count = slab_count;
   window->request_count = request_count;
   window->load_group_count = load_group_count;
   window->global_request_count = global_request_count;
 
   iree_status_t status = iree_ok_status();
-  if (slab_count != 0) {
+  if (parameter_tensor_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, parameter_tensor_count,
+        sizeof(window->parameter_tensor_ordinals[0]),
+        (void**)&window->parameter_tensor_ordinals);
+  }
+  if (iree_status_is_ok(status) && slab_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, slab_count,
                                          sizeof(window->slabs[0]),
                                          (void**)&window->slabs);
@@ -433,6 +451,11 @@ static iree_status_t id4_pipeline_parameter_window_create_empty(
         host_allocator, global_request_count,
         sizeof(window->compact_request_indices_by_global_request[0]),
         (void**)&window->compact_request_indices_by_global_request);
+  }
+  if (iree_status_is_ok(status) && window->parameter_tensor_ordinals) {
+    memset(
+        window->parameter_tensor_ordinals, 0,
+        parameter_tensor_count * sizeof(window->parameter_tensor_ordinals[0]));
   }
   if (iree_status_is_ok(status) && window->slabs) {
     memset(window->slabs, 0, slab_count * sizeof(window->slabs[0]));
@@ -476,6 +499,30 @@ static iree_host_size_t id4_pipeline_parameter_window_count_used_slabs(
     }
   }
   return used_slab_count;
+}
+
+static iree_status_t id4_pipeline_parameter_window_pack_parameter_tensors(
+    const id4_pipeline_parameter_window_build_state_t* state,
+    id4_pipeline_parameter_window_t* window) {
+  iree_host_size_t compact_tensor_index = 0;
+  for (iree_host_size_t tensor_index = 0;
+       tensor_index < state->parameter_tensor_count; ++tensor_index) {
+    if (!state->parameter_tensor_used_bits[tensor_index]) continue;
+    const id4_pipeline_parameter_tensor_plan_t* tensor =
+        id4_pipeline_plan_parameter_tensor_at(state->plan, tensor_index);
+    if (!tensor) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter tensor %" PRIhsz " is missing",
+                              tensor_index);
+    }
+    window->parameter_tensor_ordinals[compact_tensor_index++] =
+        tensor->program_tensor_ordinal;
+  }
+  if (compact_tensor_index != window->parameter_tensor_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "parameter window tensor count mismatch");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_parameter_window_pack_requests(
@@ -646,143 +693,6 @@ static void id4_pipeline_parameter_window_pack_load_groups(
   }
 }
 
-iree_status_t id4_pipeline_parameter_window_create(
-    const id4_pipeline_parameter_window_create_options_t* options,
-    iree_allocator_t host_allocator,
-    id4_pipeline_parameter_window_t** out_window) {
-  IREE_ASSERT_ARGUMENT(out_window);
-  *out_window = NULL;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_validate_options(options));
-
-  id4_pipeline_parameter_window_build_state_t state;
-  memset(&state, 0, sizeof(state));
-  state.plan = options->plan;
-
-  iree_status_t status = id4_pipeline_plan_parameter_load_group_count(
-      options->plan, &state.load_group_count);
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_build_global_offsets(
-        options->plan, host_allocator, &state.global_request_offsets_by_slab,
-        &state.global_request_offset_count, &state.global_request_count);
-  }
-  if (iree_status_is_ok(status) && state.load_group_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, state.load_group_count,
-                                         sizeof(state.load_group_used_bits[0]),
-                                         (void**)&state.load_group_used_bits);
-  }
-  if (iree_status_is_ok(status) && state.global_request_count != 0) {
-    status = iree_allocator_malloc_array(
-        host_allocator, state.global_request_count,
-        sizeof(state.request_used_bits[0]), (void**)&state.request_used_bits);
-  }
-  if (iree_status_is_ok(status) && state.load_group_used_bits) {
-    memset(state.load_group_used_bits, 0,
-           state.load_group_count * sizeof(state.load_group_used_bits[0]));
-  }
-  if (iree_status_is_ok(status) && state.request_used_bits) {
-    memset(state.request_used_bits, 0,
-           state.global_request_count * sizeof(state.request_used_bits[0]));
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_map_parameter_tensors(
-        &state, host_allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_mark_used_groups(options, &state);
-  }
-
-  const iree_host_size_t compact_slab_count =
-      iree_status_is_ok(status)
-          ? id4_pipeline_parameter_window_count_used_slabs(&state)
-          : 0;
-  const iree_host_size_t compact_request_count =
-      state.request_used_bits
-          ? id4_pipeline_parameter_window_count_used_bits(
-                state.global_request_count, state.request_used_bits)
-          : 0;
-  const iree_host_size_t compact_load_group_count =
-      state.load_group_used_bits
-          ? id4_pipeline_parameter_window_count_used_bits(
-                state.load_group_count, state.load_group_used_bits)
-          : 0;
-
-  id4_pipeline_parameter_window_t* window = NULL;
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_create_empty(
-        options, compact_slab_count, compact_request_count,
-        compact_load_group_count, state.global_request_count, host_allocator,
-        &window);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_pack_requests(&state, window);
-  }
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_parameter_window_pack_load_groups(&state, window);
-    *out_window = window;
-    window = NULL;
-  }
-
-  id4_pipeline_parameter_window_release(window);
-  iree_allocator_free(host_allocator,
-                      state.parameter_tensor_indices_by_global_request);
-  iree_allocator_free(host_allocator, state.request_used_bits);
-  iree_allocator_free(host_allocator, state.load_group_used_bits);
-  iree_allocator_free(host_allocator, state.global_request_offsets_by_slab);
-  return status;
-}
-
-void id4_pipeline_parameter_window_release(
-    id4_pipeline_parameter_window_t* window) {
-  if (!window) return;
-  iree_allocator_t host_allocator = window->host_allocator;
-  iree_allocator_free(host_allocator,
-                      window->compact_request_indices_by_global_request);
-  iree_allocator_free(host_allocator, window->load_groups);
-  iree_allocator_free(host_allocator, window->requests);
-  iree_allocator_free(host_allocator, window->slabs);
-  iree_allocator_free(host_allocator, window);
-}
-
-typedef struct id4_pipeline_parameter_region_window_statistics_t {
-  // Exact compact target allocation bytes for one region window.
-  iree_device_size_t target_byte_length;
-  // Provider source transfer bytes required to populate one region window.
-  iree_device_size_t source_transfer_byte_length;
-  // Number of load groups submitted for one region window.
-  iree_host_size_t load_group_count;
-  // Number of encoded load steps submitted for one region window.
-  iree_host_size_t encode_load_step_count;
-} id4_pipeline_parameter_region_window_statistics_t;
-
-typedef struct id4_pipeline_parameter_slab_window_statistics_t {
-  // Stage-owned encoder staging allocation for this target slab.
-  iree_device_size_t staging_byte_length;
-  // First semantic region whose compact window submits an encoded load.
-  iree_host_size_t first_encode_region;
-} id4_pipeline_parameter_slab_window_statistics_t;
-
-static iree_status_t id4_pipeline_parameter_window_add_device_size(
-    iree_device_size_t addend, iree_string_view_t field_name,
-    iree_device_size_t* inout_value) {
-  if (!iree_device_size_checked_add(*inout_value, addend, inout_value)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter window %.*s byte length overflows",
-                            (int)field_name.size, field_name.data);
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t id4_pipeline_parameter_window_add_host_size(
-    iree_host_size_t addend, iree_string_view_t field_name,
-    iree_host_size_t* inout_value) {
-  if (!iree_host_size_checked_add(*inout_value, addend, inout_value)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter window %.*s count overflows",
-                            (int)field_name.size, field_name.data);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t id4_pipeline_parameter_window_plan_global_request_index(
     const id4_pipeline_plan_t* plan, iree_host_size_t slab_index,
     iree_host_size_t request_index, iree_host_size_t* out_global_index) {
@@ -809,397 +719,273 @@ static iree_status_t id4_pipeline_parameter_window_plan_global_request_index(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_window_load_group_target_statistics(
-    const id4_pipeline_plan_t* plan,
-    const id4_pipeline_parameter_load_group_t* group,
-    iree_host_size_t group_index,
-    id4_pipeline_parameter_window_statistics_t* statistics,
-    iree_device_size_t* out_target_byte_length) {
-  *out_target_byte_length = 0;
-  const iree_host_size_t step_limit = group->step_offset + group->step_count;
-  for (iree_host_size_t step_index = group->step_offset;
-       step_index < step_limit; ++step_index) {
-    const id4_pipeline_parameter_load_step_t* step =
-        id4_pipeline_plan_parameter_load_step_at(plan, step_index);
-    if (!step) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "parameter window load step %" PRIhsz " is missing", step_index);
-    }
-    const id4_pipeline_parameter_request_table_t* request_table =
-        id4_pipeline_plan_parameter_request_table_at(plan,
-                                                     step->target_slab_index);
-    if (!request_table) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "parameter window target slab %" PRIhsz
-                              " is missing",
-                              step->target_slab_index);
-    }
-    for (iree_host_size_t request_ordinal = 0;
-         request_ordinal < step->request_count; ++request_ordinal) {
-      iree_host_size_t request_index = IREE_HOST_SIZE_MAX;
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_step_request_index(
-          step, request_ordinal, &request_index));
-      if (request_index >= request_table->count) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "parameter window request %" PRIhsz
-                                " is outside slab %" PRIhsz,
-                                request_index, step->target_slab_index);
-      }
-      const iree_device_size_t request_byte_length =
-          request_table->values[request_index].span.length;
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-          request_byte_length, IREE_SV("group target"),
-          out_target_byte_length));
-      if (request_byte_length >
-          statistics->largest_request_target_byte_length) {
-        iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
-        IREE_RETURN_IF_ERROR(
-            id4_pipeline_parameter_window_plan_global_request_index(
-                plan, step->target_slab_index, request_index,
-                &global_request_index));
-        statistics->largest_request_target_byte_length = request_byte_length;
-        statistics->largest_request_index = global_request_index;
-        statistics->largest_request_load_group_index = group_index;
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t id4_pipeline_parameter_window_encode_group_statistics(
-    const id4_pipeline_plan_t* plan,
-    const id4_pipeline_parameter_load_group_t* group,
-    iree_device_size_t staging_chunk_byte_capacity,
-    id4_pipeline_parameter_encode_statistics_t* out_statistics) {
-  const id4_pipeline_parameter_load_step_t* first_step =
-      id4_pipeline_plan_parameter_load_step_at(plan, group->step_offset);
-  if (!first_step) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter window encoded load group is empty");
-  }
-  const id4_pipeline_parameter_request_table_t* request_table =
-      id4_pipeline_plan_parameter_request_table_at(
-          plan, first_step->target_slab_index);
-  return id4_pipeline_parameter_encode_query_statistics(
-      request_table, group->step_count, first_step, staging_chunk_byte_capacity,
-      out_statistics);
-}
-
-static iree_status_t id4_pipeline_parameter_window_region_statistics(
-    const id4_pipeline_plan_t* plan,
-    const id4_pipeline_parameter_window_t* window,
-    iree_device_size_t staging_chunk_byte_capacity,
-    id4_pipeline_parameter_window_statistics_t* statistics,
-    id4_pipeline_parameter_region_window_statistics_t* out_region) {
-  memset(out_region, 0, sizeof(*out_region));
-  for (iree_host_size_t i = 0; i < window->slab_count; ++i) {
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-        window->slabs[i].byte_length, IREE_SV("region target"),
-        &out_region->target_byte_length));
-  }
-  out_region->load_group_count = window->load_group_count;
-
-  for (iree_host_size_t i = 0; i < window->load_group_count; ++i) {
-    const iree_host_size_t group_index = window->load_groups[i];
-    id4_pipeline_parameter_load_group_t group;
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_parameter_load_group_at(plan, group_index, &group));
-    iree_device_size_t group_target_byte_length = 0;
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_parameter_window_load_group_target_statistics(
-            plan, &group, group_index, statistics, &group_target_byte_length));
-    if (group_target_byte_length >
-        statistics->largest_load_group_target_byte_length) {
-      statistics->largest_load_group_target_byte_length =
-          group_target_byte_length;
-      statistics->largest_load_group_index = group_index;
-    }
-
-    switch (group.kind) {
-      case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER: {
-        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-            group_target_byte_length, IREE_SV("region source transfer"),
-            &out_region->source_transfer_byte_length));
-        break;
-      }
-      case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE: {
-        id4_pipeline_parameter_encode_statistics_t encode_statistics;
-        IREE_RETURN_IF_ERROR(
-            id4_pipeline_parameter_window_encode_group_statistics(
-                plan, &group, staging_chunk_byte_capacity, &encode_statistics));
-        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-            encode_statistics.source_byte_length,
-            IREE_SV("region source transfer"),
-            &out_region->source_transfer_byte_length));
-        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_host_size(
-            group.step_count, IREE_SV("region encoded load step"),
-            &out_region->encode_load_step_count));
-        break;
-      }
-      default:
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "parameter window load group %" PRIhsz
-                                " has invalid kind %u",
-                                group_index, group.kind);
-    }
-  }
-
-  return iree_ok_status();
-}
-
-static iree_host_size_t id4_pipeline_parameter_window_first_group_region(
-    const id4_pipeline_plan_t* plan, iree_host_size_t load_group_index) {
-  const iree_host_size_t region_count = id4_pipeline_plan_region_count(plan);
-  for (iree_host_size_t region_index = 0; region_index < region_count;
-       ++region_index) {
-    const id4_pipeline_region_plan_t* region =
-        id4_pipeline_plan_region_at(plan, region_index);
-    for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
-      if (region->parameter_load_groups[i] == load_group_index) {
-        return region_index;
-      }
-    }
-  }
-  return IREE_HOST_SIZE_MAX;
-}
-
-static iree_status_t id4_pipeline_parameter_window_slab_statistics(
-    const id4_pipeline_plan_t* plan,
-    iree_device_size_t staging_chunk_byte_capacity,
-    iree_host_size_t slab_statistics_count,
-    id4_pipeline_parameter_slab_window_statistics_t* slab_statistics,
-    iree_device_size_t* out_staging_byte_length) {
-  *out_staging_byte_length = 0;
-  for (iree_host_size_t i = 0; i < slab_statistics_count; ++i) {
-    memset(&slab_statistics[i], 0, sizeof(slab_statistics[i]));
-    slab_statistics[i].first_encode_region = IREE_HOST_SIZE_MAX;
-  }
-  iree_host_size_t load_group_count = 0;
-  IREE_RETURN_IF_ERROR(
-      id4_pipeline_plan_parameter_load_group_count(plan, &load_group_count));
-  for (iree_host_size_t group_index = 0; group_index < load_group_count;
-       ++group_index) {
-    id4_pipeline_parameter_load_group_t group;
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_parameter_load_group_at(plan, group_index, &group));
-    if (group.kind != ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE) continue;
-    if (group.target_slab_index >= slab_statistics_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "encoded parameter load group %" PRIhsz " target slab %" PRIhsz
-          " exceeds slab count %" PRIhsz,
-          group_index, group.target_slab_index, slab_statistics_count);
-    }
-    const iree_host_size_t first_region =
-        id4_pipeline_parameter_window_first_group_region(plan, group_index);
-    if (first_region == IREE_HOST_SIZE_MAX) continue;
-    id4_pipeline_parameter_encode_statistics_t encode_statistics;
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_encode_group_statistics(
-        plan, &group, staging_chunk_byte_capacity, &encode_statistics));
-    id4_pipeline_parameter_slab_window_statistics_t* slab =
-        &slab_statistics[group.target_slab_index];
-    slab->staging_byte_length = iree_max(
-        slab->staging_byte_length, encode_statistics.staging_total_byte_length);
-    slab->first_encode_region =
-        iree_min(slab->first_encode_region, first_region);
-  }
-  for (iree_host_size_t i = 0; i < slab_statistics_count; ++i) {
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-        slab_statistics[i].staging_byte_length, IREE_SV("encoder staging"),
-        out_staging_byte_length));
-  }
-  return iree_ok_status();
-}
-
-iree_status_t id4_pipeline_parameter_window_query_statistics(
-    const id4_pipeline_parameter_window_statistics_options_t* options,
+iree_status_t id4_pipeline_parameter_window_create(
+    const id4_pipeline_parameter_window_create_options_t* options,
     iree_allocator_t host_allocator,
-    id4_pipeline_parameter_window_statistics_t* out_statistics) {
-  IREE_ASSERT_ARGUMENT(out_statistics);
-  memset(out_statistics, 0, sizeof(*out_statistics));
-  out_statistics->largest_load_group_index = IREE_HOST_SIZE_MAX;
-  out_statistics->largest_request_index = IREE_HOST_SIZE_MAX;
-  out_statistics->largest_request_load_group_index = IREE_HOST_SIZE_MAX;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_validate_options_size(
-      options ? options->structure_size : 0, sizeof(*options),
-      IREE_SV("parameter window statistics")));
-  if (options->next) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "parameter window statistics extension structures are not supported");
-  }
-  if (!options->plan || options->concurrent_window_count == 0 ||
-      options->encoder_staging_chunk_byte_capacity == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter window statistics require a plan, concurrent windows, and "
-        "encoder staging capacity");
-  }
+    id4_pipeline_parameter_window_t** out_window) {
+  IREE_ASSERT_ARGUMENT(out_window);
+  *out_window = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_validate_options(options));
 
-  id4_pipeline_parameter_window_statistics_t statistics;
-  memset(&statistics, 0, sizeof(statistics));
-  statistics.largest_load_group_index = IREE_HOST_SIZE_MAX;
-  statistics.largest_request_index = IREE_HOST_SIZE_MAX;
-  statistics.largest_request_load_group_index = IREE_HOST_SIZE_MAX;
-  const iree_host_size_t region_count =
-      id4_pipeline_plan_region_count(options->plan);
-  statistics.concurrent_window_count =
-      iree_min(region_count, options->concurrent_window_count);
-  statistics.window_count = region_count;
-  const iree_host_size_t parameter_slab_count =
-      id4_pipeline_plan_parameter_slab_count(options->plan);
-  for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(options->plan, i);
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_add_device_size(
-        slab->byte_length, IREE_SV("full slab target"),
-        &statistics.full_slab_target_byte_length));
-  }
+  id4_pipeline_parameter_window_build_state_t state;
+  memset(&state, 0, sizeof(state));
+  state.plan = options->plan;
+  state.parameter_tensor_count =
+      id4_pipeline_plan_parameter_tensor_count(options->plan);
 
-  id4_pipeline_parameter_region_window_statistics_t* region_statistics = NULL;
-  id4_pipeline_parameter_slab_window_statistics_t* slab_statistics = NULL;
-  iree_status_t status = iree_ok_status();
-  if (region_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, region_count,
-                                         sizeof(region_statistics[0]),
-                                         (void**)&region_statistics);
+  iree_status_t status = id4_pipeline_plan_parameter_load_group_count(
+      options->plan, &state.load_group_count);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_build_global_offsets(
+        options->plan, host_allocator, &state.global_request_offsets_by_slab,
+        &state.global_request_offset_count, &state.global_request_count);
   }
-  if (iree_status_is_ok(status) && parameter_slab_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, parameter_slab_count,
-                                         sizeof(slab_statistics[0]),
-                                         (void**)&slab_statistics);
+  if (iree_status_is_ok(status) && state.load_group_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, state.load_group_count,
+                                         sizeof(state.load_group_used_bits[0]),
+                                         (void**)&state.load_group_used_bits);
+  }
+  if (iree_status_is_ok(status) && state.global_request_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, state.global_request_count,
+        sizeof(state.request_used_bits[0]), (void**)&state.request_used_bits);
+  }
+  if (iree_status_is_ok(status) && state.parameter_tensor_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, state.parameter_tensor_count,
+        sizeof(state.parameter_tensor_used_bits[0]),
+        (void**)&state.parameter_tensor_used_bits);
+  }
+  if (iree_status_is_ok(status) && state.load_group_used_bits) {
+    memset(state.load_group_used_bits, 0,
+           state.load_group_count * sizeof(state.load_group_used_bits[0]));
+  }
+  if (iree_status_is_ok(status) && state.request_used_bits) {
+    memset(state.request_used_bits, 0,
+           state.global_request_count * sizeof(state.request_used_bits[0]));
+  }
+  if (iree_status_is_ok(status) && state.parameter_tensor_used_bits) {
+    memset(state.parameter_tensor_used_bits, 0,
+           state.parameter_tensor_count *
+               sizeof(state.parameter_tensor_used_bits[0]));
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_slab_statistics(
-        options->plan, options->encoder_staging_chunk_byte_capacity,
-        parameter_slab_count, slab_statistics,
-        &statistics.encoder_staging_byte_length);
+    status = id4_pipeline_parameter_window_map_parameter_tensors(
+        &state, host_allocator);
   }
-  for (iree_host_size_t region_index = 0;
-       region_index < region_count && iree_status_is_ok(status);
-       ++region_index) {
-    id4_pipeline_parameter_window_create_options_t window_options;
-    memset(&window_options, 0, sizeof(window_options));
-    window_options.structure_size = sizeof(window_options);
-    window_options.plan = options->plan;
-    window_options.region_offset = region_index;
-    window_options.region_count = 1;
-    id4_pipeline_parameter_window_t* window = NULL;
-    status = id4_pipeline_parameter_window_create(&window_options,
-                                                  host_allocator, &window);
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_region_statistics(
-          options->plan, window, options->encoder_staging_chunk_byte_capacity,
-          &statistics, &region_statistics[region_index]);
-    }
-    id4_pipeline_parameter_window_release(window);
-    if (!iree_status_is_ok(status)) break;
-    const id4_pipeline_parameter_region_window_statistics_t* region =
-        &region_statistics[region_index];
-    status = id4_pipeline_parameter_window_add_device_size(
-        region->target_byte_length, IREE_SV("total target"),
-        &statistics.total_target_byte_length);
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_add_device_size(
-          region->source_transfer_byte_length, IREE_SV("total source transfer"),
-          &statistics.total_source_transfer_byte_length);
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_add_host_size(
-          region->load_group_count, IREE_SV("total load group"),
-          &statistics.total_load_group_count);
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_add_host_size(
-          region->encode_load_step_count, IREE_SV("total encoded load step"),
-          &statistics.total_encode_load_step_count);
-    }
-  }
-
-  for (iree_host_size_t window_offset = 0;
-       window_offset < region_count && iree_status_is_ok(status);
-       ++window_offset) {
-    id4_pipeline_parameter_region_window_statistics_t concurrent;
-    memset(&concurrent, 0, sizeof(concurrent));
-    const iree_host_size_t window_limit = iree_min(
-        region_count, window_offset + statistics.concurrent_window_count);
-    for (iree_host_size_t region_index = window_offset;
-         region_index < window_limit && iree_status_is_ok(status);
-         ++region_index) {
-      const id4_pipeline_parameter_region_window_statistics_t* region =
-          &region_statistics[region_index];
-      status = id4_pipeline_parameter_window_add_device_size(
-          region->target_byte_length, IREE_SV("concurrent target"),
-          &concurrent.target_byte_length);
-      if (iree_status_is_ok(status)) {
-        status = id4_pipeline_parameter_window_add_device_size(
-            region->source_transfer_byte_length,
-            IREE_SV("concurrent source transfer"),
-            &concurrent.source_transfer_byte_length);
-      }
-      if (iree_status_is_ok(status)) {
-        status = id4_pipeline_parameter_window_add_host_size(
-            region->load_group_count, IREE_SV("concurrent load group"),
-            &concurrent.load_group_count);
-      }
-      if (iree_status_is_ok(status)) {
-        status = id4_pipeline_parameter_window_add_host_size(
-            region->encode_load_step_count,
-            IREE_SV("concurrent encoded load step"),
-            &concurrent.encode_load_step_count);
-      }
-    }
-    iree_device_size_t active_staging_byte_length = 0;
-    const iree_host_size_t prefetched_region_limit = iree_min(
-        region_count, window_offset + statistics.concurrent_window_count);
-    for (iree_host_size_t slab_index = 0;
-         slab_index < parameter_slab_count && iree_status_is_ok(status);
-         ++slab_index) {
-      const id4_pipeline_parameter_slab_window_statistics_t* slab =
-          &slab_statistics[slab_index];
-      if (slab->first_encode_region >= prefetched_region_limit) continue;
-      status = id4_pipeline_parameter_window_add_device_size(
-          slab->staging_byte_length, IREE_SV("active encoder staging"),
-          &active_staging_byte_length);
-    }
-    iree_device_size_t live_byte_length = concurrent.target_byte_length;
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_add_device_size(
-          active_staging_byte_length, IREE_SV("concurrent live"),
-          &live_byte_length);
-    }
-    if (!iree_status_is_ok(status)) break;
-    statistics.peak_target_byte_length = iree_max(
-        statistics.peak_target_byte_length, concurrent.target_byte_length);
-    statistics.peak_live_byte_length =
-        iree_max(statistics.peak_live_byte_length, live_byte_length);
-    statistics.peak_source_transfer_byte_length =
-        iree_max(statistics.peak_source_transfer_byte_length,
-                 concurrent.source_transfer_byte_length);
-    statistics.peak_load_group_count =
-        iree_max(statistics.peak_load_group_count, concurrent.load_group_count);
-    statistics.peak_encode_load_step_count =
-        iree_max(statistics.peak_encode_load_step_count,
-                 concurrent.encode_load_step_count);
-  }
-
   if (iree_status_is_ok(status)) {
-    *out_statistics = statistics;
+    status =
+        id4_pipeline_parameter_window_mark_selected_tensors(options, &state);
   }
-  iree_allocator_free(host_allocator, slab_statistics);
-  iree_allocator_free(host_allocator, region_statistics);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_mark_used_groups(&state);
+  }
+
+  const iree_host_size_t compact_parameter_tensor_count =
+      state.parameter_tensor_used_bits
+          ? id4_pipeline_parameter_window_count_used_bits(
+                state.parameter_tensor_count, state.parameter_tensor_used_bits)
+          : 0;
+  const iree_host_size_t compact_slab_count =
+      iree_status_is_ok(status)
+          ? id4_pipeline_parameter_window_count_used_slabs(&state)
+          : 0;
+  const iree_host_size_t compact_request_count =
+      state.request_used_bits
+          ? id4_pipeline_parameter_window_count_used_bits(
+                state.global_request_count, state.request_used_bits)
+          : 0;
+  const iree_host_size_t compact_load_group_count =
+      state.load_group_used_bits
+          ? id4_pipeline_parameter_window_count_used_bits(
+                state.load_group_count, state.load_group_used_bits)
+          : 0;
+
+  id4_pipeline_parameter_window_t* window = NULL;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_create_empty(
+        compact_parameter_tensor_count, compact_slab_count,
+        compact_request_count, compact_load_group_count,
+        state.global_request_count, host_allocator, &window);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_pipeline_parameter_window_pack_parameter_tensors(&state, window);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_pack_requests(&state, window);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_parameter_window_pack_load_groups(&state, window);
+    *out_window = window;
+    window = NULL;
+  }
+
+  id4_pipeline_parameter_window_release(window);
+  iree_allocator_free(host_allocator,
+                      state.parameter_tensor_indices_by_global_request);
+  iree_allocator_free(host_allocator, state.parameter_tensor_used_bits);
+  iree_allocator_free(host_allocator, state.request_used_bits);
+  iree_allocator_free(host_allocator, state.load_group_used_bits);
+  iree_allocator_free(host_allocator, state.global_request_offsets_by_slab);
   return status;
 }
 
-iree_host_size_t id4_pipeline_parameter_window_region_offset(
-    const id4_pipeline_parameter_window_t* window) {
-  return window ? window->region_offset : IREE_HOST_SIZE_MAX;
+iree_status_t id4_pipeline_parameter_window_create_for_region(
+    const id4_pipeline_plan_t* plan, iree_host_size_t region_index,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_window_t** out_window) {
+  IREE_ASSERT_ARGUMENT(out_window);
+  *out_window = NULL;
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter window plan is required");
+  }
+  const id4_pipeline_region_plan_t* region =
+      id4_pipeline_plan_region_at(plan, region_index);
+  if (!region) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter window region %" PRIhsz " is missing",
+                            region_index);
+  }
+
+  id4_pipeline_parameter_window_build_state_t state;
+  memset(&state, 0, sizeof(state));
+  state.plan = plan;
+  state.parameter_tensor_count = id4_pipeline_plan_parameter_tensor_count(plan);
+  iree_status_t status = id4_pipeline_parameter_window_build_global_offsets(
+      plan, host_allocator, &state.global_request_offsets_by_slab,
+      &state.global_request_offset_count, &state.global_request_count);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_map_parameter_tensors(
+        &state, host_allocator);
+  }
+
+  uint8_t* parameter_tensor_used_bits = NULL;
+  uint32_t* parameter_tensor_ordinals = NULL;
+  if (iree_status_is_ok(status) && state.parameter_tensor_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator,
+                                         state.parameter_tensor_count,
+                                         sizeof(parameter_tensor_used_bits[0]),
+                                         (void**)&parameter_tensor_used_bits);
+  }
+  if (iree_status_is_ok(status) && parameter_tensor_used_bits) {
+    memset(
+        parameter_tensor_used_bits, 0,
+        state.parameter_tensor_count * sizeof(parameter_tensor_used_bits[0]));
+  }
+  for (iree_host_size_t group_ordinal = 0;
+       group_ordinal < region->parameter_load_group_count &&
+       iree_status_is_ok(status);
+       ++group_ordinal) {
+    id4_pipeline_parameter_load_group_t group;
+    status = id4_pipeline_plan_parameter_load_group_at(
+        plan, region->parameter_load_groups[group_ordinal], &group);
+    for (iree_host_size_t step_ordinal = 0;
+         step_ordinal < group.step_count && iree_status_is_ok(status);
+         ++step_ordinal) {
+      const id4_pipeline_parameter_load_step_t* step =
+          id4_pipeline_plan_parameter_load_step_at(
+              plan, group.step_offset + step_ordinal);
+      if (!step) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "parameter window load step %" PRIhsz
+                                  " is missing",
+                                  group.step_offset + step_ordinal);
+        break;
+      }
+      for (iree_host_size_t request_ordinal = 0;
+           request_ordinal < step->request_count && iree_status_is_ok(status);
+           ++request_ordinal) {
+        iree_host_size_t slab_request_index = IREE_HOST_SIZE_MAX;
+        status = id4_pipeline_parameter_window_step_request_index(
+            step, request_ordinal, &slab_request_index);
+        iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
+        if (iree_status_is_ok(status)) {
+          status = id4_pipeline_parameter_window_global_request_index(
+              &state, step->target_slab_index, slab_request_index,
+              &global_request_index);
+        }
+        if (!iree_status_is_ok(status)) break;
+        const iree_host_size_t parameter_tensor_index =
+            state.parameter_tensor_indices_by_global_request
+                ? state.parameter_tensor_indices_by_global_request
+                      [global_request_index]
+                : IREE_HOST_SIZE_MAX;
+        if (parameter_tensor_index == IREE_HOST_SIZE_MAX) {
+          status = iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "parameter window region %" PRIhsz " request %" PRIhsz
+              " does not belong to a planned parameter tensor",
+              region_index, global_request_index);
+          break;
+        }
+        parameter_tensor_used_bits[parameter_tensor_index] = 1;
+      }
+    }
+  }
+
+  const iree_host_size_t selected_parameter_tensor_count =
+      parameter_tensor_used_bits
+          ? id4_pipeline_parameter_window_count_used_bits(
+                state.parameter_tensor_count, parameter_tensor_used_bits)
+          : 0;
+  if (iree_status_is_ok(status) && selected_parameter_tensor_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator,
+                                         selected_parameter_tensor_count,
+                                         sizeof(parameter_tensor_ordinals[0]),
+                                         (void**)&parameter_tensor_ordinals);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t selected_index = 0;
+    for (iree_host_size_t i = 0; i < state.parameter_tensor_count; ++i) {
+      if (!parameter_tensor_used_bits[i]) continue;
+      const id4_pipeline_parameter_tensor_plan_t* tensor =
+          id4_pipeline_plan_parameter_tensor_at(plan, i);
+      parameter_tensor_ordinals[selected_index++] =
+          tensor->program_tensor_ordinal;
+    }
+    id4_pipeline_parameter_window_create_options_t options;
+    memset(&options, 0, sizeof(options));
+    options.structure_size = sizeof(options);
+    options.plan = plan;
+    options.parameter_tensor_count = selected_parameter_tensor_count;
+    options.parameter_tensor_ordinals = parameter_tensor_ordinals;
+    status = id4_pipeline_parameter_window_create(&options, host_allocator,
+                                                  out_window);
+  }
+
+  iree_allocator_free(host_allocator, parameter_tensor_ordinals);
+  iree_allocator_free(host_allocator, parameter_tensor_used_bits);
+  iree_allocator_free(host_allocator,
+                      state.parameter_tensor_indices_by_global_request);
+  iree_allocator_free(host_allocator, state.global_request_offsets_by_slab);
+  return status;
 }
 
-iree_host_size_t id4_pipeline_parameter_window_region_count(
+void id4_pipeline_parameter_window_release(
+    id4_pipeline_parameter_window_t* window) {
+  if (!window) return;
+  iree_allocator_t host_allocator = window->host_allocator;
+  iree_allocator_free(host_allocator,
+                      window->compact_request_indices_by_global_request);
+  iree_allocator_free(host_allocator, window->load_groups);
+  iree_allocator_free(host_allocator, window->requests);
+  iree_allocator_free(host_allocator, window->slabs);
+  iree_allocator_free(host_allocator, window->parameter_tensor_ordinals);
+  iree_allocator_free(host_allocator, window);
+}
+
+iree_host_size_t id4_pipeline_parameter_window_parameter_tensor_count(
     const id4_pipeline_parameter_window_t* window) {
-  return window ? window->region_count : 0;
+  return window ? window->parameter_tensor_count : 0;
+}
+
+uint32_t id4_pipeline_parameter_window_parameter_tensor_ordinal_at(
+    const id4_pipeline_parameter_window_t* window, iree_host_size_t index) {
+  return window && index < window->parameter_tensor_count
+             ? window->parameter_tensor_ordinals[index]
+             : UINT32_MAX;
 }
 
 iree_host_size_t id4_pipeline_parameter_window_slab_count(
@@ -1275,6 +1061,31 @@ static iree_status_t id4_pipeline_parameter_window_schedule_validate_options(
   return iree_ok_status();
 }
 
+static iree_status_t
+id4_pipeline_parameter_window_schedule_step_selected_request_count(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_window_t* window,
+    const id4_pipeline_parameter_load_step_t* step,
+    iree_host_size_t* out_selected_request_count) {
+  *out_selected_request_count = 0;
+  for (iree_host_size_t request_ordinal = 0;
+       request_ordinal < step->request_count; ++request_ordinal) {
+    iree_host_size_t original_request_index = IREE_HOST_SIZE_MAX;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_step_request_index(
+        step, request_ordinal, &original_request_index));
+    iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_parameter_window_plan_global_request_index(
+            plan, step->target_slab_index, original_request_index,
+            &global_request_index));
+    if (id4_pipeline_parameter_window_resolve_request(window,
+                                                      global_request_index)) {
+      ++*out_selected_request_count;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_parameter_window_schedule_count_load_steps(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
@@ -1284,11 +1095,28 @@ static iree_status_t id4_pipeline_parameter_window_schedule_count_load_steps(
     id4_pipeline_parameter_load_group_t group;
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_load_group_at(
         plan, window->load_groups[i], &group));
-    if (!iree_host_size_checked_add(*out_load_step_count, group.step_count,
-                                    out_load_step_count)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "parameter window schedule load step count overflow");
+    for (iree_host_size_t step_ordinal = 0; step_ordinal < group.step_count;
+         ++step_ordinal) {
+      const id4_pipeline_parameter_load_step_t* step =
+          id4_pipeline_plan_parameter_load_step_at(
+              plan, group.step_offset + step_ordinal);
+      if (!step) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter window schedule step %" PRIhsz
+                                " is missing",
+                                group.step_offset + step_ordinal);
+      }
+      iree_host_size_t selected_request_count = 0;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_parameter_window_schedule_step_selected_request_count(
+              plan, window, step, &selected_request_count));
+      if (selected_request_count == 0) continue;
+      if (!iree_host_size_checked_add(*out_load_step_count, 1,
+                                      out_load_step_count)) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter window schedule load step count overflow");
+      }
     }
   }
   return iree_ok_status();
@@ -1316,9 +1144,13 @@ id4_pipeline_parameter_window_schedule_count_request_indices(
                                 " is missing",
                                 group.step_offset + step_ordinal);
       }
-      if (!step->request_indices) continue;
+      if (step->kind != ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER) continue;
+      iree_host_size_t selected_request_count = 0;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_parameter_window_schedule_step_selected_request_count(
+              plan, window, step, &selected_request_count));
       if (!iree_host_size_checked_add(*out_request_index_count,
-                                      step->request_count,
+                                      selected_request_count,
                                       out_request_index_count)) {
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
@@ -1625,6 +1457,7 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
 }
 
 static iree_status_t id4_pipeline_parameter_window_schedule_populate_step(
+    const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
     const iree_host_size_t* compact_slab_indices_by_original,
     iree_host_size_t compact_slab_index_count,
@@ -1635,27 +1468,36 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_step(
     id4_pipeline_parameter_load_step_t* out_step) {
   *out_step = *original_step;
   iree_host_size_t* compact_request_indices =
-      original_step->request_indices
+      original_step->kind == ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER
           ? &request_indices[*io_request_index_offset]
           : NULL;
   out_step->request_indices = compact_request_indices;
 
   iree_host_size_t compact_slab_index = IREE_HOST_SIZE_MAX;
   iree_host_size_t first_compact_request_index = IREE_HOST_SIZE_MAX;
-  bool request_range_is_contiguous = true;
+  iree_host_size_t selected_request_count = 0;
   for (iree_host_size_t request_ordinal = 0;
        request_ordinal < original_step->request_count; ++request_ordinal) {
     iree_host_size_t original_request_index = IREE_HOST_SIZE_MAX;
     IREE_RETURN_IF_ERROR(
         id4_pipeline_parameter_window_schedule_step_request_index(
             original_step, request_ordinal, &original_request_index));
+    iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_parameter_window_plan_global_request_index(
+            plan, original_step->target_slab_index, original_request_index,
+            &global_request_index));
+    if (!id4_pipeline_parameter_window_resolve_request(window,
+                                                       global_request_index)) {
+      continue;
+    }
     iree_host_size_t step_compact_slab_index = IREE_HOST_SIZE_MAX;
     iree_host_size_t step_compact_request_index = IREE_HOST_SIZE_MAX;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_schedule_rebase_request(
         window, compact_slab_indices_by_original, compact_slab_index_count,
         original_step->target_slab_index, original_request_index,
         &step_compact_slab_index, &step_compact_request_index));
-    if (request_ordinal == 0) {
+    if (selected_request_count == 0) {
       compact_slab_index = step_compact_slab_index;
       first_compact_request_index = step_compact_request_index;
     } else if (compact_slab_index != step_compact_slab_index) {
@@ -1664,24 +1506,27 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_step(
                               (int)original_step->name.size,
                               original_step->name.data);
     }
-    request_range_is_contiguous &=
-        step_compact_request_index ==
-        first_compact_request_index + request_ordinal;
     if (compact_request_indices) {
-      compact_request_indices[request_ordinal] = step_compact_request_index;
+      compact_request_indices[selected_request_count] =
+          step_compact_request_index;
     }
+    ++selected_request_count;
+  }
+  if (selected_request_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter load step '%.*s' has no selected requests",
+        (int)original_step->name.size, original_step->name.data);
   }
 
   out_step->target_slab_index = compact_slab_index;
   out_step->request_offset = first_compact_request_index;
+  out_step->request_count = selected_request_count;
   if (compact_request_indices) {
     out_step->request_offset = 0;
-    *io_request_index_offset += original_step->request_count;
-  } else if (!request_range_is_contiguous) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "parameter load step '%.*s' no longer has a contiguous request range",
-        (int)original_step->name.size, original_step->name.data);
+    *io_request_index_offset += selected_request_count;
+  } else {
+    out_step->request_indices = NULL;
   }
   if (original_step->kind != ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER) {
     out_step->readiness_group_key = original_load_group_index;
@@ -1727,12 +1572,17 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_steps(
                                 " is missing",
                                 original_step_index);
       }
+      iree_host_size_t selected_request_count = 0;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_parameter_window_schedule_step_selected_request_count(
+              plan, window, original_step, &selected_request_count));
+      if (selected_request_count == 0) continue;
       id4_pipeline_parameter_load_step_t* compact_step =
           &schedule->load_steps[load_step_index++];
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_schedule_populate_step(
-          window, compact_slab_indices_by_original, compact_slab_index_count,
-          original_group_index, original_step, schedule->request_indices,
-          &request_index_offset, compact_step));
+          plan, window, compact_slab_indices_by_original,
+          compact_slab_index_count, original_group_index, original_step,
+          schedule->request_indices, &request_index_offset, compact_step));
     }
   }
   if (load_step_index != schedule->load_step_count ||

@@ -11,7 +11,8 @@
 #include <limits>
 #include <memory>
 
-#include "experimental/id4/pipeline/parameter_window.h"
+#include "experimental/id4/pipeline/parameter_residency.h"
+#include "experimental/id4/pipeline/parameter_window_statistics.h"
 #include "experimental/id4/stages/qwen3_vl_program.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/testing/gtest.h"
@@ -84,6 +85,16 @@ struct GenerationPlanDeleter {
 
 using GenerationPlanPtr =
     std::unique_ptr<id4_ideogram4_generation_plan_t, GenerationPlanDeleter>;
+
+struct ParameterResidencyPlanDeleter {
+  void operator()(id4_pipeline_parameter_residency_plan_t* plan) const {
+    id4_pipeline_parameter_residency_plan_release(plan);
+  }
+};
+
+using ParameterResidencyPlanPtr =
+    std::unique_ptr<id4_pipeline_parameter_residency_plan_t,
+                    ParameterResidencyPlanDeleter>;
 
 static TokenizerPtr LoadTokenizer() {
   iree_tokenizer_t* tokenizer = nullptr;
@@ -190,6 +201,71 @@ static const id4_pipeline_tensor_layout_t* FindBoundaryLayout(
     }
   }
   return nullptr;
+}
+
+static void ExpectBarrierAlignedParameterResidency(
+    const id4_pipeline_plan_t* stage_plan,
+    iree_device_size_t maximum_target_byte_length) {
+  id4_pipeline_parameter_residency_plan_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.plan = stage_plan;
+  options.maximum_target_byte_length = maximum_target_byte_length;
+  options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+  id4_pipeline_parameter_residency_plan_t* raw_residency_plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_parameter_residency_plan_create(
+      &options, iree_allocator_system(), &raw_residency_plan));
+  ParameterResidencyPlanPtr residency_plan(raw_residency_plan);
+
+  const id4_pipeline_parameter_residency_statistics_t statistics =
+      id4_pipeline_parameter_residency_plan_statistics(residency_plan.get());
+  ASSERT_GT(statistics.segment_count, 0u);
+  EXPECT_LE(statistics.peak_segment_target_byte_length,
+            maximum_target_byte_length);
+  const id4_pipeline_program_t* program =
+      id4_pipeline_plan_source_program(stage_plan);
+  ASSERT_NE(program, nullptr);
+
+  iree_host_size_t previous_region_id = IREE_HOST_SIZE_MAX;
+  iree_host_size_t expected_operation_offset = 0;
+  iree_host_size_t previous_region_limit = 0;
+  for (iree_host_size_t i = 0; i < statistics.segment_count; ++i) {
+    const id4_pipeline_parameter_residency_segment_t* segment =
+        id4_pipeline_parameter_residency_plan_segment_at(residency_plan.get(),
+                                                         i);
+    ASSERT_NE(segment, nullptr);
+    const id4_pipeline_region_plan_t* region =
+        id4_pipeline_plan_region_at(stage_plan, segment->semantic_region_id);
+    ASSERT_NE(region, nullptr);
+    if (segment->semantic_region_id != previous_region_id) {
+      if (previous_region_id != IREE_HOST_SIZE_MAX) {
+        EXPECT_EQ(expected_operation_offset, previous_region_limit);
+        EXPECT_GT(segment->semantic_region_id, previous_region_id);
+      }
+      previous_region_id = segment->semantic_region_id;
+      expected_operation_offset = region->source_operation_offset;
+      previous_region_limit =
+          region->source_operation_offset + region->source_operation_count;
+    }
+    EXPECT_EQ(segment->source_operation_offset, expected_operation_offset);
+    EXPECT_GT(segment->source_operation_count, 0u);
+    expected_operation_offset += segment->source_operation_count;
+    EXPECT_LE(expected_operation_offset, previous_region_limit);
+    EXPECT_LE(segment->resource_statistics.target_byte_length,
+              maximum_target_byte_length);
+    EXPECT_EQ(
+        id4_pipeline_parameter_window_parameter_tensor_count(segment->window),
+        segment->parameter_tensor_count);
+    if (expected_operation_offset < previous_region_limit) {
+      const id4_pipeline_program_op_t* cut_operation =
+          id4_pipeline_program_operation_at(program,
+                                            expected_operation_offset - 1);
+      ASSERT_NE(cut_operation, nullptr);
+      EXPECT_EQ(cut_operation->kind, ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER);
+    }
+  }
+  EXPECT_EQ(expected_operation_offset, previous_region_limit);
 }
 
 static iree_device_size_t RawGenerationBoundaryByteLength(
@@ -732,6 +808,29 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
             ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED);
   ExpectGenerationStageBoundaryContract(short_plan_owner.get(), short_summary);
   ExpectGenerationStageBoundaryContract(long_plan_owner.get(), long_summary);
+
+  constexpr iree_device_size_t kResidencyTargetBudget =
+      2ull * 1024ull * 1024ull * 1024ull;
+  const id4_pipeline_plan_t* short_qwen_plan =
+      FindStagePlan(short_plan_owner.get(), IREE_SV("qwen"));
+  const id4_pipeline_plan_t* long_qwen_plan =
+      FindStagePlan(long_plan_owner.get(), IREE_SV("qwen"));
+  const id4_pipeline_plan_t* conditioned_dit_plan =
+      FindStagePlan(long_plan_owner.get(), IREE_SV("dit_conditioned"));
+  const id4_pipeline_plan_t* unconditioned_dit_plan =
+      FindStagePlan(long_plan_owner.get(), IREE_SV("dit_unconditioned"));
+  ASSERT_NE(short_qwen_plan, nullptr);
+  ASSERT_NE(long_qwen_plan, nullptr);
+  ASSERT_NE(conditioned_dit_plan, nullptr);
+  ASSERT_NE(unconditioned_dit_plan, nullptr);
+  ExpectBarrierAlignedParameterResidency(short_qwen_plan,
+                                         kResidencyTargetBudget);
+  ExpectBarrierAlignedParameterResidency(long_qwen_plan,
+                                         kResidencyTargetBudget);
+  ExpectBarrierAlignedParameterResidency(conditioned_dit_plan,
+                                         kResidencyTargetBudget);
+  ExpectBarrierAlignedParameterResidency(unconditioned_dit_plan,
+                                         kResidencyTargetBudget);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
