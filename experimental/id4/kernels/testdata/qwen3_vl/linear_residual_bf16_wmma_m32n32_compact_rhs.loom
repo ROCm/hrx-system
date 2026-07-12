@@ -3,6 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+config.def @id4.qwen3_vl.linear_residual_wmma.rhs_storage = 1 : index
 
 check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_small_case {
   %input = check.generate.fill value(0.0078125) : tensor<32x16xbf16>
@@ -10,7 +11,7 @@ check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rh
   %residual = check.generate.fill value(2.0) : tensor<32x32xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
   %expected = check.generate.fill value(2.0625) : tensor<32x32xbf16>
-  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %residual, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>, tensor<32x32xbf16>)
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
   check.return
 }
@@ -21,7 +22,7 @@ check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rh
   %residual = check.generate.fill value(2.0) : tensor<288x4096xbf16>
   %output = check.generate.fill value(0.0) : tensor<288x4096xbf16>
   %expected = check.generate.fill value(50.0) : tensor<288x4096xbf16>
-  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %residual, %output) : (tensor<288x12288xbf16>, tensor<50331648xbf16>, tensor<288x4096xbf16>, tensor<288x4096xbf16>)
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<288x12288xbf16>, tensor<50331648xbf16>, tensor<288x4096xbf16>, tensor<288x4096xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288x4096xbf16>
   check.return
 }
@@ -32,7 +33,7 @@ check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rh
   %residual = check.generate.fill value(2.0) : tensor<480x4096xbf16>
   %output = check.generate.fill value(0.0) : tensor<480x4096xbf16>
   %expected = check.generate.fill value(50.0) : tensor<480x4096xbf16>
-  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %residual, %output) : (tensor<480x12288xbf16>, tensor<50331648xbf16>, tensor<480x4096xbf16>, tensor<480x4096xbf16>)
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<480x12288xbf16>, tensor<50331648xbf16>, tensor<480x4096xbf16>, tensor<480x4096xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x4096xbf16>
   check.return
 }

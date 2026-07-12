@@ -6296,7 +6296,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small",
     },
     {
@@ -6308,7 +6308,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small",
     },
     {
@@ -6320,7 +6320,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape",
     },
     {
@@ -6332,7 +6332,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape",
     },
     {
@@ -6344,7 +6344,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288",
     },
     {
@@ -6356,7 +6356,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024",
     },
     {
@@ -6368,7 +6368,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_residual_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_residual_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_residual_bf16_wmma.loom",
+        "source": "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024",
     },
     {
@@ -8265,11 +8265,9 @@ _KERNEL_SOURCES = [
     "matrix/bf16_f32_wmma_m32n64.loom",
     "qwen3_vl/linear_bf16_f32.loom",
     "qwen3_vl/linear_input_pack_f32_bf16.loom",
-    "qwen3_vl/linear_residual_bf16_wmma.loom",
-    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom",
-    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom",
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
+    "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom",
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom",
-    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom",
     "qwen3_vl/residual_add_f32.loom",
     "qwen3_vl/rotary_embedding.loom",
     "qwen3_vl/rmsnorm.loom",
@@ -8328,6 +8326,9 @@ _KERNEL_TEST_VARIANTS = {
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
+    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom": "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom",
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom": "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom",
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom": "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom",
 }
 
 [

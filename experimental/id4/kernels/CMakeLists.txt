@@ -1211,45 +1211,30 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    qwen3_vl_linear_residual_bf16_wmma_test_module
+    qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module
   SRCS
-    "testdata/qwen3_vl/linear_residual_bf16_wmma.loom"
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_m32n32.loom"
   LIBRARIES
-    "qwen3_vl/linear_residual_bf16_wmma.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom"
   MODE
     "archive"
   OUTPUT
-    "qwen3_vl_linear_residual_bf16_wmma_test_module.loom"
+    "qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
 
 loom_link_module(
   NAME
-    qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module
+    qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module
   SRCS
-    "testdata/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_m64n64.loom"
   LIBRARIES
-    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom"
   MODE
     "archive"
   OUTPUT
-    "qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
-    qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module
-  SRCS
-    "testdata/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
-  LIBRARIES
-    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom"
+    "qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -1265,21 +1250,6 @@ loom_link_module(
     "archive"
   OUTPUT
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
-    qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module
-  SRCS
-    "testdata/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
-  LIBRARIES
-    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -1974,6 +1944,51 @@ loom_link_module(
     "text"
 )
 
+loom_link_module(
+  NAME
+    qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
 add_custom_command(OUTPUT loom_sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch loom_sources.stamp
   DEPENDS
@@ -2057,11 +2072,9 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom"
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
-    "qwen3_vl/linear_residual_bf16_wmma.loom"
-    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
-    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom"
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
-    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
     "qwen3_vl/rmsnorm_rotary.loom"
@@ -2194,11 +2207,9 @@ iree_c_embed_data(
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom"
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
-    "qwen3_vl/linear_residual_bf16_wmma.loom"
-    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
-    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32.loom"
+    "qwen3_vl/linear_residual_bf16_wmma_m64n64.loom"
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
-    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
     "qwen3_vl/rmsnorm_rotary.loom"
@@ -11475,7 +11486,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11493,7 +11504,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11511,7 +11522,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11529,7 +11540,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11547,7 +11558,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11565,7 +11576,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -11583,7 +11594,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -25369,7 +25380,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=32"
@@ -25391,7 +25402,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=64"
@@ -25413,7 +25424,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=512"
@@ -25435,7 +25446,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=512"
@@ -25457,7 +25468,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=288"
@@ -25479,7 +25490,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024"
@@ -25501,7 +25512,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024"

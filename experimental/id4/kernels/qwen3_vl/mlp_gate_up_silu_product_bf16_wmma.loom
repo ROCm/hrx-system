@@ -6,6 +6,8 @@ config.decl @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size : %value: ind
 
 config.decl @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size : %value: index where [range(%value, 32, 65536), mul(%value, 32)]
 
+config.decl @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.rhs_storage : %value: index where [range(%value, 0, 1)]
+
 kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma") @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
@@ -103,20 +105,31 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf
   %one = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
+  %two_fifty_six = index.constant 256 : index
   %token_pair = kernel.workgroup.id<x> : index
   %row_pair = kernel.workgroup.id<y> : index
   %dispatch_token_count = config.get @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size : index
   %intermediate_size = config.get @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size : index
+  %rhs_storage = config.get @id4.qwen3_vl.mlp_gate_up_silu_product_wmma.rhs_storage : index
+  %rhs_is_compact = index.cmp ne, %rhs_storage, %zero : index
   %k_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %intermediate_size, %sixteen : index
+  %packed_tile_count = index.mul %output_tile_count, %k_tile_count : index
+  %packed_element_count = index.mul %packed_tile_count, %two_fifty_six : index
   %token_origin0 = index.mul %token_pair, %thirty_two : index
   %token_origin1 = index.add %token_origin0, %sixteen : index
   %row_origin0 = index.mul %row_pair, %thirty_two : index
   %row_origin1 = index.add %row_origin0, %sixteen : index
+  %row_tile0 = index.div %row_origin0, %sixteen : index
+  %row_tile1 = index.div %row_origin1, %sixteen : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+  %weight_row_count = scf.select %rhs_is_compact, %packed_element_count, %input_size : index
+  %weight_column_count = scf.select %rhs_is_compact, %sixteen, %intermediate_size : index
+  %weight_stride = scf.select %rhs_is_compact, %sixteen, %input_size : index
+  %weight_layout = encoding.layout.strided [1, %weight_stride] : encoding<layout>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %input_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %gate_weight, %up_weight, %output_bf16 : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
@@ -128,8 +141,8 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf
   %up_weight_aligned = buffer.assume.alignment %up_weight_global {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%dispatch_token_count]x[%input_size]xbf16, #dense>
-  %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xbf16, %weight_layout>
-  %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xbf16, %weight_layout>
+  %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout>
+  %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
   %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -143,10 +156,18 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf
     %k_origin = index.mul %k_tile, %sixteen : index
     %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
-    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xbf16, %weight_layout> -> vector<16xbf16>
-    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xbf16, %weight_layout> -> vector<16xbf16>
-    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xbf16, %weight_layout> -> vector<16xbf16>
-    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs_tile0 = index.madd %row_tile0, %k_tile_count, %k_tile : index
+    %rhs_tile1 = index.madd %row_tile1, %k_tile_count, %k_tile : index
+    %rhs_row0 = index.mul %rhs_tile0, %two_fifty_six : index
+    %rhs_row1 = index.mul %rhs_tile1, %two_fifty_six : index
+    %rhs_index00 = scf.select %rhs_is_compact, %rhs_row0, %k_origin : index
+    %rhs_index01 = scf.select %rhs_is_compact, %zero, %row_origin0 : index
+    %rhs_index10 = scf.select %rhs_is_compact, %rhs_row1, %k_origin : index
+    %rhs_index11 = scf.select %rhs_is_compact, %zero, %row_origin1 : index
+    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%rhs_index00, %rhs_index01] shape [%k, %n] : view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%rhs_index10, %rhs_index11] shape [%k, %n] : view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%rhs_index00, %rhs_index01] shape [%k, %n] : view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%rhs_index10, %rhs_index11] shape [%k, %n] : view<[%weight_row_count]x[%weight_column_count]xbf16, %weight_layout> -> vector<16xbf16>
     %next00 = vector.mma %lhs0, %gate_rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next01 = vector.mma %lhs0, %gate_rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next10 = vector.mma %lhs1, %gate_rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
