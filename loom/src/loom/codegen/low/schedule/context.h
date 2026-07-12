@@ -141,6 +141,13 @@ typedef struct loom_low_schedule_value_record_t {
   loom_low_schedule_value_flags_t flags;
 } loom_low_schedule_value_record_t;
 
+typedef struct loom_low_schedule_alias_pressure_limit_t {
+  // Hard live-unit limit shared by the alias set.
+  uint32_t live_unit_limit;
+  // Representative descriptor register class used by diagnostics.
+  uint16_t representative_reg_class_id;
+} loom_low_schedule_alias_pressure_limit_t;
+
 typedef struct loom_low_schedule_pressure_alias_t {
   // Source value whose live pressure currently covers the alias units.
   loom_value_ordinal_t source_ordinal;
@@ -215,8 +222,16 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.
   uint8_t* reg_class_state_flags;
-  // Hard live-unit limits indexed by descriptor register-class ID.
-  uint32_t* pressure_limit_units_by_reg_class;
+  // Hard register-pressure limits used while scoring candidates.
+  struct {
+    // Live-unit limits indexed by descriptor register-class ID. Classes in an
+    // alias set use alias_sets instead.
+    uint32_t* by_reg_class;
+    // Shared limits indexed by one-based register alias-set ID.
+    loom_low_schedule_alias_pressure_limit_t* alias_sets;
+    // Highest dense one-based alias-set ID, or zero when none are present.
+    uint16_t alias_set_count;
+  } pressure_limits;
   // Most recent architectural-state writer node, dense by register class.
   uint32_t* state_last_write_nodes;
   // Most recent non-writing state-ordering node, dense by register class.

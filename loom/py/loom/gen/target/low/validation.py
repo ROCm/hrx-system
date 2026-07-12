@@ -27,6 +27,8 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
+    RegClass,
+    RegClassFlag,
     RegisterPart,
     StorageLeaseAttachment,
 )
@@ -55,6 +57,57 @@ def validate_u64(value: int, description: str) -> None:
 def validate_i64(value: int, description: str) -> None:
     if value < -(1 << 63) or value > (1 << 63) - 1:
         raise ValueError(f"{description} does not fit i64")
+
+
+def validate_register_classes(
+    descriptor_set_key: str,
+    register_classes: Sequence[RegClass],
+) -> None:
+    """Validates register classes and their shared storage namespaces."""
+    alias_sets: dict[int, list[RegClass]] = {}
+    for register_class in register_classes:
+        description = f"descriptor set '{descriptor_set_key}' register class '{register_class.name}'"
+        if register_class.alloc_unit_bits <= 0:
+            raise ValueError(f"{description} allocation unit width must be positive")
+        validate_u16(
+            register_class.alloc_unit_bits,
+            f"{description} allocation unit width",
+        )
+        validate_u16(
+            register_class.target_bank_id,
+            f"{description} target bank ID",
+        )
+        validate_u16(
+            register_class.allocatable_count,
+            f"{description} allocatable count",
+        )
+        validate_u16(
+            register_class.alias_set_id,
+            f"{description} alias-set ID",
+        )
+        if RegClassFlag.PHYSICAL in register_class.flags and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} cannot be both physical and virtual-only")
+        if register_class.allocatable_count != 0 and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} has a physical allocation capacity but is virtual-only")
+        if register_class.alias_set_id != 0:
+            alias_sets.setdefault(register_class.alias_set_id, []).append(register_class)
+
+    alias_set_ids = sorted(alias_sets)
+    expected_alias_set_ids = list(range(1, len(alias_set_ids) + 1))
+    if alias_set_ids != expected_alias_set_ids:
+        raise ValueError(f"descriptor set '{descriptor_set_key}' alias-set IDs must be dense from 1; found {alias_set_ids}")
+
+    for alias_set_id, members in alias_sets.items():
+        reference = members[0]
+        reference_is_physical = reference.allocatable_count != 0 or RegClassFlag.PHYSICAL in reference.flags
+        for member in members[1:]:
+            member_is_physical = member.allocatable_count != 0 or RegClassFlag.PHYSICAL in member.flags
+            if member_is_physical != reference_is_physical:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} mixes physical and virtual location classes '{reference.name}' and '{member.name}'")
+            if member.target_bank_id != reference.target_bank_id:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' use different target banks")
+            if member.allocatable_count != reference.allocatable_count:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
 
 
 def _descriptor_asm_surface_description(

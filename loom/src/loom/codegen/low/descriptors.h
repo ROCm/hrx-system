@@ -401,7 +401,8 @@ typedef struct loom_low_reg_class_t {
   uint16_t alloc_unit_bits;
   // Allocatable units in this class, or zero when virtual/unbounded.
   uint16_t allocatable_count;
-  // Alias-set identifier shared by overlapping register classes.
+  // Dense one-based alias-set identifier shared by overlapping register
+  // classes, or zero when this class has a disjoint storage namespace.
   uint16_t alias_set_id;
   // Register class used for spill/reload values, or LOOM_LOW_REG_CLASS_NONE.
   uint16_t spill_class_id;
