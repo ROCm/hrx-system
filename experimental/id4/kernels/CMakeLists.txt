@@ -11,15 +11,1590 @@ iree_add_all_subdirs()
 
 loom_link_module(
   NAME
-    vae_conv3x3_bias_packed_bf16_test_module
+    attention_materialized_bf16_wmma_test_module
   SRCS
-    "testdata/vae/conv3x3_bias_packed_bf16.loom"
+    "testdata/attention/materialized_bf16_wmma.loom"
   LIBRARIES
-    "vae/conv3x3_bias_packed_bf16.loom"
+    "attention/materialized_bf16_wmma.loom"
   MODE
     "archive"
   OUTPUT
-    "vae_conv3x3_bias_packed_bf16_test_module.loom"
+    "attention_materialized_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    elementwise_add_bf16_test_module
+  SRCS
+    "testdata/elementwise/add_bf16.loom"
+  LIBRARIES
+    "elementwise/add_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "elementwise_add_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    elementwise_add_f32_test_module
+  SRCS
+    "testdata/elementwise/add_f32.loom"
+  LIBRARIES
+    "elementwise/add_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "elementwise_add_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    elementwise_cast_test_module
+  SRCS
+    "testdata/elementwise/cast.loom"
+  LIBRARIES
+    "elementwise/cast.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "elementwise_cast_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    parameter_bf16_linear_rhs_tile_test_module
+  SRCS
+    "testdata/parameter/bf16_linear_rhs_tile.loom"
+  LIBRARIES
+    "parameter/bf16_linear_rhs_tile.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "parameter_bf16_linear_rhs_tile_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module
+  SRCS
+    "testdata/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom"
+  LIBRARIES
+    "parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    parameter_fp8_e4m3_linear_rhs_tile_test_module
+  SRCS
+    "testdata/parameter/fp8_e4m3_linear_rhs_tile.loom"
+  LIBRARIES
+    "parameter/fp8_e4m3_linear_rhs_tile.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "parameter_fp8_e4m3_linear_rhs_tile_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    parameter_fp8_e4m3_scaled_to_bf16_test_module
+  SRCS
+    "testdata/parameter/fp8_e4m3_scaled_to_bf16.loom"
+  LIBRARIES
+    "parameter/fp8_e4m3_scaled_to_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "parameter_fp8_e4m3_scaled_to_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module
+  SRCS
+    "testdata/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom"
+  LIBRARIES
+    "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_adaln_split_f32_test_module
+  SRCS
+    "testdata/ideogram4/adaln_split_f32.loom"
+  LIBRARIES
+    "ideogram4/adaln_split_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_adaln_split_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_attention_blocked_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/attention_blocked_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/attention_blocked_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_attention_blocked_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_attention_online_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/attention_online_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/attention_online_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_attention_online_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_attention_query_block8_rounded_bf16_test_module
+  SRCS
+    "testdata/ideogram4/attention_query_block8_rounded_bf16.loom"
+  LIBRARIES
+    "ideogram4/attention_query_block8_rounded_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_attention_query_block8_rounded_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_attention_query_block8_rounded_f32_test_module
+  SRCS
+    "testdata/ideogram4/attention_query_block8_rounded_f32.loom"
+  LIBRARIES
+    "ideogram4/attention_query_block8_rounded_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_attention_query_block8_rounded_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_condition_input_pack_f32_bf16_test_module
+  SRCS
+    "testdata/ideogram4/condition_input_pack_f32_bf16.loom"
+  LIBRARIES
+    "ideogram4/condition_input_pack_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_condition_input_pack_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_condition_project_bias_indicator_f32_test_module
+  SRCS
+    "testdata/ideogram4/condition_project_bias_indicator_f32.loom"
+  LIBRARIES
+    "ideogram4/condition_project_bias_indicator_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_condition_project_bias_indicator_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_condition_rmsnorm_f32_test_module
+  SRCS
+    "testdata/ideogram4/condition_rmsnorm_f32.loom"
+  LIBRARIES
+    "ideogram4/condition_rmsnorm_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_condition_rmsnorm_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_condition_rmsnorm_pack_f32_bf16_test_module
+  SRCS
+    "testdata/ideogram4/condition_rmsnorm_pack_f32_bf16.loom"
+  LIBRARIES
+    "ideogram4/condition_rmsnorm_pack_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_condition_rmsnorm_pack_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_dense_bias_bf16_bf16_test_module
+  SRCS
+    "testdata/ideogram4/dense_bias_bf16_bf16.loom"
+  LIBRARIES
+    "ideogram4/dense_bias_bf16_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_dense_bias_bf16_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_dense_bias_bf16_f32_test_module
+  SRCS
+    "testdata/ideogram4/dense_bias_bf16_f32.loom"
+  LIBRARIES
+    "ideogram4/dense_bias_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_dense_bias_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_dense_bias_fp8_f32_test_module
+  SRCS
+    "testdata/ideogram4/dense_bias_fp8_f32.loom"
+  LIBRARIES
+    "ideogram4/dense_bias_fp8_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_dense_bias_fp8_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_head_rmsnorm_f32_test_module
+  SRCS
+    "testdata/ideogram4/head_rmsnorm_f32.loom"
+  LIBRARIES
+    "ideogram4/head_rmsnorm_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_head_rmsnorm_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_bf16_tail_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_bf16_tail.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_bf16_tail.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_bf16_tail_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_bf16_wmma_m32n64_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_bf16_wmma_m32n64.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_bf16_wmma_m32n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_bf16_wmma_m64n64_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_bf16_wmma_m64n64.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_bf16_wmma_m64n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_f32_tail_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_f32_tail.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_f32_tail.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_f32_tail_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bf16_f32_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_bf16_f32_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_bf16_f32_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bf16_f32_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bias_bf16_bf16_test_module
+  SRCS
+    "testdata/ideogram4/linear_bias_bf16_bf16.loom"
+  LIBRARIES
+    "ideogram4/linear_bias_bf16_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bias_bf16_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bias_bf16_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_bias_bf16_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_bias_bf16_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bias_bf16_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bias_bf16_f32_test_module
+  SRCS
+    "testdata/ideogram4/linear_bias_bf16_f32.loom"
+  LIBRARIES
+    "ideogram4/linear_bias_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bias_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bias_fp8_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_bias_fp8_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_bias_fp8_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_bias_fp8_f32_test_module
+  SRCS
+    "testdata/ideogram4/linear_bias_fp8_f32.loom"
+  LIBRARIES
+    "ideogram4/linear_bias_fp8_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_bias_fp8_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_fp8_bf16_f32_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_fp8_bf16_f32_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_fp8_bf16_f32_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_fp8_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/linear_fp8_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/linear_fp8_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_fp8_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module
+  SRCS
+    "testdata/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom"
+  LIBRARIES
+    "ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module
+  SRCS
+    "testdata/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom"
+  LIBRARIES
+    "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_fp8_f32_test_module
+  SRCS
+    "testdata/ideogram4/linear_fp8_f32.loom"
+  LIBRARIES
+    "ideogram4/linear_fp8_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_fp8_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_input_pack_f32_bf16_test_module
+  SRCS
+    "testdata/ideogram4/linear_input_pack_f32_bf16.loom"
+  LIBRARIES
+    "ideogram4/linear_input_pack_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_input_pack_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_linear_input_unpack_bf16_f32_test_module
+  SRCS
+    "testdata/ideogram4/linear_input_unpack_bf16_f32.loom"
+  LIBRARIES
+    "ideogram4/linear_input_unpack_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_linear_input_unpack_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_mlp_gate_up_silu_f32_test_module
+  SRCS
+    "testdata/ideogram4/mlp_gate_up_silu_f32.loom"
+  LIBRARIES
+    "ideogram4/mlp_gate_up_silu_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_mlp_gate_up_silu_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_mlp_up_silu_product_bf16_tail_test_module
+  SRCS
+    "testdata/ideogram4/mlp_up_silu_product_bf16_tail.loom"
+  LIBRARIES
+    "ideogram4/mlp_up_silu_product_bf16_tail.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_mlp_up_silu_product_bf16_tail_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_mlp_up_silu_product_bf16_wmma_test_module
+  SRCS
+    "testdata/ideogram4/mlp_up_silu_product_bf16_wmma.loom"
+  LIBRARIES
+    "ideogram4/mlp_up_silu_product_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_mlp_up_silu_product_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_modulated_layernorm_bf16_test_module
+  SRCS
+    "testdata/ideogram4/modulated_layernorm_bf16.loom"
+  LIBRARIES
+    "ideogram4/modulated_layernorm_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_modulated_layernorm_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_modulated_layernorm_image_bf16_test_module
+  SRCS
+    "testdata/ideogram4/modulated_layernorm_image_bf16.loom"
+  LIBRARIES
+    "ideogram4/modulated_layernorm_image_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_modulated_layernorm_image_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_modulated_layernorm_f32_test_module
+  SRCS
+    "testdata/ideogram4/modulated_layernorm_f32.loom"
+  LIBRARIES
+    "ideogram4/modulated_layernorm_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_modulated_layernorm_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_modulated_rmsnorm_f32_test_module
+  SRCS
+    "testdata/ideogram4/modulated_rmsnorm_f32.loom"
+  LIBRARIES
+    "ideogram4/modulated_rmsnorm_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_modulated_rmsnorm_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_prelude_image_bf16_f32_test_module
+  SRCS
+    "testdata/ideogram4/prelude_image_bf16_f32.loom"
+  LIBRARIES
+    "ideogram4/prelude_image_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_prelude_image_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_prelude_image_fp8_f32_test_module
+  SRCS
+    "testdata/ideogram4/prelude_image_fp8_f32.loom"
+  LIBRARIES
+    "ideogram4/prelude_image_fp8_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_prelude_image_fp8_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_prelude_image_pack_f32_bf16_test_module
+  SRCS
+    "testdata/ideogram4/prelude_image_pack_f32_bf16.loom"
+  LIBRARIES
+    "ideogram4/prelude_image_pack_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_prelude_image_pack_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_prelude_indicator_bf16_test_module
+  SRCS
+    "testdata/ideogram4/prelude_indicator_bf16.loom"
+  LIBRARIES
+    "ideogram4/prelude_indicator_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_prelude_indicator_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_prelude_indicator_bf16_f32_test_module
+  SRCS
+    "testdata/ideogram4/prelude_indicator_bf16_f32.loom"
+  LIBRARIES
+    "ideogram4/prelude_indicator_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_prelude_indicator_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_qkv_norm_rotary_bf16_test_module
+  SRCS
+    "testdata/ideogram4/qkv_norm_rotary_bf16.loom"
+  LIBRARIES
+    "ideogram4/qkv_norm_rotary_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_qkv_norm_rotary_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_qkv_norm_rotary_f32_test_module
+  SRCS
+    "testdata/ideogram4/qkv_norm_rotary_f32.loom"
+  LIBRARIES
+    "ideogram4/qkv_norm_rotary_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_qkv_norm_rotary_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_qkv_split_f32_test_module
+  SRCS
+    "testdata/ideogram4/qkv_split_f32.loom"
+  LIBRARIES
+    "ideogram4/qkv_split_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_qkv_split_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_rmsnorm_gated_residual_f32_test_module
+  SRCS
+    "testdata/ideogram4/rmsnorm_gated_residual_f32.loom"
+  LIBRARIES
+    "ideogram4/rmsnorm_gated_residual_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_rmsnorm_gated_residual_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_rotary_apply_f32_test_module
+  SRCS
+    "testdata/ideogram4/rotary_apply_f32.loom"
+  LIBRARIES
+    "ideogram4/rotary_apply_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_rotary_apply_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_silu_bf16_test_module
+  SRCS
+    "testdata/ideogram4/silu_bf16.loom"
+  LIBRARIES
+    "ideogram4/silu_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_silu_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_silu_f32_test_module
+  SRCS
+    "testdata/ideogram4/silu_f32.loom"
+  LIBRARIES
+    "ideogram4/silu_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_silu_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_silu_product_bf16_test_module
+  SRCS
+    "testdata/ideogram4/silu_product_bf16.loom"
+  LIBRARIES
+    "ideogram4/silu_product_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_silu_product_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_timestep_embedding_f32_test_module
+  SRCS
+    "testdata/ideogram4/timestep_embedding_f32.loom"
+  LIBRARIES
+    "ideogram4/timestep_embedding_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_timestep_embedding_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_unpatchify_scale_f32_test_module
+  SRCS
+    "testdata/ideogram4/unpatchify_scale_f32.loom"
+  LIBRARIES
+    "ideogram4/unpatchify_scale_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_unpatchify_scale_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    ideogram4_unpatchify_scale_packed_bf16_test_module
+  SRCS
+    "testdata/ideogram4/unpatchify_scale_packed_bf16.loom"
+  LIBRARIES
+    "ideogram4/unpatchify_scale_packed_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_unpatchify_scale_packed_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_attention_materialized_f32_test_module
+  SRCS
+    "testdata/qwen3_vl/attention_materialized_f32.loom"
+  LIBRARIES
+    "qwen3_vl/attention_materialized_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_attention_materialized_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_attention_online_bf16_test_module
+  SRCS
+    "testdata/qwen3_vl/attention_online_bf16.loom"
+  LIBRARIES
+    "qwen3_vl/attention_online_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_attention_online_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_attention_online_bf16_wmma_test_module
+  SRCS
+    "testdata/qwen3_vl/attention_online_bf16_wmma.loom"
+  LIBRARIES
+    "qwen3_vl/attention_online_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_attention_online_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_attention_wmma_test_module
+  SRCS
+    "testdata/qwen3_vl/attention_wmma.loom"
+  LIBRARIES
+    "qwen3_vl/attention_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_attention_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_condition_test_module
+  SRCS
+    "testdata/qwen3_vl/condition.loom"
+  LIBRARIES
+    "qwen3_vl/condition.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_condition_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_tail_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_tail.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_tail.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_tail_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom"
+  LIBRARIES
+    "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom"
+  LIBRARIES
+    "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    matrix_bf16_f32_wmma_m32n64_test_module
+  SRCS
+    "testdata/matrix/bf16_f32_wmma_m32n64.loom"
+  LIBRARIES
+    "matrix/bf16_f32_wmma_m32n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "matrix_bf16_f32_wmma_m32n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_f32_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_f32.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_input_pack_f32_bf16_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_input_pack_f32_bf16.loom"
+  LIBRARIES
+    "qwen3_vl/linear_input_pack_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_input_pack_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_residual_bf16_wmma_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_residual_bf16_wmma.loom"
+  LIBRARIES
+    "qwen3_vl/linear_residual_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_residual_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module
+  SRCS
+    "testdata/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
+  LIBRARIES
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_residual_add_f32_test_module
+  SRCS
+    "testdata/qwen3_vl/residual_add_f32.loom"
+  LIBRARIES
+    "qwen3_vl/residual_add_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_residual_add_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_rotary_embedding_test_module
+  SRCS
+    "testdata/qwen3_vl/rotary_embedding.loom"
+  LIBRARIES
+    "qwen3_vl/rotary_embedding.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_rotary_embedding_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_rmsnorm_test_module
+  SRCS
+    "testdata/qwen3_vl/rmsnorm.loom"
+  LIBRARIES
+    "qwen3_vl/rmsnorm.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_rmsnorm_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_rmsnorm_rotary_test_module
+  SRCS
+    "testdata/qwen3_vl/rmsnorm_rotary.loom"
+  LIBRARIES
+    "qwen3_vl/rmsnorm_rotary.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_rmsnorm_rotary_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_selected_hidden_pack_test_module
+  SRCS
+    "testdata/qwen3_vl/selected_hidden_pack.loom"
+  LIBRARIES
+    "qwen3_vl/selected_hidden_pack.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_selected_hidden_pack_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_silu_gate_f32_test_module
+  SRCS
+    "testdata/qwen3_vl/silu_gate_f32.loom"
+  LIBRARIES
+    "qwen3_vl/silu_gate_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_silu_gate_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    qwen3_vl_token_embedding_test_module
+  SRCS
+    "testdata/qwen3_vl/token_embedding.loom"
+  LIBRARIES
+    "qwen3_vl/token_embedding.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_token_embedding_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    sampler_cfg_denoise_f32_test_module
+  SRCS
+    "testdata/sampler/cfg_denoise_f32.loom"
+  LIBRARIES
+    "sampler/cfg_denoise_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "sampler_cfg_denoise_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    sampler_euler_step_f32_test_module
+  SRCS
+    "testdata/sampler/euler_step_f32.loom"
+  LIBRARIES
+    "sampler/euler_step_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "sampler_euler_step_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    sampler_noise_f32_test_module
+  SRCS
+    "testdata/sampler/noise_f32.loom"
+  LIBRARIES
+    "sampler/noise_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "sampler_noise_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    tensor_transpose_bf16_test_module
+  SRCS
+    "testdata/tensor/transpose_bf16.loom"
+  LIBRARIES
+    "tensor/transpose_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "tensor_transpose_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv1x1_bias_bf16_wmma_test_module
+  SRCS
+    "testdata/vae/conv1x1_bias_bf16_wmma.loom"
+  LIBRARIES
+    "vae/conv1x1_bias_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv1x1_bias_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv1x1_bias_f32_test_module
+  SRCS
+    "testdata/vae/conv1x1_bias_f32.loom"
+  LIBRARIES
+    "vae/conv1x1_bias_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv1x1_bias_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv1x1_bf16_wmma_inplace_padded_test_module
+  SRCS
+    "testdata/vae/conv1x1_bf16_wmma_inplace_padded.loom"
+  LIBRARIES
+    "vae/conv1x1_bf16_wmma_inplace_padded.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv1x1_bf16_wmma_inplace_padded_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv_bias_epilogue_bf16_test_module
+  SRCS
+    "testdata/vae/conv_bias_epilogue_bf16.loom"
+  LIBRARIES
+    "vae/conv_bias_epilogue_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv_bias_epilogue_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_compact_channels_bf16_test_module
+  SRCS
+    "testdata/vae/compact_channels_bf16.loom"
+  LIBRARIES
+    "vae/compact_channels_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_compact_channels_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv3x3_bias_bf16_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_bf16.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_bf16_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -35,6 +1610,366 @@ loom_link_module(
     "archive"
   OUTPUT
     "vae_conv3x3_bias_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv3x3_bias_packed_block_f32_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_packed_block_f32.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_packed_block_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_packed_block_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv3x3_bias_packed_bf16_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_packed_bf16.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_packed_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_packed_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv3x3_bias_packed_f32_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_packed_f32.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_packed_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_packed_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_decode_nearest_f32_test_module
+  SRCS
+    "testdata/vae/decode_nearest_f32.loom"
+  LIBRARIES
+    "vae/decode_nearest_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_decode_nearest_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_flux2_affine_pixel_shuffle_bf16_test_module
+  SRCS
+    "testdata/vae/flux2_affine_pixel_shuffle_bf16.loom"
+  LIBRARIES
+    "vae/flux2_affine_pixel_shuffle_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_flux2_affine_pixel_shuffle_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_flux2_affine_pixel_shuffle_f32_test_module
+  SRCS
+    "testdata/vae/flux2_affine_pixel_shuffle_f32.loom"
+  LIBRARIES
+    "vae/flux2_affine_pixel_shuffle_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_flux2_affine_pixel_shuffle_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_bf16_test_module
+  SRCS
+    "testdata/vae/group_norm_bf16.loom"
+  LIBRARIES
+    "vae/group_norm_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_f32_test_module
+  SRCS
+    "testdata/vae/group_norm_f32.loom"
+  LIBRARIES
+    "vae/group_norm_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_apply_bf16_test_module
+  SRCS
+    "testdata/vae/group_norm_apply_bf16.loom"
+  LIBRARIES
+    "vae/group_norm_apply_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_apply_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_silu_conv3x3_bias_bf16_test_module
+  SRCS
+    "testdata/vae/group_norm_silu_conv3x3_bias_bf16.loom"
+  LIBRARIES
+    "vae/group_norm_silu_conv3x3_bias_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_oc8_f32_test_module
+  SRCS
+    "testdata/vae/group_norm_oc8_f32.loom"
+  LIBRARIES
+    "vae/group_norm_oc8_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_oc8_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_im2col3x3_bf16_test_module
+  SRCS
+    "testdata/vae/im2col3x3_bf16.loom"
+  LIBRARIES
+    "vae/im2col3x3_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_im2col3x3_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_group_norm_oc16_f32_test_module
+  SRCS
+    "testdata/vae/group_norm_oc16_f32.loom"
+  LIBRARIES
+    "vae/group_norm_oc16_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_group_norm_oc16_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_pack_conv3x3_weight_f32_test_module
+  SRCS
+    "testdata/vae/pack_conv3x3_weight_f32.loom"
+  LIBRARIES
+    "vae/pack_conv3x3_weight_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_pack_conv3x3_weight_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_pack_upsample_conv3x3_weight_f32_bf16_test_module
+  SRCS
+    "testdata/vae/pack_upsample_conv3x3_weight_f32_bf16.loom"
+  LIBRARIES
+    "vae/pack_upsample_conv3x3_weight_f32_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_spatial_attention_f32_test_module
+  SRCS
+    "testdata/vae/spatial_attention_f32.loom"
+  LIBRARIES
+    "vae/spatial_attention_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_spatial_attention_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_spatial_attention_online_bf16_wmma_test_module
+  SRCS
+    "testdata/vae/spatial_attention_online_bf16_wmma.loom"
+  LIBRARIES
+    "vae/spatial_attention_online_bf16_wmma.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_spatial_attention_online_bf16_wmma_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_spatial_attention_vec2_f32_test_module
+  SRCS
+    "testdata/vae/spatial_attention_vec2_f32.loom"
+  LIBRARIES
+    "vae/spatial_attention_vec2_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_spatial_attention_vec2_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_spatial_attention_vec8_bf16_test_module
+  SRCS
+    "testdata/vae/spatial_attention_vec8_bf16.loom"
+  LIBRARIES
+    "vae/spatial_attention_vec8_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_spatial_attention_vec8_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_tile_io_bf16_test_module
+  SRCS
+    "testdata/vae/tile_io_bf16.loom"
+  LIBRARIES
+    "vae/tile_io_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_tile_io_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_tile_io_f32_test_module
+  SRCS
+    "testdata/vae/tile_io_f32.loom"
+  LIBRARIES
+    "vae/tile_io_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_tile_io_f32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_upsample_conv3x3_bias_bf16_test_module
+  SRCS
+    "testdata/vae/upsample_conv3x3_bias_bf16.loom"
+  LIBRARIES
+    "vae/upsample_conv3x3_bias_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_upsample_conv3x3_bias_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_upsample_conv3x3_bias_parity_bf16_test_module
+  SRCS
+    "testdata/vae/upsample_conv3x3_bias_parity_bf16.loom"
+  LIBRARIES
+    "vae/upsample_conv3x3_bias_parity_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_upsample_conv3x3_bias_parity_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_upsample_conv3x3_bias_f32_test_module
+  SRCS
+    "testdata/vae/upsample_conv3x3_bias_f32.loom"
+  LIBRARIES
+    "vae/upsample_conv3x3_bias_f32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_upsample_conv3x3_bias_f32_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -328,7 +2263,7 @@ iree_native_test(
   NAME
     "attention_qk_scores_all_heads_bf16_f32_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -346,7 +2281,7 @@ iree_native_test(
   NAME
     "attention_softmax_all_heads_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_softmax_all_heads_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -364,7 +2299,7 @@ iree_native_test(
   NAME
     "attention_pv_all_heads_bf16_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_pv_all_heads_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -382,7 +2317,7 @@ iree_native_test(
   NAME
     "elementwise_add_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_f32_test_module.loom}}"
     "--benchmark=@id4_elementwise_add_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -397,7 +2332,7 @@ iree_native_test(
   NAME
     "elementwise_add_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_f32_test_module.loom}}"
     "--benchmark=@id4_elementwise_add_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -412,7 +2347,7 @@ iree_native_test(
   NAME
     "elementwise_add_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_bf16_test_module.loom}}"
     "--benchmark=@id4_elementwise_add_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -427,7 +2362,7 @@ iree_native_test(
   NAME
     "elementwise_add_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_bf16_test_module.loom}}"
     "--benchmark=@id4_elementwise_add_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -442,7 +2377,7 @@ iree_native_test(
   NAME
     "elementwise_cast_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_cast_test_module.loom}}"
     "--benchmark=@id4_elementwise_cast_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -457,7 +2392,7 @@ iree_native_test(
   NAME
     "elementwise_cast_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_cast_test_module.loom}}"
     "--benchmark=@id4_elementwise_cast_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -472,7 +2407,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_bf16_linear_rhs_tile_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -488,7 +2423,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_bf16_linear_rhs_tile_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -504,7 +2439,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -520,7 +2455,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_linear_rhs_tile_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -536,7 +2471,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -552,7 +2487,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -568,7 +2503,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -584,7 +2519,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_max_finite_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite"
     "--dry-run"
     "--output-format=jsonl"
@@ -600,7 +2535,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -616,7 +2551,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -632,7 +2567,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -648,7 +2583,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite"
     "--dry-run"
     "--output-format=jsonl"
@@ -664,7 +2599,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -680,7 +2615,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -696,7 +2631,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -712,7 +2647,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite"
     "--dry-run"
     "--output-format=jsonl"
@@ -728,7 +2663,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -744,7 +2679,7 @@ iree_native_test(
   NAME
     "ideogram4_adaln_split_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/adaln_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_adaln_split_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_adaln_split_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -759,7 +2694,7 @@ iree_native_test(
   NAME
     "ideogram4_adaln_split_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/adaln_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_adaln_split_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_adaln_split_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -774,7 +2709,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -791,7 +2726,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -808,7 +2743,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -825,7 +2760,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_cond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_f32_cond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -842,7 +2777,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -859,7 +2794,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_f32_uniform_softmax_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_f32_uniform_softmax_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -876,7 +2811,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -893,7 +2828,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_uniform_softmax_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_uniform_softmax_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -910,7 +2845,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_uncond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_uncond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -927,7 +2862,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_cond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_cond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -944,7 +2879,7 @@ iree_native_test(
   NAME
     "attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -962,7 +2897,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -982,7 +2917,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset"
     "--dry-run"
     "--output-format=jsonl"
@@ -1002,7 +2937,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1022,7 +2957,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1042,7 +2977,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -1062,7 +2997,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1082,7 +3017,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1102,7 +3037,7 @@ iree_native_test(
   NAME
     "attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1120,7 +3055,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_softmax_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_softmax_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1140,7 +3075,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1160,7 +3095,7 @@ iree_native_test(
   NAME
     "attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1178,7 +3113,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1198,7 +3133,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1218,7 +3153,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_input_pack_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_condition_input_pack_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1236,7 +3171,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_pack_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_condition_rmsnorm_pack_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1254,7 +3189,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_project_bias_indicator_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_project_bias_indicator_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_project_bias_indicator_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_condition_project_bias_indicator_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1273,7 +3208,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_condition_rmsnorm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1290,7 +3225,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_f32_ideogram_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_condition_rmsnorm_f32_ideogram_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -1307,7 +3242,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -1324,7 +3259,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_silu_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_silu"
     "--dry-run"
     "--output-format=jsonl"
@@ -1341,7 +3276,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_adaln_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_adaln_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1358,7 +3293,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -1375,7 +3310,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_silu_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_silu"
     "--dry-run"
     "--output-format=jsonl"
@@ -1392,7 +3327,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1409,7 +3344,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_f32_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -1426,7 +3361,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_silu_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_f32_silu"
     "--dry-run"
     "--output-format=jsonl"
@@ -1443,7 +3378,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_adaln_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_f32_adaln_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1460,7 +3395,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_adaln_modulation_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_bf16_f32_adaln_modulation_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1477,7 +3412,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_fp8_f32_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -1494,7 +3429,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_silu_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_fp8_f32_silu"
     "--dry-run"
     "--output-format=jsonl"
@@ -1511,7 +3446,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_adaln_modulation_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_dense_bias_fp8_f32_adaln_modulation_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1528,7 +3463,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_pack_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_pack_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1546,7 +3481,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_pack_f32_bf16_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_pack_f32_bf16_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1564,7 +3499,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_indicator_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1582,7 +3517,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_f32_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_indicator_bf16_f32_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1600,7 +3535,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_capacity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_indicator_bf16_capacity"
     "--dry-run"
     "--output-format=jsonl"
@@ -1619,7 +3554,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_condition_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_indicator_bf16_condition_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1638,7 +3573,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_image_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_indicator_bf16_image_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1657,7 +3592,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1678,7 +3613,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_uncond_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_bf16_f32_uncond_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -1699,7 +3634,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_patchified_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_bf16_f32_patchified_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -1720,7 +3655,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1741,7 +3676,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -1762,7 +3697,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_patchified_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_patchified_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -1783,7 +3718,7 @@ iree_native_test(
   NAME
     "ideogram4_head_rmsnorm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/head_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_head_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_head_rmsnorm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1800,7 +3735,7 @@ iree_native_test(
   NAME
     "ideogram4_head_rmsnorm_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/head_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_head_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_head_rmsnorm_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1817,7 +3752,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1837,7 +3772,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_ic4_oc4_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_ic4_oc4_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1859,7 +3794,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_f32_flux2_post_quant_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_f32_flux2_post_quant_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1879,7 +3814,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1896,7 +3831,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1913,7 +3848,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_f32_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -1930,7 +3865,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -2875,7 +4810,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -2897,7 +4832,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -2919,7 +4854,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -2983,7 +4918,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3005,7 +4940,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3027,7 +4962,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3153,7 +5088,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3175,7 +5110,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3197,7 +5132,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3261,7 +5196,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3283,7 +5218,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3305,7 +5240,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_flux2_tile_residual_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_flux2_tile_residual_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3385,7 +5320,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3402,7 +5337,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rounded_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_rounded_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3422,7 +5357,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_matches_scalar_medium_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_rgb_f32_matches_scalar_medium"
     "--dry-run"
     "--output-format=jsonl"
@@ -3442,7 +5377,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_wmma_matches_scalar_medium_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_rgb_f32_wmma_matches_scalar_medium"
     "--dry-run"
     "--output-format=jsonl"
@@ -3462,7 +5397,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_flux2_final_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_rgb_f32_flux2_final_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3482,7 +5417,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_wmma_flux2_final_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_rgb_f32_wmma_flux2_final_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3502,7 +5437,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_flux2_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3519,7 +5454,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3536,7 +5471,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3553,7 +5488,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_rhs_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_rhs_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3570,7 +5505,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_rhs_f32_bf16_flux2_conv_in_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--benchmark=@id4_vae_pack_conv3x3_weight_rhs_f32_bf16_flux2_conv_in_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3587,7 +5522,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3604,7 +5539,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3621,7 +5556,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3638,7 +5573,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3655,7 +5590,7 @@ iree_native_test(
   NAME
     "vae_group_norm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3677,7 +5612,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3699,7 +5634,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3723,7 +5658,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_2d_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3747,7 +5682,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3771,7 +5706,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3795,7 +5730,7 @@ iree_native_test(
   NAME
     "vae_group_norm_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3817,7 +5752,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3839,7 +5774,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3863,7 +5798,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_2d_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_2d_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3887,7 +5822,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -3911,7 +5846,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3935,7 +5870,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3956,7 +5891,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_onepass_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -3977,7 +5912,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_nonuniform_equivalence_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_onepass_bf16_nonuniform_equivalence"
     "--dry-run"
     "--output-format=jsonl"
@@ -3998,7 +5933,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_tail_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_tail_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4019,7 +5954,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_256_channel_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_256_channel_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4040,7 +5975,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4061,7 +5996,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_256x256x512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_256x256x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4082,7 +6017,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_512x512x512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4103,7 +6038,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4124,7 +6059,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_512x512x256_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4145,7 +6080,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4166,7 +6101,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4187,7 +6122,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4208,7 +6143,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4233,7 +6168,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4258,7 +6193,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc4_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc4_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4283,7 +6218,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4308,7 +6243,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4333,7 +6268,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -4358,7 +6293,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -4383,7 +6318,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc8_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc8_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4408,7 +6343,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -4433,7 +6368,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4458,7 +6393,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4483,7 +6418,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc16_flat_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc16_flat_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4508,7 +6443,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4533,7 +6468,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bf16_wmma_inplace_padded.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bf16_wmma_inplace_padded_test_module.loom}}"
     "--benchmark=@id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4550,7 +6485,7 @@ iree_native_test(
   NAME
     "vae_compact_channels_bf16_v8_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/compact_channels_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_compact_channels_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_compact_channels_bf16_v8_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4568,7 +6503,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4593,7 +6528,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_add_bf16_wmma_oc128_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_conv3x3_bias_add_bf16_wmma_oc128_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4618,7 +6553,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_add_padded_bf16_wmma_oc128_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_conv3x3_bias_add_padded_bf16_wmma_oc128_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4643,7 +6578,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_flux2_1024x1024_256x128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_flux2_1024x1024_256x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4668,7 +6603,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_f32_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -4687,7 +6622,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_f32_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_f32_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_f32_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -4706,7 +6641,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec2_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -4725,7 +6660,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec2_f32_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -4744,7 +6679,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_nonuniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec2_f32_nonuniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -4763,7 +6698,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec8_bf16_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -4782,7 +6717,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec8_bf16_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -4801,7 +6736,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4820,7 +6755,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_query2_vec8_bf16_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -4839,7 +6774,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_query2_vec8_bf16_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -4858,7 +6793,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence"
     "--dry-run"
     "--output-format=jsonl"
@@ -4877,7 +6812,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4896,7 +6831,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_online_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_online_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4913,7 +6848,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4930,7 +6865,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4951,7 +6886,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4972,7 +6907,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc4_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc4_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -4994,7 +6929,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5016,7 +6951,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5038,7 +6973,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5060,7 +6995,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5082,7 +7017,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5103,7 +7038,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5125,7 +7060,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5147,7 +7082,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5169,7 +7104,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5191,7 +7126,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5213,7 +7148,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5235,7 +7170,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5257,7 +7192,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium"
     "--dry-run"
     "--output-format=jsonl"
@@ -5279,7 +7214,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5301,7 +7236,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5322,7 +7257,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5343,7 +7278,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5364,7 +7299,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5385,7 +7320,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5406,7 +7341,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level2_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level2_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5427,7 +7362,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level1_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level1_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5448,7 +7383,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5469,7 +7404,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5490,7 +7425,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_16_to_32_512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_16_to_32_512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5511,7 +7446,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_32_to_64_512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_32_to_64_512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5532,7 +7467,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_64_to_128_256_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_64_to_128_256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5553,7 +7488,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5574,7 +7509,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32_to_64_512_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32_to_64_512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5595,7 +7530,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64_to_128_256_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64_to_128_256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5616,7 +7551,7 @@ iree_native_test(
   NAME
     "vae_decode_nearest_f32_scale2_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_decode_nearest_f32_test_module.loom}}"
     "--benchmark=@id4_vae_decode_nearest_f32_scale2"
     "--dry-run"
     "--output-format=jsonl"
@@ -5645,7 +7580,7 @@ iree_native_test(
   NAME
     "vae_decode_nearest_f32_flux2_tile_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_decode_nearest_f32_test_module.loom}}"
     "--benchmark=@id4_vae_decode_nearest_f32_flux2_tile"
     "--dry-run"
     "--output-format=jsonl"
@@ -5674,7 +7609,7 @@ iree_native_test(
   NAME
     "vae_tile_clear_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--benchmark=@id4_vae_tile_clear_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5705,7 +7640,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_f32_x_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--benchmark=@id4_vae_tile_extract_f32_x"
     "--dry-run"
     "--output-format=jsonl"
@@ -5736,7 +7671,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_bf16_x_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_tile_extract_bf16_x"
     "--dry-run"
     "--output-format=jsonl"
@@ -5759,7 +7694,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_f32_y_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--benchmark=@id4_vae_tile_extract_f32_y"
     "--dry-run"
     "--output-format=jsonl"
@@ -5790,7 +7725,7 @@ iree_native_test(
   NAME
     "vae_tile_merge_f32_origin_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--benchmark=@id4_vae_tile_merge_f32_origin"
     "--dry-run"
     "--output-format=jsonl"
@@ -5821,7 +7756,7 @@ iree_native_test(
   NAME
     "vae_tile_merge_f32_left_overlap_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--benchmark=@id4_vae_tile_merge_f32_left_overlap"
     "--dry-run"
     "--output-format=jsonl"
@@ -5852,7 +7787,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_f32_test_module.loom}}"
     "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5874,7 +7809,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_f32_flux2_tile_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_f32_test_module.loom}}"
     "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_f32_flux2_tile"
     "--dry-run"
     "--output-format=jsonl"
@@ -5896,7 +7831,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5918,7 +7853,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile"
     "--dry-run"
     "--output-format=jsonl"
@@ -5940,7 +7875,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5959,7 +7894,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_f32_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5978,7 +7913,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_f32_cond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5997,7 +7932,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_f32_cond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6016,7 +7951,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6035,7 +7970,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6054,7 +7989,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6073,7 +8008,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6092,7 +8027,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6111,7 +8046,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6130,7 +8065,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6149,7 +8084,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6168,7 +8103,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6187,7 +8122,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6206,7 +8141,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6225,7 +8160,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6244,7 +8179,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6263,7 +8198,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6282,7 +8217,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6301,7 +8236,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_unit_dot_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_unit_dot"
     "--dry-run"
     "--output-format=jsonl"
@@ -6319,7 +8254,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6337,7 +8272,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6355,7 +8290,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_condition_projection_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_bf16_wmma_condition_projection_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6373,7 +8308,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6391,7 +8326,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_qkv_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_qkv_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6409,7 +8344,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_mlp_down_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_mlp_down_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6427,7 +8362,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6445,7 +8380,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6463,7 +8398,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6481,7 +8416,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_f32_wmma_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6499,7 +8434,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_cond_proj_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_fp8_bf16_f32_wmma_cond_proj_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6517,7 +8452,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6535,7 +8470,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6553,7 +8488,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_layout"
     "--dry-run"
     "--output-format=jsonl"
@@ -6571,7 +8506,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_k32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_layout_k32"
     "--dry-run"
     "--output-format=jsonl"
@@ -6589,7 +8524,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_k4608_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_layout_k4608"
     "--dry-run"
     "--output-format=jsonl"
@@ -6607,7 +8542,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k32"
     "--dry-run"
     "--output-format=jsonl"
@@ -6625,7 +8560,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp"
     "--dry-run"
     "--output-format=jsonl"
@@ -6643,7 +8578,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k4608_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k4608"
     "--dry-run"
     "--output-format=jsonl"
@@ -6661,7 +8596,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_tail_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_tail_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6680,7 +8615,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_tail_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_tail_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6699,7 +8634,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6717,7 +8652,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6735,7 +8670,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6753,7 +8688,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6771,7 +8706,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6789,7 +8724,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6807,7 +8742,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_up_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_up_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6825,7 +8760,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6843,7 +8778,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -6861,7 +8796,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -6879,7 +8814,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6897,7 +8832,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6915,7 +8850,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6933,7 +8868,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6951,7 +8886,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_up_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_up_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6969,7 +8904,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_up_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_up_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -6987,7 +8922,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7005,7 +8940,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7023,7 +8958,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -7041,7 +8976,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7059,7 +8994,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7077,7 +9012,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7095,7 +9030,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7113,7 +9048,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_up_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_up_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7131,7 +9066,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_up_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_up_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7149,7 +9084,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7167,7 +9102,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7185,7 +9120,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_tail_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7204,7 +9139,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_tail_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -7223,7 +9158,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_token32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_bf16_tail_token32"
     "--dry-run"
     "--output-format=jsonl"
@@ -7242,7 +9177,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_qkv_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_uncond_qkv_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7260,7 +9195,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7278,7 +9213,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7296,7 +9231,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_cond_proj_128_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bf16_f32_wmma_cond_proj_128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7314,7 +9249,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_pack_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7332,7 +9267,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_padded_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -7350,7 +9285,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7368,7 +9303,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7386,7 +9321,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_bf16_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_unpack_bf16_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -7404,7 +9339,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7422,7 +9357,7 @@ iree_native_test(
   NAME
     "ideogram4_packed_value_unpack_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_packed_value_unpack_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7440,7 +9375,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_f32_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_unpack_f32_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -7458,7 +9393,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7476,7 +9411,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7493,7 +9428,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_ideogram_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_f32_ideogram_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -7510,7 +9445,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7527,7 +9462,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_cond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_f32_cond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7544,7 +9479,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_linear_input_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_linear_input_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7561,7 +9496,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_linear_input_bf16_uncond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_gate_up_silu_linear_input_bf16_uncond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7578,7 +9513,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_up_silu_product_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7596,7 +9531,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_wmma_uncond_1024_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_up_silu_product_bf16_wmma_uncond_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7614,7 +9549,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_tail_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_tail_test_module.loom}}"
     "--benchmark=@id4_ideogram4_mlp_up_silu_product_bf16_tail_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7633,7 +9568,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7652,7 +9587,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7671,7 +9606,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7690,7 +9625,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7709,7 +9644,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7726,7 +9661,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7743,7 +9678,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7762,7 +9697,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_linear_bias_fp8_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7781,7 +9716,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7797,7 +9732,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7813,7 +9748,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7829,7 +9764,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7845,7 +9780,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_input_token_major_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7861,7 +9796,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7877,7 +9812,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7895,7 +9830,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7913,7 +9848,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7931,7 +9866,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7949,7 +9884,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -7966,7 +9901,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -7983,7 +9918,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8000,7 +9935,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8017,7 +9952,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -8034,7 +9969,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8051,7 +9986,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8068,7 +10003,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8084,7 +10019,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8100,7 +10035,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8116,7 +10051,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8132,7 +10067,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8148,7 +10083,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8164,7 +10099,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_split_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_split_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_split_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8180,7 +10115,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_split_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_split_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_split_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8196,7 +10131,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8213,7 +10148,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8230,7 +10165,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8248,7 +10183,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8266,7 +10201,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8284,7 +10219,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -8302,7 +10237,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8320,7 +10255,7 @@ iree_native_test(
   NAME
     "ideogram4_rotary_apply_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rotary_apply_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rotary_apply_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rotary_apply_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8337,7 +10272,7 @@ iree_native_test(
   NAME
     "ideogram4_rotary_apply_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rotary_apply_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rotary_apply_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_rotary_apply_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8354,7 +10289,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8369,7 +10304,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_f32_adaln_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_f32_adaln_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8384,7 +10319,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8399,7 +10334,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_bf16_adaln_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_bf16_adaln_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8414,7 +10349,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_product_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8432,7 +10367,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_padded_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_product_bf16_padded"
     "--dry-run"
     "--output-format=jsonl"
@@ -8450,7 +10385,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_structured128_mlp_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_silu_product_bf16_structured128_mlp_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8468,7 +10403,7 @@ iree_native_test(
   NAME
     "ideogram4_timestep_embedding_f32_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/timestep_embedding_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_timestep_embedding_f32_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -8483,7 +10418,7 @@ iree_native_test(
   NAME
     "ideogram4_timestep_embedding_f32_ideogram_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/timestep_embedding_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_timestep_embedding_f32_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -8498,7 +10433,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_unpatchify_scale_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8517,7 +10452,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_f32_conditioned_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_f32_test_module.loom}}"
     "--benchmark=@id4_ideogram4_unpatchify_scale_f32_conditioned_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -8536,7 +10471,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_packed_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_packed_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_packed_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_unpatchify_scale_packed_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8553,7 +10488,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_packed_bf16_two_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_packed_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_packed_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_unpatchify_scale_packed_bf16_two_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -8570,7 +10505,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_cfg_denoise_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8585,7 +10520,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_full_latent_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_cfg_denoise_f32_full_latent"
     "--dry-run"
     "--output-format=jsonl"
@@ -8600,7 +10535,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_euler_step_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8615,7 +10550,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_in_place_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_euler_step_f32_in_place"
     "--dry-run"
     "--output-format=jsonl"
@@ -8630,7 +10565,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_full_latent_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_euler_step_f32_full_latent"
     "--dry-run"
     "--output-format=jsonl"
@@ -8645,7 +10580,7 @@ iree_native_test(
   NAME
     "sampler_noise_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_noise_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -8660,7 +10595,7 @@ iree_native_test(
   NAME
     "sampler_noise_f32_full_latent_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
     "--benchmark=@id4_sampler_noise_f32_full_latent"
     "--dry-run"
     "--output-format=jsonl"
@@ -8675,7 +10610,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_f32_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -8695,7 +10630,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -8715,7 +10650,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_f32_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -8735,7 +10670,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -8755,7 +10690,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_grouped_query_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_f32_grouped_query"
     "--dry-run"
     "--output-format=jsonl"
@@ -8775,7 +10710,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_grouped_query_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_grouped_query"
     "--dry-run"
     "--output-format=jsonl"
@@ -8795,7 +10730,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_padded_context_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_padded_context"
     "--dry-run"
     "--output-format=jsonl"
@@ -8815,7 +10750,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -8835,7 +10770,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_single_token_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_single_token"
     "--dry-run"
     "--output-format=jsonl"
@@ -8855,7 +10790,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_uniform_softmax_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_uniform_softmax"
     "--dry-run"
     "--output-format=jsonl"
@@ -8875,7 +10810,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_grouped_query_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_grouped_query"
     "--dry-run"
     "--output-format=jsonl"
@@ -8895,7 +10830,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -8915,7 +10850,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_qwen_451_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_qwen_451"
     "--dry-run"
     "--output-format=jsonl"
@@ -8935,7 +10870,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_single_tile_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_single_tile"
     "--dry-run"
     "--output-format=jsonl"
@@ -8955,7 +10890,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_grouped_query_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_grouped_query"
     "--dry-run"
     "--output-format=jsonl"
@@ -8975,7 +10910,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -8995,7 +10930,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_qwen_451_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_qwen_451"
     "--dry-run"
     "--output-format=jsonl"
@@ -9015,7 +10950,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9035,7 +10970,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_ones_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_ones"
     "--dry-run"
     "--output-format=jsonl"
@@ -9055,7 +10990,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_softmax_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9075,7 +11010,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_softmax_bf16_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9095,7 +11030,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9115,7 +11050,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_qwen_full_tile_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_qwen_full_tile_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9135,7 +11070,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_short_prompt_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_short_prompt_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9155,7 +11090,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_short_prompt_ones_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_short_prompt_ones"
     "--dry-run"
     "--output-format=jsonl"
@@ -9175,7 +11110,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_padded_192_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_qk_padded_192_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9195,7 +11130,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9215,7 +11150,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9235,7 +11170,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9255,7 +11190,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9275,7 +11210,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_sequence_padded_171_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_sequence_padded_171_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9295,7 +11230,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_sequence_short_prompt_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_sequence_short_prompt_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9315,7 +11250,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -9335,7 +11270,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform"
     "--dry-run"
     "--output-format=jsonl"
@@ -9355,7 +11290,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9373,7 +11308,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9391,7 +11326,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_transpose_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9409,7 +11344,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9427,7 +11362,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_padded_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_padded"
     "--dry-run"
     "--output-format=jsonl"
@@ -9445,7 +11380,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_qwen_value_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_qwen_value"
     "--dry-run"
     "--output-format=jsonl"
@@ -9463,7 +11398,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9480,7 +11415,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9497,7 +11432,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9514,7 +11449,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9531,7 +11466,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32"
     "--dry-run"
     "--output-format=jsonl"
@@ -9548,7 +11483,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9566,7 +11501,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9584,7 +11519,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9602,7 +11537,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9620,7 +11555,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -9638,7 +11573,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -9656,7 +11591,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -9674,7 +11609,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9692,7 +11627,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9710,7 +11645,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -9728,7 +11663,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9746,7 +11681,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -9764,7 +11699,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9781,7 +11716,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9798,7 +11733,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9815,7 +11750,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9832,7 +11767,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9849,7 +11784,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9866,7 +11801,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -9883,7 +11818,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_qwen_value_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_qwen_value_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -9900,7 +11835,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9917,7 +11852,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -9934,7 +11869,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_short_prompt_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_short_prompt_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -9951,7 +11886,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_qwen_value_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_qwen_value_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -9968,7 +11903,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32"
     "--dry-run"
     "--output-format=jsonl"
@@ -9985,7 +11920,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32"
     "--dry-run"
     "--output-format=jsonl"
@@ -10002,7 +11937,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32"
     "--dry-run"
     "--output-format=jsonl"
@@ -10019,7 +11954,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32"
     "--dry-run"
     "--output-format=jsonl"
@@ -10036,7 +11971,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10053,7 +11988,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10070,7 +12005,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_kv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_kv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10087,7 +12022,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10104,7 +12039,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10121,7 +12056,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10138,7 +12073,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10155,7 +12090,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10172,7 +12107,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10189,7 +12124,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10206,7 +12141,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10223,7 +12158,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10240,7 +12175,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10258,7 +12193,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10276,7 +12211,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10294,7 +12229,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10312,7 +12247,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10330,7 +12265,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10347,7 +12282,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10364,7 +12299,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10381,7 +12316,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -10398,7 +12333,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10415,7 +12350,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10432,7 +12367,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10449,7 +12384,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10466,7 +12401,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10483,7 +12418,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10500,7 +12435,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10517,7 +12452,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10534,7 +12469,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10551,7 +12486,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_nonzero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
@@ -10568,7 +12503,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10585,7 +12520,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10602,7 +12537,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10619,7 +12554,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10636,7 +12571,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10653,7 +12588,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10670,7 +12605,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_qwen_value_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_qwen_value_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10687,7 +12622,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10704,7 +12639,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10721,7 +12656,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10738,7 +12673,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_projection_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_projection_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10755,7 +12690,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10772,7 +12707,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10789,7 +12724,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10806,7 +12741,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10823,7 +12758,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -10840,7 +12775,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_512"
     "--dry-run"
     "--output-format=jsonl"
@@ -10857,7 +12792,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_512"
     "--dry-run"
     "--output-format=jsonl"
@@ -10874,7 +12809,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_512"
     "--dry-run"
     "--output-format=jsonl"
@@ -10891,7 +12826,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_512"
     "--dry-run"
     "--output-format=jsonl"
@@ -10908,7 +12843,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10925,7 +12860,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10942,7 +12877,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -10959,7 +12894,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10976,7 +12911,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -10993,7 +12928,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -11010,7 +12945,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -11027,7 +12962,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11044,7 +12979,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11061,7 +12996,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11078,7 +13013,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11095,7 +13030,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11112,7 +13047,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11129,7 +13064,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -11146,7 +13081,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11163,7 +13098,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11180,7 +13115,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11197,7 +13132,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_vae_16x16_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_vae_16x16_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -11214,7 +13149,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_vae_32x32_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_matrix_bf16_f32_wmma_m32n64_vae_32x32_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -11231,7 +13166,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11248,7 +13183,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11265,7 +13200,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_silu_curve_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_silu_curve"
     "--dry-run"
     "--output-format=jsonl"
@@ -11282,7 +13217,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_silu_curve_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_silu_curve"
     "--dry-run"
     "--output-format=jsonl"
@@ -11299,7 +13234,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -11316,7 +13251,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -11333,7 +13268,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11350,7 +13285,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11367,7 +13302,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -11384,7 +13319,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11401,7 +13336,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_silu_curve_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_silu_curve"
     "--dry-run"
     "--output-format=jsonl"
@@ -11418,7 +13353,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_zero_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_zero"
     "--dry-run"
     "--output-format=jsonl"
@@ -11435,7 +13370,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_1024_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_1024"
     "--dry-run"
     "--output-format=jsonl"
@@ -11452,7 +13387,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11469,7 +13404,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_short_prompt_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_short_prompt_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11486,7 +13421,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11503,7 +13438,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11520,7 +13455,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_prompt_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_prompt_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -11537,7 +13472,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11554,7 +13489,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -11571,7 +13506,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11589,7 +13524,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_bf16_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11607,7 +13542,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_bf16_padded_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_bf16_bf16_padded_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -11625,7 +13560,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_rows_bf16_bf16_copy_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy"
     "--dry-run"
     "--output-format=jsonl"
@@ -11643,7 +13578,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail"
     "--dry-run"
     "--output-format=jsonl"
@@ -11661,7 +13596,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -11679,7 +13614,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11695,7 +13630,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11711,7 +13646,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_fixture_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_fixture_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -11727,7 +13662,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_multi_partial_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_multi_partial"
     "--dry-run"
     "--output-format=jsonl"
@@ -11743,7 +13678,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_id4_text451_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_id4_text451"
     "--dry-run"
     "--output-format=jsonl"
@@ -11759,7 +13694,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_bf16_f32_id4_text451_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_condition_forward_bf16_f32_id4_text451"
     "--dry-run"
     "--output-format=jsonl"
@@ -11775,7 +13710,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11793,7 +13728,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major"
     "--dry-run"
     "--output-format=jsonl"
@@ -11811,7 +13746,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451"
     "--dry-run"
     "--output-format=jsonl"
@@ -11829,7 +13764,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rmsnorm_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11845,7 +13780,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rmsnorm_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11861,7 +13796,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rmsnorm_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -11877,7 +13812,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rotary_embedding_f32_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -11894,7 +13829,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_bf16_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rotary_embedding_bf16_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -11911,7 +13846,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_qwen_key_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rotary_embedding_f32_qwen_key_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -11928,7 +13863,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rotary_embedding_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -11945,7 +13880,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_rotary_bf16_identity_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm_rotary.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_rotary_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_rmsnorm_rotary_bf16_identity"
     "--dry-run"
     "--output-format=jsonl"
@@ -11962,7 +13897,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_silu_gate_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11978,7 +13913,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_silu_gate_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -11994,7 +13929,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_silu_gate_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -12010,7 +13945,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_bf16_qwen_shape_288_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_silu_gate_bf16_qwen_shape_288"
     "--dry-run"
     "--output-format=jsonl"
@@ -12026,7 +13961,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_residual_add_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12042,7 +13977,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_residual_add_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12058,7 +13993,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_rmsnorm_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_residual_add_rmsnorm_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12074,7 +14009,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_f32_qwen_slice_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_residual_add_f32_qwen_slice"
     "--dry-run"
     "--output-format=jsonl"
@@ -12090,7 +14025,7 @@ iree_native_test(
   NAME
     "tensor_transpose_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/tensor_transpose_bf16_test_module.loom}}"
     "--benchmark=@id4_tensor_transpose_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12107,7 +14042,7 @@ iree_native_test(
   NAME
     "tensor_transpose_bf16_vae_value_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/tensor_transpose_bf16_test_module.loom}}"
     "--benchmark=@id4_tensor_transpose_bf16_vae_value"
     "--dry-run"
     "--output-format=jsonl"
@@ -12124,7 +14059,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12141,7 +14076,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12158,7 +14093,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_tail_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_tail_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_tail_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12177,7 +14112,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_f32_qwen_projection_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_f32_qwen_projection_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -12194,7 +14129,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_1x1_layout_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_im2col3x3_bf16_1x1_layout"
     "--dry-run"
     "--output-format=jsonl"
@@ -12211,7 +14146,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_16x16_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_im2col3x3_bf16_16x16_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -12228,7 +14163,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_32x32_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_im2col3x3_bf16_32x32_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -12245,7 +14180,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv_bias_epilogue_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12261,7 +14196,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_add_epilogue_f32_bf16_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv_bias_add_epilogue_f32_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -12277,7 +14212,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_16x16_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -12293,7 +14228,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_32x32_c512_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--benchmark=@id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512"
     "--dry-run"
     "--output-format=jsonl"
@@ -12310,7 +14245,7 @@ iree_native_test(
   NAME
     "attention_qk_scores_all_heads_bf16_f32_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
@@ -12332,7 +14267,7 @@ iree_native_test(
   NAME
     "attention_softmax_all_heads_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_softmax_all_heads_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
@@ -12354,7 +14289,7 @@ iree_native_test(
   NAME
     "attention_pv_all_heads_bf16_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_pv_all_heads_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
@@ -12376,7 +14311,7 @@ iree_native_test(
   NAME
     "elementwise_add_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_f32_test_module.loom}}"
     "--case=@id4_elementwise_add_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.add.element_count=4"
@@ -12395,7 +14330,7 @@ iree_native_test(
   NAME
     "elementwise_add_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_f32_test_module.loom}}"
     "--case=@id4_elementwise_add_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.add.element_count=8388608"
@@ -12414,7 +14349,7 @@ iree_native_test(
   NAME
     "elementwise_add_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_bf16_test_module.loom}}"
     "--case=@id4_elementwise_add_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.add.element_count=4"
@@ -12433,7 +14368,7 @@ iree_native_test(
   NAME
     "elementwise_add_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/add_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_add_bf16_test_module.loom}}"
     "--case=@id4_elementwise_add_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.add.element_count=8388608"
@@ -12452,7 +14387,7 @@ iree_native_test(
   NAME
     "elementwise_cast_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_cast_test_module.loom}}"
     "--case=@id4_elementwise_cast_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.cast.element_count=4"
@@ -12471,7 +14406,7 @@ iree_native_test(
   NAME
     "elementwise_cast_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/elementwise_cast_test_module.loom}}"
     "--case=@id4_elementwise_cast_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.elementwise.cast.element_count=4"
@@ -12490,7 +14425,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_bf16_linear_rhs_tile_small_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.bf16_linear_rhs_tile.output_size=16"
@@ -12510,7 +14445,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_bf16_linear_rhs_tile_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.bf16_linear_rhs_tile.output_size=13824"
@@ -12530,7 +14465,7 @@ iree_native_test(
   NAME
     "parameter_bf16_linear_rhs_tile_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.bf16_linear_rhs_tile.output_size=12288"
@@ -12550,7 +14485,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_linear_rhs_tile_small_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_linear_rhs_tile.output_size=16"
@@ -12570,7 +14505,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_linear_rhs_tile.output_size=13824"
@@ -12590,7 +14525,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_linear_rhs_tile.output_size=12288"
@@ -12610,7 +14545,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=3"
@@ -12630,7 +14565,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_max_finite_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=2"
@@ -12650,7 +14585,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=13824"
@@ -12670,7 +14605,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=12288"
@@ -12690,7 +14625,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
@@ -12710,7 +14645,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
@@ -12730,7 +14665,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=13824"
@@ -12750,7 +14685,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=12288"
@@ -12770,7 +14705,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=128"
@@ -12790,7 +14725,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=128"
@@ -12810,7 +14745,7 @@ iree_native_test(
   NAME
     "parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_test_module.loom}}"
     "--case=@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile.output_size=12288"
@@ -12830,7 +14765,7 @@ iree_native_test(
   NAME
     "ideogram4_adaln_split_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/adaln_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_adaln_split_f32_test_module.loom}}"
     "--case=@id4_ideogram4_adaln_split_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.adaln_split.hidden_size=2"
@@ -12849,7 +14784,7 @@ iree_native_test(
   NAME
     "ideogram4_adaln_split_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/adaln_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_adaln_split_f32_test_module.loom}}"
     "--case=@id4_ideogram4_adaln_split_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.adaln_split.hidden_size=4608"
@@ -12868,7 +14803,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=1"
@@ -12889,7 +14824,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=3"
@@ -12910,7 +14845,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=4096"
@@ -12931,7 +14866,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_f32_cond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_f32_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_f32_cond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=4547"
@@ -12952,7 +14887,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=1"
@@ -12973,7 +14908,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_f32_uniform_softmax_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_f32_uniform_softmax_tail_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=3"
@@ -12994,7 +14929,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=1"
@@ -13015,7 +14950,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_uniform_softmax_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_uniform_softmax_tail_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=3"
@@ -13036,7 +14971,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_uncond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_uncond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=4096"
@@ -13057,7 +14992,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_query_block8_rounded_bf16_linear_input_cond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_query_block8_rounded_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_query_block8_rounded_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_attention_query_block8_rounded_bf16_linear_input_cond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_query_block8_rounded.token_count=4547"
@@ -13078,7 +15013,7 @@ iree_native_test(
   NAME
     "attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
@@ -13100,7 +15035,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
@@ -13124,7 +15059,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=32"
@@ -13148,7 +15083,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
@@ -13172,7 +15107,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=16"
@@ -13196,7 +15131,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=17"
@@ -13220,7 +15155,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=4096"
@@ -13244,7 +15179,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=4365"
@@ -13268,7 +15203,7 @@ iree_native_test(
   NAME
     "attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_softmax_all_heads_f32_bf16_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
@@ -13290,7 +15225,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_softmax_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_softmax_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
@@ -13314,7 +15249,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
@@ -13338,7 +15273,7 @@ iree_native_test(
   NAME
     "attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/attention/materialized_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
     "--case=@id4_attention_pv_all_heads_bf16_bf16_wmma_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
@@ -13360,7 +15295,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
@@ -13384,7 +15319,7 @@ iree_native_test(
   NAME
     "ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_blocked_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
@@ -13408,7 +15343,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_input_pack_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_condition_input_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.condition_input_pack.text_token_count=16"
@@ -13430,7 +15365,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_pack_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_condition_rmsnorm_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.condition_rmsnorm_pack.text_token_count=16"
@@ -13452,7 +15387,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_project_bias_indicator_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_project_bias_indicator_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_project_bias_indicator_f32_test_module.loom}}"
     "--case=@id4_ideogram4_condition_project_bias_indicator_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.condition_project_bias.text_token_count=3"
@@ -13475,7 +15410,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_condition_rmsnorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.condition_rmsnorm.token_count=1"
@@ -13496,7 +15431,7 @@ iree_native_test(
   NAME
     "ideogram4_condition_rmsnorm_f32_ideogram_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/condition_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_condition_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_condition_rmsnorm_f32_ideogram_slice_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.condition_rmsnorm.token_count=2"
@@ -13517,7 +15452,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_identity_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=4"
@@ -13538,7 +15473,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_silu_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_silu_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=4"
@@ -13559,7 +15494,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_adaln_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_adaln_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=4608"
@@ -13580,7 +15515,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_identity_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=4"
@@ -13601,7 +15536,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_silu_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_silu_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=4"
@@ -13622,7 +15557,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_bf16.input_size=512"
@@ -13643,7 +15578,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_f32_identity_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias.input_size=4"
@@ -13664,7 +15599,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_silu_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_f32_silu_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias.input_size=4"
@@ -13685,7 +15620,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_adaln_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_f32_adaln_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias.input_size=4608"
@@ -13706,7 +15641,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_bf16_f32_adaln_modulation_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_bf16_f32_adaln_modulation_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias.input_size=512"
@@ -13727,7 +15662,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_fp8_f32_identity_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_fp8.input_size=4"
@@ -13748,7 +15683,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_silu_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_fp8_f32_silu_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_fp8.input_size=4"
@@ -13769,7 +15704,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_adaln_modulation_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_fp8_f32_adaln_modulation_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_fp8.input_size=512"
@@ -13790,7 +15725,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_pack_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image_pack.token_count=2"
@@ -13812,7 +15747,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_pack_f32_bf16_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_pack_f32_bf16_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image_pack.token_count=4096"
@@ -13834,7 +15769,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator.token_count=2"
@@ -13856,7 +15791,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_f32_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_f32_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator.token_count=4096"
@@ -13878,7 +15813,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_capacity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_capacity_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator_bf16.valid_token_count=2"
@@ -13901,7 +15836,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_condition_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_condition_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator_bf16.valid_token_count=451"
@@ -13924,7 +15859,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_image_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_image_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator_bf16.valid_token_count=4096"
@@ -13947,7 +15882,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=2"
@@ -13972,7 +15907,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_uncond_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_bf16_f32_uncond_slice_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=2"
@@ -13997,7 +15932,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_bf16_f32_patchified_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_bf16_f32_patchified_channel_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=1"
@@ -14022,7 +15957,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_fp8_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=2"
@@ -14047,7 +15982,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_fp8_f32_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=2"
@@ -14072,7 +16007,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_patchified_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_fp8_f32_patchified_channel_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=1"
@@ -14097,7 +16032,7 @@ iree_native_test(
   NAME
     "ideogram4_head_rmsnorm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/head_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_head_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_head_rmsnorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.head_rmsnorm.token_count=1"
@@ -14118,7 +16053,7 @@ iree_native_test(
   NAME
     "ideogram4_head_rmsnorm_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/head_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_head_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_head_rmsnorm_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.head_rmsnorm.token_count=2"
@@ -14139,7 +16074,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias.width=2"
@@ -14163,7 +16098,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_ic4_oc4_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_ic4_oc4_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias.width=2"
@@ -14189,7 +16124,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_f32_flux2_post_quant_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_f32_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_f32_flux2_post_quant_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias.width=128"
@@ -14213,7 +16148,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias_wmma.pixel_count=32"
@@ -14234,7 +16169,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias_wmma.pixel_count=16384"
@@ -14255,7 +16190,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_f32_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias_wmma.pixel_count=32"
@@ -14276,7 +16211,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bias_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_bias_wmma.pixel_count=16384"
@@ -15405,7 +17340,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15431,7 +17366,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15457,7 +17392,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15533,7 +17468,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -15559,7 +17494,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -15585,7 +17520,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -15735,7 +17670,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15761,7 +17696,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15787,7 +17722,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -15863,7 +17798,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=256"
@@ -15889,7 +17824,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=256"
@@ -15915,7 +17850,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_flux2_tile_residual_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_block_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_block_f32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc64_packed_block_f32_flux2_tile_residual_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=256"
@@ -16011,7 +17946,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2"
@@ -16032,7 +17967,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rounded_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_rounded_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1"
@@ -16056,7 +17991,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_matches_scalar_medium_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_rgb_f32_matches_scalar_medium_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=4"
@@ -16080,7 +18015,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_wmma_matches_scalar_medium_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_rgb_f32_wmma_matches_scalar_medium_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=4"
@@ -16104,7 +18039,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_flux2_final_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_rgb_f32_flux2_final_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16128,7 +18063,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_rgb_f32_wmma_flux2_final_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_rgb_f32_wmma_flux2_final_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16152,7 +18087,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_flux2_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=512"
@@ -16173,7 +18108,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2"
@@ -16194,7 +18129,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=32"
@@ -16215,7 +18150,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_rhs_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_rhs_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2"
@@ -16236,7 +18171,7 @@ iree_native_test(
   NAME
     "vae_pack_conv3x3_weight_rhs_f32_bf16_flux2_conv_in_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_conv3x3_weight_f32_test_module.loom}}"
     "--case=@id4_vae_pack_conv3x3_weight_rhs_f32_bf16_flux2_conv_in_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=32"
@@ -16257,7 +18192,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--case=@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=1"
@@ -16278,7 +18213,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--case=@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512"
@@ -16299,7 +18234,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--case=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=1"
@@ -16320,7 +18255,7 @@ iree_native_test(
   NAME
     "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_pack_upsample_conv3x3_weight_f32_bf16_test_module.loom}}"
     "--case=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512"
@@ -16341,7 +18276,7 @@ iree_native_test(
   NAME
     "vae_group_norm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=2"
@@ -16367,7 +18302,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=2"
@@ -16393,7 +18328,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16421,7 +18356,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_2d_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16449,7 +18384,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16477,7 +18412,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16505,7 +18440,7 @@ iree_native_test(
   NAME
     "vae_group_norm_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16531,7 +18466,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16557,7 +18492,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16585,7 +18520,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_2d_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_2d_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16613,7 +18548,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16641,7 +18576,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16669,7 +18604,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16694,7 +18629,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_onepass_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -16719,7 +18654,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_nonuniform_equivalence_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_onepass_bf16_nonuniform_equivalence_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=4"
@@ -16744,7 +18679,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_tail_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_tail_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=64"
@@ -16769,7 +18704,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_256_channel_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_256_channel_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16794,7 +18729,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -16819,7 +18754,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_256x256x512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_256x256x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=256"
@@ -16844,7 +18779,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_512x512x512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=512"
@@ -16869,7 +18804,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=512"
@@ -16894,7 +18829,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_512x512x256_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=512"
@@ -16919,7 +18854,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1024"
@@ -16944,7 +18879,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1024"
@@ -16969,7 +18904,7 @@ iree_native_test(
   NAME
     "vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1024"
@@ -16994,7 +18929,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17023,7 +18958,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=64"
@@ -17052,7 +18987,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc4_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc4_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17081,7 +19016,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=64"
@@ -17110,7 +19045,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17139,7 +19074,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -17168,7 +19103,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=64"
@@ -17197,7 +19132,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc8_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc8_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17226,7 +19161,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -17255,7 +19190,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17284,7 +19219,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -17313,7 +19248,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc16_flat_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc16_flat_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -17342,7 +19277,7 @@ iree_native_test(
   NAME
     "vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_apply_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_apply_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -17371,7 +19306,7 @@ iree_native_test(
   NAME
     "vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bf16_wmma_inplace_padded.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv1x1_bf16_wmma_inplace_padded_test_module.loom}}"
     "--case=@id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv1x1_inplace.pixel_count=16"
@@ -17392,7 +19327,7 @@ iree_native_test(
   NAME
     "vae_compact_channels_bf16_v8_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/compact_channels_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_compact_channels_bf16_test_module.loom}}"
     "--case=@id4_vae_compact_channels_bf16_v8_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.compact_channels.pixel_count=16"
@@ -17414,7 +19349,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1"
@@ -17443,7 +19378,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_add_bf16_wmma_oc128_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_conv3x3_bias_add_bf16_wmma_oc128_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1"
@@ -17472,7 +19407,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_add_padded_bf16_wmma_oc128_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_conv3x3_bias_add_padded_bf16_wmma_oc128_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1"
@@ -17501,7 +19436,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_flux2_1024x1024_256x128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_silu_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_silu_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_flux2_1024x1024_256x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -17530,7 +19465,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_f32_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=1"
@@ -17553,7 +19488,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_f32_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_f32_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_f32_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=2"
@@ -17576,7 +19511,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec2_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=1"
@@ -17599,7 +19534,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec2_f32_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=2"
@@ -17622,7 +19557,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec2_f32_nonuniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec2_f32_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec2_f32_nonuniform_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=4"
@@ -17645,7 +19580,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec8_bf16_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=1"
@@ -17668,7 +19603,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec8_bf16_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=2"
@@ -17691,7 +19626,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=128"
@@ -17714,7 +19649,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_query2_vec8_bf16_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=1"
@@ -17737,7 +19672,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_query2_vec8_bf16_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=2"
@@ -17760,7 +19695,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=4"
@@ -17783,7 +19718,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec8_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_vec8_bf16_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention.width=128"
@@ -17806,7 +19741,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_online_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_online_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention_wmma.token_count=16"
@@ -17827,7 +19762,7 @@ iree_native_test(
   NAME
     "vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_spatial_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.spatial_attention_wmma.token_count=16384"
@@ -17848,7 +19783,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -17873,7 +19808,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -17898,7 +19833,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc4_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc4_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -17924,7 +19859,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -17950,7 +19885,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -17976,7 +19911,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -18002,7 +19937,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -18028,7 +19963,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18053,7 +19988,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18079,7 +20014,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18105,7 +20040,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18131,7 +20066,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_f32_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18157,7 +20092,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -18183,7 +20118,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18209,7 +20144,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
@@ -18235,7 +20170,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=4"
@@ -18261,7 +20196,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18287,7 +20222,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18312,7 +20247,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
@@ -18337,7 +20272,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=16"
@@ -18362,7 +20297,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=16"
@@ -18387,7 +20322,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=128"
@@ -18412,7 +20347,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level2_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level2_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=256"
@@ -18437,7 +20372,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level1_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_parity_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level1_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=512"
@@ -18462,7 +20397,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=256"
@@ -18487,7 +20422,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=512"
@@ -18512,7 +20447,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_16_to_32_512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_16_to_32_512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=16"
@@ -18537,7 +20472,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_32_to_64_512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_32_to_64_512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=32"
@@ -18562,7 +20497,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_64_to_128_256_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_128_decode_64_to_128_256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=64"
@@ -18587,7 +20522,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16_to_32_512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=16"
@@ -18612,7 +20547,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32_to_64_512_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32_to_64_512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=32"
@@ -18637,7 +20572,7 @@ iree_native_test(
   NAME
     "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64_to_128_256_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_upsample_conv3x3_bias_bf16_test_module.loom}}"
     "--case=@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64_to_128_256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.upsample_conv3x3_bias.input_width=64"
@@ -18662,7 +20597,7 @@ iree_native_test(
   NAME
     "vae_decode_nearest_f32_scale2_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_decode_nearest_f32_test_module.loom}}"
     "--case=@id4_vae_decode_nearest_f32_scale2_case"
     "--device=amdgpu://0"
     "--config=id4.vae.decode.output_element_count=16"
@@ -18695,7 +20630,7 @@ iree_native_test(
   NAME
     "vae_decode_nearest_f32_flux2_tile_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_decode_nearest_f32_test_module.loom}}"
     "--case=@id4_vae_decode_nearest_f32_flux2_tile_case"
     "--device=amdgpu://0"
     "--config=id4.vae.decode.output_element_count=786432"
@@ -18728,7 +20663,7 @@ iree_native_test(
   NAME
     "vae_tile_clear_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--case=@id4_vae_tile_clear_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.clear_element_count=4"
@@ -18763,7 +20698,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_f32_x_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--case=@id4_vae_tile_extract_f32_x_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.clear_element_count=2"
@@ -18798,7 +20733,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_bf16_x_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_bf16_test_module.loom}}"
     "--case=@id4_vae_tile_extract_bf16_x_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.source_width=4"
@@ -18825,7 +20760,7 @@ iree_native_test(
   NAME
     "vae_tile_extract_f32_y_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--case=@id4_vae_tile_extract_f32_y_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.clear_element_count=2"
@@ -18860,7 +20795,7 @@ iree_native_test(
   NAME
     "vae_tile_merge_f32_origin_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--case=@id4_vae_tile_merge_f32_origin_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.clear_element_count=4"
@@ -18895,7 +20830,7 @@ iree_native_test(
   NAME
     "vae_tile_merge_f32_left_overlap_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_tile_io_f32_test_module.loom}}"
     "--case=@id4_vae_tile_merge_f32_left_overlap_case"
     "--device=amdgpu://0"
     "--config=id4.vae.tile.clear_element_count=4"
@@ -18930,7 +20865,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_f32_test_module.loom}}"
     "--case=@id4_vae_flux2_affine_pixel_shuffle_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=1"
@@ -18956,7 +20891,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_f32_flux2_tile_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_f32_test_module.loom}}"
     "--case=@id4_vae_flux2_affine_pixel_shuffle_f32_flux2_tile_case"
     "--device=amdgpu://0"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
@@ -18982,7 +20917,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_bf16_test_module.loom}}"
     "--case=@id4_vae_flux2_affine_pixel_shuffle_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=1"
@@ -19008,7 +20943,7 @@ iree_native_test(
   NAME
     "vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_flux2_affine_pixel_shuffle_bf16_test_module.loom}}"
     "--case=@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case"
     "--device=amdgpu://0"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
@@ -19034,7 +20969,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8.token_count=2"
@@ -19057,7 +20992,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_f32_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8.token_count=2"
@@ -19080,7 +21015,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_f32_cond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8.token_count=4547"
@@ -19103,7 +21038,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_f32_cond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8.token_count=4547"
@@ -19126,7 +21061,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8.token_count=4547"
@@ -19149,7 +21084,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=32"
@@ -19172,7 +21107,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19195,7 +21130,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19218,7 +21153,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19241,7 +21176,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19264,7 +21199,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19287,7 +21222,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19310,7 +21245,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
@@ -19333,7 +21268,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
@@ -19356,7 +21291,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
@@ -19379,7 +21314,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
@@ -19402,7 +21337,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19425,7 +21360,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19448,7 +21383,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19471,7 +21406,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_unit_dot_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_unit_dot_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19493,7 +21428,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=32"
@@ -19515,7 +21450,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19537,7 +21472,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_condition_projection_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_bf16_wmma_condition_projection_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=480"
@@ -19559,7 +21494,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19581,7 +21516,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_qkv_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_qkv_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19603,7 +21538,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_mlp_down_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_short_mlp_down_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -19625,7 +21560,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19647,7 +21582,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=4096"
@@ -19669,7 +21604,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.token_count=16"
@@ -19691,7 +21626,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_f32_wmma_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.token_count=16"
@@ -19713,7 +21648,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_cond_proj_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_f32_wmma_cond_proj_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.token_count=464"
@@ -19735,7 +21670,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=16"
@@ -19757,7 +21692,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=16"
@@ -19779,7 +21714,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_layout_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=16"
@@ -19801,7 +21736,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_k32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_layout_k32_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=16"
@@ -19823,7 +21758,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_layout_k4608_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_layout_k4608_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=16"
@@ -19845,7 +21780,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k32_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=515"
@@ -19867,7 +21802,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=515"
@@ -19889,7 +21824,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_stride515_k4608_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_stride515_k4608_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=515"
@@ -19911,7 +21846,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_tail_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_tail_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_tail_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_tail.token_count=3"
@@ -19934,7 +21869,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_tail_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_tail_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_tail_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_tail.token_count=3"
@@ -19957,7 +21892,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=32"
@@ -19979,7 +21914,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=32"
@@ -20001,7 +21936,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=32"
@@ -20023,7 +21958,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=32"
@@ -20045,7 +21980,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20067,7 +22002,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20089,7 +22024,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_up_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_up_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20111,7 +22046,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m32n64_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20133,7 +22068,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=64"
@@ -20155,7 +22090,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=64"
@@ -20177,7 +22112,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20199,7 +22134,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20221,7 +22156,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20243,7 +22178,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20265,7 +22200,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_up_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_up_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20287,7 +22222,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_up_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_up_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20309,7 +22244,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20331,7 +22266,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m64n64_cond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20353,7 +22288,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=128"
@@ -20375,7 +22310,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20397,7 +22332,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20419,7 +22354,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20441,7 +22376,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20463,7 +22398,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_up_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_up_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20485,7 +22420,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_up_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_up_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20507,7 +22442,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20529,7 +22464,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4608"
@@ -20551,7 +22486,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_tail_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_tail.token_count=3"
@@ -20574,7 +22509,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_tail_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_tail.token_count=3"
@@ -20597,7 +22532,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_bf16_tail_token32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_bf16_tail_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_bf16_tail_token32_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_tail.token_count=32"
@@ -20620,7 +22555,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_qkv_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_uncond_qkv_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20642,7 +22577,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20664,7 +22599,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=4096"
@@ -20686,7 +22621,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bf16_f32_wmma_cond_proj_128_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bf16_f32_wmma_cond_proj_128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_wmma.token_count=464"
@@ -20708,7 +22643,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=3"
@@ -20730,7 +22665,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_padded_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=3"
@@ -20752,7 +22687,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
@@ -20774,7 +22709,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
@@ -20796,7 +22731,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_bf16_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_unpack_bf16_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_unpack.token_count=1"
@@ -20818,7 +22753,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_unpack.token_count=4096"
@@ -20840,7 +22775,7 @@ iree_native_test(
   NAME
     "ideogram4_packed_value_unpack_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_packed_value_unpack_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_unpack.token_count=3"
@@ -20862,7 +22797,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_f32_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_unpack_f32_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_unpack.token_count=1"
@@ -20884,7 +22819,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_input_unpack_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_unpack.token_count=4096"
@@ -20906,7 +22841,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=2"
@@ -20927,7 +22862,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_ideogram_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_f32_ideogram_slice_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=2"
@@ -20948,7 +22883,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=4096"
@@ -20969,7 +22904,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_f32_cond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_f32_cond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=4547"
@@ -20990,7 +22925,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_linear_input_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_linear_input_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=2"
@@ -21011,7 +22946,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_gate_up_silu_linear_input_bf16_uncond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_gate_up_silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_gate_up_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_gate_up_silu_linear_input_bf16_uncond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_gate_up_silu.token_count=4096"
@@ -21032,7 +22967,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_up_silu_product_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_up_silu_product_wmma.token_count=32"
@@ -21054,7 +22989,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_wmma_uncond_1024_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_up_silu_product_bf16_wmma_uncond_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_up_silu_product_wmma.token_count=4096"
@@ -21076,7 +23011,7 @@ iree_native_test(
   NAME
     "ideogram4_mlp_up_silu_product_bf16_tail_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/mlp_up_silu_product_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_mlp_up_silu_product_bf16_tail_test_module.loom}}"
     "--case=@id4_ideogram4_mlp_up_silu_product_bf16_tail_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.mlp_up_silu_product_tail.token_count=3"
@@ -21099,7 +23034,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias.token_count=3"
@@ -21122,7 +23057,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias.token_count=2"
@@ -21145,7 +23080,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_bf16.token_count=3"
@@ -21168,7 +23103,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_bf16.token_count=2"
@@ -21191,7 +23126,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_bf16_wmma.token_count=32"
@@ -21212,7 +23147,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_bf16_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_bf16_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_bf16_wmma.token_count=4096"
@@ -21233,7 +23168,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_fp8.token_count=3"
@@ -21256,7 +23191,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_fp8.token_count=2"
@@ -21279,7 +23214,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm.token_count=1"
@@ -21299,7 +23234,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm.token_count=2"
@@ -21319,7 +23254,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
@@ -21339,7 +23274,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
@@ -21359,7 +23294,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_input_token_major_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
@@ -21379,7 +23314,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
@@ -21399,7 +23334,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
@@ -21421,7 +23356,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
@@ -21443,7 +23378,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
@@ -21465,7 +23400,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_layernorm_image_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
@@ -21487,7 +23422,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
@@ -21508,7 +23443,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
@@ -21529,7 +23464,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
@@ -21550,7 +23485,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
@@ -21571,7 +23506,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
@@ -21592,7 +23527,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
@@ -21613,7 +23548,7 @@ iree_native_test(
   NAME
     "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_rmsnorm_f32_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
@@ -21634,7 +23569,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=1"
@@ -21654,7 +23589,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=2"
@@ -21674,7 +23609,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=1"
@@ -21694,7 +23629,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=2"
@@ -21714,7 +23649,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=1"
@@ -21734,7 +23669,7 @@ iree_native_test(
   NAME
     "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rmsnorm_gated_residual_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rmsnorm_gated_residual_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=2"
@@ -21754,7 +23689,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_split_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_split_f32_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_split_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_split.token_count=1"
@@ -21774,7 +23709,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_split_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_split_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_split_f32_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_split_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_split.token_count=2"
@@ -21794,7 +23729,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_f32_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
@@ -21815,7 +23750,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_f32_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=2"
@@ -21836,7 +23771,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
@@ -21858,7 +23793,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=2"
@@ -21880,7 +23815,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
@@ -21902,7 +23837,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
@@ -21924,7 +23859,7 @@ iree_native_test(
   NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_qkv_norm_rotary_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=2"
@@ -21946,7 +23881,7 @@ iree_native_test(
   NAME
     "ideogram4_rotary_apply_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rotary_apply_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rotary_apply_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rotary_apply_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rotary_apply.token_count=1"
@@ -21967,7 +23902,7 @@ iree_native_test(
   NAME
     "ideogram4_rotary_apply_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/rotary_apply_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_rotary_apply_f32_test_module.loom}}"
     "--case=@id4_ideogram4_rotary_apply_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.rotary_apply.token_count=2"
@@ -21988,7 +23923,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_silu_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu.element_count=4"
@@ -22007,7 +23942,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_f32_adaln_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_f32_test_module.loom}}"
     "--case=@id4_ideogram4_silu_f32_adaln_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu.element_count=512"
@@ -22026,7 +23961,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_silu_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_bf16.element_count=4"
@@ -22045,7 +23980,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_bf16_adaln_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_silu_bf16_adaln_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_bf16.element_count=512"
@@ -22064,7 +23999,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_silu_product_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_product_bf16.token_count=2"
@@ -22086,7 +24021,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_padded_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_silu_product_bf16_padded_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_product_bf16.token_count=2"
@@ -22108,7 +24043,7 @@ iree_native_test(
   NAME
     "ideogram4_silu_product_bf16_structured128_mlp_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_silu_product_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_silu_product_bf16_structured128_mlp_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_product_bf16.token_count=256"
@@ -22130,7 +24065,7 @@ iree_native_test(
   NAME
     "ideogram4_timestep_embedding_f32_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/timestep_embedding_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
     "--case=@id4_ideogram4_timestep_embedding_f32_zero_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
@@ -22149,7 +24084,7 @@ iree_native_test(
   NAME
     "ideogram4_timestep_embedding_f32_ideogram_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/timestep_embedding_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
     "--case=@id4_ideogram4_timestep_embedding_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.timestep_embedding.embedding_size=4608"
@@ -22168,7 +24103,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_f32_test_module.loom}}"
     "--case=@id4_ideogram4_unpatchify_scale_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.unpatchify_scale.width=1"
@@ -22191,7 +24126,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_f32_conditioned_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_f32_test_module.loom}}"
     "--case=@id4_ideogram4_unpatchify_scale_f32_conditioned_slice_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.unpatchify_scale.width=1"
@@ -22214,7 +24149,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_packed_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_packed_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_packed_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_unpatchify_scale_packed_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.unpatchify_scale_packed_bf16.width=1"
@@ -22235,7 +24170,7 @@ iree_native_test(
   NAME
     "ideogram4_unpatchify_scale_packed_bf16_two_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/unpatchify_scale_packed_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_unpatchify_scale_packed_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_unpatchify_scale_packed_bf16_two_token_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.unpatchify_scale_packed_bf16.width=2"
@@ -22256,7 +24191,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
     "--case=@id4_sampler_cfg_denoise_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.element_count=257"
@@ -22275,7 +24210,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_full_latent_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
     "--case=@id4_sampler_cfg_denoise_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.element_count=524288"
@@ -22294,7 +24229,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--case=@id4_sampler_euler_step_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.euler_step.element_count=257"
@@ -22313,7 +24248,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_in_place_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--case=@id4_sampler_euler_step_f32_in_place_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.euler_step.element_count=257"
@@ -22332,7 +24267,7 @@ iree_native_test(
   NAME
     "sampler_euler_step_f32_full_latent_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
     "--case=@id4_sampler_euler_step_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.euler_step.element_count=524288"
@@ -22351,7 +24286,7 @@ iree_native_test(
   NAME
     "sampler_noise_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
     "--case=@id4_sampler_noise_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.noise.element_count=8"
@@ -22370,7 +24305,7 @@ iree_native_test(
   NAME
     "sampler_noise_f32_full_latent_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
     "--case=@id4_sampler_noise_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.noise.element_count=524288"
@@ -22389,7 +24324,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_f32_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=1"
@@ -22413,7 +24348,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_bf16_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=1"
@@ -22437,7 +24372,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_f32_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -22461,7 +24396,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -22485,7 +24420,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_grouped_query_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_f32_grouped_query_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -22509,7 +24444,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_grouped_query_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_bf16_grouped_query_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -22533,7 +24468,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_bf16_padded_context_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_bf16_padded_context_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -22557,7 +24492,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_materialized_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_materialized_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=64"
@@ -22581,7 +24516,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_single_token_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_single_token_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online.token_count=1"
@@ -22605,7 +24540,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_uniform_softmax_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_uniform_softmax_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online.token_count=2"
@@ -22629,7 +24564,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_grouped_query_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_grouped_query_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online.token_count=2"
@@ -22653,7 +24588,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online.token_count=64"
@@ -22677,7 +24612,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_qwen_451_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_qwen_451_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online.token_count=451"
@@ -22701,7 +24636,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_single_tile_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_single_tile_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online_wmma.token_count=16"
@@ -22725,7 +24660,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_grouped_query_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_grouped_query_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online_wmma.token_count=16"
@@ -22749,7 +24684,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online_wmma.token_count=64"
@@ -22773,7 +24708,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_online_bf16_bf16_wmma_qwen_451_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_online_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_online_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_online_bf16_bf16_wmma_qwen_451_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_online_wmma.token_count=451"
@@ -22797,7 +24732,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=16"
@@ -22821,7 +24756,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_ones_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_ones_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=16"
@@ -22845,7 +24780,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_softmax_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=16"
@@ -22869,7 +24804,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_softmax_bf16_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=16"
@@ -22893,7 +24828,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=16"
@@ -22917,7 +24852,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_qwen_full_tile_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_qwen_full_tile_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=480"
@@ -22941,7 +24876,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_short_prompt_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_short_prompt_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=19"
@@ -22965,7 +24900,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_short_prompt_ones_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_short_prompt_ones_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=19"
@@ -22989,7 +24924,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_qk_padded_192_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_qk_padded_192_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=171"
@@ -23013,7 +24948,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=480"
@@ -23037,7 +24972,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=192"
@@ -23061,7 +24996,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=480"
@@ -23085,7 +25020,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=192"
@@ -23109,7 +25044,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_sequence_padded_171_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_sequence_padded_171_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=171"
@@ -23133,7 +25068,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_sequence_short_prompt_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_sequence_short_prompt_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=19"
@@ -23157,7 +25092,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=19"
@@ -23181,7 +25116,7 @@ iree_native_test(
   NAME
     "qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_attention_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=19"
@@ -23205,7 +25140,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=3"
@@ -23227,7 +25162,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=451"
@@ -23249,7 +25184,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_transpose_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=3"
@@ -23271,7 +25206,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=3"
@@ -23293,7 +25228,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_padded_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_padded_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=3"
@@ -23315,7 +25250,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_input_pack_transpose_bf16_bf16_qwen_value_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_input_pack_f32_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_input_pack_f32_bf16_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_input_pack_transpose_bf16_bf16_qwen_value_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_input_pack.token_count=451"
@@ -23337,7 +25272,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23358,7 +25293,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23379,7 +25314,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23400,7 +25335,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23421,7 +25356,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23442,7 +25377,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=32"
@@ -23464,7 +25399,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=64"
@@ -23486,7 +25421,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=512"
@@ -23508,7 +25443,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=512"
@@ -23530,7 +25465,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=288"
@@ -23552,7 +25487,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024"
@@ -23574,7 +25509,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024"
@@ -23596,7 +25531,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=64"
@@ -23618,7 +25553,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=32"
@@ -23640,7 +25575,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=288"
@@ -23662,7 +25597,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_compact_rhs_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=480"
@@ -23684,7 +25619,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_residual_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_residual_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_residual_wmma.token_count=1024"
@@ -23706,7 +25641,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=32"
@@ -23727,7 +25662,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23748,7 +25683,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23769,7 +25704,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23790,7 +25725,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23811,7 +25746,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -23832,7 +25767,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_qwen_kv_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -23853,7 +25788,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_qwen_value_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_compact_rhs_transpose_output_qwen_value_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -23874,7 +25809,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=16"
@@ -23895,7 +25830,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=16"
@@ -23916,7 +25851,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_short_prompt_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_short_prompt_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=16"
@@ -23937,7 +25872,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_qwen_value_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m16n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64_transpose_output_qwen_value_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -23958,7 +25893,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -23979,7 +25914,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -24000,7 +25935,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -24021,7 +25956,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -24042,7 +25977,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=64"
@@ -24063,7 +25998,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24084,7 +26019,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_kv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_kv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24105,7 +26040,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24126,7 +26061,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24147,7 +26082,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -24168,7 +26103,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=64"
@@ -24189,7 +26124,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24210,7 +26145,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -24231,7 +26166,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_projection_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24252,7 +26187,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_up_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24273,7 +26208,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_compact_rhs_qwen_mlp_down_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -24294,7 +26229,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
@@ -24316,7 +26251,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
@@ -24338,7 +26273,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=128"
@@ -24360,7 +26295,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
@@ -24382,7 +26317,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
@@ -24404,7 +26339,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -24425,7 +26360,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -24446,7 +26381,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=48"
@@ -24467,7 +26402,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=48"
@@ -24488,7 +26423,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24509,7 +26444,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24530,7 +26465,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24551,7 +26486,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24572,7 +26507,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24593,7 +26528,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24614,7 +26549,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24635,7 +26570,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24656,7 +26591,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24677,7 +26612,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_nonzero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_nonzero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24698,7 +26633,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24719,7 +26654,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24740,7 +26675,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24761,7 +26696,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24782,7 +26717,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output_qwen_value_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24803,7 +26738,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24824,7 +26759,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_qwen_value_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_qwen_value_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24845,7 +26780,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24866,7 +26801,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24887,7 +26822,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24908,7 +26843,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_projection_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_projection_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24929,7 +26864,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24950,7 +26885,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -24971,7 +26906,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -24992,7 +26927,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25013,7 +26948,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m48n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25034,7 +26969,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_512_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -25055,7 +26990,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_512_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -25076,7 +27011,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_512_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -25097,7 +27032,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_512_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=512"
@@ -25118,7 +27053,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -25139,7 +27074,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -25160,7 +27095,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -25181,7 +27116,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -25202,7 +27137,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -25223,7 +27158,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -25244,7 +27179,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024"
@@ -25265,7 +27200,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -25286,7 +27221,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
@@ -25307,7 +27242,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25328,7 +27263,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25349,7 +27284,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25370,7 +27305,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=288"
@@ -25391,7 +27326,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_zero_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=32"
@@ -25412,7 +27347,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=480"
@@ -25433,7 +27368,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=480"
@@ -25454,7 +27389,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=480"
@@ -25475,7 +27410,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_vae_16x16_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_vae_16x16_c512_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=256"
@@ -25496,7 +27431,7 @@ iree_native_test(
   NAME
     "matrix_bf16_f32_wmma_m32n64_vae_32x32_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/matrix/bf16_f32_wmma_m32n64.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/matrix_bf16_f32_wmma_m32n64_test_module.loom}}"
     "--case=@id4_matrix_bf16_f32_wmma_m32n64_vae_32x32_c512_case"
     "--device=amdgpu://0"
     "--config=id4.matrix.bf16_f32_wmma.dispatch_token_count=1024"
@@ -25517,7 +27452,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25538,7 +27473,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25559,7 +27494,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_silu_curve_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_silu_curve_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25580,7 +27515,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_silu_curve_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_silu_curve_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25601,7 +27536,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25622,7 +27557,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25643,7 +27578,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=480"
@@ -25664,7 +27599,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=480"
@@ -25685,7 +27620,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=1024"
@@ -25706,7 +27641,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25727,7 +27662,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_silu_curve_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_silu_curve_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25748,7 +27683,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_zero_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_zero_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25769,7 +27704,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_1024_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_1024_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=1024"
@@ -25790,7 +27725,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=480"
@@ -25811,7 +27746,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_short_prompt_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_short_prompt_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25832,7 +27767,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_compact_rhs_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_compact_rhs_qwen_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=288"
@@ -25853,7 +27788,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25874,7 +27809,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_prompt_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_prompt_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=32"
@@ -25895,7 +27830,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=288"
@@ -25916,7 +27851,7 @@ iree_native_test(
   NAME
     "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_test_module.loom}}"
     "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=288"
@@ -25937,7 +27872,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=2"
@@ -25959,7 +27894,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_bf16_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=2"
@@ -25981,7 +27916,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_bf16_padded_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_bf16_bf16_padded_tail_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=2"
@@ -26003,7 +27938,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_rows_bf16_bf16_copy_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=2"
@@ -26025,7 +27960,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=2"
@@ -26047,7 +27982,7 @@ iree_native_test(
   NAME
     "qwen3_vl_token_embedding_bf16_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_token_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.token_embedding.token_count=64"
@@ -26069,7 +28004,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=1"
@@ -26089,7 +28024,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=1"
@@ -26109,7 +28044,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_fixture_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_fixture_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=32"
@@ -26129,7 +28064,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_multi_partial_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_multi_partial_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=1"
@@ -26149,7 +28084,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_f32_id4_text451_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_id4_text451_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=53248"
@@ -26169,7 +28104,7 @@ iree_native_test(
   NAME
     "qwen3_vl_condition_bf16_f32_id4_text451_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_condition_test_module.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_bf16_f32_id4_text451_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=53248"
@@ -26189,7 +28124,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--case=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.selected_hidden_pack.token_count=4"
@@ -26211,7 +28146,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--case=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2"
@@ -26233,7 +28168,7 @@ iree_native_test(
   NAME
     "qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_selected_hidden_pack_test_module.loom}}"
     "--case=@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.selected_hidden_pack.token_count=451"
@@ -26255,7 +28190,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--case=@id4_qwen3_vl_rmsnorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rmsnorm.token_count=1"
@@ -26275,7 +28210,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--case=@id4_qwen3_vl_rmsnorm_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rmsnorm.token_count=1"
@@ -26295,7 +28230,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_test_module.loom}}"
     "--case=@id4_qwen3_vl_rmsnorm_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rmsnorm.token_count=64"
@@ -26315,7 +28250,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_rotary_embedding_f32_identity_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rotary.token_count=1"
@@ -26336,7 +28271,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_bf16_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_rotary_embedding_bf16_identity_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rotary.token_count=1"
@@ -26357,7 +28292,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_qwen_key_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_rotary_embedding_f32_qwen_key_identity_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rotary.token_count=1"
@@ -26378,7 +28313,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rotary_embedding_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rotary_embedding_test_module.loom}}"
     "--case=@id4_qwen3_vl_rotary_embedding_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rotary.token_count=64"
@@ -26399,7 +28334,7 @@ iree_native_test(
   NAME
     "qwen3_vl_rmsnorm_rotary_bf16_identity_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm_rotary.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_rmsnorm_rotary_test_module.loom}}"
     "--case=@id4_qwen3_vl_rmsnorm_rotary_bf16_identity_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rmsnorm_rotary.token_count=1"
@@ -26420,7 +28355,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_silu_gate_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.silu_gate.token_count=2"
@@ -26440,7 +28375,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_silu_gate_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.silu_gate.token_count=2"
@@ -26460,7 +28395,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_silu_gate_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.silu_gate.token_count=64"
@@ -26480,7 +28415,7 @@ iree_native_test(
   NAME
     "qwen3_vl_silu_gate_bf16_qwen_shape_288_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_silu_gate_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_silu_gate_bf16_qwen_shape_288_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.silu_gate.token_count=288"
@@ -26500,7 +28435,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_residual_add_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=2"
@@ -26520,7 +28455,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_residual_add_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=2"
@@ -26540,7 +28475,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_rmsnorm_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_residual_add_rmsnorm_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=1"
@@ -26560,7 +28495,7 @@ iree_native_test(
   NAME
     "qwen3_vl_residual_add_f32_qwen_slice_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_residual_add_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_residual_add_f32_qwen_slice_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=64"
@@ -26580,7 +28515,7 @@ iree_native_test(
   NAME
     "tensor_transpose_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/tensor_transpose_bf16_test_module.loom}}"
     "--case=@id4_tensor_transpose_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.tensor.transpose.token_count=3"
@@ -26601,7 +28536,7 @@ iree_native_test(
   NAME
     "tensor_transpose_bf16_vae_value_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/tensor_transpose_bf16_test_module.loom}}"
     "--case=@id4_tensor_transpose_bf16_vae_value_case"
     "--device=amdgpu://0"
     "--config=id4.tensor.transpose.token_count=16"
@@ -26622,7 +28557,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear.token_count=1"
@@ -26643,7 +28578,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear.token_count=1"
@@ -26664,7 +28599,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_bf16_tail_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_tail.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_bf16_tail_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_bf16_tail_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_tail.token_count=2"
@@ -26687,7 +28622,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_bf16_f32_qwen_projection_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_bf16_f32_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_f32_qwen_projection_shape_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear.token_count=64"
@@ -26708,7 +28643,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_1x1_layout_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--case=@id4_vae_im2col3x3_bf16_1x1_layout_case"
     "--device=amdgpu://0"
     "--config=id4.vae.im2col3x3.width=1"
@@ -26729,7 +28664,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_16x16_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--case=@id4_vae_im2col3x3_bf16_16x16_c512_case"
     "--device=amdgpu://0"
     "--config=id4.vae.im2col3x3.width=16"
@@ -26750,7 +28685,7 @@ iree_native_test(
   NAME
     "vae_im2col3x3_bf16_32x32_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/im2col3x3_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_im2col3x3_bf16_test_module.loom}}"
     "--case=@id4_vae_im2col3x3_bf16_32x32_c512_case"
     "--device=amdgpu://0"
     "--config=id4.vae.im2col3x3.width=32"
@@ -26771,7 +28706,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--case=@id4_vae_conv_bias_epilogue_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv_bias_epilogue.row_count=2"
@@ -26791,7 +28726,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_add_epilogue_f32_bf16_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--case=@id4_vae_conv_bias_add_epilogue_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv_bias_epilogue.row_count=2"
@@ -26811,7 +28746,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_16x16_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--case=@id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv_bias_epilogue.row_count=256"
@@ -26831,7 +28766,7 @@ iree_native_test(
   NAME
     "vae_conv_bias_epilogue_f32_bf16_32x32_c512_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv_bias_epilogue_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv_bias_epilogue_bf16_test_module.loom}}"
     "--case=@id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv_bias_epilogue.row_count=1024"
@@ -26851,7 +28786,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=33"
@@ -26873,7 +28808,7 @@ iree_native_test(
   NAME
     "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=65"
@@ -26895,7 +28830,7 @@ iree_native_test(
   NAME
     "ideogram4_dense_bias_fp8_f32_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/dense_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_dense_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_dense_bias_fp8_f32_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.dense_bias_fp8.input_size=16"
@@ -26916,7 +28851,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_f32_wmma_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_f32_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_f32_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_f32_wmma_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_bf16_f32_wmma.token_count=16"
@@ -26938,7 +28873,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_indicator_bf16_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_indicator_bf16.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_indicator_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_indicator_bf16_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_indicator_bf16.valid_token_count=2"
@@ -26961,7 +28896,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_test_module.loom}}"
     "--case=@id4_ideogram4_linear_fp8_bf16_wmma_compact_rhs_tile_m128n128_4wave_workgroup_staged_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=128"
@@ -26983,7 +28918,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_bf16_wmma_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_bf16_wmma.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_bf16_wmma_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_bf16_wmma_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_fp8_wmma.token_count=32"
@@ -27005,7 +28940,7 @@ iree_native_test(
   NAME
     "ideogram4_linear_bias_fp8_f32_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_bias_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_linear_bias_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_linear_bias_fp8_f32_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_bias_fp8.token_count=1"
@@ -27028,7 +28963,7 @@ iree_native_test(
   NAME
     "ideogram4_prelude_image_fp8_f32_bf16_scale_rounding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_prelude_image_fp8_f32_test_module.loom}}"
     "--case=@id4_ideogram4_prelude_image_fp8_f32_bf16_scale_rounding_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=1"

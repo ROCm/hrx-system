@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_case {
+  %weight = check.generate.fill value(1.0) : tensor<128x128xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<1x1xf32>
+  %target = check.generate.fill value(0.0) : tensor<16384xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<16384xbf16>
+  func.call @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<128x128xf8E4M3>, tensor<1x1xf32>, tensor<16384xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16384xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_case {
+  %weight = check.generate.fill value(448.0) : tensor<128x128xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<1x1xf32>
+  %target = check.generate.fill value(0.0) : tensor<16384xbf16>
+  %expected = check.generate.fill value(448.0) : tensor<16384xbf16>
+  func.call @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<128x128xf8E4M3>, tensor<1x1xf32>, tensor<16384xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16384xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_case {
+  %weight = check.generate.fill value(0.5) : tensor<12288x4096xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<96x32xf32>
+  %target = check.generate.fill value(0.0) : tensor<50331648xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<50331648xbf16>
+  func.call @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<12288x4096xf8E4M3>, tensor<96x32xf32>, tensor<50331648xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<50331648xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite_case> @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_max_finite
+
+check.benchmark<@id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape_case> @id4_parameter_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile_qwen_mlp_up_shape

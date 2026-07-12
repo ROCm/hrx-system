@@ -1,0 +1,38 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_small_case {
+  %source = check.generate.iota offset(0.0) step(1.0) : tensor<16x16xbf16>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.iota offset(0.0) step(1.0) : tensor<256xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<16x16xbf16>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_qkv_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<13824x4608xbf16>
+  %target = check.generate.fill value(0.0) : tensor<63700992xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<63700992xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<13824x4608xbf16>, tensor<63700992xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<63700992xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<12288x4608xbf16>
+  %target = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<56623104xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<12288x4608xbf16>, tensor<56623104xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<56623104xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_small_case> @id4_parameter_bf16_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_qkv_shape_case> @id4_parameter_bf16_linear_rhs_tile_qkv_shape
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case> @id4_parameter_bf16_linear_rhs_tile_mlp_up_shape

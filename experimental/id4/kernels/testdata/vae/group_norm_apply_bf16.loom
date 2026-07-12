@@ -1,0 +1,188 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_group_norm_silu_ic4_oc4_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x4x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<4xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<4xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x4x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<1x1x4x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x4x1xbf16>, tensor<4xbf16>, tensor<4xbf16>, tensor<1x1x2xf32>, tensor<1x1x4x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc4_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x4x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<4xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<4xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x4x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<1x1x4x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x4x1xbf16>, tensor<4xbf16>, tensor<4xbf16>, tensor<1x1x2xf32>, tensor<1x1x4x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape_case {
+  %input = check.generate.fill value(0.0) : tensor<64x64x128x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<128xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<128xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x64x128x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<64x64x128x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<64x64x128x1xbf16>, tensor<128xbf16>, tensor<128xbf16>, tensor<1x32x2xf32>, tensor<64x64x128x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x128x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape_case {
+  %input = check.generate.fill value(0.0) : tensor<64x64x128x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<128xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<128xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x64x128x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<64x64x128x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<64x64x128x1xbf16>, tensor<128xbf16>, tensor<128xbf16>, tensor<1x32x2xf32>, tensor<64x64x128x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x128x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<8xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<8xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<1x1x8x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x8x1xbf16>, tensor<8xbf16>, tensor<8xbf16>, tensor<1x1x2xf32>, tensor<1x1x8x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x8x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc8_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<8xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<8xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<1x1x8x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x8x1xbf16>, tensor<8xbf16>, tensor<8xbf16>, tensor<1x1x2xf32>, tensor<1x1x8x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x8x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_case {
+  %input = check.generate.fill value(0.0) : tensor<128x128x256x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<256xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128x256x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<128x128x256x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<128x128x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x256x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case {
+  %input = check.generate.iota offset(-1.0) step(0.000244140625) : tensor<64x64x256x1xbf16>
+  %weight = check.generate.iota offset(0.5) step(0.001953125) : tensor<256xbf16>
+  %bias = check.generate.iota offset(-0.25) step(0.0009765625) : tensor<256xbf16>
+  %stats = check.generate.iota offset(0.125) step(0.0009765625) : tensor<1x32x2xf32>
+  %output0 = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  %output1 = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output0) : (tensor<64x64x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<64x64x256x1xbf16>)
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output1) : (tensor<64x64x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<64x64x256x1xbf16>)
+  check.expect.close actual(%output1) expected(%output0) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x256x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_case {
+  %input = check.generate.fill value(0.0) : tensor<128x128x256x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<256xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<256xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128x256x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<128x128x256x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<128x128x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x256x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<16xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<16xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<1x1x16x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x16x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc16_flat_bf16_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<16xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<16xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<1x1x16x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x16x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_case {
+  %input = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<512xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<512xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %expected = check.generate.fill value(0.73105857863000497) : tensor<128x128x512x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_case {
+  %input = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %weight = check.generate.fill value(2.0) : tensor<512xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<512xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<128x128x512x1xbf16>
+  func.call @id4_vae_group_norm_apply_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc4_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape_case> @id4_vae_group_norm_silu_ic4_oc4_flat_bf16_flux2_tail_shape
+
+check.benchmark<@id4_vae_group_norm_ic4_oc4_flat_bf16_small_case> @id4_vae_group_norm_ic4_oc4_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape_case> @id4_vae_group_norm_ic4_oc4_flat_bf16_flux2_tail_shape
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel
+
+check.benchmark<@id4_vae_group_norm_ic4_oc8_flat_bf16_small_case> @id4_vae_group_norm_ic4_oc8_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_case> @id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape
+
+check.benchmark<@id4_vae_group_norm_ic4_oc16_flat_bf16_small_case> @id4_vae_group_norm_ic4_oc16_flat_bf16_small
+
+check.benchmark<@id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape

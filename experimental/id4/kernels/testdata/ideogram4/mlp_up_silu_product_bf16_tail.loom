@@ -1,0 +1,18 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_mlp_up_silu_product_bf16_tail_small_case {
+  %input = check.generate.fill value(1.0) : tensor<3x1xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<3x1xbf16>
+  %gate = check.generate.fill value(1.0) : tensor<3x3xbf16>
+  %output = check.generate.fill value(0.0) : tensor<3x3xbf16>
+  %expected = check.generate.fill value(1.4621171572600098) : tensor<3x3xbf16>
+  func.call @id4_ideogram4_mlp_up_silu_product_bf16_tail(%input, %up_weight, %gate, %output) : (tensor<3x1xbf16>, tensor<3x1xbf16>, tensor<3x3xbf16>, tensor<3x3xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<3x3xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_up_silu_product_bf16_tail_small_case> @id4_ideogram4_mlp_up_silu_product_bf16_tail_small

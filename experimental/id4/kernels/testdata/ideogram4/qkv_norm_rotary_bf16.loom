@@ -1,0 +1,103 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_small_case {
+  %qkv = check.generate.iota offset(1.0) step(1.0) : tensor<1x6xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %rotated_key = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %value = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %expected_query = check.generate.fill value(1.8984399999999999) : tensor<1x2xbf16>
+  %expected_key = check.generate.fill value(1.9765600000000001) : tensor<1x2xbf16>
+  %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape_case {
+  %qkv = check.generate.fill value(2.0) : tensor<2x13824xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x128x2xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %rotated_key = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %value = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %expected_rotated = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  %expected_key = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  %expected_value = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<2x13824xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<2x2x128x2xf32>, tensor<2x4608xbf16>, tensor<2x4608xbf16>, tensor<2x4608xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small_case {
+  %qkv = check.generate.iota offset(1.0) step(1.0) : tensor<1x6xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %rotated_key = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %value = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %expected_query = check.generate.fill value(1.8984399999999999) : tensor<1x2xbf16>
+  %expected_key = check.generate.fill value(1.9765600000000001) : tensor<1x2xbf16>
+  %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case {
+  %qkv = check.generate.fill value(0.0) : tensor<1x6xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %rotated_key = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %value = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<2x2xbf16>, tensor<2x2xbf16>, tensor<2x2xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.expect.close actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_case {
+  %qkv = check.generate.fill value(2.0) : tensor<2x13824xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x128x2xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %rotated_key = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %value = check.generate.fill value(0.0) : tensor<2x4608xbf16>
+  %expected_rotated = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  %expected_key = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  %expected_value = check.generate.fill value(2.0) : tensor<2x4608xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<2x13824xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<2x2x128x2xf32>, tensor<2x4608xbf16>, tensor<2x4608xbf16>, tensor<2x4608xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_small_case> @id4_ideogram4_qkv_norm_rotary_bf16_small
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape_case> @id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape

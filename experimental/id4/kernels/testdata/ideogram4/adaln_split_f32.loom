@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_adaln_split_f32_small_case {
+  %raw_modulation = check.generate.fill value(1.0) : tensor<4x2xf32>
+  %scale_msa = check.generate.fill value(0.0) : tensor<2xf32>
+  %gate_msa = check.generate.fill value(0.0) : tensor<2xf32>
+  %scale_mlp = check.generate.fill value(0.0) : tensor<2xf32>
+  %gate_mlp = check.generate.fill value(0.0) : tensor<2xf32>
+  %expected_scale = check.generate.fill value(2.0) : tensor<2xf32>
+  %expected_gate = check.generate.fill value(0.76159415595576481) : tensor<2xf32>
+  func.call @id4_ideogram4_adaln_split_f32(%raw_modulation, %scale_msa, %gate_msa, %scale_mlp, %gate_mlp) : (tensor<4x2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>)
+  check.expect.close actual(%scale_msa) expected(%expected_scale) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
+  check.expect.close actual(%gate_msa) expected(%expected_gate) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
+  check.expect.close actual(%scale_mlp) expected(%expected_scale) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
+  check.expect.close actual(%gate_mlp) expected(%expected_gate) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_adaln_split_f32_ideogram_shape_case {
+  %raw_modulation = check.generate.fill value(0.0) : tensor<4x4608xf32>
+  %scale_msa = check.generate.fill value(1.0) : tensor<4608xf32>
+  %gate_msa = check.generate.fill value(1.0) : tensor<4608xf32>
+  %scale_mlp = check.generate.fill value(1.0) : tensor<4608xf32>
+  %gate_mlp = check.generate.fill value(1.0) : tensor<4608xf32>
+  %expected_scale = check.generate.fill value(1.0) : tensor<4608xf32>
+  %expected_gate = check.generate.fill value(0.0) : tensor<4608xf32>
+  func.call @id4_ideogram4_adaln_split_f32(%raw_modulation, %scale_msa, %gate_msa, %scale_mlp, %gate_mlp) : (tensor<4x4608xf32>, tensor<4608xf32>, tensor<4608xf32>, tensor<4608xf32>, tensor<4608xf32>)
+  check.expect.close actual(%scale_msa) expected(%expected_scale) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%gate_msa) expected(%expected_gate) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%scale_mlp) expected(%expected_scale) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%gate_mlp) expected(%expected_gate) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_adaln_split_f32_small_case> @id4_ideogram4_adaln_split_f32_small
+
+check.benchmark<@id4_ideogram4_adaln_split_f32_ideogram_shape_case> @id4_ideogram4_adaln_split_f32_ideogram_shape

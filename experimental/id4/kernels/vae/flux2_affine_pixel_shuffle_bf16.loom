@@ -70,28 +70,3 @@ kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affi
   }
   kernel.return
 }
-
-check.case public @id4_vae_flux2_affine_pixel_shuffle_bf16_small_case {
-  %public_latent = check.generate.fill value(1.0) : tensor<1x1x4x1xf32>
-  %latent_mean = check.generate.fill value(10.0) : tensor<4xf32>
-  %latent_std = check.generate.fill value(2.0) : tensor<4xf32>
-  %internal_latent = check.generate.fill value(0.0) : tensor<2x2x1x1xbf16>
-  %expected = check.generate.fill value(12.0) : tensor<2x2x1x1xbf16>
-  func.call @id4_vae_flux2_affine_pixel_shuffle_bf16(%public_latent, %latent_mean, %latent_std, %internal_latent) : (tensor<1x1x4x1xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2x2x1x1xbf16>)
-  check.expect.close actual(%internal_latent) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xbf16>
-  check.return
-}
-
-check.case public @id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case {
-  %public_latent = check.generate.fill value(1.0) : tensor<32x32x128x1xf32>
-  %latent_mean = check.generate.fill value(0.0) : tensor<128xf32>
-  %latent_std = check.generate.fill value(1.0) : tensor<128xf32>
-  %internal_latent = check.generate.fill value(0.0) : tensor<64x64x32x1xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<64x64x32x1xbf16>
-  func.call @id4_vae_flux2_affine_pixel_shuffle_bf16(%public_latent, %latent_mean, %latent_std, %internal_latent) : (tensor<32x32x128x1xf32>, tensor<128xf32>, tensor<128xf32>, tensor<64x64x32x1xbf16>)
-  check.expect.close actual(%internal_latent) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x32x1xbf16>
-  check.return
-}
-
-check.benchmark<@id4_vae_flux2_affine_pixel_shuffle_bf16_small_case> @id4_vae_flux2_affine_pixel_shuffle_bf16_small
-check.benchmark<@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case> @id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile

@@ -1,0 +1,89 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_small_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<64x16xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x64xf32>
+  %expected = check.generate.fill value(16.0) : tensor<32x64xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<64x16xbf16>, tensor<32x64xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x64xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_zero_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<64x16xbf16>
+  %output = check.generate.fill value(1.0) : tensor<32x64xf32>
+  %expected = check.generate.fill value(0.0) : tensor<32x64xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<64x16xbf16>, tensor<32x64xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x64xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_qwen_projection_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<480x4096xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<480x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<480x4096xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<480x4096xbf16>, tensor<4096x4096xbf16>, tensor<480x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x4096xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<480x4096xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<480x12288xf32>
+  %expected = check.generate.fill value(0.0) : tensor<480x12288xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<480x4096xbf16>, tensor<12288x4096xbf16>, tensor<480x12288xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x12288xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<480x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %output = check.generate.fill value(1.0) : tensor<480x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<480x4096xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<480x12288xbf16>, tensor<4096x12288xbf16>, tensor<480x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x4096xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_vae_16x16_c512_case {
+  %input = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<256x512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<256x512xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<256x4608xbf16>, tensor<512x4608xbf16>, tensor<256x512xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x512xf32>
+  check.return
+}
+
+check.case public @id4_matrix_bf16_f32_wmma_m32n64_vae_32x32_c512_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1024x512xf32>
+  func.call @id4_matrix_bf16_f32_wmma_m32n64(%input, %weight, %output) : (tensor<1024x4608xbf16>, tensor<512x4608xbf16>, tensor<1024x512xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x512xf32>
+  check.return
+}
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_small_case> @id4_matrix_bf16_f32_wmma_m32n64_small
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_zero_case> @id4_matrix_bf16_f32_wmma_m32n64_zero
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_qwen_projection_shape_case> @id4_matrix_bf16_f32_wmma_m32n64_qwen_projection_shape
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape_case> @id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_up_shape
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape_case> @id4_matrix_bf16_f32_wmma_m32n64_qwen_mlp_down_shape
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_vae_16x16_c512_case> @id4_matrix_bf16_f32_wmma_m32n64_vae_16x16_c512
+
+check.benchmark<@id4_matrix_bf16_f32_wmma_m32n64_vae_32x32_c512_case> @id4_matrix_bf16_f32_wmma_m32n64_vae_32x32_c512

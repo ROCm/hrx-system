@@ -1,0 +1,36 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_rotary_apply_f32_small_case {
+  %query = check.generate.fill value(2.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(3.0) : tensor<1x2xf32>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %expected_query = check.generate.fill value(4.0) : tensor<1x2xf32>
+  %expected_key = check.generate.fill value(6.0) : tensor<1x2xf32>
+  func.call @id4_ideogram4_rotary_apply_f32(%query, %key, %position_embedding, %rotated_query, %rotated_key) : (tensor<1x2xf32>, tensor<1x2xf32>, tensor<2x2x1x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_rotary_apply_f32_ideogram_shape_case {
+  %query = check.generate.fill value(1.0) : tensor<2x4608xf32>
+  %key = check.generate.fill value(2.0) : tensor<2x4608xf32>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x128x2xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %expected_query = check.generate.fill value(2.0) : tensor<2x4608xf32>
+  %expected_key = check.generate.fill value(4.0) : tensor<2x4608xf32>
+  func.call @id4_ideogram4_rotary_apply_f32(%query, %key, %position_embedding, %rotated_query, %rotated_key) : (tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x2x128x2xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_rotary_apply_f32_small_case> @id4_ideogram4_rotary_apply_f32_small
+check.benchmark<@id4_ideogram4_rotary_apply_f32_ideogram_shape_case> @id4_ideogram4_rotary_apply_f32_ideogram_shape

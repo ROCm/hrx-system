@@ -84,14 +84,3 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded
   vector.fragment.store<result> %result7, %output_view[%pixel_origin, %one_hundred_twelve] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
   kernel.return
 }
-
-check.case public @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_case {
-  %storage = check.generate.fill value(1.0) : tensor<16x256xbf16>
-  %weight = check.generate.fill value(0.00390625) : tensor<256x128xbf16>
-  %expected = check.generate.fill value(1.0) : tensor<16x256xbf16>
-  func.call @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128(%storage, %weight, %storage) : (tensor<16x256xbf16>, tensor<256x128xbf16>, tensor<16x256xbf16>)
-  check.expect.close actual(%storage) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x256xbf16>
-  check.return
-}
-
-check.benchmark<@id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small_case> @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_small

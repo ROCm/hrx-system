@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_case {
+  %source = check.generate.fill value(0.0) : tensor<1x1x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x1x4x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x1x4x1xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_f32_bf16(%source, %target) : (tensor<1x1x3x3xf32>, tensor<4x1x4x1xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1x4x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_case {
+  %source = check.generate.fill value(0.0) : tensor<512x512x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x512x4x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x512x4x512xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_f32_bf16(%source, %target) : (tensor<512x512x3x3xf32>, tensor<4x512x4x512xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x512x4x512xbf16>
+  check.return
+}
+
+check.case public @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case {
+  %source = check.generate.fill value(0.0) : tensor<1x1x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x4x1x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x4x1x1xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16(%source, %target) : (tensor<1x1x3x3xf32>, tensor<4x4x1x1xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x1x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case {
+  %source = check.generate.fill value(0.0) : tensor<512x512x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x4x512x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x4x512x512xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16(%source, %target) : (tensor<512x512x3x3xf32>, tensor<4x4x512x512xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x512x512xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_case> @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_case> @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case> @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case> @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape

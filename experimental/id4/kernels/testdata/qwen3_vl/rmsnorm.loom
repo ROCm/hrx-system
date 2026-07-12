@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_qwen3_vl_rmsnorm_f32_small_case {
+  %input = check.generate.fill value(2.0) : tensor<1x4xf32>
+  %weight = check.generate.iota offset(0.5) step(0.5) : tensor<4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x4xf32>
+  %expected = check.generate.iota offset(0.5) step(0.5) : tensor<1x4xf32>
+  func.call @id4_qwen3_vl_rmsnorm_f32(%input, %weight, %output) : (tensor<1x4xf32>, tensor<4xbf16>, tensor<1x4xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<1x4xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_rmsnorm_bf16_small_case {
+  %input = check.generate.fill value(2.0) : tensor<1x4xbf16>
+  %weight = check.generate.iota offset(0.5) step(0.5) : tensor<4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %expected = check.generate.iota offset(0.5) step(0.5) : tensor<1x4xbf16>
+  func.call @id4_qwen3_vl_rmsnorm_bf16(%input, %weight, %output) : (tensor<1x4xbf16>, tensor<4xbf16>, tensor<1x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<1x4xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_rmsnorm_f32_qwen_slice_case {
+  %input = check.generate.fill value(2.0) : tensor<64x4096xf32>
+  %weight = check.generate.fill value(1.0) : tensor<4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<64x4096xf32>
+  %expected = check.generate.fill value(1.0) : tensor<64x4096xf32>
+  func.call @id4_qwen3_vl_rmsnorm_f32(%input, %weight, %output) : (tensor<64x4096xf32>, tensor<4096xbf16>, tensor<64x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<64x4096xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_rmsnorm_f32_small_case> @id4_qwen3_vl_rmsnorm_f32_small
+
+check.benchmark<@id4_qwen3_vl_rmsnorm_bf16_small_case> @id4_qwen3_vl_rmsnorm_bf16_small
+
+check.benchmark<@id4_qwen3_vl_rmsnorm_f32_qwen_slice_case> @id4_qwen3_vl_rmsnorm_f32_qwen_slice

@@ -1,0 +1,43 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_sampler_euler_step_f32_small_case {
+  %x_t = check.generate.fill value(10.0) : tensor<257xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<257xf32>
+  %expected_x_next = check.generate.iota offset(6.5) step(-0.5) : tensor<257xf32>
+  func.call @id4_sampler_euler_step_f32(%x_t, %denoised, %sigmas, %x_next) : (tensor<257xf32>, tensor<257xf32>, tensor<2xf32>, tensor<257xf32>)
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_euler_step_f32_in_place_case {
+  %x = check.generate.fill value(10.0) : tensor<257xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %expected_x = check.generate.iota offset(6.5) step(-0.5) : tensor<257xf32>
+  func.call @id4_sampler_euler_step_f32(%x, %denoised, %sigmas, %x) : (tensor<257xf32>, tensor<257xf32>, tensor<2xf32>, tensor<257xf32>)
+  check.expect.close actual(%x) expected(%expected_x) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_euler_step_f32_full_latent_case {
+  %x_t = check.generate.fill value(10.0) : tensor<524288xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<524288xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<524288xf32>
+  %expected_x_next = check.generate.iota offset(6.5) step(-0.5) : tensor<524288xf32>
+  func.call @id4_sampler_euler_step_f32(%x_t, %denoised, %sigmas, %x_next) : (tensor<524288xf32>, tensor<524288xf32>, tensor<2xf32>, tensor<524288xf32>)
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
+  check.return
+}
+
+check.benchmark<@id4_sampler_euler_step_f32_small_case> @id4_sampler_euler_step_f32_small
+
+check.benchmark<@id4_sampler_euler_step_f32_in_place_case> @id4_sampler_euler_step_f32_in_place
+
+check.benchmark<@id4_sampler_euler_step_f32_full_latent_case> @id4_sampler_euler_step_f32_full_latent

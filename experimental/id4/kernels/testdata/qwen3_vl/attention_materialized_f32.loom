@@ -1,0 +1,141 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_qwen3_vl_attention_materialized_f32_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %value = check.generate.iota offset(3.0) step(2.0) : tensor<1x2xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<1x1xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x1x1xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x1x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x2xf32>
+  func.call @id4_qwen3_vl_attention_scores_f32(%query, %key, %attention_mask, %scores) : (tensor<1x2xf32>, tensor<1x2xf32>, tensor<1x1xf32>, tensor<1x1x1xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<1x1x1xf32>, tensor<1x1x1xf32>)
+  func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<1x1x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
+  check.expect.close actual(%output) expected(%value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %value = check.generate.iota offset(3.0) step(2.0) : tensor<1x2xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<1x1xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x1x1xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x1x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x1xf32>, tensor<1x1x1xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<1x1x1xf32>, tensor<1x1x1xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x1x1xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
+  check.expect.close actual(%output) expected(%value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_f32_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %expected = check.generate.fill value(2.0) : tensor<2x1xf32>
+  func.call @id4_qwen3_vl_attention_scores_f32(%query, %key, %attention_mask, %scores) : (tensor<2x1xf32>, tensor<2x1xf32>, tensor<2x2xf32>, tensor<1x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<1x2x2xf32>, tensor<1x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<1x2x2xf32>, tensor<2x1xf32>, tensor<2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x1xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x1xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<2x1xbf16>, tensor<2x1xbf16>, tensor<2x2xf32>, tensor<1x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<1x2x2xf32>, tensor<1x2x2xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x2x2xbf16>, tensor<2x1xbf16>, tensor<2x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_f32_grouped_query_case {
+  %query = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<2x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<2x2x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %expected = check.generate.fill value(2.0) : tensor<2x2xf32>
+  func.call @id4_qwen3_vl_attention_scores_f32(%query, %key, %attention_mask, %scores) : (tensor<2x2xf32>, tensor<2x1xf32>, tensor<2x2xf32>, tensor<2x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<2x2x2xf32>, tensor<2x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<2x2x2xf32>, tensor<2x1xf32>, tensor<2x2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x2xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_grouped_query_case {
+  %query = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<2x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<2x2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x2xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<2x2xbf16>, tensor<2x1xbf16>, tensor<2x2xf32>, tensor<2x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<2x2x2xf32>, tensor<2x2x2xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<2x2x2xbf16>, tensor<2x1xbf16>, tensor<2x2xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_padded_context_case {
+  %probabilities = check.generate.fill value(0.0) : tensor<1x2x2xbf16>
+  %value = check.generate.fill value(7.0) : tensor<2x1xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x1xbf16>
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x2x2xbf16>, tensor<2x1xbf16>, tensor<4x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_f32_qwen_slice_case {
+  %query = check.generate.fill value(0.0) : tensor<64x4096xf32>
+  %key = check.generate.fill value(0.0) : tensor<64x1024xf32>
+  %value = check.generate.fill value(7.0) : tensor<64x1024xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<64x64xf32>
+  %scores = check.generate.fill value(0.0) : tensor<32x64x64xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<32x64x64xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x4096xf32>
+  %expected = check.generate.fill value(7.0) : tensor<64x4096xf32>
+  func.call @id4_qwen3_vl_attention_scores_f32(%query, %key, %attention_mask, %scores) : (tensor<64x4096xf32>, tensor<64x1024xf32>, tensor<64x64xf32>, tensor<32x64x64xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<32x64x64xf32>, tensor<32x64x64xf32>)
+  func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<32x64x64xf32>, tensor<64x1024xf32>, tensor<64x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<64x4096xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_f32_single_token_case> @id4_qwen3_vl_attention_materialized_f32_single_token
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_single_token_case> @id4_qwen3_vl_attention_materialized_bf16_single_token
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_f32_uniform_softmax_case> @id4_qwen3_vl_attention_materialized_f32_uniform_softmax
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case> @id4_qwen3_vl_attention_materialized_bf16_uniform_softmax
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_f32_grouped_query_case> @id4_qwen3_vl_attention_materialized_f32_grouped_query
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_grouped_query_case> @id4_qwen3_vl_attention_materialized_bf16_grouped_query
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_padded_context_case> @id4_qwen3_vl_attention_materialized_bf16_padded_context
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_f32_qwen_slice_case> @id4_qwen3_vl_attention_materialized_f32_qwen_slice

@@ -1,0 +1,96 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<64x16xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<32x64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x64xbf16>
+  %expected = check.generate.fill value(18.0) : tensor<32x64xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<32x16xbf16>, tensor<64x16xbf16>, tensor<32x64xbf16>, tensor<32x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x64xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_case {
+  %input = check.generate.fill value(1.0) : tensor<64x16xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<64x16xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<64x64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<64x64xbf16>
+  %expected = check.generate.fill value(18.0) : tensor<64x64xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64(%input, %weight, %residual, %output) : (tensor<64x16xbf16>, tensor<64x16xbf16>, tensor<64x64xbf16>, tensor<64x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<512x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<512x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x4096xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<512x4096xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<512x12288xbf16>, tensor<4096x12288xbf16>, tensor<512x4096xbf16>, tensor<512x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<512x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<512x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x4096xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<512x4096xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64(%input, %weight, %residual, %output) : (tensor<512x12288xbf16>, tensor<4096x12288xbf16>, tensor<512x4096xbf16>, tensor<512x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_case {
+  %input = check.generate.fill value(0.0078125) : tensor<288x12288xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<4096x12288xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<288x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<288x4096xbf16>
+  %expected = check.generate.fill value(50.0) : tensor<288x4096xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<288x12288xbf16>, tensor<4096x12288xbf16>, tensor<288x4096xbf16>, tensor<288x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<1024x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<1024x4096xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32(%input, %weight, %residual, %output) : (tensor<1024x12288xbf16>, tensor<4096x12288xbf16>, tensor<1024x4096xbf16>, tensor<1024x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %residual = check.generate.fill value(2.0) : tensor<1024x4096xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<1024x4096xbf16>
+  func.call @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64(%input, %weight, %residual, %output) : (tensor<1024x12288xbf16>, tensor<4096x12288xbf16>, tensor<1024x4096xbf16>, tensor<1024x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_small
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_1024
+
+check.benchmark<@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case> @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024

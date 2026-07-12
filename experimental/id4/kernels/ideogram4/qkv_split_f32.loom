@@ -50,34 +50,3 @@ kernel.def export("id4_ideogram4_qkv_split_f32") @id4_ideogram4_qkv_split_f32() 
   }
   kernel.return
 }
-
-check.case public @id4_ideogram4_qkv_split_f32_small_case {
-  %qkv = check.generate.iota offset(1.0) step(1.0) : tensor<6x1xf32>
-  %query = check.generate.fill value(0.0) : tensor<1x2xf32>
-  %key = check.generate.fill value(0.0) : tensor<1x2xf32>
-  %value = check.generate.fill value(0.0) : tensor<1x2xf32>
-  %expected_query = check.generate.iota offset(1.0) step(1.0) : tensor<1x2xf32>
-  %expected_key = check.generate.iota offset(3.0) step(1.0) : tensor<1x2xf32>
-  %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xf32>
-  func.call @id4_ideogram4_qkv_split_f32(%qkv, %query, %key, %value) : (tensor<6x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
-  check.expect.close actual(%query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
-  check.expect.close actual(%key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
-  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
-  check.return
-}
-
-check.case public @id4_ideogram4_qkv_split_f32_ideogram_shape_case {
-  %qkv = check.generate.fill value(3.0) : tensor<13824x2xf32>
-  %query = check.generate.fill value(0.0) : tensor<2x4608xf32>
-  %key = check.generate.fill value(0.0) : tensor<2x4608xf32>
-  %value = check.generate.fill value(0.0) : tensor<2x4608xf32>
-  %expected = check.generate.fill value(3.0) : tensor<2x4608xf32>
-  func.call @id4_ideogram4_qkv_split_f32(%qkv, %query, %key, %value) : (tensor<13824x2xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>)
-  check.expect.close actual(%query) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
-  check.expect.close actual(%key) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
-  check.expect.close actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
-  check.return
-}
-
-check.benchmark<@id4_ideogram4_qkv_split_f32_small_case> @id4_ideogram4_qkv_split_f32_small
-check.benchmark<@id4_ideogram4_qkv_split_f32_ideogram_shape_case> @id4_ideogram4_qkv_split_f32_ideogram_shape

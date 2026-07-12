@@ -149,37 +149,3 @@ kernel.def @id4_vae_im2col3x3_bf16_1x1_expected() {
   }
   kernel.return
 }
-
-check.case public @id4_vae_im2col3x3_bf16_1x1_layout_case {
-  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32xbf16>
-  %actual = check.generate.fill value(-1.0) : tensor<288xbf16>
-  %expected = check.generate.fill value(-2.0) : tensor<288xbf16>
-  func.call @id4_vae_im2col3x3_bf16(%input, %actual) : (tensor<32xbf16>, tensor<288xbf16>)
-  func.call @id4_vae_im2col3x3_bf16_1x1_expected(%input, %expected) : (tensor<32xbf16>, tensor<288xbf16>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288xbf16>
-  check.return
-}
-
-check.case public @id4_vae_im2col3x3_bf16_16x16_c512_case {
-  %input = check.generate.fill value(0.0) : tensor<256x512xbf16>
-  %output = check.generate.fill value(1.0) : tensor<256x4608xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<256x4608xbf16>
-  func.call @id4_vae_im2col3x3_bf16(%input, %output) : (tensor<256x512xbf16>, tensor<256x4608xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x4608xbf16>
-  check.return
-}
-
-check.case public @id4_vae_im2col3x3_bf16_32x32_c512_case {
-  %input = check.generate.fill value(0.0) : tensor<1024x512xbf16>
-  %output = check.generate.fill value(1.0) : tensor<1024x4608xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x4608xbf16>
-  func.call @id4_vae_im2col3x3_bf16(%input, %output) : (tensor<1024x512xbf16>, tensor<1024x4608xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4608xbf16>
-  check.return
-}
-
-check.benchmark<@id4_vae_im2col3x3_bf16_1x1_layout_case> @id4_vae_im2col3x3_bf16_1x1_layout
-
-check.benchmark<@id4_vae_im2col3x3_bf16_16x16_c512_case> @id4_vae_im2col3x3_bf16_16x16_c512
-
-check.benchmark<@id4_vae_im2col3x3_bf16_32x32_c512_case> @id4_vae_im2col3x3_bf16_32x32_c512

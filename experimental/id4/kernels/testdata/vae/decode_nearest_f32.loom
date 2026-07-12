@@ -1,0 +1,29 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_decode_nearest_f32_scale2_case {
+  %latent = check.generate.fill value(2.0) : tensor<2x2x1x1xf32>
+  %decoded_tile = check.generate.fill value(0.0) : tensor<4x4x1x1xf32>
+  %decoded_image = check.generate.fill value(0.0) : tensor<4x4x1x1xf32>
+  %expected = check.generate.fill value(2.0) : tensor<4x4x1x1xf32>
+  func.call @id4_vae_decode_nearest_f32(%latent, %decoded_tile, %decoded_image) : (tensor<2x2x1x1xf32>, tensor<4x4x1x1xf32>, tensor<4x4x1x1xf32>)
+  check.expect.close actual(%decoded_image) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x1x1xf32>
+  check.expect.close actual(%decoded_tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_decode_nearest_f32_flux2_tile_case {
+  %latent = check.generate.fill value(1.0) : tensor<32x32x128x1xf32>
+  %decoded_tile = check.generate.fill value(0.0) : tensor<512x512x3x1xf32>
+  %decoded_image = check.generate.fill value(0.0) : tensor<512x512x3x1xf32>
+  %expected = check.generate.fill value(1.0) : tensor<512x512x3x1xf32>
+  func.call @id4_vae_decode_nearest_f32(%latent, %decoded_tile, %decoded_image) : (tensor<32x32x128x1xf32>, tensor<512x512x3x1xf32>, tensor<512x512x3x1xf32>)
+  check.expect.close actual(%decoded_image) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x512x3x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_decode_nearest_f32_scale2_case> @id4_vae_decode_nearest_f32_scale2
+check.benchmark<@id4_vae_decode_nearest_f32_flux2_tile_case> @id4_vae_decode_nearest_f32_flux2_tile

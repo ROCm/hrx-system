@@ -8,24 +8,17 @@ load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
-load(":build_defs.bzl", "id4_vae_group_norm_apply_case")
+load(
+    ":build_defs.bzl",
+    "id4_kernel_test_module_label",
+    "id4_kernel_test_module_name",
+    "id4_vae_group_norm_apply_case",
+)
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-loom_link_module(
-    name = "vae_conv3x3_bias_packed_bf16_test_module",
-    srcs = ["testdata/vae/conv3x3_bias_packed_bf16.loom"],
-    libraries = ["vae/conv3x3_bias_packed_bf16.loom"],
-)
-
-loom_link_module(
-    name = "vae_conv3x3_bias_f32_test_module",
-    srcs = ["testdata/vae/conv3x3_bias_f32.loom"],
-    libraries = ["vae/conv3x3_bias_f32.loom"],
 )
 
 _KERNEL_CASES = [
@@ -1109,7 +1102,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=2",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_bf16_small",
     },
     {
@@ -1125,7 +1118,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_bf16_small_same_padding",
     },
     {
@@ -1141,7 +1134,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_bf16_flux2_conv_in_shape",
     },
     {
@@ -1157,7 +1150,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=2",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=8",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_matches_scalar_small_same_padding",
     },
     {
@@ -1173,7 +1166,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=4",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=256",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_padding",
     },
     {
@@ -1189,7 +1182,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=4",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=256",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding",
     },
     {
@@ -1205,7 +1198,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=4",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=256",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding",
     },
     {
@@ -1221,7 +1214,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=16",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=262144",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape",
     },
     {
@@ -1235,7 +1228,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape",
     },
     {
@@ -1249,7 +1242,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape",
     },
     {
@@ -1265,7 +1258,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape",
     },
     {
@@ -1281,7 +1274,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_bf16_flux2_mid_block_shape",
     },
     {
@@ -1295,7 +1288,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape",
     },
     {
@@ -1309,7 +1302,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape",
     },
     {
@@ -1323,7 +1316,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=131072",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape",
     },
     {
@@ -1337,7 +1330,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape",
     },
     {
@@ -1351,7 +1344,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=1048576",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape",
     },
     {
@@ -1365,7 +1358,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=131072",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape",
     },
     {
@@ -1379,7 +1372,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape",
     },
     {
@@ -1393,7 +1386,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=1048576",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape",
     },
     {
@@ -1407,7 +1400,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x256_shape",
     },
     {
@@ -1421,7 +1414,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape",
     },
     {
@@ -1435,7 +1428,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_256x256_shape",
     },
     {
@@ -1449,7 +1442,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape",
     },
     {
@@ -1463,7 +1456,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_256x128_shape",
     },
     {
@@ -1477,7 +1470,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape",
     },
     {
@@ -1491,7 +1484,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape",
     },
     {
@@ -1505,7 +1498,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape",
     },
     {
@@ -1519,7 +1512,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=131072",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape",
     },
     {
@@ -1533,7 +1526,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape",
     },
     {
@@ -1549,7 +1542,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=4",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=256",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_matches_scalar_medium_same_padding",
     },
     {
@@ -1563,7 +1556,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=131072",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_16x16_512x512_shape",
     },
     {
@@ -1577,7 +1570,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=524288",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_32x32_512x512_shape",
     },
     {
@@ -1591,7 +1584,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=1048576",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_64x64_256x256_shape",
     },
     {
@@ -1605,7 +1598,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=2097152",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_128x128_128x128_shape",
     },
     {
@@ -1619,7 +1612,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_512x512_256x256_shape",
     },
     {
@@ -1633,7 +1626,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=67108864",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape",
     },
     {
@@ -1647,7 +1640,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape",
     },
     {
@@ -1661,7 +1654,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=134217728",
         ],
-        "source": ":vae_conv3x3_bias_packed_bf16_test_module",
+        "source": "vae/conv3x3_bias_packed_bf16.loom",
         "target_name": "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape",
     },
     {
@@ -1675,7 +1668,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_f32_small_same_padding",
     },
     {
@@ -1689,7 +1682,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_f32_flux2_conv_in_shape",
     },
     {
@@ -1703,7 +1696,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_f32_small_same_padding",
     },
     {
@@ -1719,7 +1712,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc4_f32_small_same_padding",
     },
     {
@@ -1735,7 +1728,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc8_f32_small_same_padding",
     },
     {
@@ -1751,7 +1744,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc8_packed_f32_small_same_padding",
     },
     {
@@ -1813,7 +1806,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=64",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=262144",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape",
     },
     {
@@ -1829,7 +1822,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=64",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=262144",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape",
     },
     {
@@ -1889,7 +1882,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=2097152",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_f32_flux2_tile_mid_shape",
     },
     {
@@ -1903,7 +1896,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=16",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_f32_small_same_padding",
     },
     {
@@ -1919,7 +1912,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc4_f32_small_same_padding",
     },
     {
@@ -1935,7 +1928,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc8_f32_small_same_padding",
     },
     {
@@ -1951,7 +1944,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc8_packed_f32_small_same_padding",
     },
     {
@@ -2013,7 +2006,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=16",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=1048576",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc8_f32_flux2_tile_residual_shape",
     },
     {
@@ -2029,7 +2022,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=16",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=1048576",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc8_packed_f32_flux2_tile_residual_shape",
     },
     {
@@ -2089,7 +2082,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=8388608",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_f32_flux2_tile_residual_shape",
     },
     {
@@ -2103,7 +2096,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=4",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_wg_reduce_f32_small_same_padding",
     },
     {
@@ -2117,7 +2110,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.batch_count=1",
             "--config=id4.vae.conv3x3_bias.output_element_count=1",
         ],
-        "source": ":vae_conv3x3_bias_f32_test_module",
+        "source": "vae/conv3x3_bias_f32.loom",
         "target_name": "vae_conv3x3_bias_wg_reduce_f32_iota_center",
     },
     {
@@ -8325,6 +8318,15 @@ _KERNEL_SOURCES = [
     "vae/upsample_conv3x3_bias_f32.loom",
 ]
 
+[
+    loom_link_module(
+        name = id4_kernel_test_module_name(source),
+        srcs = ["testdata/" + source],
+        libraries = [source],
+    )
+    for source in _KERNEL_SOURCES
+]
+
 exports_files(_KERNEL_SOURCES)
 
 filegroup(
@@ -8352,13 +8354,13 @@ _HAL_EXECUTION_DEVICE = "amdgpu://0"
         name = _case["target_name"] + "_plan_test",
         src = "//loom/src/loom/tools/iree-benchmark-loom",
         args = [
-            "$(location %s)" % _case["source"],
+            "$(location %s)" % id4_kernel_test_module_label(_case["source"]),
             "--benchmark=%s" % _case["benchmark"],
             "--dry-run",
             "--output-format=jsonl",
         ] + _case["configs"],
         data = [
-            _case["source"],
+            id4_kernel_test_module_label(_case["source"]),
         ] + _case.get("data", []),
         tags = ["hostonly"],
     )
@@ -8370,12 +8372,12 @@ _HAL_EXECUTION_DEVICE = "amdgpu://0"
         name = _case["target_name"] + "_hal_test",
         src = "//loom/src/loom/tools/iree-test-loom",
         args = [
-            "$(location %s)" % _case["source"],
+            "$(location %s)" % id4_kernel_test_module_label(_case["source"]),
             "--case=%s" % _case["actual_case"],
             "--device=%s" % _HAL_EXECUTION_DEVICE,
         ] + _case["configs"],
         data = [
-            _case["source"],
+            id4_kernel_test_module_label(_case["source"]),
         ] + _case.get("data", []),
         tags = [
             "iree-run-requirement=runtime.resource.amd_gpu",

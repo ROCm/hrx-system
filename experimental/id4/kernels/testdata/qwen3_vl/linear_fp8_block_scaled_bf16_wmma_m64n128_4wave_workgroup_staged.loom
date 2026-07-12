@@ -1,0 +1,42 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_case {
+  %input = check.generate.fill value(1.0) : tensor<64x128xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<16384xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<1x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x128xbf16>
+  %expected = check.generate.fill value(256.0) : tensor<64x128xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<64x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case {
+  %input = check.generate.fill value(1.0) : tensor<33x128xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<16384xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<1x1xf32>
+  %output = check.generate.fill value(1.0) : tensor<64x128xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<64x128xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<33x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case {
+  %input = check.generate.fill value(0.0078125) : tensor<64x4096xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<50331648xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<96x32xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x12288xbf16>
+  %expected = check.generate.fill value(16.0) : tensor<64x12288xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<64x4096xbf16>, tensor<50331648xf8E4M3>, tensor<96x32xf32>, tensor<64x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x12288xbf16>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small
+
+check.benchmark<@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case> @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero

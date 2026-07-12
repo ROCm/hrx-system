@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_attention_query_block8_rounded_f32_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(0.0) : tensor<1x2xf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<1x2xf16>
+  %output = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %expected = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xf32>
+  func.call @id4_ideogram4_attention_query_block8_rounded_f32(%query, %key, %value, %output) : (tensor<1x2xf32>, tensor<1x2xf16>, tensor<1x2xf16>, tensor<2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail_case {
+  %query = check.generate.fill value(0.0) : tensor<3x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<3x1xf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<3x1xf16>
+  %output = check.generate.fill value(0.0) : tensor<1x3xf32>
+  %expected = check.generate.fill value(3.0) : tensor<1x3xf32>
+  func.call @id4_ideogram4_attention_query_block8_rounded_f32(%query, %key, %value, %output) : (tensor<3x1xf32>, tensor<3x1xf16>, tensor<3x1xf16>, tensor<1x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x3xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4096x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<4096x4608xf16>
+  %value = check.generate.fill value(0.0) : tensor<4096x4608xf16>
+  %output = check.generate.fill value(1.0) : tensor<4608x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4608x4096xf32>
+  func.call @id4_ideogram4_attention_query_block8_rounded_f32(%query, %key, %value, %output) : (tensor<4096x4608xf32>, tensor<4096x4608xf16>, tensor<4096x4608xf16>, tensor<4608x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4096xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query_block8_rounded_f32_cond_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4547x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<4547x4608xf16>
+  %value = check.generate.fill value(0.0) : tensor<4547x4608xf16>
+  %output = check.generate.fill value(1.0) : tensor<4608x4547xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4608x4547xf32>
+  func.call @id4_ideogram4_attention_query_block8_rounded_f32(%query, %key, %value, %output) : (tensor<4547x4608xf32>, tensor<4547x4608xf16>, tensor<4547x4608xf16>, tensor<4608x4547xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4547xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_attention_query_block8_rounded_f32_single_token_case> @id4_ideogram4_attention_query_block8_rounded_f32_single_token
+check.benchmark<@id4_ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail_case> @id4_ideogram4_attention_query_block8_rounded_f32_uniform_softmax_tail
+check.benchmark<@id4_ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape_case> @id4_ideogram4_attention_query_block8_rounded_f32_uncond_1024_shape
+check.benchmark<@id4_ideogram4_attention_query_block8_rounded_f32_cond_1024_shape_case> @id4_ideogram4_attention_query_block8_rounded_f32_cond_1024_shape

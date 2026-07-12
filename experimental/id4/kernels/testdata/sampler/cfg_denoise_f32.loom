@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_sampler_cfg_denoise_f32_small_case {
+  %cond = check.generate.iota offset(1.0) step(1.0) : tensor<257xf32>
+  %uncond = check.generate.iota offset(0.0) step(1.0) : tensor<257xf32>
+  %x_t = check.generate.fill value(10.0) : tensor<257xf32>
+  %scalings = check.generate.iota offset(1.0) step(-2.0) : tensor<3xf32>
+  %guidance = check.generate.iota offset(7.0) step(-6.0) : tensor<3xf32>
+  %guided_pred = check.generate.fill value(0.0) : tensor<257xf32>
+  %denoised = check.generate.fill value(0.0) : tensor<257xf32>
+  %expected_guided_pred = check.generate.iota offset(7.0) step(1.0) : tensor<257xf32>
+  %expected_denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
+  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<3xf32>, tensor<257xf32>, tensor<257xf32>)
+  check.expect.close actual(%guided_pred) expected(%expected_guided_pred) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.expect.close actual(%denoised) expected(%expected_denoised) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_cfg_denoise_f32_full_latent_case {
+  %cond = check.generate.iota offset(1.0) step(1.0) : tensor<524288xf32>
+  %uncond = check.generate.iota offset(0.0) step(1.0) : tensor<524288xf32>
+  %x_t = check.generate.fill value(10.0) : tensor<524288xf32>
+  %scalings = check.generate.iota offset(1.0) step(-2.0) : tensor<3xf32>
+  %guidance = check.generate.iota offset(7.0) step(-6.0) : tensor<3xf32>
+  %guided_pred = check.generate.fill value(0.0) : tensor<524288xf32>
+  %denoised = check.generate.fill value(0.0) : tensor<524288xf32>
+  %expected_guided_pred = check.generate.iota offset(7.0) step(1.0) : tensor<524288xf32>
+  %expected_denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<524288xf32>
+  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised) : (tensor<524288xf32>, tensor<524288xf32>, tensor<524288xf32>, tensor<3xf32>, tensor<3xf32>, tensor<524288xf32>, tensor<524288xf32>)
+  check.expect.close actual(%guided_pred) expected(%expected_guided_pred) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
+  check.expect.close actual(%denoised) expected(%expected_denoised) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
+  check.return
+}
+
+check.benchmark<@id4_sampler_cfg_denoise_f32_small_case> @id4_sampler_cfg_denoise_f32_small
+
+check.benchmark<@id4_sampler_cfg_denoise_f32_full_latent_case> @id4_sampler_cfg_denoise_f32_full_latent

@@ -6,6 +6,16 @@
 
 """ID4 Loom kernel test and benchmark definitions."""
 
+def id4_kernel_test_module_name(source):
+    """Returns the linked test module target name for a production source."""
+    if not source.endswith(".loom"):
+        fail("kernel source must use the .loom extension: %s" % source)
+    return source[:-len(".loom")].replace("/", "_") + "_test_module"
+
+def id4_kernel_test_module_label(source):
+    """Returns the linked test module label for a production source."""
+    return ":" + id4_kernel_test_module_name(source)
+
 def id4_vae_group_norm_apply_case(
         name,
         width,

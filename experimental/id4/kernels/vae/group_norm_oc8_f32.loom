@@ -101,31 +101,3 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc8_2d_f32") @id4_vae_group_norm_
   }
   kernel.return
 }
-
-check.case public @id4_vae_group_norm_silu_ic4_oc8_2d_f32_small_case {
-  %input = check.generate.fill value(0.0) : tensor<1x1x8x1xf32>
-  %weight = check.generate.fill value(1.0) : tensor<8xf32>
-  %bias = check.generate.fill value(1.0) : tensor<8xf32>
-  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
-  %output = check.generate.fill value(0.0) : tensor<1x1x8x1xf32>
-  %expected = check.generate.fill value(0.73105857863000497) : tensor<1x1x8x1xf32>
-  func.call @id4_vae_group_norm_silu_ic4_oc8_2d_f32(%input, %weight, %bias, %stats, %output) : (tensor<1x1x8x1xf32>, tensor<8xf32>, tensor<8xf32>, tensor<1x1x2xf32>, tensor<1x1x8x1xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<1x1x8x1xf32>
-  check.return
-}
-
-check.case public @id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_case {
-  %input = check.generate.fill value(0.0) : tensor<128x128x256x1xf32>
-  %weight = check.generate.fill value(1.0) : tensor<256xf32>
-  %bias = check.generate.fill value(1.0) : tensor<256xf32>
-  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
-  %output = check.generate.fill value(0.0) : tensor<128x128x256x1xf32>
-  %expected = check.generate.fill value(0.73105857863000497) : tensor<128x128x256x1xf32>
-  func.call @id4_vae_group_norm_silu_ic4_oc8_2d_f32(%input, %weight, %bias, %stats, %output) : (tensor<128x128x256x1xf32>, tensor<256xf32>, tensor<256xf32>, tensor<1x32x2xf32>, tensor<128x128x256x1xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<128x128x256x1xf32>
-  check.return
-}
-
-check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_2d_f32_small_case> @id4_vae_group_norm_silu_ic4_oc8_2d_f32_small
-
-check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_case> @id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel

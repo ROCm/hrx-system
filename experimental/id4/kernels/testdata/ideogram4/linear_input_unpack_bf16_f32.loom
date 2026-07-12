@@ -1,0 +1,60 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_ideogram4_linear_input_unpack_bf16_f32_single_token_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<1x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4x1xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xf32>
+  func.call @id4_ideogram4_linear_input_unpack_bf16_f32(%input, %output) : (tensor<1x4xbf16>, tensor<4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4608x4096xf32>
+  %expected = check.generate.fill value(1.0) : tensor<4608x4096xf32>
+  func.call @id4_ideogram4_linear_input_unpack_bf16_f32(%input, %output) : (tensor<4096x4608xbf16>, tensor<4608x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4096xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_packed_value_unpack_bf16_f32_small_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<3x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x3xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xf32>
+  func.call @id4_ideogram4_packed_value_unpack_bf16_f32(%input, %output) : (tensor<3x2xbf16>, tensor<2x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_input_unpack_f32_f32_single_token_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<1x4xf32>
+  %output = check.generate.fill value(0.0) : tensor<4x1xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xf32>
+  func.call @id4_ideogram4_linear_input_unpack_f32_f32(%input, %output) : (tensor<1x4xf32>, tensor<4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x4608xf32>
+  %output = check.generate.fill value(0.0) : tensor<4608x4096xf32>
+  %expected = check.generate.fill value(1.0) : tensor<4608x4096xf32>
+  func.call @id4_ideogram4_linear_input_unpack_f32_f32(%input, %output) : (tensor<4096x4608xf32>, tensor<4608x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4096xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_input_unpack_bf16_f32_single_token_case> @id4_ideogram4_linear_input_unpack_bf16_f32_single_token
+
+check.benchmark<@id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_case> @id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape
+
+check.benchmark<@id4_ideogram4_packed_value_unpack_bf16_f32_small_case> @id4_ideogram4_packed_value_unpack_bf16_f32_small
+
+check.benchmark<@id4_ideogram4_linear_input_unpack_f32_f32_single_token_case> @id4_ideogram4_linear_input_unpack_f32_f32_single_token
+
+check.benchmark<@id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_case> @id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape

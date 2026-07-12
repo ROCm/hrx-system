@@ -1,0 +1,57 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_qwen3_vl_residual_add_f32_small_case {
+  %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xf32>
+  %rhs = check.generate.fill value(10.0) : tensor<2x3xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x3xf32>
+  %expected = check.generate.iota offset(11.0) step(1.0) : tensor<2x3xf32>
+  func.call @id4_qwen3_vl_residual_add_f32(%lhs, %rhs, %output) : (tensor<2x3xf32>, tensor<2x3xf32>, tensor<2x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_residual_add_bf16_small_case {
+  %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xbf16>
+  %rhs = check.generate.fill value(10.0) : tensor<2x3xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x3xbf16>
+  %expected = check.generate.iota offset(11.0) step(1.0) : tensor<2x3xbf16>
+  func.call @id4_qwen3_vl_residual_add_bf16(%lhs, %rhs, %output) : (tensor<2x3xbf16>, tensor<2x3xbf16>, tensor<2x3xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_residual_add_rmsnorm_bf16_small_case {
+  %lhs = check.generate.fill value(1.0) : tensor<1x4xbf16>
+  %rhs = check.generate.fill value(1.0) : tensor<1x4xbf16>
+  %weight = check.generate.iota offset(0.5) step(0.5) : tensor<4xbf16>
+  %residual_output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %expected_residual = check.generate.fill value(2.0) : tensor<1x4xbf16>
+  %expected = check.generate.iota offset(0.5) step(0.5) : tensor<1x4xbf16>
+  func.call @id4_qwen3_vl_residual_add_rmsnorm_bf16(%lhs, %rhs, %weight, %residual_output, %output) : (tensor<1x4xbf16>, tensor<1x4xbf16>, tensor<4xbf16>, tensor<1x4xbf16>, tensor<1x4xbf16>)
+  check.expect.close actual(%residual_output) expected(%expected_residual) atol(0.0) rtol(0.0) nan(same) : tensor<1x4xbf16>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<1x4xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_residual_add_f32_qwen_slice_case {
+  %lhs = check.generate.fill value(1.0) : tensor<64x4096xf32>
+  %rhs = check.generate.fill value(2.0) : tensor<64x4096xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x4096xf32>
+  %expected = check.generate.fill value(3.0) : tensor<64x4096xf32>
+  func.call @id4_qwen3_vl_residual_add_f32(%lhs, %rhs, %output) : (tensor<64x4096xf32>, tensor<64x4096xf32>, tensor<64x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x4096xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_residual_add_f32_small_case> @id4_qwen3_vl_residual_add_f32_small
+
+check.benchmark<@id4_qwen3_vl_residual_add_bf16_small_case> @id4_qwen3_vl_residual_add_bf16_small
+
+check.benchmark<@id4_qwen3_vl_residual_add_rmsnorm_bf16_small_case> @id4_qwen3_vl_residual_add_rmsnorm_bf16_small
+
+check.benchmark<@id4_qwen3_vl_residual_add_f32_qwen_slice_case> @id4_qwen3_vl_residual_add_f32_qwen_slice

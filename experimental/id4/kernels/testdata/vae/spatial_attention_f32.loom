@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_spatial_attention_f32_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x1x2x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<1x1x2x1xf32>
+  %value = check.generate.iota offset(3.0) step(2.0) : tensor<1x1x2x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x2x1xf32>
+  func.call @id4_vae_spatial_attention_f32(%query, %key, %value, %output) : (tensor<1x1x2x1xf32>, tensor<1x1x2x1xf32>, tensor<1x1x2x1xf32>, tensor<1x1x2x1xf32>)
+  check.expect.close actual(%output) expected(%value) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x1x2x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_spatial_attention_f32_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1x2x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x1x2x1xf32>
+  %value = check.file.read.npy path("testdata/vae_spatial_attention_f32_uniform_value.npy") : tensor<2x1x2x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x1x2x1xf32>
+  %expected = check.file.read.npy path("testdata/vae_spatial_attention_f32_uniform_expected.npy") : tensor<2x1x2x1xf32>
+  func.call @id4_vae_spatial_attention_f32(%query, %key, %value, %output) : (tensor<2x1x2x1xf32>, tensor<2x1x2x1xf32>, tensor<2x1x2x1xf32>, tensor<2x1x2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x1x2x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_spatial_attention_f32_flux2_mid_block_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<128x128x512x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<128x128x512x1xf32>
+  %value = check.generate.fill value(7.0) : tensor<128x128x512x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<128x128x512x1xf32>
+  %expected = check.generate.fill value(7.0) : tensor<128x128x512x1xf32>
+  func.call @id4_vae_spatial_attention_f32(%query, %key, %value, %output) : (tensor<128x128x512x1xf32>, tensor<128x128x512x1xf32>, tensor<128x128x512x1xf32>, tensor<128x128x512x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<128x128x512x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_spatial_attention_f32_single_token_case> @id4_vae_spatial_attention_f32_single_token
+check.benchmark<@id4_vae_spatial_attention_f32_uniform_softmax_case> @id4_vae_spatial_attention_f32_uniform_softmax
+check.benchmark<@id4_vae_spatial_attention_f32_flux2_mid_block_shape_case> @id4_vae_spatial_attention_f32_flux2_mid_block_shape

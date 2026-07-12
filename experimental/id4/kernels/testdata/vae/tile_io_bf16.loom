@@ -1,0 +1,16 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_tile_extract_bf16_x_case {
+  %source = check.generate.fill value(3.0) : tensor<4x1x1x1xbf16>
+  %tile = check.generate.fill value(0.0) : tensor<2x1x1x1xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<2x1x1x1xbf16>
+  func.call @id4_vae_tile_extract_bf16(%source, %tile) : (tensor<4x1x1x1xbf16>, tensor<2x1x1x1xbf16>)
+  check.expect.close actual(%tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1x1x1xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_tile_extract_bf16_x_case> @id4_vae_tile_extract_bf16_x

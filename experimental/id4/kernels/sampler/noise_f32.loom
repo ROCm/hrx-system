@@ -70,21 +70,3 @@ kernel.def export("id4_sampler_noise_f32") @id4_sampler_noise_f32() {
   }
   kernel.return
 }
-
-check.case public @id4_sampler_noise_f32_small_case {
-  %seed = check.generate.iota offset(0) step(1) : tensor<2xi32>
-  %latent = check.generate.fill value(0.0) : tensor<8xf32>
-  func.call @id4_sampler_noise_f32(%seed, %latent) : (tensor<2xi32>, tensor<8xf32>)
-  check.return
-}
-
-check.case public @id4_sampler_noise_f32_full_latent_case {
-  %seed = check.generate.iota offset(0) step(1) : tensor<2xi32>
-  %latent = check.generate.fill value(0.0) : tensor<524288xf32>
-  func.call @id4_sampler_noise_f32(%seed, %latent) : (tensor<2xi32>, tensor<524288xf32>)
-  check.return
-}
-
-check.benchmark<@id4_sampler_noise_f32_small_case> @id4_sampler_noise_f32_small
-
-check.benchmark<@id4_sampler_noise_f32_full_latent_case> @id4_sampler_noise_f32_full_latent

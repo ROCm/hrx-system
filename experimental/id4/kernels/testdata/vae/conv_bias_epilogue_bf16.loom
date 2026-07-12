@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_small_case {
+  %input = check.generate.fill value(1.0) : tensor<2x64xf32>
+  %bias = check.generate.fill value(2.0) : tensor<64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x64xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<2x64xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<2x64xf32>, tensor<64xbf16>, tensor<2x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x64xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_add_epilogue_f32_bf16_small_case {
+  %input = check.generate.fill value(1.0) : tensor<2x64xf32>
+  %bias = check.generate.fill value(2.0) : tensor<64xbf16>
+  %addend = check.generate.fill value(4.0) : tensor<2x64xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x64xbf16>
+  %expected = check.generate.fill value(7.0) : tensor<2x64xbf16>
+  func.call @id4_vae_conv_bias_add_epilogue_f32_bf16(%input, %bias, %addend, %output) : (tensor<2x64xf32>, tensor<64xbf16>, tensor<2x64xbf16>, tensor<2x64xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x64xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<256x512xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<256x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x512xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<256x512xf32>, tensor<512xbf16>, tensor<256x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x512xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512_case {
+  %input = check.generate.fill value(0.0) : tensor<1024x512xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x512xbf16>
+  func.call @id4_vae_conv_bias_epilogue_f32_bf16(%input, %bias, %output) : (tensor<1024x512xf32>, tensor<512xbf16>, tensor<1024x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x512xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_small_case> @id4_vae_conv_bias_epilogue_f32_bf16_small
+
+check.benchmark<@id4_vae_conv_bias_add_epilogue_f32_bf16_small_case> @id4_vae_conv_bias_add_epilogue_f32_bf16_small
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512_case> @id4_vae_conv_bias_epilogue_f32_bf16_16x16_c512
+
+check.benchmark<@id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512_case> @id4_vae_conv_bias_epilogue_f32_bf16_32x32_c512

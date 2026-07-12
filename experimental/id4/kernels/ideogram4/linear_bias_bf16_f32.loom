@@ -54,28 +54,3 @@ kernel.def export("id4_ideogram4_linear_bias_bf16_f32") @id4_ideogram4_linear_bi
   }
   kernel.return
 }
-
-check.case public @id4_ideogram4_linear_bias_bf16_f32_small_case {
-  %input = check.generate.iota offset(1.01) step(1.0) : tensor<4x3xf32>
-  %weight = check.generate.fill value(1.0) : tensor<1x4xbf16>
-  %bias = check.generate.fill value(2.0) : tensor<1xbf16>
-  %output = check.generate.fill value(0.0) : tensor<1x2xf32>
-  %expected = check.generate.iota offset(28.04) step(4.0) : tensor<1x2xf32>
-  func.call @id4_ideogram4_linear_bias_bf16_f32(%input, %weight, %bias, %output) : (tensor<4x3xf32>, tensor<1x4xbf16>, tensor<1xbf16>, tensor<1x2xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<1x2xf32>
-  check.return
-}
-
-check.case public @id4_ideogram4_linear_bias_bf16_f32_ideogram_shape_case {
-  %input = check.generate.fill value(1.0) : tensor<4608x2xf32>
-  %weight = check.generate.fill value(0.0) : tensor<128x4608xbf16>
-  %bias = check.generate.fill value(0.0) : tensor<128xbf16>
-  %output = check.generate.fill value(1.0) : tensor<128x2xf32>
-  %expected = check.generate.fill value(0.0) : tensor<128x2xf32>
-  func.call @id4_ideogram4_linear_bias_bf16_f32(%input, %weight, %bias, %output) : (tensor<4608x2xf32>, tensor<128x4608xbf16>, tensor<128xbf16>, tensor<128x2xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x2xf32>
-  check.return
-}
-
-check.benchmark<@id4_ideogram4_linear_bias_bf16_f32_small_case> @id4_ideogram4_linear_bias_bf16_f32_small
-check.benchmark<@id4_ideogram4_linear_bias_bf16_f32_ideogram_shape_case> @id4_ideogram4_linear_bias_bf16_f32_ideogram_shape

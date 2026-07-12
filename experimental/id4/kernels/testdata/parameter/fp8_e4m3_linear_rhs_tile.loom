@@ -1,0 +1,44 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_small_case {
+  %source = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<256xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<16x16xf8E4M3>, tensor<256xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<256xf8E4M3>, tensor<16x16xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<13824x4608xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<63700992xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<13824x4608xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<13824x4608xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<13824x4608xf8E4M3>, tensor<63700992xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<63700992xf8E4M3>, tensor<13824x4608xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<13824x4608xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<12288x4608xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<12288x4608xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<12288x4608xf8E4M3>, tensor<56623104xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<56623104xf8E4M3>, tensor<12288x4608xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<12288x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape

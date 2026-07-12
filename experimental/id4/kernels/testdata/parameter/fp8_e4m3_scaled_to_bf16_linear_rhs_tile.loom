@@ -1,0 +1,78 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case {
+  %weight = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<16xf32>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<256xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case {
+  %weight = check.generate.fill value(448.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(448.0) : tensor<256xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent_case {
+  %weight = check.generate.fill value(-320.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(-320.0) : tensor<256xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_random_zero_scale_case {
+  %seed = check.param.seed base(80557283627064) count(1) : i64
+  %weight = check.generate.random.uniform seed(%seed) range(-448.0 to 448.0) : tensor<16x4608xf8E4M3>
+  %scale = check.generate.fill value(0.0) : tensor<16xf32>
+  %target = check.generate.fill value(1.0) : tensor<73728xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<73728xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x4608xf8E4M3>, tensor<16xf32>, tensor<73728xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<73728xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case {
+  %weight = check.generate.fill value(0.0) : tensor<13824x4608xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<13824xf32>
+  %target = check.generate.fill value(1.0) : tensor<63700992xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<63700992xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<13824x4608xf8E4M3>, tensor<13824xf32>, tensor<63700992xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<63700992xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_case {
+  %weight = check.generate.fill value(0.0) : tensor<12288x4608xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<12288xf32>
+  %target = check.generate.fill value(1.0) : tensor<56623104xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<12288x4608xf8E4M3>, tensor<12288xf32>, tensor<56623104xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<56623104xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_random_zero_scale_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_random_zero_scale
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape
