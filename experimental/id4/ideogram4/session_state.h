@@ -220,6 +220,8 @@ struct id4_ideogram4_generation_bundle_t {
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Stage-bundle residency policy selected during generation preparation.
   id4_ideogram4_generation_residency_policy_t residency_policy;
+  // Maximum compact target bytes retained while issuing a deferred stage.
+  iree_device_size_t maximum_parameter_window_byte_length;
   // Prepared coarse stage bundles retained by selected stage-bundle residency.
   id4_pipeline_bundle_t*
       resident_stage_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
@@ -248,7 +250,7 @@ struct id4_ideogram4_generation_execution_t {
   // Prepared generation bundle retained while queued work may use it.
   id4_ideogram4_generation_bundle_t* bundle;
   // Deferred parameter load lookahead selected for stage issues.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  iree_host_size_t parameter_load_prefetch_segment_distance;
   // Stage issue flags forwarded to every coarse stage submission.
   id4_pipeline_stage_issue_flags_t stage_issue_flags;
   // Lowered Qwen prompt inputs used by the conditioning phase.

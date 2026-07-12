@@ -352,7 +352,8 @@ static iree_status_t PrepareStage(
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      parameter_provider, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+      parameter_provider, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+      /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = kernel_library;
   prepare_options.wait_semaphore_list = wait_list;
   prepare_options.signal_semaphore_list = signal_list;
@@ -427,7 +428,7 @@ static iree_status_t IssueStage(
   id4_pipeline_stage_issue_options_t issue_options;
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.boundary_binding_count = boundary_bindings.count;
   issue_options.boundary_bindings = boundary_bindings.bindings;
   issue_options.diagnostic_tap_binding_count = diagnostic_tap_bindings.count;

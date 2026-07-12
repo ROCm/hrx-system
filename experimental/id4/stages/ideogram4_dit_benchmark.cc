@@ -440,7 +440,8 @@ static iree_status_t PrepareDitBundle(DitBenchmarkContext* context,
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
       context->parameter_provider.get(),
-      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+      /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = context->kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal.list();
@@ -468,7 +469,7 @@ static iree_status_t IssueDitBundle(
   id4_pipeline_stage_issue_options_t issue_options;
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.boundary_binding_count = boundary_bindings.count;
   issue_options.boundary_bindings = boundary_bindings.bindings;
   issue_options.wait_semaphore_list = wait.list();

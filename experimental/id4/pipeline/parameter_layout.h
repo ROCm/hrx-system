@@ -142,6 +142,15 @@ iree_status_t id4_pipeline_parameter_layout_add_archive_entries(
 iree_status_t id4_pipeline_parameter_layout_validate_index(
     const id4_pipeline_plan_t* plan, iree_io_parameter_index_t* index);
 
+// Maps one planned parameter request to its baked archive entry while
+// preserving |target_span|'s compact target range. The returned key is
+// borrowed from |plan|.
+iree_status_t id4_pipeline_parameter_layout_make_archive_request(
+    const id4_pipeline_plan_t* plan, iree_host_size_t parameter_tensor_index,
+    const id4_pipeline_parameter_request_t* planned_request,
+    iree_io_parameter_span_t target_span,
+    id4_pipeline_parameter_request_t* out_request);
+
 // Asynchronously populates a writable archive from prepared execution-layout
 // slabs and checkpoint source tensors. Source-layout entries are relayed in
 // bounded chunks and never become model-scale resident duplicates.

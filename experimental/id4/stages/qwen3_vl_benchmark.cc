@@ -36,12 +36,12 @@ IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "hybrid_compact_rhs, or streaming_compact_rhs.");
 IREE_FLAG(string, qwen_attention_implementation, "auto",
           "Qwen3-VL attention implementation: auto, materialized, or wmma.");
-IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
-          "Number of future stage regions whose deferred parameter load groups "
-          "may be submitted before the current region.");
-IREE_FLAG(bool, diagnostic_wait_after_each_region, false,
-          "Waits for each submitted Qwen3-VL region before submitting the next "
-          "region.");
+IREE_FLAG(int64_t, parameter_load_prefetch_segment_distance, 0,
+          "Number of future execution segments whose parameter windows may "
+          "be loaded before the current segment.");
+IREE_FLAG(bool, diagnostic_wait_after_each_execution_segment, false,
+          "Waits for each submitted Qwen3-VL execution segment before "
+          "submitting the next segment.");
 IREE_FLAG(bool, diagnostic_region_per_dispatch, false,
           "Plans each Qwen3-VL dispatch into a separate execution region.");
 IREE_FLAG(int64_t, diagnostic_model_layer_count, 0,
@@ -115,7 +115,7 @@ enum class QwenIssueTimingMode {
 enum class QwenParameterLoadMode {
   // Stage preparation submits all planned parameter loads.
   kEager,
-  // Stage issue submits parameter load groups at first consumer regions.
+  // Stage issue submits parameter loads at consumer execution segments.
   kDeferred,
 };
 
@@ -141,7 +141,7 @@ struct QwenBenchmarkContext {
   // Loaded Qwen3-VL stage under benchmark.
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
   // Deferred parameter load lookahead used by issue benchmarks.
-  iree_host_size_t parameter_load_prefetch_region_distance = 0;
+  iree_host_size_t parameter_load_prefetch_segment_distance = 0;
   // Fixture tensors used by fixture-backed issue benchmarks.
   id4::test::FixtureTensorSet fixture_tensors;
   // Token id storage backing |request|.
@@ -257,19 +257,19 @@ static iree_status_t ParseQwenAttentionImplementation(
 static iree_status_t ParseParameterLoadPrefetchRegionDistance(
     iree_host_size_t* out_distance) {
   IREE_ASSERT_ARGUMENT(out_distance);
-  if (FLAG_parameter_load_prefetch_region_distance < 0) {
+  if (FLAG_parameter_load_prefetch_segment_distance < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--parameter_load_prefetch_region_distance must be non-negative");
+        "--parameter_load_prefetch_segment_distance must be non-negative");
   }
-  if ((uint64_t)FLAG_parameter_load_prefetch_region_distance >
+  if ((uint64_t)FLAG_parameter_load_prefetch_segment_distance >
       IREE_HOST_SIZE_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "--parameter_load_prefetch_region_distance exceeds host size range");
+        "--parameter_load_prefetch_segment_distance exceeds host size range");
   }
   *out_distance =
-      (iree_host_size_t)FLAG_parameter_load_prefetch_region_distance;
+      (iree_host_size_t)FLAG_parameter_load_prefetch_segment_distance;
   return iree_ok_status();
 }
 
@@ -370,7 +370,7 @@ static iree_status_t CreateLoadedQwenStageContext(
   IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(ParseParameterLoadPrefetchRegionDistance(
-      &out_context->parameter_load_prefetch_region_distance));
+      &out_context->parameter_load_prefetch_segment_distance));
   IREE_RETURN_IF_ERROR(
       CreateQwen3VlStage(out_context->live, out_context->stage.out()));
 
@@ -568,7 +568,7 @@ static double AverageRegionDistance(iree_host_size_t distance_sum,
 
 static void SetQwenBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state, uint32_t token_count,
-    iree_host_size_t parameter_load_prefetch_region_distance,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_plan_statistics_t& statistics,
     const id4::test::StageDiagnostics& diagnostics, uint64_t iteration_count) {
@@ -596,7 +596,7 @@ static void SetQwenBenchmarkLabel(
       &label_builder,
       "tokens=%" PRIu32
       " source=%.*s weights=%.*s attention=%.*s "
-      "prefetch_regions=%" PRIhsz " param_total=%" PRIu64
+      "prefetch_segments=%" PRIhsz " param_total=%" PRIu64
       "MiB param_largest=%" PRIu64 "MiB param_source=%" PRIu64
       "MiB param_source_direct=%" PRIu64 "MiB param_source_encoded=%" PRIu64
       "MiB param_load_steps[gather=%" PRIhsz ",encode=%" PRIhsz
@@ -607,7 +607,8 @@ static void SetQwenBenchmarkLabel(
       " load_group_submit_count[total=%" PRIhsz ",gather=%" PRIhsz
       ",encode=%" PRIhsz
       "]"
-      " prefetch_groups[count=%" PRIhsz ",avg_regions=%.2f,max_regions=%" PRIhsz
+      " prefetch_groups[count=%" PRIhsz
+      ",avg_segments=%.2f,max_segments=%" PRIhsz
       "]"
       " direct_gather_groups[count=%" PRIhsz ",requests=%" PRIhsz
       ",source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,max=%" PRIu64
@@ -634,7 +635,7 @@ static void SetQwenBenchmarkLabel(
       weight_execution_strategy_name.data,
       static_cast<int>(attention_implementation_name.size),
       attention_implementation_name.data,
-      parameter_load_prefetch_region_distance,
+      parameter_load_prefetch_segment_distance,
       CeilMiB(statistics.parameter_slab_byte_length),
       CeilMiB(statistics.largest_parameter_slab_byte_length),
       CeilMiB(statistics.parameter_source_byte_length),
@@ -663,9 +664,9 @@ static void SetQwenBenchmarkLabel(
       diagnostics.parameter_load_group_submit_encode_count,
       diagnostics.parameter_load_group_prefetch_submit_count,
       AverageRegionDistance(
-          diagnostics.parameter_load_group_prefetch_region_distance_sum,
+          diagnostics.parameter_load_group_prefetch_segment_distance_sum,
           diagnostics.parameter_load_group_prefetch_submit_count),
-      diagnostics.parameter_load_group_prefetch_region_distance_max,
+      diagnostics.parameter_load_group_prefetch_segment_distance_max,
       diagnostics.parameter_direct_gather_group_count,
       diagnostics.parameter_direct_gather_request_count,
       CeilMiB(diagnostics.parameter_direct_gather_source_byte_length),
@@ -765,7 +766,8 @@ static iree_status_t PrepareQwenBundle(QwenBenchmarkContext* context,
   prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
       context->parameter_provider.get(),
       defers_parameter_loads ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
-                             : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+                             : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+      defers_parameter_loads ? IREE_DEVICE_SIZE_MAX : 0);
   prepare_options.kernel_library = context->kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
@@ -793,19 +795,20 @@ static iree_status_t IssueQwenBundle(
   id4_pipeline_stage_issue_options_t issue_options;
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.boundary_binding_count = boundary_bindings.count;
   issue_options.boundary_bindings = boundary_bindings.bindings;
-  if (FLAG_diagnostic_wait_after_each_region) {
-    issue_options.flags |= ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+  if (FLAG_diagnostic_wait_after_each_execution_segment) {
+    issue_options.flags |=
+        ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_EXECUTION_SEGMENT;
   }
   id4_pipeline_parameter_slab_set_t* parameter_slabs =
       id4_pipeline_bundle_parameter_slabs(bundle);
   if (parameter_slabs &&
       id4_pipeline_parameter_slab_set_has_deferred_load_context(
           parameter_slabs)) {
-    issue_options.parameter_load_prefetch_region_distance =
-        context->parameter_load_prefetch_region_distance;
+    issue_options.parameter_load_prefetch_segment_distance =
+        context->parameter_load_prefetch_segment_distance;
   }
   issue_options.wait_semaphore_list = wait.list();
   issue_options.signal_semaphore_list = signal.list();
@@ -961,7 +964,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
       benchmark_state,
       static_cast<int64_t>(iteration_count * shape.token_count));
   SetQwenBenchmarkLabel(benchmark_state, shape.token_count,
-                        context.parameter_load_prefetch_region_distance,
+                        context.parameter_load_prefetch_segment_distance,
                         plan.get(), statistics, context.diagnostics,
                         iteration_count);
   return iree_ok_status();
@@ -1035,7 +1038,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
       benchmark_state,
       static_cast<int64_t>(iteration_count * context.request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context.request.token_count,
-                        context.parameter_load_prefetch_region_distance,
+                        context.parameter_load_prefetch_segment_distance,
                         plan.get(), statistics, context.diagnostics,
                         iteration_count);
   return iree_ok_status();
@@ -1144,7 +1147,7 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context->request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
-                        context->parameter_load_prefetch_region_distance,
+                        context->parameter_load_prefetch_segment_distance,
                         plan.get(), statistics, context->diagnostics,
                         iteration_count);
   return iree_ok_status();
@@ -1271,7 +1274,7 @@ static iree_status_t RunPrepareIssueBenchmarkWithContext(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context->request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
-                        context->parameter_load_prefetch_region_distance,
+                        context->parameter_load_prefetch_segment_distance,
                         plan.get(), statistics, context->diagnostics,
                         iteration_count);
   return iree_ok_status();

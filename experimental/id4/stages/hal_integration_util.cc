@@ -1078,19 +1078,21 @@ static iree_status_t CaptureDiagnostics(
     diagnostics->parameter_load_group_submit_duration_ns += duration_ns;
     diagnostics->parameter_load_group_submit_max_duration_ns = iree_max(
         diagnostics->parameter_load_group_submit_max_duration_ns, duration_ns);
-    if (event->parameter_load->submit_region_id != IREE_HOST_SIZE_MAX &&
-        event->parameter_load->first_consumer_region_id != IREE_HOST_SIZE_MAX &&
-        event->parameter_load->submit_region_id <
-            event->parameter_load->first_consumer_region_id) {
-      const iree_host_size_t region_distance =
-          event->parameter_load->first_consumer_region_id -
-          event->parameter_load->submit_region_id;
+    if (event->parameter_load->submit_execution_ordinal != IREE_HOST_SIZE_MAX &&
+        event->parameter_load->first_consumer_execution_ordinal !=
+            IREE_HOST_SIZE_MAX &&
+        event->parameter_load->submit_execution_ordinal <
+            event->parameter_load->first_consumer_execution_ordinal) {
+      const iree_host_size_t segment_distance =
+          event->parameter_load->first_consumer_execution_ordinal -
+          event->parameter_load->submit_execution_ordinal;
       ++diagnostics->parameter_load_group_prefetch_submit_count;
-      diagnostics->parameter_load_group_prefetch_region_distance_sum +=
-          region_distance;
-      diagnostics->parameter_load_group_prefetch_region_distance_max = iree_max(
-          diagnostics->parameter_load_group_prefetch_region_distance_max,
-          region_distance);
+      diagnostics->parameter_load_group_prefetch_segment_distance_sum +=
+          segment_distance;
+      diagnostics->parameter_load_group_prefetch_segment_distance_max =
+          iree_max(
+              diagnostics->parameter_load_group_prefetch_segment_distance_max,
+              segment_distance);
     }
     if (iree_string_view_equal(event->parameter_load->load_group_kind,
                                IREE_SV("gather"))) {

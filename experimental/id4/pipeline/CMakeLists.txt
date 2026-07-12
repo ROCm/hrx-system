@@ -131,6 +131,7 @@ iree_cc_library(
     "parameter_window.c"
     "parameter_window_statistics.c"
   DEPS
+    ::parameter_layout
     ::parameter_slab
     ::plan
     iree::base
@@ -211,6 +212,7 @@ iree_cc_library(
   DEPS
     ::kernel_cache
     ::kernel_library
+    ::parameter_residency
     ::parameter_slab
     ::parameter_window
     ::plan
@@ -234,6 +236,7 @@ iree_cc_library(
   DEPS
     ::kernel_cache
     ::parameter_layout
+    ::parameter_residency
     ::parameter_slab
     ::program
     ::program_plan
@@ -353,6 +356,7 @@ iree_cc_test(
     "parameter_layout_test.cc"
   DEPS
     ::parameter_layout
+    ::parameter_window
     ::program_plan
     iree::base
     iree::base::internal::arena
@@ -404,6 +408,7 @@ iree_cc_test(
     ::diagnostics
     ::kernel_cache
     ::kernel_library
+    ::parameter_layout
     ::parameter_slab
     ::plan
     ::program_stage
@@ -412,8 +417,11 @@ iree_cc_test(
     iree::base::tooling::flags
     iree::experimental::id4::tooling::runtime
     iree::hal
+    iree::io::file_handle
+    iree::io::formats::irpa
     iree::io::parameter_index
     iree::io::parameter_index_provider
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

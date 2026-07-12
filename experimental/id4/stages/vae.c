@@ -278,7 +278,8 @@ static iree_status_t id4_vae_stage_prepare(
       wrapped_stage_options = *options;
       wrapped_stage_options.parameter_source =
           id4_pipeline_stage_checkpoint_parameters(
-              parameter_provider, options->parameter_source.residency);
+              parameter_provider, options->parameter_source.residency,
+              options->parameter_source.maximum_parameter_window_byte_length);
       stage_options = &wrapped_stage_options;
     }
   }

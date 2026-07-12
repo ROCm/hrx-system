@@ -865,7 +865,7 @@ static void RunFileBackedDirectGatherManySmall(
         issue_context.out()));
     IREE_ASSERT_OK(id4_pipeline_plan_submit_parameter_load_group(
         plan.get(), issue_context.get(), /*group_index=*/0,
-        /*submit_region_id=*/0, &diagnostics_sink));
+        /*submit_execution_ordinal=*/0, &diagnostics_sink));
     iree_hal_semaphore_list_t cleanup_wait_list =
         iree_hal_semaphore_list_empty();
     IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_finish(
@@ -1115,7 +1115,7 @@ static void RunCompactLinearRhsTileEncoding(
       issue_context.out()));
   IREE_ASSERT_OK(id4_pipeline_plan_submit_parameter_load_group(
       plan.get(), issue_context.get(), /*group_index=*/0,
-      /*submit_region_id=*/0, diagnostics_sink));
+      /*submit_execution_ordinal=*/0, diagnostics_sink));
   iree_hal_semaphore_list_t cleanup_wait_list = iree_hal_semaphore_list_empty();
   IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_finish(
       issue_context.get(), &cleanup_wait_list));
@@ -1500,8 +1500,7 @@ static void RunFileBackedQwenRhsTileEncoding(
               id4_pipeline_parameter_slab_issue_context_release>
         issue_context;
     IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_create(
-        slab_set.get(), load_step_count, load_steps, iree_allocator_system(),
-        issue_context.out()));
+        slab_set.get(), iree_allocator_system(), issue_context.out()));
     const iree_host_size_t load_group_count =
         id4_pipeline_parameter_slab_set_load_group_count(slab_set.get());
     ASSERT_EQ(load_group_count,
@@ -1511,15 +1510,15 @@ static void RunFileBackedQwenRhsTileEncoding(
       id4_pipeline_parameter_load_group_context_t group_context = {
           // Plan-local load group ordinal.
           .group_index = group_index,
-          // This test has no consumer region graph.
-          .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+          // This test has no consumer execution graph.
+          .first_consumer_execution_ordinal = IREE_HOST_SIZE_MAX,
           // This test submits parameter groups directly.
-          .submit_region_id = IREE_HOST_SIZE_MAX,
+          .submit_execution_ordinal = IREE_HOST_SIZE_MAX,
       };
       IREE_ASSERT_OK(
           id4_pipeline_parameter_slab_issue_context_submit_load_group(
-              issue_context.get(), load_step_count, load_steps, group_context,
-              plan_options.stage_name, &diagnostics_sink));
+              issue_context.get(), group_context, plan_options.stage_name,
+              &diagnostics_sink));
     }
     iree_hal_semaphore_list_t cleanup_wait_list =
         iree_hal_semaphore_list_empty();

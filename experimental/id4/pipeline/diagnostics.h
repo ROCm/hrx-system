@@ -89,10 +89,10 @@ typedef struct id4_pipeline_parameter_load_diagnostic_t {
   iree_host_size_t load_group_index;
   // Human-readable load group kind such as "gather" or "encode".
   iree_string_view_t load_group_kind;
-  // First consumer region id, or IREE_HOST_SIZE_MAX when untracked.
-  iree_host_size_t first_consumer_region_id;
-  // Region id that submitted this group, or IREE_HOST_SIZE_MAX outside issue.
-  iree_host_size_t submit_region_id;
+  // First consumer execution ordinal, or IREE_HOST_SIZE_MAX when untracked.
+  iree_host_size_t first_consumer_execution_ordinal;
+  // Submitting execution ordinal, or IREE_HOST_SIZE_MAX outside issue.
+  iree_host_size_t submit_execution_ordinal;
   // First load-step ordinal represented by this loading window.
   iree_host_size_t load_step_offset;
   // Number of load steps represented by this loading window.

@@ -65,8 +65,8 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
       /*.slab_index=*/3,
       /*.load_group_index=*/4,
       /*.load_group_kind=*/IREE_SV("encode"),
-      /*.first_consumer_region_id=*/9,
-      /*.submit_region_id=*/10,
+      /*.first_consumer_execution_ordinal=*/9,
+      /*.submit_execution_ordinal=*/10,
       /*.load_step_offset=*/5,
       /*.load_step_count=*/2,
       /*.first_load_step_name=*/IREE_SV("layer0.q_proj"),
@@ -148,8 +148,8 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   ExpectFinds(event_log, "\"parameter_load\"");
   ExpectFinds(event_log, "\"load_group_index\":4");
   ExpectFinds(event_log, "\"load_group_kind\":\"encode\"");
-  ExpectFinds(event_log, "\"first_consumer_region_id\":9");
-  ExpectFinds(event_log, "\"submit_region_id\":10");
+  ExpectFinds(event_log, "\"first_consumer_execution_ordinal\":9");
+  ExpectFinds(event_log, "\"submit_execution_ordinal\":10");
   ExpectFinds(event_log, "\"staging_slot_count\":2");
   ExpectFinds(event_log, "\"source_gather_batch_count\":2");
   ExpectFinds(event_log, "\"encoder_dispatch_count\":2");

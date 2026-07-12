@@ -7,10 +7,13 @@
 #include <cstring>
 #include <vector>
 
+#include "experimental/id4/pipeline/parameter_layout.h"
 #include "experimental/id4/pipeline/program_stage.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/file_handle.h"
+#include "iree/io/memory_stream.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/testing/gtest.h"
@@ -28,6 +31,12 @@ class OwningRef {
   ~OwningRef() { reset(); }
 
   T* get() const { return value_; }
+
+  T* release() {
+    T* value = value_;
+    value_ = nullptr;
+    return value;
+  }
 
   T** out() {
     reset();
@@ -160,6 +169,106 @@ static iree_status_t CreateTwoScopeParameterProvider(
       IREE_ARRAYSIZE(entries), entries, iree_allocator_system(), out_provider);
 }
 
+static iree_status_t CreateBakedLayoutProvider(
+    const id4_pipeline_plan_t* plan, std::vector<uint8_t>* archive_bytes,
+    iree_io_parameter_index_t** out_index,
+    iree_io_parameter_provider_t** out_provider) {
+  *out_index = nullptr;
+  *out_provider = nullptr;
+  iree_io_parameter_archive_builder_t archive_builder;
+  std::memset(&archive_builder, 0, sizeof(archive_builder));
+  bool archive_builder_initialized = false;
+  OwningRef<iree_io_file_handle_t, iree_io_file_handle_release> archive_handle;
+  OwningRef<iree_io_stream_t, iree_io_stream_release> archive_stream;
+  OwningRef<iree_io_parameter_index_t, iree_io_parameter_index_release>
+      archive_index;
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      archive_provider;
+
+  iree_status_t status = iree_io_parameter_archive_builder_initialize(
+      iree_allocator_system(), &archive_builder);
+  archive_builder_initialized = iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_layout_add_archive_entries(
+        plan, &archive_builder);
+  }
+  if (iree_status_is_ok(status)) {
+    archive_bytes->resize(
+        iree_io_parameter_archive_builder_total_size(&archive_builder));
+    status = iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(archive_bytes->data(), archive_bytes->size()),
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        archive_handle.out());
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_memory_stream_wrap(
+        IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE,
+        iree_make_byte_span(archive_bytes->data(), archive_bytes->size()),
+        iree_io_stream_release_callback_null(), iree_allocator_system(),
+        archive_stream.out());
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_index_create(iree_allocator_system(),
+                                            archive_index.out());
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_archive_builder_write(
+        &archive_builder, archive_handle.get(), /*file_offset=*/0,
+        archive_stream.get(), archive_index.get());
+  }
+  const iree_host_size_t entry_count =
+      iree_status_is_ok(status)
+          ? iree_io_parameter_index_count(archive_index.get())
+          : 0;
+  for (iree_host_size_t i = 0; i < entry_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_io_parameter_index_entry_t* entry = nullptr;
+    status = iree_io_parameter_index_get(archive_index.get(), i, &entry);
+    if (!iree_status_is_ok(status)) break;
+    float value = 0.0f;
+    if (iree_string_view_equal(entry->key, IREE_SV("first.bias"))) {
+      value = 10.0f;
+    } else if (iree_string_view_equal(entry->key, IREE_SV("second.bias"))) {
+      value = 100.0f;
+    } else {
+      status =
+          iree_make_status(IREE_STATUS_NOT_FOUND,
+                           "unexpected baked parameter layout entry '%.*s'",
+                           (int)entry->key.size, entry->key.data);
+      break;
+    }
+    if (entry->type != IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE ||
+        entry->length % sizeof(value) != 0 ||
+        entry->storage.file.offset > archive_bytes->size() ||
+        entry->length > archive_bytes->size() - entry->storage.file.offset) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "baked parameter layout entry '%.*s' has invalid file storage",
+          (int)entry->key.size, entry->key.data);
+      break;
+    }
+    for (uint64_t offset = 0; offset < entry->length; offset += sizeof(value)) {
+      std::memcpy(archive_bytes->data() + entry->storage.file.offset + offset,
+                  &value, sizeof(value));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_index_provider_create(
+        IREE_SV("baked"), archive_index.get(),
+        IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+        iree_allocator_system(), archive_provider.out());
+  }
+  if (iree_status_is_ok(status)) {
+    *out_index = archive_index.release();
+    *out_provider = archive_provider.release();
+  }
+  if (archive_builder_initialized) {
+    iree_io_parameter_archive_builder_deinitialize(&archive_builder);
+  }
+  return status;
+}
+
 typedef uint32_t id4_pipeline_test_program_flags_t;
 
 enum id4_pipeline_test_program_flag_bits_t {
@@ -167,6 +276,8 @@ enum id4_pipeline_test_program_flag_bits_t {
   ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS = 1u << 1,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS = 1u << 2,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS = 1u << 3,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY = 1u << 4,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_USE_EXECUTION_LAYOUT = 1u << 5,
 };
 
 typedef struct id4_pipeline_test_program_diagnostics_t {
@@ -299,12 +410,22 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
     IREE_CHECK_OK(id4_pipeline_program_tap(builder, &tap_options));
   }
 
-  id4_pipeline_program_region_cut_options_t cut_options = {
-      /*.structure_size=*/sizeof(cut_options),
-      /*.next=*/nullptr,
-      /*.name=*/IREE_SV("after.first.add"),
-  };
-  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+  if (iree_all_bits_set(
+          flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY)) {
+    id4_pipeline_program_barrier_options_t barrier_options = {
+        /*.structure_size=*/sizeof(barrier_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("after.first.add"),
+    };
+    IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &barrier_options));
+  } else {
+    id4_pipeline_program_region_cut_options_t cut_options = {
+        /*.structure_size=*/sizeof(cut_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("after.first.add"),
+    };
+    IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+  }
 
   const id4_pipeline_program_parameter_source_t second_source[] = {
       {
@@ -459,6 +580,12 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
   const bool reuses_parameter_slabs = iree_all_bits_set(
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS);
+  const bool segments_parameter_residency = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY);
+  const bool uses_execution_layout = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_USE_EXECUTION_LAYOUT);
+  ASSERT_FALSE(segments_parameter_residency && !defers_parameter_loads);
+  ASSERT_FALSE(uses_execution_layout && !segments_parameter_residency);
 
   RuntimeContext& context = SharedRuntimeContext();
 
@@ -494,11 +621,23 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(CreateTwoRegionAddPlan(
       program.get(), context, stage_plan_flags, stage_diagnostic_tap_names,
       &diagnostics_sink, plan.out()));
-  ASSERT_EQ(id4_pipeline_plan_region_count(plan.get()), 2u);
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan.get()),
+            segments_parameter_residency ? 1u : 2u);
   iree_host_size_t load_group_count = 0;
   IREE_ASSERT_OK(id4_pipeline_plan_parameter_load_group_count(
       plan.get(), &load_group_count));
   ASSERT_EQ(load_group_count, 2u);
+
+  std::vector<uint8_t> baked_archive_bytes;
+  OwningRef<iree_io_parameter_index_t, iree_io_parameter_index_release>
+      baked_archive_index;
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      baked_archive_provider;
+  if (uses_execution_layout) {
+    IREE_ASSERT_OK(CreateBakedLayoutProvider(plan.get(), &baked_archive_bytes,
+                                             baked_archive_index.out(),
+                                             baked_archive_provider.out()));
+  }
 
   iree_hal_device_t* device =
       id4_tooling_runtime_context_primary_device(&context.value);
@@ -516,12 +655,23 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   id4_pipeline_stage_prepare_options_t stage_prepare_options;
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
-  stage_prepare_options.parameter_source =
-      id4_pipeline_stage_checkpoint_parameters(
-          parameter_provider.get(),
-          defers_parameter_loads
-              ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
-              : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+  if (uses_execution_layout) {
+    stage_prepare_options.parameter_source =
+        id4_pipeline_stage_execution_layout_parameters(
+            baked_archive_index.get(), baked_archive_provider.get(),
+            IREE_SV("baked"), ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
+            /*maximum_parameter_window_byte_length=*/4 * sizeof(float));
+  } else {
+    stage_prepare_options.parameter_source =
+        id4_pipeline_stage_checkpoint_parameters(
+            parameter_provider.get(),
+            defers_parameter_loads
+                ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
+                : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+            segments_parameter_residency ? 4 * sizeof(float)
+            : defers_parameter_loads     ? IREE_DEVICE_SIZE_MAX
+                                         : 0);
+  }
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
@@ -590,7 +740,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       id4_pipeline_bundle_parameter_slabs(bundle.get());
   ASSERT_NE(parameter_slabs, nullptr);
   EXPECT_EQ(id4_pipeline_parameter_slab_set_load_group_count(parameter_slabs),
-            2u);
+            uses_execution_layout ? 0u : 2u);
   EXPECT_EQ(id4_pipeline_parameter_slab_set_has_deferred_load_context(
                 parameter_slabs),
             defers_parameter_loads);
@@ -672,10 +822,10 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   id4_pipeline_stage_issue_options_t issue_options;
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.boundary_binding_count = IREE_ARRAYSIZE(boundary_bindings);
   issue_options.boundary_bindings = boundary_bindings;
-  issue_options.parameter_load_prefetch_region_distance =
+  issue_options.parameter_load_prefetch_segment_distance =
       prefetches_deferred_parameter_loads ? 1 : 0;
   if (captures_diagnostic_taps) {
     issue_options.diagnostic_tap_binding_count =
@@ -718,6 +868,20 @@ TEST(ProgramStageIntegration,
   RunTwoRegionAddProgram(
       ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
       ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
+}
+
+TEST(ProgramStageIntegration, IssuesBarrierAlignedParameterResidencySegments) {
+  RunTwoRegionAddProgram(
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY);
+}
+
+TEST(ProgramStageIntegration,
+     IssuesBarrierAlignedBakedExecutionLayoutSegments) {
+  RunTwoRegionAddProgram(
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY |
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_USE_EXECUTION_LAYOUT);
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithReusedParameters) {
@@ -769,7 +933,8 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   stage_prepare_options.parameter_source =
       id4_pipeline_stage_checkpoint_parameters(
           parameter_provider.get(),
-          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+          /*maximum_parameter_window_byte_length=*/0);
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
   stage_prepare_options.command_buffer_mode = context.value.command_buffer_mode;

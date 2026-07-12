@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "experimental/id4/pipeline/parameter_layout.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 
 struct id4_pipeline_parameter_window_t {
@@ -40,6 +41,8 @@ struct id4_pipeline_parameter_window_schedule_t {
   iree_allocator_t host_allocator;
   // Plan retained for borrowed string views, sources, and device group access.
   id4_pipeline_plan_t* plan;
+  // Owned provider scope for execution-layout archive gathers.
+  iree_string_view_t source_scope;
   // Compact parameter slab plans in schedule load order.
   id4_pipeline_parameter_slab_plan_t* slabs;
   // Compact provider request tables parallel to slabs.
@@ -660,6 +663,8 @@ static iree_status_t id4_pipeline_parameter_window_pack_requests(
               .original_slab_index = original_slab_index,
               // Original request index within the original slab.
               .original_request_index = original_request_index,
+              // Plan parameter tensor owning this request.
+              .parameter_tensor_index = parameter_tensor_index,
               // Global request ordinal in the containing plan.
               .global_request_index = global_request_index,
               // Compact target span.
@@ -1062,6 +1067,38 @@ static iree_status_t id4_pipeline_parameter_window_schedule_validate_options(
 }
 
 static iree_status_t
+id4_pipeline_parameter_window_execution_layout_schedule_validate_options(
+    const id4_pipeline_parameter_window_execution_layout_schedule_create_options_t*
+        options) {
+  if (!options) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "execution-layout parameter window schedule options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("execution-layout parameter window schedule")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "execution-layout parameter window schedule extension structures are "
+        "not supported");
+  }
+  if (!options->plan || !options->window) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "execution-layout parameter window schedule requires a plan and "
+        "window");
+  }
+  if (iree_string_view_is_empty(options->source_scope)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "execution-layout parameter window schedule source scope is required");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
 id4_pipeline_parameter_window_schedule_step_selected_request_count(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
@@ -1374,7 +1411,7 @@ static iree_status_t id4_pipeline_parameter_window_schedule_step_request_index(
 
 static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
     const id4_pipeline_plan_t* plan,
-    const id4_pipeline_parameter_window_t* window,
+    const id4_pipeline_parameter_window_t* window, bool uses_execution_layout,
     id4_pipeline_parameter_window_schedule_t* schedule) {
   iree_hal_device_group_t* device_group = id4_pipeline_plan_device_group(plan);
   if (!device_group) {
@@ -1407,9 +1444,15 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
       const id4_pipeline_parameter_request_t* original_request =
           &original_request_table
                ->values[window_request->original_request_index];
-      schedule->requests[compact_request_index] =
-          id4_pipeline_parameter_request(original_request->key,
-                                         window_request->span);
+      if (uses_execution_layout) {
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_layout_make_archive_request(
+            plan, window_request->parameter_tensor_index, original_request,
+            window_request->span, &schedule->requests[compact_request_index]));
+      } else {
+        schedule->requests[compact_request_index] =
+            id4_pipeline_parameter_request(original_request->key,
+                                           window_request->span);
+      }
     }
     schedule->slabs[compact_slab_index] = id4_pipeline_make_parameter_slab_plan(
         original_slab->placement_id, window_slab->binding_slot,
@@ -1629,7 +1672,8 @@ iree_status_t id4_pipeline_parameter_window_schedule_create(
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_window_schedule_populate_slabs(
-        options->plan, options->window, schedule);
+        options->plan, options->window, /*uses_execution_layout=*/false,
+        schedule);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_window_schedule_populate_steps(
@@ -1646,11 +1690,70 @@ iree_status_t id4_pipeline_parameter_window_schedule_create(
   return status;
 }
 
+iree_status_t id4_pipeline_parameter_window_execution_layout_schedule_create(
+    const id4_pipeline_parameter_window_execution_layout_schedule_create_options_t*
+        options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_window_schedule_t** out_schedule) {
+  IREE_ASSERT_ARGUMENT(out_schedule);
+  *out_schedule = NULL;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_window_execution_layout_schedule_validate_options(
+          options));
+
+  const iree_host_size_t load_count = options->window->slab_count;
+  id4_pipeline_parameter_window_schedule_t* schedule = NULL;
+  iree_status_t status = id4_pipeline_parameter_window_schedule_create_empty(
+      options->plan, load_count, options->window->request_count,
+      /*load_step_count=*/load_count, /*request_index_count=*/0,
+      /*load_group_count=*/load_count, /*original_load_group_count=*/0,
+      host_allocator, &schedule);
+  if (iree_status_is_ok(status)) {
+    char* source_scope_storage = NULL;
+    status = iree_allocator_malloc(host_allocator, options->source_scope.size,
+                                   (void**)&source_scope_storage);
+    if (iree_status_is_ok(status)) {
+      memcpy(source_scope_storage, options->source_scope.data,
+             options->source_scope.size);
+      schedule->source_scope = iree_make_string_view(
+          source_scope_storage, options->source_scope.size);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_schedule_populate_slabs(
+        options->plan, options->window, /*uses_execution_layout=*/true,
+        schedule);
+  }
+  for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
+       ++i) {
+    const id4_pipeline_parameter_request_table_t* request_table =
+        schedule->loads[i].request_table;
+    if (!request_table || request_table->count == 0) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "execution-layout parameter window slab %" PRIhsz " has no requests",
+          i);
+      break;
+    }
+    schedule->load_steps[i] = id4_pipeline_parameter_gather_load_step(
+        IREE_SV("baked execution layout"), schedule->source_scope,
+        /*target_slab_index=*/i, /*request_offset=*/0, request_table->count);
+    schedule->original_load_groups[i] = IREE_HOST_SIZE_MAX;
+  }
+  if (iree_status_is_ok(status)) {
+    *out_schedule = schedule;
+  } else {
+    id4_pipeline_parameter_window_schedule_release(schedule);
+  }
+  return status;
+}
+
 void id4_pipeline_parameter_window_schedule_release(
     id4_pipeline_parameter_window_schedule_t* schedule) {
   if (!schedule) return;
   iree_allocator_t host_allocator = schedule->host_allocator;
   id4_pipeline_plan_release(schedule->plan);
+  iree_allocator_free(host_allocator, (void*)schedule->source_scope.data);
   iree_allocator_free(host_allocator,
                       schedule->compact_load_groups_by_original);
   iree_allocator_free(host_allocator, schedule->original_load_groups);

@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_ID4_PIPELINE_PROGRAM_PREPARE_H_
 
 #include "experimental/id4/pipeline/kernel_cache.h"
+#include "experimental/id4/pipeline/parameter_residency.h"
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "iree/base/api.h"
@@ -20,14 +21,13 @@ extern "C" {
 // Opaque prepared semantic program execution state.
 typedef struct id4_pipeline_program_prepared_t id4_pipeline_program_prepared_t;
 
-// Program preparation behavior flags.
-typedef uint32_t id4_pipeline_program_prepare_flags_t;
-
-// Program preparation behavior flag bits.
-typedef enum id4_pipeline_program_prepare_flag_bits_e {
-  // Records reusable regions against compact region-local parameter windows.
-  ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS = 1u << 0,
-} id4_pipeline_program_prepare_flag_bits_t;
+// Source representation for constrained parameter-window schedules.
+typedef struct id4_pipeline_program_parameter_window_source_t {
+  // Active source representation.
+  id4_pipeline_parameter_window_source_kind_t kind;
+  // Provider scope for execution-layout archive gathers.
+  iree_string_view_t execution_layout_scope;
+} id4_pipeline_program_parameter_window_source_t;
 
 // Options for preparing executable state from a semantic program and plan.
 typedef struct id4_pipeline_program_prepare_options_t {
@@ -35,12 +35,15 @@ typedef struct id4_pipeline_program_prepare_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Preparation behavior flags.
-  id4_pipeline_program_prepare_flags_t flags;
   // Immutable semantic program to record.
   const id4_pipeline_program_t* program;
   // Plan derived from the same semantic program.
   const id4_pipeline_plan_t* plan;
+  // Optional constrained residency plan derived from |plan|. NULL selects one
+  // resident execution segment per semantic region.
+  const id4_pipeline_parameter_residency_plan_t* parameter_residency_plan;
+  // Source representation used to populate constrained parameter windows.
+  id4_pipeline_program_parameter_window_source_t parameter_window_source;
   // Loom kernel cache used to JIT planned kernel specializations.
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Kernel source library used to resolve planned module paths.
@@ -53,10 +56,10 @@ typedef struct id4_pipeline_program_prepare_options_t {
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Diagnostic artifact classes requested from the Loom JIT path.
   id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
-  // HAL queue-alloca flags used for local transient slabs.
-  iree_hal_alloca_flags_t local_slab_alloca_flags;
-  // HAL queue-dealloca flags used for local transient slabs.
-  iree_hal_dealloca_flags_t local_slab_dealloca_flags;
+  // HAL queue-alloca flags used for all issue-local transient slabs.
+  iree_hal_alloca_flags_t transient_slab_alloca_flags;
+  // HAL queue-dealloca flags used for all issue-local transient slabs.
+  iree_hal_dealloca_flags_t transient_slab_dealloca_flags;
   // Diagnostics sink for JIT and recording events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_program_prepare_options_t;

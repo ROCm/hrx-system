@@ -1101,7 +1101,7 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
       options->phase_stage_masks, &residency_policy);
   iree_host_size_t parameter_region_window_size = 0;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_region_window_size(
-      options->parameter_load_prefetch_region_distance,
+      options->parameter_load_prefetch_segment_distance,
       &parameter_region_window_size));
   id4_ideogram4_generation_stage_resource_statistics_t resident_statistics;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_resource_resident_stages(
@@ -1350,7 +1350,7 @@ id4_ideogram4_generation_residency_mode_for_mask(
 static iree_status_t id4_ideogram4_generation_residency_statistics_for_mask(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
-    iree_host_size_t parameter_load_prefetch_region_distance,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
     id4_ideogram4_generation_resource_statistics_t* out_statistics) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   memset(&options, 0, sizeof(options));
@@ -1358,8 +1358,8 @@ static iree_status_t id4_ideogram4_generation_residency_statistics_for_mask(
   options.residency_mode =
       id4_ideogram4_generation_residency_mode_for_mask(resident_stage_mask);
   options.resident_stage_mask = resident_stage_mask;
-  options.parameter_load_prefetch_region_distance =
-      parameter_load_prefetch_region_distance;
+  options.parameter_load_prefetch_segment_distance =
+      parameter_load_prefetch_segment_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1368,7 +1368,7 @@ static iree_status_t id4_ideogram4_generation_phase_aware_residency_statistics(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
     const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks,
-    iree_host_size_t parameter_load_prefetch_region_distance,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
     id4_ideogram4_generation_resource_statistics_t* out_statistics) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   memset(&options, 0, sizeof(options));
@@ -1378,8 +1378,8 @@ static iree_status_t id4_ideogram4_generation_phase_aware_residency_statistics(
   options.resident_stage_mask = resident_stage_mask;
   memcpy(options.phase_stage_masks, phase_stage_masks,
          sizeof(options.phase_stage_masks));
-  options.parameter_load_prefetch_region_distance =
-      parameter_load_prefetch_region_distance;
+  options.parameter_load_prefetch_segment_distance =
+      parameter_load_prefetch_segment_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1551,7 +1551,7 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
 
     id4_ideogram4_generation_resource_statistics_t statistics;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_statistics_for_mask(
-        plan, stage_mask, options->parameter_load_prefetch_region_distance,
+        plan, stage_mask, options->parameter_load_prefetch_segment_distance,
         &statistics));
     const iree_device_size_t peak_byte_length =
         id4_ideogram4_generation_selected_peak(options->issue_policy,
@@ -1612,7 +1612,7 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_generation_phase_aware_residency_statistics(
               plan, request_stage_mask, phase_stage_masks,
-              options->parameter_load_prefetch_region_distance, &statistics));
+              options->parameter_load_prefetch_segment_distance, &statistics));
       const iree_device_size_t peak_byte_length =
           id4_ideogram4_generation_selected_peak(options->issue_policy,
                                                  &statistics);

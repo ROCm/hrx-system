@@ -30,6 +30,8 @@ typedef struct id4_pipeline_parameter_residency_build_state_t {
   iree_device_size_t maximum_target_byte_length;
   // Encoder staging capacity used for exact segment diagnostics.
   iree_device_size_t encoder_staging_chunk_byte_capacity;
+  // Source representation used to populate compact windows.
+  id4_pipeline_parameter_window_source_kind_t source_kind;
   // Plan parameter count and bit-vector length.
   iree_host_size_t parameter_tensor_count;
   // Plan parameter index by source-program tensor ordinal.
@@ -70,6 +72,8 @@ typedef struct id4_pipeline_parameter_residency_current_segment_t {
 } id4_pipeline_parameter_residency_current_segment_t;
 
 struct id4_pipeline_parameter_residency_plan_t {
+  // Reference count for shared residency-plan ownership.
+  iree_atomic_ref_count_t ref_count;
   // Host allocator used for the packed plan allocation.
   iree_allocator_t host_allocator;
   // Source plan retained for segment tensor names and later lowering.
@@ -113,12 +117,26 @@ static iree_status_t id4_pipeline_parameter_residency_validate_options(
         IREE_STATUS_UNIMPLEMENTED,
         "parameter residency extension structures are not supported");
   }
-  if (!options->plan || options->maximum_target_byte_length == 0 ||
+  if (!options->plan || options->maximum_target_byte_length == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter residency requires a plan and target budget");
+  }
+  if (options->source_kind !=
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT &&
+      options->source_kind !=
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter residency source representation is invalid");
+  }
+  if (options->source_kind ==
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT &&
       options->encoder_staging_chunk_byte_capacity == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter residency requires a plan, target budget, and encoder "
-        "staging capacity");
+        "checkpoint parameter residency requires an encoder staging "
+        "capacity");
   }
   if (!id4_pipeline_plan_source_program(options->plan)) {
     return iree_make_status(
@@ -305,8 +323,9 @@ static iree_status_t id4_pipeline_parameter_residency_finalize_segment(
 
   id4_pipeline_parameter_window_resource_statistics_t resources;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_window_query_resource_statistics(
-      state->plan, current->window, state->encoder_staging_chunk_byte_capacity,
-      state->host_allocator, &resources));
+      state->plan, current->window, state->source_kind,
+      state->encoder_staging_chunk_byte_capacity, state->host_allocator,
+      &resources));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_residency_update_statistics(state, &resources));
   for (iree_host_size_t i = 0; i < state->parameter_tensor_count; ++i) {
@@ -601,7 +620,7 @@ id4_pipeline_parameter_residency_finalize_duplication_statistics(
   id4_pipeline_parameter_window_resource_statistics_t unique_resources;
   iree_status_t status =
       id4_pipeline_parameter_window_query_resource_statistics(
-          state->plan, unique_window,
+          state->plan, unique_window, state->source_kind,
           state->encoder_staging_chunk_byte_capacity, state->host_allocator,
           &unique_resources);
   if (iree_status_is_ok(status)) {
@@ -646,6 +665,7 @@ static iree_status_t id4_pipeline_parameter_residency_bake(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       state->host_allocator, allocation_size, (void**)&residency_plan));
   memset(residency_plan, 0, allocation_size);
+  iree_atomic_ref_count_init(&residency_plan->ref_count);
   residency_plan->host_allocator = state->host_allocator;
   residency_plan->plan = (id4_pipeline_plan_t*)state->plan;
   id4_pipeline_plan_retain(residency_plan->plan);
@@ -711,6 +731,7 @@ iree_status_t id4_pipeline_parameter_residency_plan_create(
   state.maximum_target_byte_length = options->maximum_target_byte_length;
   state.encoder_staging_chunk_byte_capacity =
       options->encoder_staging_chunk_byte_capacity;
+  state.source_kind = options->source_kind;
   state.parameter_tensor_count =
       id4_pipeline_plan_parameter_tensor_count(options->plan);
   state.arena = &arena;
@@ -809,9 +830,14 @@ iree_status_t id4_pipeline_parameter_residency_plan_create(
   return status;
 }
 
-void id4_pipeline_parameter_residency_plan_release(
+void id4_pipeline_parameter_residency_plan_retain(
     id4_pipeline_parameter_residency_plan_t* residency_plan) {
   if (!residency_plan) return;
+  iree_atomic_ref_count_inc(&residency_plan->ref_count);
+}
+
+static void id4_pipeline_parameter_residency_plan_destroy(
+    id4_pipeline_parameter_residency_plan_t* residency_plan) {
   const iree_host_size_t segment_count =
       residency_plan->statistics.segment_count;
   for (iree_host_size_t i = 0; i < segment_count; ++i) {
@@ -820,6 +846,19 @@ void id4_pipeline_parameter_residency_plan_release(
   }
   id4_pipeline_plan_release(residency_plan->plan);
   iree_allocator_free(residency_plan->host_allocator, residency_plan);
+}
+
+void id4_pipeline_parameter_residency_plan_release(
+    id4_pipeline_parameter_residency_plan_t* residency_plan) {
+  if (residency_plan &&
+      iree_atomic_ref_count_dec(&residency_plan->ref_count) == 1) {
+    id4_pipeline_parameter_residency_plan_destroy(residency_plan);
+  }
+}
+
+const id4_pipeline_plan_t* id4_pipeline_parameter_residency_plan_source_plan(
+    const id4_pipeline_parameter_residency_plan_t* residency_plan) {
+  return residency_plan ? residency_plan->plan : NULL;
 }
 
 id4_pipeline_parameter_residency_statistics_t

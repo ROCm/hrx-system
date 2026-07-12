@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 
+#include "experimental/id4/pipeline/parameter_window.h"
 #include "experimental/id4/pipeline/program_plan.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/io/file_handle.h"
@@ -300,6 +301,72 @@ TEST(ParameterLayoutTest, PreservesDynamicSourcesAndBakesExecutionStorage) {
                             plan.get(), incompatible_index));
 
   iree_io_parameter_archive_builder_deinitialize(&archive_builder);
+}
+
+TEST(ParameterLayoutTest, ExecutionLayoutWindowGathersBakedStorageDirectly) {
+  DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
+                              iree_hal_device_group_release);
+  ProgramPtr program = CreateParameterProgram();
+  PlanPtr plan = CreateParameterPlan(program.get(), device_group.get());
+
+  const id4_pipeline_parameter_tensor_plan_t* linear_tensor =
+      id4_pipeline_plan_parameter_tensor_at(plan.get(), /*index=*/1);
+  ASSERT_NE(linear_tensor, nullptr);
+  const uint32_t parameter_tensor_ordinal =
+      linear_tensor->program_tensor_ordinal;
+  id4_pipeline_parameter_window_create_options_t window_options = {
+      /*.structure_size=*/sizeof(window_options),
+      /*.next=*/nullptr,
+      /*.plan=*/plan.get(),
+      /*.parameter_tensor_count=*/1,
+      /*.parameter_tensor_ordinals=*/&parameter_tensor_ordinal,
+  };
+  id4_pipeline_parameter_window_t* window = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_parameter_window_create(
+      &window_options, iree_allocator_system(), &window));
+  std::unique_ptr<id4_pipeline_parameter_window_t,
+                  decltype(&id4_pipeline_parameter_window_release)>
+      window_owner(window, id4_pipeline_parameter_window_release);
+
+  id4_pipeline_parameter_window_execution_layout_schedule_create_options_t
+      schedule_options = {
+          /*.structure_size=*/sizeof(schedule_options),
+          /*.next=*/nullptr,
+          /*.plan=*/plan.get(),
+          /*.window=*/window,
+          /*.source_scope=*/IREE_SV("baked"),
+      };
+  id4_pipeline_parameter_window_schedule_t* schedule = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_parameter_window_execution_layout_schedule_create(
+      &schedule_options, iree_allocator_system(), &schedule));
+  std::unique_ptr<id4_pipeline_parameter_window_schedule_t,
+                  decltype(&id4_pipeline_parameter_window_schedule_release)>
+      schedule_owner(schedule, id4_pipeline_parameter_window_schedule_release);
+
+  ASSERT_EQ(id4_pipeline_parameter_window_schedule_load_count(schedule), 1u);
+  const id4_pipeline_parameter_slab_load_t* loads =
+      id4_pipeline_parameter_window_schedule_loads(schedule);
+  ASSERT_NE(loads, nullptr);
+  ASSERT_NE(loads[0].request_table, nullptr);
+  ASSERT_EQ(loads[0].request_table->count, 1u);
+  const id4_pipeline_parameter_request_t& request =
+      loads[0].request_table->values[0];
+  EXPECT_TRUE(iree_string_view_equal(request.key, IREE_SV("linear.weight")));
+  EXPECT_EQ(request.span.parameter_offset, 0u);
+  EXPECT_EQ(request.span.buffer_offset, 0u);
+  EXPECT_EQ(request.span.length, 16u * 16u);
+
+  ASSERT_EQ(id4_pipeline_parameter_window_schedule_load_step_count(schedule),
+            1u);
+  const id4_pipeline_parameter_load_step_t* load_steps =
+      id4_pipeline_parameter_window_schedule_load_steps(schedule);
+  ASSERT_NE(load_steps, nullptr);
+  EXPECT_EQ(load_steps[0].kind, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER);
+  EXPECT_TRUE(
+      iree_string_view_equal(load_steps[0].source_scope, IREE_SV("baked")));
+  EXPECT_EQ(id4_pipeline_parameter_window_schedule_original_load_group_at(
+                schedule, 0),
+            IREE_HOST_SIZE_MAX);
 }
 
 TEST(ParameterLayoutTest, LoadsBakedStorageWithoutReencoding) {

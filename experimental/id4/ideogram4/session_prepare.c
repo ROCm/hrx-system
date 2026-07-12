@@ -99,6 +99,11 @@ static iree_status_t id4_ideogram4_validate_generation_prepare_options(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 generation prepare kernel library is required");
   }
+  if (options->maximum_parameter_window_byte_length == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation prepare parameter window budget is required");
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("Ideogram 4 generation prepare")));
   return iree_ok_status();
@@ -138,6 +143,8 @@ static void id4_ideogram4_generation_bundle_capture_prepare_resources(
   bundle->kernel_library = options->kernel_library;
   id4_pipeline_kernel_library_retain(bundle->kernel_library);
   bundle->command_buffer_mode = options->command_buffer_mode;
+  bundle->maximum_parameter_window_byte_length =
+      options->maximum_parameter_window_byte_length;
   bundle->residency_policy.mode = options->residency_mode;
   switch (options->residency_mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
@@ -721,7 +728,10 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
             &bundle->parameter_providers, stage_ordinal),
         defer_parameter_loads_to_issue
             ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
-            : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+            : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+        defer_parameter_loads_to_issue
+            ? bundle->maximum_parameter_window_byte_length
+            : 0);
   }
   prepare_options.kernel_library = bundle->kernel_library;
   prepare_options.wait_semaphore_list =

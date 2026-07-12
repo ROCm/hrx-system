@@ -85,6 +85,8 @@ typedef struct id4_pipeline_parameter_residency_plan_create_options_t {
   const void* next;
   // Program-backed source plan whose semantic regions are segmented.
   const id4_pipeline_plan_t* plan;
+  // Source representation used to populate planned compact windows.
+  id4_pipeline_parameter_window_source_kind_t source_kind;
   // Maximum compact target allocation bytes permitted in one segment.
   iree_device_size_t maximum_target_byte_length;
   // Maximum provider source bytes packed into one encoder staging chunk.
@@ -97,9 +99,17 @@ iree_status_t id4_pipeline_parameter_residency_plan_create(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_residency_plan_t** out_residency_plan);
 
+// Retains |residency_plan| for the caller.
+void id4_pipeline_parameter_residency_plan_retain(
+    id4_pipeline_parameter_residency_plan_t* residency_plan);
+
 // Releases a residency plan and its compact parameter windows.
 void id4_pipeline_parameter_residency_plan_release(
     id4_pipeline_parameter_residency_plan_t* residency_plan);
+
+// Returns the source plan retained by |residency_plan|.
+const id4_pipeline_plan_t* id4_pipeline_parameter_residency_plan_source_plan(
+    const id4_pipeline_parameter_residency_plan_t* residency_plan);
 
 // Returns aggregate statistics derived from the fixed segment plan.
 id4_pipeline_parameter_residency_statistics_t

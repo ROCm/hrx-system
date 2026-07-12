@@ -216,12 +216,12 @@ typedef struct StageDiagnostics {
   iree_duration_t parameter_load_group_submit_encode_duration_ns;
   // Maximum host-observed duration for one load group submit event.
   iree_duration_t parameter_load_group_submit_max_duration_ns;
-  // Number of load groups submitted before their first consumer region.
+  // Number of load groups submitted before their consumer execution segment.
   iree_host_size_t parameter_load_group_prefetch_submit_count;
-  // Sum of region distances for prefetched load group submissions.
-  iree_host_size_t parameter_load_group_prefetch_region_distance_sum;
-  // Maximum region distance for one prefetched load group submission.
-  iree_host_size_t parameter_load_group_prefetch_region_distance_max;
+  // Sum of execution-segment distances for prefetched load submissions.
+  iree_host_size_t parameter_load_group_prefetch_segment_distance_sum;
+  // Maximum execution-segment distance for one prefetched load submission.
+  iree_host_size_t parameter_load_group_prefetch_segment_distance_max;
   // Number of submitted direct gather group diagnostics observed.
   iree_host_size_t parameter_direct_gather_group_count;
   // Number of logical parameter requests in direct gather groups.

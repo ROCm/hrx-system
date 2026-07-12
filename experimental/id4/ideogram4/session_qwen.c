@@ -171,7 +171,8 @@ static iree_status_t id4_ideogram4_qwen_prepare_bundle(
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
       options->parameter_provider,
-      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT);
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+      /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = options->kernel_library;
   prepare_options.wait_semaphore_list = options->wait_semaphore_list;
   prepare_options.signal_semaphore_list = signal_list;
@@ -246,7 +247,7 @@ static iree_status_t id4_ideogram4_qwen_issue_bundle(
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.boundary_binding_count = execution->boundary_bindings.count;
   issue_options.boundary_bindings = execution->boundary_bindings.bindings;
   issue_options.diagnostic_tap_binding_count =

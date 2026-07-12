@@ -250,11 +250,13 @@ static PlanPtr MakeResidencyPlan() {
 
 static iree_status_t CreateResidencyPlan(
     id4_pipeline_plan_t* plan, iree_device_size_t maximum_target_byte_length,
+    id4_pipeline_parameter_window_source_kind_t source_kind,
     id4_pipeline_parameter_residency_plan_t** out_residency_plan) {
   id4_pipeline_parameter_residency_plan_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.plan = plan;
+  options.source_kind = source_kind;
   options.maximum_target_byte_length = maximum_target_byte_length;
   options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
@@ -265,9 +267,11 @@ static iree_status_t CreateResidencyPlan(
 TEST(ParameterResidencyTest, CutsOnlyBetweenAuthoredBarrierEpochs) {
   PlanPtr source_plan = MakeResidencyPlan();
   id4_pipeline_parameter_residency_plan_t* raw_residency_plan = nullptr;
-  IREE_ASSERT_OK(CreateResidencyPlan(source_plan.get(),
-                                     /*maximum_target_byte_length=*/160,
-                                     &raw_residency_plan));
+  IREE_ASSERT_OK(
+      CreateResidencyPlan(source_plan.get(),
+                          /*maximum_target_byte_length=*/160,
+                          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT,
+                          &raw_residency_plan));
   ResidencyPlanPtr residency_plan(raw_residency_plan);
 
   const id4_pipeline_parameter_residency_statistics_t statistics =
@@ -332,12 +336,36 @@ TEST(ParameterResidencyTest, CutsOnlyBetweenAuthoredBarrierEpochs) {
   iree_string_builder_deinitialize(&json_builder);
 }
 
+TEST(ParameterResidencyTest, ExecutionLayoutStatisticsExcludeCheckpointWork) {
+  PlanPtr source_plan = MakeResidencyPlan();
+  id4_pipeline_parameter_residency_plan_t* raw_residency_plan = nullptr;
+  IREE_ASSERT_OK(CreateResidencyPlan(
+      source_plan.get(), /*maximum_target_byte_length=*/160,
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT,
+      &raw_residency_plan));
+  ResidencyPlanPtr residency_plan(raw_residency_plan);
+
+  const id4_pipeline_parameter_residency_statistics_t statistics =
+      id4_pipeline_parameter_residency_plan_statistics(residency_plan.get());
+  EXPECT_EQ(statistics.segment_count, 2u);
+  EXPECT_EQ(statistics.peak_encoder_staging_byte_length, 0u);
+  EXPECT_EQ(statistics.peak_segment_live_byte_length,
+            statistics.peak_segment_target_byte_length);
+  EXPECT_EQ(statistics.unique_source_transfer_byte_length,
+            statistics.unique_target_byte_length);
+  EXPECT_EQ(statistics.total_source_transfer_byte_length,
+            statistics.total_target_byte_length);
+  EXPECT_EQ(statistics.total_encode_load_step_count, 0u);
+  EXPECT_EQ(statistics.total_load_group_count, statistics.segment_count);
+}
+
 TEST(ParameterResidencyTest, RejectsAnIndivisibleEpochOverBudget) {
   PlanPtr source_plan = MakeResidencyPlan();
   id4_pipeline_parameter_residency_plan_t* residency_plan = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       CreateResidencyPlan(source_plan.get(), /*maximum_target_byte_length=*/143,
+                          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT,
                           &residency_plan));
   EXPECT_EQ(residency_plan, nullptr);
 }

@@ -146,13 +146,13 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_load_json(
   IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
       builder, "load_group_kind", parameter_load->load_group_kind));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-      builder, ",\"first_consumer_region_id\":"));
+      builder, ",\"first_consumer_execution_ordinal\":"));
   IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
-      builder, parameter_load->first_consumer_region_id));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ",\"submit_region_id\":"));
+      builder, parameter_load->first_consumer_execution_ordinal));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, ",\"submit_execution_ordinal\":"));
   IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
-      builder, parameter_load->submit_region_id));
+      builder, parameter_load->submit_execution_ordinal));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
       builder, "first_load_step_name", parameter_load->first_load_step_name));

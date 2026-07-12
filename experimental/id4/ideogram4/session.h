@@ -308,8 +308,8 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
   // Stage-bundle masks materialized for each generation phase.
   id4_ideogram4_generation_resident_stage_mask_t
       phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
-  // Future regions whose compact parameter issue windows may be live.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  // Future execution segments whose compact parameter windows may be live.
+  iree_host_size_t parameter_load_prefetch_segment_distance;
 } id4_ideogram4_generation_resource_statistics_options_t;
 
 // Logical resource lifetime statistics derived from a generation plan.
@@ -359,8 +359,8 @@ typedef struct id4_ideogram4_generation_residency_select_options_t {
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Candidate coarse stage bundles the selector may retain.
   id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask;
-  // Future regions whose compact parameter issue windows may be live.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  // Future execution segments whose compact parameter windows may be live.
+  iree_host_size_t parameter_load_prefetch_segment_distance;
   // Maximum logical live bytes allowed by the selected policy.
   iree_device_size_t memory_budget_byte_length;
 } id4_ideogram4_generation_residency_select_options_t;
@@ -397,6 +397,8 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   // Coarse stage bundles materialized for each generation phase.
   id4_ideogram4_generation_resident_stage_mask_t
       phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+  // Maximum compact target bytes retained while issuing any deferred stage.
+  iree_device_size_t maximum_parameter_window_byte_length;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Semaphores that generation preparation waits on.
@@ -426,9 +428,9 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Stage issue flags forwarded to each coarse generation stage.
   id4_pipeline_stage_issue_flags_t stage_issue_flags;
-  // Number of future regions whose deferred parameter load groups may be
-  // submitted before the current region is issued.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  // Number of future execution segments whose parameter windows may be loaded
+  // before the current segment is issued.
+  iree_host_size_t parameter_load_prefetch_segment_distance;
   // Kernel diagnostic artifacts requested for issue-time stage preparation.
   id4_pipeline_kernel_diagnostic_artifact_flags_t
       kernel_diagnostic_artifact_flags;
@@ -489,9 +491,9 @@ typedef struct id4_ideogram4_generation_phase_issue_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Stage issue flags forwarded to each coarse generation stage in the phase.
   id4_pipeline_stage_issue_flags_t stage_issue_flags;
-  // Number of future regions whose deferred parameter load groups may be
-  // submitted before the current region is issued.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  // Number of future execution segments whose parameter windows may be loaded
+  // before the current segment is issued.
+  iree_host_size_t parameter_load_prefetch_segment_distance;
   // Semaphores signaled after the phase completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
   // Diagnostics sink for issue events.

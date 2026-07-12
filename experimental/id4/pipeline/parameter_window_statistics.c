@@ -334,16 +334,44 @@ static iree_status_t id4_pipeline_parameter_window_finalize_slab_statistics(
 iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
+    id4_pipeline_parameter_window_source_kind_t source_kind,
     iree_device_size_t encoder_staging_chunk_byte_capacity,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_resource_statistics_t* out_statistics) {
   IREE_ASSERT_ARGUMENT(out_statistics);
   memset(out_statistics, 0, sizeof(*out_statistics));
-  if (!plan || !window || encoder_staging_chunk_byte_capacity == 0) {
+  if (!plan || !window) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter window resource statistics require a plan, window, and "
-        "encoder staging capacity");
+        "parameter window resource statistics require a plan and window");
+  }
+  if (source_kind ==
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT) {
+    id4_pipeline_parameter_window_resource_statistics_t statistics;
+    memset(&statistics, 0, sizeof(statistics));
+    statistics.load_group_count =
+        id4_pipeline_parameter_window_slab_count(window);
+    for (iree_host_size_t i = 0; i < statistics.load_group_count; ++i) {
+      const id4_pipeline_parameter_window_slab_t* slab =
+          id4_pipeline_parameter_window_slab_at(window, i);
+      if (!slab || !iree_device_size_checked_add(
+                       statistics.target_byte_length, slab->byte_length,
+                       &statistics.target_byte_length)) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "execution-layout parameter window byte length overflows");
+      }
+    }
+    statistics.source_transfer_byte_length = statistics.target_byte_length;
+    *out_statistics = statistics;
+    return iree_ok_status();
+  }
+  if (source_kind != ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT ||
+      encoder_staging_chunk_byte_capacity == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "checkpoint parameter window resource statistics require an encoder "
+        "staging capacity");
   }
 
   const iree_host_size_t parameter_slab_count =

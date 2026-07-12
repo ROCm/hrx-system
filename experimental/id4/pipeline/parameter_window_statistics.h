@@ -86,6 +86,7 @@ typedef struct id4_pipeline_parameter_window_resource_statistics_t {
 iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
+    id4_pipeline_parameter_window_source_kind_t source_kind,
     iree_device_size_t encoder_staging_chunk_byte_capacity,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_resource_statistics_t* out_statistics);

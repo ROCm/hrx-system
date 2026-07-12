@@ -212,10 +212,10 @@ typedef struct id4_pipeline_parameter_load_group_t {
 typedef struct id4_pipeline_parameter_load_group_context_t {
   // Plan-local load group ordinal.
   iree_host_size_t group_index;
-  // First region that consumes the group, or IREE_HOST_SIZE_MAX when unknown.
-  iree_host_size_t first_consumer_region_id;
-  // Region issuing the group, or IREE_HOST_SIZE_MAX outside region issue.
-  iree_host_size_t submit_region_id;
+  // First execution ordinal consuming the group, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t first_consumer_execution_ordinal;
+  // Execution ordinal issuing the group, or IREE_HOST_SIZE_MAX outside issue.
+  iree_host_size_t submit_execution_ordinal;
 } id4_pipeline_parameter_load_group_context_t;
 
 // Bounded source-staging requirements for one contiguous encoded load run.
@@ -577,8 +577,6 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare_load_context(
 // Creates an issue-local context for deferred parameter load submissions.
 iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     id4_pipeline_parameter_slab_set_t* slab_set,
-    iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_issue_context_t** out_context);
 
@@ -597,8 +595,6 @@ void id4_pipeline_parameter_slab_issue_context_release(
 // populated.
 iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
     id4_pipeline_parameter_slab_issue_context_t* context,
-    iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);

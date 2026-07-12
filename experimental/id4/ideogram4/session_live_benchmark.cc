@@ -64,9 +64,12 @@ IREE_FLAG(int64_t, generation_residency_budget, 0,
           "--generation_residency=memory_budgeted.");
 IREE_FLAG(string, generation_issue_mode, "phases",
           "Generation issue mode: full, phases, or stage_serial.");
-IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
-          "Number of future stage regions whose deferred parameter load groups "
-          "may be submitted before the current region.");
+IREE_FLAG(int64_t, parameter_load_prefetch_segment_distance, 0,
+          "Number of future execution segments whose parameter windows may "
+          "be loaded before the current segment.");
+IREE_FLAG(int64_t, parameter_window_budget, INT64_C(2147483648),
+          "Maximum compact parameter bytes retained while issuing a deferred "
+          "stage.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
           "Comma-separated generation stage bundles retained or considered by "
           "--generation_residency=selected_stage_bundles or memory_budgeted: "
@@ -329,7 +332,9 @@ struct LiveGenerationBenchmarkContext {
   // Generation issue mode selected by benchmark flags.
   GenerationIssueMode generation_issue_mode = GenerationIssueMode::kPhases;
   // Deferred parameter load lookahead selected by benchmark flags.
-  iree_host_size_t parameter_load_prefetch_region_distance = 0;
+  iree_host_size_t parameter_load_prefetch_segment_distance = 0;
+  // Maximum compact parameter bytes retained by one deferred stage.
+  iree_device_size_t maximum_parameter_window_byte_length = 0;
   // Generation stage bundles selected or considered by benchmark flags.
   id4_ideogram4_generation_resident_stage_mask_t
       generation_resident_stage_mask =
@@ -618,19 +623,19 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
 static iree_status_t ParseParameterLoadPrefetchRegionDistance(
     iree_host_size_t* out_distance) {
   IREE_ASSERT_ARGUMENT(out_distance);
-  if (FLAG_parameter_load_prefetch_region_distance < 0) {
+  if (FLAG_parameter_load_prefetch_segment_distance < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--parameter_load_prefetch_region_distance must be non-negative");
+        "--parameter_load_prefetch_segment_distance must be non-negative");
   }
-  if ((uint64_t)FLAG_parameter_load_prefetch_region_distance >
+  if ((uint64_t)FLAG_parameter_load_prefetch_segment_distance >
       IREE_HOST_SIZE_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "--parameter_load_prefetch_region_distance exceeds host size range");
+        "--parameter_load_prefetch_segment_distance exceeds host size range");
   }
   *out_distance =
-      (iree_host_size_t)FLAG_parameter_load_prefetch_region_distance;
+      (iree_host_size_t)FLAG_parameter_load_prefetch_segment_distance;
   return iree_ok_status();
 }
 
@@ -757,8 +762,8 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
           GenerationIssuePolicy(context.generation_issue_mode);
       select_options.candidate_stage_mask =
           context.generation_resident_stage_mask;
-      select_options.parameter_load_prefetch_region_distance =
-          context.parameter_load_prefetch_region_distance;
+      select_options.parameter_load_prefetch_segment_distance =
+          context.parameter_load_prefetch_segment_distance;
       select_options.memory_budget_byte_length =
           context.generation_residency_budget_byte_length;
       id4_ideogram4_generation_residency_selection_t selection;
@@ -897,7 +902,7 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
 static iree_status_t QueryGenerationBenchmarkResourceStatistics(
     const id4_ideogram4_generation_plan_t* plan,
     const GenerationResidencyResolution& residency,
-    iree_host_size_t parameter_load_prefetch_region_distance,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
     id4_ideogram4_generation_resource_statistics_t* out_statistics) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
@@ -906,8 +911,8 @@ static iree_status_t QueryGenerationBenchmarkResourceStatistics(
   options.resident_stage_mask = residency.resident_stage_mask;
   std::memcpy(options.phase_stage_masks, residency.phase_stage_masks,
               sizeof(options.phase_stage_masks));
-  options.parameter_load_prefetch_region_distance =
-      parameter_load_prefetch_region_distance;
+  options.parameter_load_prefetch_segment_distance =
+      parameter_load_prefetch_segment_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1302,7 +1307,10 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
   IREE_RETURN_IF_ERROR(
       ParseGenerationIssueMode(&out_context->generation_issue_mode));
   IREE_RETURN_IF_ERROR(ParseParameterLoadPrefetchRegionDistance(
-      &out_context->parameter_load_prefetch_region_distance));
+      &out_context->parameter_load_prefetch_segment_distance));
+  IREE_RETURN_IF_ERROR(ParsePositiveByteBudgetFlag(
+      FLAG_parameter_window_budget, IREE_SV("--parameter_window_budget"),
+      &out_context->maximum_parameter_window_byte_length));
   IREE_RETURN_IF_ERROR(ParseGenerationResidentStageMask(
       &out_context->generation_resident_stage_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
@@ -1367,6 +1375,8 @@ static iree_status_t PrepareGenerationBundle(
   prepare_options.parameter_providers =
       LiveGenerationParameterProviders(context);
   prepare_options.kernel_library = context.kernel_library.get();
+  prepare_options.maximum_parameter_window_byte_length =
+      context.maximum_parameter_window_byte_length;
   prepare_options.residency_mode = residency.residency_mode;
   prepare_options.resident_stage_mask = residency.resident_stage_mask;
   std::memcpy(prepare_options.phase_stage_masks, residency.phase_stage_masks,
@@ -1418,7 +1428,7 @@ static iree_status_t IssueGenerationPhase(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_phase_bundle_t* phase_bundle,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
-    iree_host_size_t parameter_load_prefetch_region_distance,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
     iree_hal_semaphore_t* wait_semaphore, uint64_t wait_value,
     iree_hal_semaphore_t* signal_semaphore, uint64_t signal_value) {
   id4::test::SemaphoreListStorage wait;
@@ -1432,8 +1442,8 @@ static iree_status_t IssueGenerationPhase(
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
   issue_options.wait_semaphore_list = wait.list();
-  issue_options.parameter_load_prefetch_region_distance =
-      parameter_load_prefetch_region_distance;
+  issue_options.parameter_load_prefetch_segment_distance =
+      parameter_load_prefetch_segment_distance;
   issue_options.signal_semaphore_list = signal.list();
   issue_options.diagnostics_sink = diagnostics_sink;
   return id4_ideogram4_generation_execution_issue_phase(execution, phase_bundle,
@@ -1473,8 +1483,8 @@ static iree_status_t IssueGenerationBundle(
         context.generation_issue_mode == GenerationIssueMode::kStageSerial
             ? ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
             : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
-    issue_options.parameter_load_prefetch_region_distance =
-        context.parameter_load_prefetch_region_distance;
+    issue_options.parameter_load_prefetch_segment_distance =
+        context.parameter_load_prefetch_segment_distance;
     issue_options.wait_semaphore_list = prepare_wait.list();
     issue_options.signal_semaphore_list = completion_signal.list();
     issue_options.diagnostics_sink = diagnostics_sink;
@@ -1521,7 +1531,7 @@ static iree_status_t IssueGenerationBundle(
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, conditioning_phase, diagnostics_sink,
-        context.parameter_load_prefetch_region_distance, prepare_semaphore,
+        context.parameter_load_prefetch_segment_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->conditioning.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1549,7 +1559,7 @@ static iree_status_t IssueGenerationBundle(
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, denoise_phase, diagnostics_sink,
-        context.parameter_load_prefetch_region_distance, prepare_semaphore,
+        context.parameter_load_prefetch_segment_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->denoise.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1575,7 +1585,7 @@ static iree_status_t IssueGenerationBundle(
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, decode_phase, diagnostics_sink,
-        context.parameter_load_prefetch_region_distance, prepare_semaphore,
+        context.parameter_load_prefetch_segment_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->decode.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1763,7 +1773,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency_request=%.*s residency=%.*s issue=%.*s"
-      " prefetch_regions=%" PRIhsz
+      " prefetch_segments=%" PRIhsz
       " resident_stage_mask=0x%08x residency_budget=%" PRIu64
       "MiB"
       " params=%.*s activation=%.*s weights=%.*s qwen_params=%.*s"
@@ -1785,7 +1795,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB,resident=%" PRIu64 "MiB,phase_peak=%" PRIu64
       "MiB,stage_serial_peak=%" PRIu64 "MiB,selected_peak=%" PRIu64
       "MiB]"
-      " prefetch_groups[count=%" PRIhsz ",avg_regions=%.2f,max_regions=%" PRIhsz
+      " prefetch_groups[count=%" PRIhsz
+      ",avg_segments=%.2f,max_segments=%" PRIhsz
       "]"
       " direct_gather_groups[count=%" PRIhsz ",requests=%" PRIhsz
       ",source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,max=%" PRIu64
@@ -1819,7 +1830,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(residency_request.size), residency_request.data,
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
-      context.parameter_load_prefetch_region_distance,
+      context.parameter_load_prefetch_segment_distance,
       residency.resident_stage_mask,
       CeilMiB(context.generation_residency_budget_byte_length),
       static_cast<int>(parameter_format.size), parameter_format.data,
@@ -1870,9 +1881,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(selected_logical_peak_byte_length),
       diagnostics.parameter_load_group_prefetch_submit_count,
       AverageRegionDistance(
-          diagnostics.parameter_load_group_prefetch_region_distance_sum,
+          diagnostics.parameter_load_group_prefetch_segment_distance_sum,
           diagnostics.parameter_load_group_prefetch_submit_count),
-      diagnostics.parameter_load_group_prefetch_region_distance_max,
+      diagnostics.parameter_load_group_prefetch_segment_distance_max,
       diagnostics.parameter_direct_gather_group_count,
       diagnostics.parameter_direct_gather_request_count,
       CeilMiB(diagnostics.parameter_direct_gather_source_byte_length),
@@ -2035,7 +2046,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     if (iree_status_is_ok(status)) {
       status = QueryGenerationBenchmarkResourceStatistics(
           plan.get(), residency,
-          context.parameter_load_prefetch_region_distance,
+          context.parameter_load_prefetch_segment_distance,
           &resource_statistics);
     }
     if (iree_status_is_ok(status)) {
@@ -2176,7 +2187,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       ResolveGenerationBenchmarkResidency(context, plan.get(), &residency));
   id4_ideogram4_generation_resource_statistics_t resource_statistics;
   IREE_RETURN_IF_ERROR(QueryGenerationBenchmarkResourceStatistics(
-      plan.get(), residency, context.parameter_load_prefetch_region_distance,
+      plan.get(), residency, context.parameter_load_prefetch_segment_distance,
       &resource_statistics));
 
   IREE_RETURN_IF_ERROR(

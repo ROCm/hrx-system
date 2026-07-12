@@ -187,6 +187,61 @@ static iree_status_t id4_pipeline_parameter_layout_candidate(
   return iree_ok_status();
 }
 
+iree_status_t id4_pipeline_parameter_layout_make_archive_request(
+    const id4_pipeline_plan_t* plan, iree_host_size_t parameter_tensor_index,
+    const id4_pipeline_parameter_request_t* planned_request,
+    iree_io_parameter_span_t target_span,
+    id4_pipeline_parameter_request_t* out_request) {
+  IREE_ASSERT_ARGUMENT(planned_request);
+  IREE_ASSERT_ARGUMENT(out_request);
+  memset(out_request, 0, sizeof(*out_request));
+  const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
+      id4_pipeline_plan_parameter_tensor_at(plan, parameter_tensor_index);
+  if (!parameter_tensor) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter layout tensor %" PRIhsz " is missing",
+                            parameter_tensor_index);
+  }
+  if (target_span.length != planned_request->span.length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter layout archive target length %" PRIu64
+                            " does not match planned request length %" PRIu64,
+                            target_span.length, planned_request->span.length);
+  }
+
+  id4_pipeline_parameter_layout_entry_t entry;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_layout_candidate(
+      plan, parameter_tensor_index, &entry));
+  uint64_t archive_parameter_offset = 0;
+  if (entry.kind == ID4_PIPELINE_PARAMETER_LAYOUT_ENTRY_KIND_SOURCE) {
+    archive_parameter_offset = planned_request->span.parameter_offset;
+  } else if (entry.kind == ID4_PIPELINE_PARAMETER_LAYOUT_ENTRY_KIND_EXECUTION) {
+    if (planned_request->span.buffer_offset < parameter_tensor->offset) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter layout request for %.*s starts before tensor storage",
+          (int)parameter_tensor->layout.name.size,
+          parameter_tensor->layout.name.data);
+    }
+    archive_parameter_offset =
+        planned_request->span.buffer_offset - parameter_tensor->offset;
+  } else {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "parameter layout entry kind %u is invalid",
+                            entry.kind);
+  }
+  if (archive_parameter_offset > entry.byte_length ||
+      target_span.length > entry.byte_length - archive_parameter_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter layout archive request for %.*s exceeds entry storage",
+        (int)entry.key.size, entry.key.data);
+  }
+  target_span.parameter_offset = archive_parameter_offset;
+  *out_request = id4_pipeline_parameter_request(entry.key, target_span);
+  return iree_ok_status();
+}
+
 static bool id4_pipeline_parameter_layout_shapes_equal(
     id4_pipeline_tensor_shape_t lhs, id4_pipeline_tensor_shape_t rhs) {
   if (lhs.rank != rhs.rank) return false;

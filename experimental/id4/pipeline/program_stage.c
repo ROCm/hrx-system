@@ -369,6 +369,9 @@ static iree_string_view_t id4_pipeline_program_stage_parameter_policy_name(
       {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
        IREE_SVL("execution_layout/resident")},
+      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
+       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
+       IREE_SVL("execution_layout/streaming")},
       {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, IREE_SVL("resident")},
   };
@@ -546,23 +549,57 @@ iree_status_t id4_pipeline_program_stage_prepare(
           &options->stage_options->parameter_source)));
 
   id4_pipeline_parameter_slab_set_t* parameter_slabs = NULL;
+  id4_pipeline_parameter_residency_plan_t* parameter_residency_plan = NULL;
   id4_pipeline_program_prepared_t* prepared_program = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
   bool parameter_load_submitted = false;
   const id4_pipeline_stage_parameter_source_t* parameter_source =
       &options->stage_options->parameter_source;
   const bool streams_parameters =
-      parameter_source->kind ==
-          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT &&
       parameter_source->residency ==
-          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
+  id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_INVALID;
   iree_status_t status = iree_ok_status();
-  if (parameter_source->kind ==
-      ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
+  if (streams_parameters) {
+    switch (parameter_source->kind) {
+      case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+        parameter_window_source_kind =
+            ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+        break;
+      case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+        parameter_window_source_kind =
+            ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT;
+        break;
+      default:
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "streaming parameter source kind %u is unsupported",
+            parameter_source->kind);
+        break;
+    }
+  }
+  if (iree_status_is_ok(status) && streams_parameters) {
+    id4_pipeline_parameter_residency_plan_create_options_t residency_options;
+    memset(&residency_options, 0, sizeof(residency_options));
+    residency_options.structure_size = sizeof(residency_options);
+    residency_options.plan = options->plan;
+    residency_options.source_kind = parameter_window_source_kind;
+    residency_options.maximum_target_byte_length =
+        parameter_source->maximum_parameter_window_byte_length;
+    residency_options.encoder_staging_chunk_byte_capacity =
+        ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+    status = id4_pipeline_parameter_residency_plan_create(
+        &residency_options, host_allocator, &parameter_residency_plan);
+  }
+  if (iree_status_is_ok(status) &&
+      parameter_source->kind ==
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
     parameter_slabs = parameter_source->storage.resident.slabs;
     id4_pipeline_parameter_slab_set_retain(parameter_slabs);
-  } else if (parameter_source->kind ==
-             ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
+  } else if (iree_status_is_ok(status) &&
+             parameter_source->kind ==
+                 ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
     id4_pipeline_parameter_slab_set_load_options_t load_options;
     memset(&load_options, 0, sizeof(load_options));
     load_options.structure_size = sizeof(load_options);
@@ -591,33 +628,61 @@ iree_status_t id4_pipeline_program_stage_prepare(
           options->plan, &load_options, host_allocator, &parameter_slabs);
       parameter_load_submitted = iree_status_is_ok(status);
     }
-  } else if (parameter_source->kind ==
-             ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
-    id4_pipeline_parameter_layout_load_options_t load_options;
-    memset(&load_options, 0, sizeof(load_options));
-    load_options.structure_size = sizeof(load_options);
-    load_options.index = parameter_source->storage.execution_layout.index;
-    load_options.provider = parameter_source->storage.execution_layout.provider;
-    load_options.scope = parameter_source->storage.execution_layout.scope;
-    load_options.wait_semaphore_list =
-        options->stage_options->wait_semaphore_list;
-    load_options.signal_semaphore_list =
-        options->stage_options->signal_semaphore_list;
-    load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
-    status = id4_pipeline_parameter_layout_load(
-        options->plan, &load_options, host_allocator, &parameter_slabs);
-    parameter_load_submitted = iree_status_is_ok(status);
+  } else if (iree_status_is_ok(status) &&
+             parameter_source->kind ==
+                 ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+    if (streams_parameters) {
+      status = id4_pipeline_parameter_layout_validate_index(
+          options->plan, parameter_source->storage.execution_layout.index);
+    }
+    if (iree_status_is_ok(status) && streams_parameters) {
+      id4_pipeline_parameter_slab_set_load_options_t load_options;
+      memset(&load_options, 0, sizeof(load_options));
+      load_options.structure_size = sizeof(load_options);
+      load_options.provider =
+          parameter_source->storage.execution_layout.provider;
+      load_options.wait_semaphore_list =
+          options->stage_options->wait_semaphore_list;
+      load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
+      status = id4_pipeline_parameter_slab_set_prepare_load_context(
+          &load_options, /*load_count=*/0, /*loads=*/NULL,
+          /*load_step_count=*/0, /*load_steps=*/NULL,
+          id4_pipeline_plan_stage_name(options->plan), host_allocator,
+          &parameter_slabs);
+    } else if (iree_status_is_ok(status)) {
+      id4_pipeline_parameter_layout_load_options_t load_options;
+      memset(&load_options, 0, sizeof(load_options));
+      load_options.structure_size = sizeof(load_options);
+      load_options.index = parameter_source->storage.execution_layout.index;
+      load_options.provider =
+          parameter_source->storage.execution_layout.provider;
+      load_options.scope = parameter_source->storage.execution_layout.scope;
+      load_options.wait_semaphore_list =
+          options->stage_options->wait_semaphore_list;
+      load_options.signal_semaphore_list =
+          options->stage_options->signal_semaphore_list;
+      load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
+      status = id4_pipeline_parameter_layout_load(
+          options->plan, &load_options, host_allocator, &parameter_slabs);
+      parameter_load_submitted = iree_status_is_ok(status);
+    }
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_program_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
-    if (streams_parameters) {
-      prepare_options.flags =
-          ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS;
-    }
     prepare_options.program = id4_pipeline_plan_source_program(options->plan);
     prepare_options.plan = options->plan;
+    prepare_options.parameter_residency_plan = parameter_residency_plan;
+    if (streams_parameters) {
+      prepare_options.parameter_window_source.kind =
+          parameter_window_source_kind;
+      if (parameter_source->kind ==
+          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+        prepare_options.parameter_window_source.execution_layout_scope =
+            parameter_source->storage.execution_layout.scope;
+      }
+    }
     prepare_options.kernel_cache = options->kernel_cache;
     prepare_options.kernel_library = options->stage_options->kernel_library;
     prepare_options.executable_cache = options->executable_cache;
@@ -627,8 +692,8 @@ iree_status_t id4_pipeline_program_stage_prepare(
         options->stage_options->command_buffer_mode;
     prepare_options.diagnostic_artifact_flags =
         options->stage_options->kernel_diagnostic_artifact_flags;
-    prepare_options.local_slab_alloca_flags = IREE_HAL_ALLOCA_FLAG_NONE;
-    prepare_options.local_slab_dealloca_flags = IREE_HAL_DEALLOCA_FLAG_NONE;
+    prepare_options.transient_slab_alloca_flags = IREE_HAL_ALLOCA_FLAG_NONE;
+    prepare_options.transient_slab_dealloca_flags = IREE_HAL_DEALLOCA_FLAG_NONE;
     prepare_options.diagnostics_sink = options->stage_options->diagnostics_sink;
     status = id4_pipeline_program_prepare(&prepare_options, host_allocator,
                                           &prepared_program);
@@ -674,6 +739,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     id4_pipeline_bundle_release(bundle);
     id4_pipeline_program_prepared_release(prepared_program);
   }
+  id4_pipeline_parameter_residency_plan_release(parameter_residency_plan);
   id4_pipeline_parameter_slab_set_release(parameter_slabs);
   return status;
 }

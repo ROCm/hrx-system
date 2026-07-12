@@ -120,6 +120,9 @@ typedef struct id4_pipeline_stage_parameter_source_t {
   id4_pipeline_stage_parameter_source_kind_t kind;
   // Storage lifetime policy selected for this source.
   id4_pipeline_stage_parameter_residency_t residency;
+  // Maximum compact target bytes retained by streaming policy. Must be zero
+  // for non-streaming policies.
+  iree_device_size_t maximum_parameter_window_byte_length;
   // Source-specific handles borrowed for the duration of prepare.
   union {
     // Framework-layout checkpoint source.
@@ -157,22 +160,30 @@ id4_pipeline_stage_no_parameters(void) {
 static inline id4_pipeline_stage_parameter_source_t
 id4_pipeline_stage_checkpoint_parameters(
     iree_io_parameter_provider_t* provider,
-    id4_pipeline_stage_parameter_residency_t residency) {
+    id4_pipeline_stage_parameter_residency_t residency,
+    iree_device_size_t maximum_parameter_window_byte_length) {
   id4_pipeline_stage_parameter_source_t source = {0};
   source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   source.residency = residency;
+  source.maximum_parameter_window_byte_length =
+      maximum_parameter_window_byte_length;
   source.storage.checkpoint.provider = provider;
   return source;
 }
 
-// Returns a resident baked execution-layout archive source.
+// Returns a baked execution-layout archive source with an explicit residency
+// policy.
 static inline id4_pipeline_stage_parameter_source_t
 id4_pipeline_stage_execution_layout_parameters(
     iree_io_parameter_index_t* index, iree_io_parameter_provider_t* provider,
-    iree_string_view_t scope) {
+    iree_string_view_t scope,
+    id4_pipeline_stage_parameter_residency_t residency,
+    iree_device_size_t maximum_parameter_window_byte_length) {
   id4_pipeline_stage_parameter_source_t source = {0};
   source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
-  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT;
+  source.residency = residency;
+  source.maximum_parameter_window_byte_length =
+      maximum_parameter_window_byte_length;
   source.storage.execution_layout.index = index;
   source.storage.execution_layout.provider = provider;
   source.storage.execution_layout.scope = scope;
@@ -186,6 +197,7 @@ id4_pipeline_stage_resident_parameters(
   id4_pipeline_stage_parameter_source_t source = {0};
   source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT;
   source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT;
+  source.maximum_parameter_window_byte_length = 0;
   source.storage.resident.slabs = slabs;
   return source;
 }
@@ -218,9 +230,9 @@ typedef uint32_t id4_pipeline_stage_issue_flags_t;
 
 // Stage issue behavior flag bits.
 typedef enum id4_pipeline_stage_issue_flag_bits_e {
-  // Waits after every scheduler-visible internal region and emits completion
-  // diagnostics. This is a fault-localization mode and serializes execution.
-  ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION = 1u << 0,
+  // Waits after every prepared execution segment and emits completion
+  // diagnostics. This is a fault-localization mode that serializes execution.
+  ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_EXECUTION_SEGMENT = 1u << 0,
 } id4_pipeline_stage_issue_flag_bits_t;
 
 // Options for issuing a prepared bundle.
@@ -231,9 +243,8 @@ typedef struct id4_pipeline_stage_issue_options_t {
   const void* next;
   // Issue behavior flags.
   id4_pipeline_stage_issue_flags_t flags;
-  // Maximum number of scheduler-visible regions submitted without host-side
-  // completion backpressure.
-  iree_host_size_t region_submission_window;
+  // Maximum prepared execution segments submitted without host backpressure.
+  iree_host_size_t execution_segment_submission_window;
   // Number of caller-owned boundary tensor bindings.
   iree_host_size_t boundary_binding_count;
   // Caller-owned boundary tensor bindings in plan boundary tensor order.
@@ -242,9 +253,9 @@ typedef struct id4_pipeline_stage_issue_options_t {
   iree_host_size_t diagnostic_tap_binding_count;
   // Caller-owned diagnostic tap bindings in plan diagnostic tap order.
   const iree_hal_buffer_binding_t* diagnostic_tap_bindings;
-  // Number of future regions whose deferred parameter load groups may be
-  // submitted before the current region is issued.
-  iree_host_size_t parameter_load_prefetch_region_distance;
+  // Number of future execution segments whose parameter windows may be loaded
+  // before the current segment is issued.
+  iree_host_size_t parameter_load_prefetch_segment_distance;
   // Semaphores that execution waits on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when execution completes.

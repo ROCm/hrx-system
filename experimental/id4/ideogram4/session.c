@@ -70,7 +70,7 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
                               (uint32_t)options->issue_policy);
   }
   const id4_pipeline_stage_issue_flags_t allowed_stage_issue_flags =
-      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_EXECUTION_SEGMENT;
   if (iree_any_bit_set(options->stage_issue_flags,
                        ~allowed_stage_issue_flags)) {
     return iree_make_status(
@@ -244,7 +244,7 @@ static iree_status_t id4_ideogram4_validate_generation_phase_issue_options(
                             "structures are not supported");
   }
   const id4_pipeline_stage_issue_flags_t allowed_stage_issue_flags =
-      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_EXECUTION_SEGMENT;
   if (iree_any_bit_set(options->stage_issue_flags,
                        ~allowed_stage_issue_flags)) {
     return iree_make_status(
@@ -522,7 +522,7 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.region_submission_window = 1;
+  issue_options.execution_segment_submission_window = 1;
   issue_options.flags = execution->stage_issue_flags;
   issue_options.boundary_binding_count = slot->boundary_bindings.count;
   issue_options.boundary_bindings = slot->boundary_bindings.bindings;
@@ -535,8 +535,8 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   if (parameter_slabs &&
       id4_pipeline_parameter_slab_set_has_deferred_load_context(
           parameter_slabs)) {
-    issue_options.parameter_load_prefetch_region_distance =
-        execution->parameter_load_prefetch_region_distance;
+    issue_options.parameter_load_prefetch_segment_distance =
+        execution->parameter_load_prefetch_segment_distance;
   }
   issue_options.wait_semaphore_list = wait_semaphore_list;
   issue_options.signal_semaphore_list = signal_list;
@@ -1427,8 +1427,8 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
     const id4_ideogram4_generation_phase_issue_options_t* options) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_phase_issue_options(
       execution, phase_bundle, options));
-  execution->parameter_load_prefetch_region_distance =
-      options->parameter_load_prefetch_region_distance;
+  execution->parameter_load_prefetch_segment_distance =
+      options->parameter_load_prefetch_segment_distance;
   execution->stage_issue_flags = options->stage_issue_flags;
   iree_status_t status = id4_ideogram4_generation_chain_phase_issue_wait(
       execution, phase_bundle->phase_mask, options->wait_semaphore_list);
@@ -1480,8 +1480,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
         options->tokenizer_flags, options->wait_semaphore_list,
         iree_hal_semaphore_list_empty(), &execution);
     if (iree_status_is_ok(status)) {
-      execution->parameter_load_prefetch_region_distance =
-          options->parameter_load_prefetch_region_distance;
+      execution->parameter_load_prefetch_segment_distance =
+          options->parameter_load_prefetch_segment_distance;
       execution->stage_issue_flags = options->stage_issue_flags;
     }
     if (iree_status_is_ok(status)) {
@@ -1515,8 +1515,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
       options->tokenizer_flags, options->wait_semaphore_list,
       iree_hal_semaphore_list_empty(), &execution);
   if (iree_status_is_ok(status)) {
-    execution->parameter_load_prefetch_region_distance =
-        options->parameter_load_prefetch_region_distance;
+    execution->parameter_load_prefetch_segment_distance =
+        options->parameter_load_prefetch_segment_distance;
     execution->stage_issue_flags = options->stage_issue_flags;
   }
   if (iree_status_is_ok(status)) {

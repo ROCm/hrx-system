@@ -2136,10 +2136,11 @@ static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
       // Submission strategy used by the load group.
       .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
           ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE),
-      // First planned region that consumes this group.
-      .first_consumer_region_id = group_context.first_consumer_region_id,
-      // Region that submitted this group.
-      .submit_region_id = group_context.submit_region_id,
+      // First execution segment that consumes this group.
+      .first_consumer_execution_ordinal =
+          group_context.first_consumer_execution_ordinal,
+      // Execution segment that submitted this group.
+      .submit_execution_ordinal = group_context.submit_execution_ordinal,
       // First load-step ordinal represented by the window.
       .load_step_offset = load_step_offset,
       // Number of load steps represented by the window.
@@ -2525,10 +2526,11 @@ id4_pipeline_parameter_slab_emit_encode_window_allocation_diagnostic(
       // Submission strategy represented by the issue window.
       .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
           ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE),
-      // First planned region that consumes the allocating group.
-      .first_consumer_region_id = group_context.first_consumer_region_id,
-      // Region that allocated the window.
-      .submit_region_id = group_context.submit_region_id,
+      // First execution segment that consumes the allocating group.
+      .first_consumer_execution_ordinal =
+          group_context.first_consumer_execution_ordinal,
+      // Execution segment that allocated the window.
+      .submit_execution_ordinal = group_context.submit_execution_ordinal,
       // Issue windows can cover non-contiguous load groups.
       .load_step_offset = IREE_HOST_SIZE_MAX,
       // Number of encoded groups sharing this window.
@@ -3193,10 +3195,11 @@ static iree_status_t id4_pipeline_parameter_slab_emit_gather_group_diagnostic(
       // Submission strategy used by the load group.
       .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
           ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER),
-      // First planned region that consumes this group.
-      .first_consumer_region_id = group_context.first_consumer_region_id,
-      // Region that submitted this group.
-      .submit_region_id = group_context.submit_region_id,
+      // First execution segment that consumes this group.
+      .first_consumer_execution_ordinal =
+          group_context.first_consumer_execution_ordinal,
+      // Execution segment that submitted this group.
+      .submit_execution_ordinal = group_context.submit_execution_ordinal,
       // First load-step ordinal represented by the group.
       .load_step_offset = group.step_offset,
       // Number of direct gather load steps in the group.
@@ -3349,10 +3352,11 @@ static iree_status_t id4_pipeline_parameter_slab_emit_load_group_submit_timing(
       // Submission strategy used by the load group.
       .load_group_kind =
           id4_pipeline_parameter_load_group_kind_name(group.kind),
-      // First planned region that consumes this group.
-      .first_consumer_region_id = group_context.first_consumer_region_id,
-      // Region that submitted this group.
-      .submit_region_id = group_context.submit_region_id,
+      // First execution segment that consumes this group.
+      .first_consumer_execution_ordinal =
+          group_context.first_consumer_execution_ordinal,
+      // Execution segment that submitted this group.
+      .submit_execution_ordinal = group_context.submit_execution_ordinal,
       // First load-step ordinal represented by the group.
       .load_step_offset = group.step_offset,
       // Number of load steps represented by the group.
@@ -3452,9 +3456,9 @@ static iree_status_t id4_pipeline_parameter_slab_describe_failed_load_group(
       .load_group_kind =
           id4_pipeline_parameter_load_group_kind_name(group.kind),
       // Failure checks run after scheduling, without region-local context.
-      .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+      .first_consumer_execution_ordinal = IREE_HOST_SIZE_MAX,
       // Failure checks run after scheduling, without region-local context.
-      .submit_region_id = IREE_HOST_SIZE_MAX,
+      .submit_execution_ordinal = IREE_HOST_SIZE_MAX,
       // First load-step ordinal represented by the failed group.
       .load_step_offset = group.step_offset,
       // Number of load steps represented by the failed group.
@@ -3956,10 +3960,10 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
     id4_pipeline_parameter_load_group_context_t group_context = {
         // This eager path does not retain plan-local group ordering.
         .group_index = IREE_HOST_SIZE_MAX,
-        // This eager path does not track first consumer regions.
-        .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+        // This eager path does not track first consumer execution ordinals.
+        .first_consumer_execution_ordinal = IREE_HOST_SIZE_MAX,
         // Eager prepare-time loading happens outside region issue.
-        .submit_region_id = IREE_HOST_SIZE_MAX,
+        .submit_execution_ordinal = IREE_HOST_SIZE_MAX,
     };
     return id4_pipeline_parameter_slab_submit_load_group(
         options, /*encode_window_context=*/NULL, loads, slab_set->load_count,
@@ -4018,10 +4022,10 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
     id4_pipeline_parameter_load_group_context_t group_context = {
         // Plan-local load group ordinal.
         .group_index = group_index,
-        // Eager prepare-time loading does not track first consumer regions.
-        .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+        // Eager loading does not track first consumer execution ordinals.
+        .first_consumer_execution_ordinal = IREE_HOST_SIZE_MAX,
         // Eager prepare-time loading happens outside region issue.
-        .submit_region_id = IREE_HOST_SIZE_MAX,
+        .submit_execution_ordinal = IREE_HOST_SIZE_MAX,
     };
     status = id4_pipeline_parameter_slab_submit_load_group(
         options,
@@ -4355,8 +4359,6 @@ id4_pipeline_parameter_slab_set_submit_options(
 
 iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     id4_pipeline_parameter_slab_set_t* slab_set,
-    iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_issue_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(out_context);
@@ -4369,11 +4371,6 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "parameter slab set has no retained load context");
   }
-  if (load_step_count != 0 && !load_steps) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameter load step array is required");
-  }
-
   id4_pipeline_parameter_slab_issue_context_t* context = NULL;
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*context), (void**)&context);
@@ -4385,8 +4382,8 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_create(
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_encode_window_context_initialize(
-        slab_set->loads, slab_set->load_count, load_step_count, load_steps,
-        slab_set->encoder_staging_chunk_byte_capacity,
+        slab_set->loads, slab_set->load_count, slab_set->load_step_count,
+        slab_set->load_steps, slab_set->encoder_staging_chunk_byte_capacity,
         /*emits_issue_window_diagnostic=*/true, host_allocator,
         &context->encode_windows);
   }
@@ -4415,8 +4412,6 @@ void id4_pipeline_parameter_slab_issue_context_release(
 
 iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
     id4_pipeline_parameter_slab_issue_context_t* context,
-    iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -4445,10 +4440,10 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
       id4_pipeline_parameter_one_semaphore_list(&target_signal_semaphore,
                                                 &target_signal_payload_value);
   return id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
-      context, slab_set->load_count, slab_set->loads, load_step_count,
-      load_steps, group_context.group_index, slab_set->count, slab_set->buffers,
-      iree_hal_semaphore_list_empty(), target_signal_list, group_context,
-      stage_name, diagnostics_sink);
+      context, slab_set->load_count, slab_set->loads, slab_set->load_step_count,
+      slab_set->load_steps, group_context.group_index, slab_set->count,
+      slab_set->buffers, iree_hal_semaphore_list_empty(), target_signal_list,
+      group_context, stage_name, diagnostics_sink);
 }
 
 iree_status_t

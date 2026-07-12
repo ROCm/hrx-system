@@ -210,6 +210,7 @@ static void ExpectBarrierAlignedParameterResidency(
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.plan = stage_plan;
+  options.source_kind = ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
   options.maximum_target_byte_length = maximum_target_byte_length;
   options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
@@ -315,14 +316,14 @@ EstimateGenerationResources(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_residency_mode_t residency_mode,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
-    iree_host_size_t parameter_load_prefetch_region_distance = 0) {
+    iree_host_size_t parameter_load_prefetch_segment_distance = 0) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.residency_mode = residency_mode;
   options.resident_stage_mask = resident_stage_mask;
-  options.parameter_load_prefetch_region_distance =
-      parameter_load_prefetch_region_distance;
+  options.parameter_load_prefetch_segment_distance =
+      parameter_load_prefetch_segment_distance;
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_CHECK_OK(id4_ideogram4_generation_plan_resource_statistics(
       plan, &options, &statistics));
@@ -913,7 +914,7 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
       EstimateGenerationResources(
           plan.get(), ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE,
-          /*parameter_load_prefetch_region_distance=*/1);
+          /*parameter_load_prefetch_segment_distance=*/1);
   EXPECT_EQ(prefetched_statistics.stage_serial_parameter_peak_byte_length,
             MaxGenerationParameterWindowPeak(plan.get(), 2));
   EXPECT_GE(prefetched_statistics.stage_serial_parameter_peak_byte_length,

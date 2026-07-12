@@ -2532,35 +2532,23 @@ static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
   return IREE_HOST_SIZE_MAX;
 }
 
-iree_status_t id4_pipeline_plan_create_parameter_slab_issue_context(
-    const id4_pipeline_plan_t* plan,
-    id4_pipeline_parameter_slab_set_t* slab_set,
-    iree_allocator_t host_allocator,
-    id4_pipeline_parameter_slab_issue_context_t** out_context) {
-  IREE_ASSERT_ARGUMENT(plan);
-  return id4_pipeline_parameter_slab_issue_context_create(
-      slab_set, plan->parameter_load_step_count, plan->parameter_load_steps,
-      host_allocator, out_context);
-}
-
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,
     id4_pipeline_parameter_slab_issue_context_t* context,
-    iree_host_size_t group_index, iree_host_size_t submit_region_id,
+    iree_host_size_t group_index, iree_host_size_t submit_execution_ordinal,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_ASSERT_ARGUMENT(plan);
   id4_pipeline_parameter_load_group_context_t group_context = {
       // Plan-local load group ordinal.
       .group_index = group_index,
-      // First planned region that consumes the load group.
-      .first_consumer_region_id =
+      // First planned execution ordinal that consumes the load group.
+      .first_consumer_execution_ordinal =
           id4_pipeline_plan_find_load_group_first_region(plan, group_index),
-      // Region currently submitting the load group.
-      .submit_region_id = submit_region_id,
+      // Execution ordinal currently submitting the load group.
+      .submit_execution_ordinal = submit_execution_ordinal,
   };
   return id4_pipeline_parameter_slab_issue_context_submit_load_group(
-      context, plan->parameter_load_step_count, plan->parameter_load_steps,
-      group_context, plan->stage_name, diagnostics_sink);
+      context, group_context, plan->stage_name, diagnostics_sink);
 }
 
 static iree_status_t id4_pipeline_plan_append_json_string(

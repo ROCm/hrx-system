@@ -23,6 +23,19 @@ typedef struct id4_pipeline_parameter_window_t id4_pipeline_parameter_window_t;
 typedef struct id4_pipeline_parameter_window_schedule_t
     id4_pipeline_parameter_window_schedule_t;
 
+// Source representation used to populate compact parameter windows.
+typedef uint32_t id4_pipeline_parameter_window_source_kind_t;
+
+// Compact parameter-window source representation values.
+typedef enum id4_pipeline_parameter_window_source_kind_e {
+  // Invalid or unspecified parameter-window source.
+  ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_INVALID = 0,
+  // Plan-directed checkpoint gathers and encoders populate each window.
+  ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT = 1,
+  // Validated baked execution-layout entries are gathered directly.
+  ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT = 2,
+} id4_pipeline_parameter_window_source_kind_e;
+
 // Compact target slab represented inside one parameter materialization window.
 typedef struct id4_pipeline_parameter_window_slab_t {
   // Original parameter slab index represented by this compact window slab.
@@ -48,6 +61,8 @@ typedef struct id4_pipeline_parameter_window_request_t {
   iree_host_size_t original_slab_index;
   // Original request index within original_slab_index.
   iree_host_size_t original_request_index;
+  // Plan parameter tensor index owning this request.
+  iree_host_size_t parameter_tensor_index;
   // Global request ordinal in the containing plan.
   iree_host_size_t global_request_index;
   // Source parameter span and compact target buffer span.
@@ -79,6 +94,21 @@ typedef struct id4_pipeline_parameter_window_schedule_create_options_t {
   // Window selecting the compact parameter materialization scope.
   const id4_pipeline_parameter_window_t* window;
 } id4_pipeline_parameter_window_schedule_create_options_t;
+
+// Options for loading a compact window from a baked execution-layout archive.
+typedef struct
+    id4_pipeline_parameter_window_execution_layout_schedule_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Plan that defines archive entry identity and compact target layouts.
+  id4_pipeline_plan_t* plan;
+  // Window selecting the compact parameter materialization scope.
+  const id4_pipeline_parameter_window_t* window;
+  // Provider scope containing the validated execution-layout archive.
+  iree_string_view_t source_scope;
+} id4_pipeline_parameter_window_execution_layout_schedule_create_options_t;
 
 // Creates a compact parameter materialization window from existing plan
 // metadata.
@@ -142,9 +172,18 @@ id4_pipeline_parameter_window_resolve_request(
     const id4_pipeline_parameter_window_t* window,
     iree_host_size_t global_request_index);
 
-// Creates compact parameter slab loads and load steps for |window|.
+// Creates compact parameter slab loads and plan-directed checkpoint load steps
+// for |window|.
 iree_status_t id4_pipeline_parameter_window_schedule_create(
     const id4_pipeline_parameter_window_schedule_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_window_schedule_t** out_schedule);
+
+// Creates compact gather-only loads from baked execution-layout archive
+// entries into |window|.
+iree_status_t id4_pipeline_parameter_window_execution_layout_schedule_create(
+    const id4_pipeline_parameter_window_execution_layout_schedule_create_options_t*
+        options,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_schedule_t** out_schedule);
 
