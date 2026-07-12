@@ -546,7 +546,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
   schedule.nodes = schedule_nodes;
   schedule.node_count = 13;
-  schedule.dependencies.ordering.count = 6;
+  schedule.dependencies.count = 6;
   schedule.scheduled_node_indices = scheduled_node_indices;
   schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
   schedule.resource_use_count = 4;

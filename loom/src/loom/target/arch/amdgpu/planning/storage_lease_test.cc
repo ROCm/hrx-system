@@ -81,27 +81,14 @@ void InitializeScheduleFixture(const loom_low_descriptor_set_t* descriptor_set,
       /*.result_count=*/descriptor->result_count,
   };
   fixture->scheduled_node_indices[0] = 0;
-  fixture->schedule = {
-      /*.module=*/{},
-      /*.function_op=*/{},
-      /*.target=*/
-      {/*.target_symbol=*/{}, /*.target_op=*/{}, /*.bundle_storage=*/{},
-       /*.target_name=*/{}, /*.descriptor_set_key=*/{}, /*.feature_bits=*/{},
-       /*.descriptor_set=*/descriptor_set},
-      /*.memory_access_table=*/{},
-      /*.value_ids=*/{},
-      /*.value_count=*/{},
-      /*.liveness=*/{},
-      /*.blocks=*/&fixture->block,
-      /*.block_count=*/1,
-      /*.nodes=*/&fixture->node,
-      /*.node_count=*/1,
-      /*.dependencies=*/{},
-      /*.scheduled_node_indices=*/fixture->scheduled_node_indices,
-      /*.scheduled_node_count=*/1,
-      /*.error_count=*/{},
-      /*.failure=*/{},
-  };
+  fixture->schedule = {};
+  fixture->schedule.target.descriptor_set = descriptor_set;
+  fixture->schedule.blocks = &fixture->block;
+  fixture->schedule.block_count = 1;
+  fixture->schedule.nodes = &fixture->node;
+  fixture->schedule.node_count = 1;
+  fixture->schedule.scheduled_node_indices = fixture->scheduled_node_indices;
+  fixture->schedule.scheduled_node_count = 1;
 }
 
 class AmdgpuStorageLeaseTest : public ::testing::Test {

@@ -28,6 +28,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,8 @@ enum loom_low_schedule_node_flag_bits_e {
   LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY = 1u << 1,
   // Structural node can supply dependencies while setting up a target pair.
   LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP = 1u << 2,
+  // Node observes completion of externally visible program-exit memory.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY = 1u << 3,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
@@ -402,8 +405,8 @@ typedef struct loom_low_schedule_candidate_decision_t {
 } loom_low_schedule_candidate_decision_t;
 
 // Descriptor effect row recorded in scheduled order. Effects describe memory,
-// counter, call, barrier, and control visibility used by dependency
-// construction and target-owned visibility planning.
+// counter, call, barrier, and control behavior used by dependency construction
+// and target-owned wait and hazard planning.
 typedef struct loom_low_schedule_effect_use_t {
   // Scheduled node carrying the effect row.
   uint32_t node_index;
@@ -616,11 +619,13 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_block_t* blocks;
   // Number of block records.
   iree_host_size_t block_count;
+  // Read-only control-flow graph shared by target planning overlays.
+  loom_cfg_graph_t cfg_graph;
   // Per-op schedule nodes in source order.
   const loom_low_schedule_node_t* nodes;
   // Number of schedule nodes.
   iree_host_size_t node_count;
-  // Stable dependency graph consumed by scheduling and target visibility
+  // Stable ordering dependency graph consumed by scheduling and target
   // planning.
   loom_low_schedule_dependency_graph_t dependencies;
   // Node indices in scheduled order, grouped by block.

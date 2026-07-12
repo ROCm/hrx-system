@@ -258,8 +258,7 @@ static void loom_ireevm_archive_emit_accumulate_frame_report(
   }
   totals->schedule_node_count += frame->schedule.node_count;
   totals->scheduled_node_count += frame->schedule.scheduled_node_count;
-  totals->schedule_dependency_count +=
-      frame->schedule.dependencies.ordering.count;
+  totals->schedule_dependency_count += frame->schedule.dependencies.count;
   totals->schedule_resource_use_count += frame->schedule.resource_use_count;
   totals->schedule_hazard_gap_count += frame->schedule.hazard_gap_count;
   totals->schedule_model_summary_count += frame->schedule.model_summary_count;

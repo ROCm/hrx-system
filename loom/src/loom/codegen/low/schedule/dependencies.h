@@ -56,18 +56,6 @@ typedef struct loom_low_schedule_dependency_t {
   uint32_t operand_index;
 } loom_low_schedule_dependency_t;
 
-// One memory-visibility edge between two schedule nodes. Visibility edges are
-// consumed by target overlays such as wait insertion; they do not constrain the
-// block-local list scheduler.
-typedef struct loom_low_schedule_visibility_dependency_t {
-  // Producer node whose memory effect must be visible first.
-  uint32_t producer_node;
-  // Consumer node that observes or overwrites the producer's memory effect.
-  uint32_t consumer_node;
-  // Dependency kind. Currently always EFFECT.
-  loom_low_schedule_dependency_kind_t kind;
-} loom_low_schedule_visibility_dependency_t;
-
 // Stable storage for one range of indexed scheduler dependencies.
 typedef iree_alignas(64) struct loom_low_schedule_dependency_segment_t {
   // Dependency rows indexed by the low bits of a dependency index.
@@ -75,34 +63,15 @@ typedef iree_alignas(64) struct loom_low_schedule_dependency_segment_t {
       rows[LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY];
 } loom_low_schedule_dependency_segment_t;
 
-// Stable storage for one range of indexed visibility dependencies.
-typedef iree_alignas(
-    64) struct loom_low_schedule_visibility_dependency_segment_t {
-  // Visibility rows indexed by the low bits of a dependency index.
-  loom_low_schedule_visibility_dependency_t
-      rows[LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY];
-} loom_low_schedule_visibility_dependency_segment_t;
-
 static_assert(sizeof(loom_low_schedule_dependency_segment_t) == 64 * 1024,
               "dependency segment must fit in a compiler workspace block");
-static_assert(sizeof(loom_low_schedule_visibility_dependency_segment_t) ==
-                  48 * 1024,
-              "visibility segment must fit in a compiler workspace block");
 
-// One stable segmented row sequence.
-typedef struct loom_low_schedule_dependency_storage_t {
+// Complete dependency graph storage for one scheduled function.
+typedef struct loom_low_schedule_dependency_graph_t {
   // Number of populated rows.
   iree_host_size_t count;
   // Arena-backed stable segment directory.
   loom_segmented_storage_t segments;
-} loom_low_schedule_dependency_storage_t;
-
-// Complete dependency graph storage for one scheduled function.
-typedef struct loom_low_schedule_dependency_graph_t {
-  // Edges that constrain the block-local list scheduler.
-  loom_low_schedule_dependency_storage_t ordering;
-  // Cross-block edges consumed by target visibility planning.
-  loom_low_schedule_dependency_storage_t visibility;
 } loom_low_schedule_dependency_graph_t;
 
 // Initializes an empty dependency graph. Payload segments are allocated lazily.
@@ -116,42 +85,21 @@ void loom_low_schedule_dependency_graph_move(
     loom_low_schedule_dependency_graph_t* source,
     loom_low_schedule_dependency_graph_t* out_graph);
 
-// Appends one ordering dependency.
-iree_status_t loom_low_schedule_dependency_graph_append_ordering(
+// Appends one dependency.
+iree_status_t loom_low_schedule_dependency_graph_append(
     loom_low_schedule_dependency_graph_t* graph,
     loom_low_schedule_dependency_t dependency, iree_arena_allocator_t* arena);
 
-// Appends one visibility dependency.
-iree_status_t loom_low_schedule_dependency_graph_append_visibility(
-    loom_low_schedule_dependency_graph_t* graph,
-    loom_low_schedule_visibility_dependency_t dependency,
-    iree_arena_allocator_t* arena);
-
-// Returns an ordering dependency by its stable zero-based index.
+// Returns a dependency by its stable zero-based index.
 static inline const loom_low_schedule_dependency_t*
-loom_low_schedule_dependency_graph_ordering_at(
+loom_low_schedule_dependency_graph_at(
     const loom_low_schedule_dependency_graph_t* graph,
     uint32_t dependency_index) {
-  IREE_ASSERT(dependency_index < graph->ordering.count);
+  IREE_ASSERT(dependency_index < graph->count);
   const loom_low_schedule_dependency_segment_t* segment =
       (const loom_low_schedule_dependency_segment_t*)
           loom_segmented_storage_const_segment(
-              &graph->ordering.segments,
-              dependency_index >> LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT);
-  return &segment->rows[dependency_index &
-                        LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_MASK];
-}
-
-// Returns a visibility dependency by its stable zero-based index.
-static inline const loom_low_schedule_visibility_dependency_t*
-loom_low_schedule_dependency_graph_visibility_at(
-    const loom_low_schedule_dependency_graph_t* graph,
-    uint32_t dependency_index) {
-  IREE_ASSERT(dependency_index < graph->visibility.count);
-  const loom_low_schedule_visibility_dependency_segment_t* segment =
-      (const loom_low_schedule_visibility_dependency_segment_t*)
-          loom_segmented_storage_const_segment(
-              &graph->visibility.segments,
+              &graph->segments,
               dependency_index >> LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT);
   return &segment->rows[dependency_index &
                         LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_MASK];
