@@ -12,7 +12,6 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/schedule/ready_frontier.h"
 #include "loom/codegen/low/schedule/target_pressure.h"
-#include "loom/codegen/low/storage_relation.h"
 #include "loom/target/registers.h"
 
 #define LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY 16u
@@ -124,7 +123,8 @@ iree_status_t loom_low_schedule_pressure_initialize(
     memset(out_pressure_state->remaining_consumer_node_xors, 0,
            value_count *
                sizeof(*out_pressure_state->remaining_consumer_node_xors));
-    const iree_host_size_t alias_capacity = state->storage_reads.relation_count;
+    const iree_host_size_t alias_capacity =
+        state->storage_relations.relation_count;
     if (alias_capacity != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, value_count, sizeof(*out_pressure_state->alias_heads),
@@ -638,10 +638,7 @@ static uint64_t loom_low_schedule_ready_schedule_key(
 static uint64_t loom_low_schedule_ready_storage_key(
     const loom_low_schedule_build_state_t* state, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
-  const uint16_t relation_count =
-      node->op != NULL
-          ? loom_low_storage_relation_count(state->module, node->op)
-          : 0;
+  const uint16_t relation_count = node->storage_relation_count;
   return relation_count == 0 ? UINT64_MAX
                              : (uint64_t)(UINT16_MAX - relation_count);
 }
@@ -928,7 +925,7 @@ static void loom_low_schedule_note_candidate_pressure_delta(
 
 static bool loom_low_schedule_storage_relation_can_alias_pressure(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_storage_relation_t* relation,
+    const loom_low_schedule_storage_relation_t* relation,
     loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal) {
   if (relation->kind != LOOM_LOW_STORAGE_RELATION_SAME_STORAGE &&
       relation->kind != LOOM_LOW_STORAGE_RELATION_SUBRANGE &&
@@ -1000,23 +997,24 @@ static uint32_t loom_low_schedule_candidate_claimed_source_units(
 static uint32_t loom_low_schedule_result_alias_units_after_candidate(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,
-    const loom_low_schedule_node_t* node, loom_value_ordinal_t result_ordinal) {
+    uint32_t node_index, loom_value_ordinal_t result_ordinal) {
   uint32_t alias_units = 0;
-  loom_low_storage_relation_iterator_t iterator;
-  loom_low_storage_relation_iterator_initialize(state->module, node->op,
-                                                &iterator);
-  loom_low_storage_relation_t relation;
-  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-    const loom_value_ordinal_t destination_ordinal =
-        loom_local_value_domain_ordinal(state->value_domain,
-                                        relation.destination_value_id);
-    if (destination_ordinal != result_ordinal) {
+  const uint32_t relation_begin =
+      loom_low_schedule_storage_relation_index_begin(&state->storage_relations,
+                                                     node_index);
+  const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+      &state->storage_relations, node_index);
+  for (uint32_t relation_index = relation_begin; relation_index < relation_end;
+       ++relation_index) {
+    const loom_low_schedule_storage_relation_t* relation =
+        loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                    relation_index);
+    if (relation->destination_ordinal != result_ordinal) {
       continue;
     }
-    const loom_value_ordinal_t source_ordinal = loom_local_value_domain_ordinal(
-        state->value_domain, relation.source_value_id);
+    const loom_value_ordinal_t source_ordinal = relation->source_ordinal;
     if (!loom_low_schedule_storage_relation_can_alias_pressure(
-            state, &relation, result_ordinal, source_ordinal)) {
+            state, relation, result_ordinal, source_ordinal)) {
       continue;
     }
     if (!loom_low_schedule_relation_source_is_available_after_candidate(
@@ -1032,7 +1030,7 @@ static uint32_t loom_low_schedule_result_alias_units_after_candidate(
       continue;
     }
     const uint32_t relation_alias_units =
-        iree_min(relation.unit_count, source->unit_count - claimed_units);
+        iree_min(relation->unit_count, source->unit_count - claimed_units);
     pressure_state->candidate_scratch_counts[source_ordinal] +=
         relation_alias_units;
     alias_units += relation_alias_units;
@@ -1357,10 +1355,7 @@ void loom_low_schedule_pressure_score_candidate(
   uint64_t produced_live_units = 0;
   uint32_t produced_live_value_count = 0;
   bool has_multi_use_result = false;
-  const uint16_t storage_relation_count =
-      node->op != NULL
-          ? loom_low_storage_relation_count(state->module, node->op)
-          : 0;
+  const uint16_t storage_relation_count = node->storage_relation_count;
 
   const loom_value_ordinal_t* operand_ordinals =
       loom_low_schedule_node_const_operand_ordinals(node);
@@ -1410,7 +1405,7 @@ void loom_low_schedule_pressure_score_candidate(
     }
     const uint32_t alias_units =
         loom_low_schedule_result_alias_units_after_candidate(
-            state, pressure_state, node, result_ordinals[result_index]);
+            state, pressure_state, node_index, result_ordinals[result_index]);
     const uint32_t unit_count = value->unit_count - alias_units;
     produced_live_units += unit_count;
     if (unit_count != 0) {
@@ -1544,33 +1539,34 @@ static bool loom_low_schedule_value_is_live_with_full_pressure(
 
 static uint32_t loom_low_schedule_append_result_aliases(
     loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state,
-    const loom_low_schedule_node_t* node, loom_value_ordinal_t result_ordinal) {
+    loom_low_schedule_pressure_state_t* pressure_state, uint32_t node_index,
+    loom_value_ordinal_t result_ordinal) {
   if (pressure_state->alias_heads == NULL) {
     return 0;
   }
   uint32_t alias_units = 0;
-  loom_low_storage_relation_iterator_t iterator;
-  loom_low_storage_relation_iterator_initialize(state->module, node->op,
-                                                &iterator);
-  loom_low_storage_relation_t relation;
-  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-    const loom_value_ordinal_t destination_ordinal =
-        loom_local_value_domain_ordinal(state->value_domain,
-                                        relation.destination_value_id);
-    if (destination_ordinal != result_ordinal) {
+  const uint32_t relation_begin =
+      loom_low_schedule_storage_relation_index_begin(&state->storage_relations,
+                                                     node_index);
+  const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+      &state->storage_relations, node_index);
+  for (uint32_t relation_index = relation_begin; relation_index < relation_end;
+       ++relation_index) {
+    const loom_low_schedule_storage_relation_t* relation =
+        loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                    relation_index);
+    if (relation->destination_ordinal != result_ordinal) {
       continue;
     }
-    const loom_value_ordinal_t source_ordinal = loom_local_value_domain_ordinal(
-        state->value_domain, relation.source_value_id);
+    const loom_value_ordinal_t source_ordinal = relation->source_ordinal;
     if (!loom_low_schedule_storage_relation_can_alias_pressure(
-            state, &relation, result_ordinal, source_ordinal)) {
+            state, relation, result_ordinal, source_ordinal)) {
       continue;
     }
     const loom_low_schedule_value_record_t* source =
         &state->values[source_ordinal];
     if (!loom_low_schedule_value_is_live_with_full_pressure(
-            source, relation.unit_count)) {
+            source, relation->unit_count)) {
       continue;
     }
     const uint32_t claimed_source_units =
@@ -1581,7 +1577,7 @@ static uint32_t loom_low_schedule_append_result_aliases(
       continue;
     }
     const uint32_t aliasable_units = iree_min(
-        relation.unit_count, source->unit_count - claimed_source_units);
+        relation->unit_count, source->unit_count - claimed_source_units);
     IREE_ASSERT(pressure_state->alias_count < pressure_state->alias_capacity,
                 "storage relation alias count must fit precomputed capacity");
     if (pressure_state->alias_heads[source_ordinal] ==
@@ -1666,7 +1662,7 @@ void loom_low_schedule_pressure_note_node_scheduled(
     }
     value->flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
     const uint32_t alias_units = loom_low_schedule_append_result_aliases(
-        state, pressure_state, node, result_ordinals[result_index]);
+        state, pressure_state, node_index, result_ordinals[result_index]);
     const uint32_t unit_count = value->unit_count - alias_units;
     value->live_unit_count = unit_count;
     pressure_state->current_live_units += unit_count;

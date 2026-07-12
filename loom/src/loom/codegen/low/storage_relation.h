@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-typedef enum loom_low_storage_relation_kind_e {
+enum loom_low_storage_relation_kind_e {
   // Unknown or uninitialized storage relation kind.
   LOOM_LOW_STORAGE_RELATION_UNKNOWN = 0,
   // Destination and source unit ranges occupy identical storage units.
@@ -33,9 +33,10 @@ typedef enum loom_low_storage_relation_kind_e {
   LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART = 3,
   // Destination and source unit ranges should occupy disjoint storage.
   LOOM_LOW_STORAGE_RELATION_DISJOINT_STORAGE = 4,
-} loom_low_storage_relation_kind_t;
+};
+typedef uint8_t loom_low_storage_relation_kind_t;
 
-typedef enum loom_low_storage_relation_cause_e {
+enum loom_low_storage_relation_cause_e {
   // Unknown or uninitialized storage relation cause.
   LOOM_LOW_STORAGE_RELATION_CAUSE_UNKNOWN = 0,
   // Descriptor tied result requiring source/result storage identity.
@@ -52,7 +53,8 @@ typedef enum loom_low_storage_relation_cause_e {
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR = 6,
   // low.scf.yield payload/result or backedge affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD = 7,
-} loom_low_storage_relation_cause_t;
+};
+typedef uint8_t loom_low_storage_relation_cause_t;
 
 enum loom_low_storage_relation_flag_bits_e {
   // The relation is required for the operation semantics.
