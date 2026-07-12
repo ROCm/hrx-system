@@ -3,13 +3,14 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+config.def @id4.qwen3_vl.linear_wmma.rhs_storage = 1 : index
 
 check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small_case {
   %input = check.generate.fill value(0.0078125) : tensor<32x16xbf16>
   %weight = check.generate.fill value(0.5) : tensor<512xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
   %expected = check.generate.fill value(0.0625) : tensor<32x32xbf16>
-  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>)
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
   check.return
 }
@@ -19,7 +20,7 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpo
   %weight = check.generate.fill value(0.5) : tensor<512xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
   %expected = check.generate.fill value(0.0625) : tensor<32x32xbf16>
-  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>)
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output(%input, %weight, %output) : (tensor<32x16xbf16>, tensor<512xbf16>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
   check.return
 }
@@ -29,7 +30,7 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_pr
   %weight = check.generate.fill value(0.5) : tensor<16777216xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x4096xbf16>
   %expected = check.generate.fill value(16.0) : tensor<32x4096xbf16>
-  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %output) : (tensor<32x4096xbf16>, tensor<16777216xbf16>, tensor<32x4096xbf16>)
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32(%input, %weight, %output) : (tensor<32x4096xbf16>, tensor<16777216xbf16>, tensor<32x4096xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x4096xbf16>
   check.return
 }
@@ -39,7 +40,7 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv
   %weight = check.generate.fill value(0.5) : tensor<4194304xbf16>
   %output = check.generate.fill value(0.0) : tensor<288x1024xbf16>
   %expected = check.generate.fill value(16.0) : tensor<288x1024xbf16>
-  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %output) : (tensor<288x4096xbf16>, tensor<4194304xbf16>, tensor<288x1024xbf16>)
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32(%input, %weight, %output) : (tensor<288x4096xbf16>, tensor<4194304xbf16>, tensor<288x1024xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288x1024xbf16>
   check.return
 }
@@ -49,7 +50,7 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpo
   %weight = check.generate.fill value(0.5) : tensor<4194304xbf16>
   %output = check.generate.fill value(0.0) : tensor<1024x288xbf16>
   %expected = check.generate.fill value(16.0) : tensor<1024x288xbf16>
-  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output(%input, %weight, %output) : (tensor<288x4096xbf16>, tensor<4194304xbf16>, tensor<1024x288xbf16>)
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_transpose_output(%input, %weight, %output) : (tensor<288x4096xbf16>, tensor<4194304xbf16>, tensor<1024x288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x288xbf16>
   check.return
 }
