@@ -1690,7 +1690,9 @@ static iree_status_t IssueGenerationBundle(
 static bool RequiresPreparedGenerationWarmup(
     const GenerationResidencyResolution& residency) {
   return residency.residency_mode ==
-         ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+             ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES ||
+         residency.resident_stage_mask !=
+             ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
 }
 
 static iree_status_t WarmPreparedGenerationState(
