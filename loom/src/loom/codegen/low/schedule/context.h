@@ -14,6 +14,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/schedule/dependency_index.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/local_value_domain.h"
@@ -192,6 +193,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_node_t* nodes;
   // Stable dependency graph accumulated while building the schedule DAG.
   loom_low_schedule_dependency_graph_t dependencies;
+  // Compact producer/consumer groups used by list scheduling.
+  loom_low_schedule_dependency_index_t dependency_index;
   // Node indices in final scheduled order.
   uint32_t* scheduled_node_indices;
   // Pressure-model steps in scheduled order for scored strategy runs.
@@ -218,10 +221,6 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* node_pressure_demand_units;
   // Maximum downstream register width needed to advance each node's value.
   uint32_t* node_pressure_activation_units;
-  // Per-node head of outgoing dependency lists during list scheduling.
-  const uint32_t* outgoing_heads;
-  // Per-dependency next link for outgoing dependency lists.
-  const uint32_t* outgoing_next_indices;
   // Most recent producer state for each minimum-distance hazard key.
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.
@@ -331,6 +330,8 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_chain_read_record_count;
   // Number of populated pair-affinity records.
   iree_host_size_t pair_affinity_record_count;
+  // Number of consumers published to final-producer unlock summaries.
+  uint64_t unlock_summary_publication_count;
   // Number of detached-copy nodes that can set up placement-sensitive pairs.
   iree_host_size_t detached_copy_node_count;
   // Number of populated placement-pair use records.
