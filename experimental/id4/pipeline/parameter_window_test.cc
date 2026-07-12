@@ -426,6 +426,83 @@ static ParameterWindowSchedulePtr MakeParameterWindowSchedule(
   return ParameterWindowSchedulePtr(raw_schedule);
 }
 
+static id4_pipeline_parameter_window_statistics_t QueryWindowStatistics(
+    const id4_pipeline_plan_t* plan, iree_host_size_t concurrent_window_count) {
+  id4_pipeline_parameter_window_statistics_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.plan = plan;
+  options.concurrent_window_count = concurrent_window_count;
+  options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+  id4_pipeline_parameter_window_statistics_t statistics;
+  IREE_CHECK_OK(id4_pipeline_parameter_window_query_statistics(
+      &options, iree_allocator_system(), &statistics));
+  return statistics;
+}
+
+TEST(ParameterWindowTest, ReportsIndependentlyAllocatedSlidingWindows) {
+  PlanPtr plan = MakeWindowPlan();
+
+  id4_pipeline_parameter_window_statistics_t statistics =
+      QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/1);
+  EXPECT_EQ(statistics.concurrent_window_count, 1u);
+  EXPECT_EQ(statistics.window_count, 3u);
+  EXPECT_EQ(statistics.full_slab_target_byte_length, 600u);
+  EXPECT_EQ(statistics.peak_target_byte_length, 508u);
+  EXPECT_EQ(statistics.encoder_staging_byte_length, 0u);
+  EXPECT_EQ(statistics.peak_live_byte_length, 508u);
+  EXPECT_EQ(statistics.peak_source_transfer_byte_length, 500u);
+  EXPECT_EQ(statistics.total_target_byte_length, 808u);
+  EXPECT_EQ(statistics.total_source_transfer_byte_length, 800u);
+  EXPECT_EQ(statistics.peak_load_group_count, 2u);
+  EXPECT_EQ(statistics.total_load_group_count, 4u);
+  EXPECT_EQ(statistics.largest_load_group_target_byte_length, 300u);
+  EXPECT_EQ(statistics.largest_load_group_index, 2u);
+  EXPECT_EQ(statistics.largest_request_target_byte_length, 300u);
+  EXPECT_EQ(statistics.largest_request_index, 2u);
+  EXPECT_EQ(statistics.largest_request_load_group_index, 2u);
+
+  statistics = QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/2);
+  EXPECT_EQ(statistics.window_count, 3u);
+  EXPECT_EQ(statistics.peak_target_byte_length, 708u);
+  EXPECT_EQ(statistics.peak_source_transfer_byte_length, 700u);
+  EXPECT_EQ(statistics.peak_load_group_count, 3u);
+  EXPECT_EQ(statistics.total_target_byte_length, 808u);
+  EXPECT_EQ(statistics.total_load_group_count, 4u);
+
+  statistics = QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/3);
+  EXPECT_EQ(statistics.window_count, 3u);
+  EXPECT_EQ(statistics.peak_target_byte_length, 808u);
+  EXPECT_EQ(statistics.peak_source_transfer_byte_length, 800u);
+  EXPECT_EQ(statistics.peak_load_group_count, 4u);
+  EXPECT_EQ(statistics.total_target_byte_length, 808u);
+  EXPECT_EQ(statistics.total_load_group_count, 4u);
+}
+
+TEST(ParameterWindowTest, IncludesEncoderStagingInLivePeak) {
+  PlanPtr plan = MakeSchedulePlan();
+
+  id4_pipeline_parameter_window_statistics_t statistics =
+      QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/1);
+  EXPECT_EQ(statistics.full_slab_target_byte_length, 256u);
+  EXPECT_EQ(statistics.peak_target_byte_length, 128u);
+  EXPECT_EQ(statistics.encoder_staging_byte_length, 320u);
+  EXPECT_EQ(statistics.peak_live_byte_length, 448u);
+  EXPECT_EQ(statistics.peak_source_transfer_byte_length, 320u);
+  EXPECT_EQ(statistics.total_target_byte_length, 320u);
+  EXPECT_EQ(statistics.total_source_transfer_byte_length, 512u);
+  EXPECT_EQ(statistics.peak_encode_load_step_count, 2u);
+  EXPECT_EQ(statistics.total_encode_load_step_count, 2u);
+
+  statistics = QueryWindowStatistics(plan.get(), /*concurrent_window_count=*/2);
+  EXPECT_EQ(statistics.peak_target_byte_length, 256u);
+  EXPECT_EQ(statistics.encoder_staging_byte_length, 320u);
+  EXPECT_EQ(statistics.peak_live_byte_length, 576u);
+  EXPECT_EQ(statistics.peak_source_transfer_byte_length, 448u);
+  EXPECT_EQ(statistics.peak_load_group_count, 2u);
+}
+
 TEST(ParameterWindowTest, PacksOnlyRequestsUsedByWindow) {
   PlanPtr plan = MakeWindowPlan();
   ParameterWindowPtr window =

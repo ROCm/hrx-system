@@ -218,6 +218,37 @@ typedef struct id4_pipeline_parameter_load_group_context_t {
   iree_host_size_t submit_region_id;
 } id4_pipeline_parameter_load_group_context_t;
 
+// Bounded source-staging requirements for one contiguous encoded load run.
+typedef struct id4_pipeline_parameter_encode_statistics_t {
+  // Number of reusable staging slots allocated by the encoder pipeline.
+  iree_host_size_t staging_slot_count;
+  // Byte length required by each reusable staging slot.
+  iree_device_size_t staging_slot_byte_length;
+  // Total byte length allocated across all reusable staging slots.
+  iree_device_size_t staging_total_byte_length;
+  // Number of source chunks submitted through the reusable staging slots.
+  iree_host_size_t staging_chunk_count;
+  // Number of logical provider source tensors gathered into staging.
+  iree_host_size_t logical_source_count;
+  // Number of provider gather batches required by the encoded load run.
+  iree_host_size_t source_gather_batch_count;
+  // Total provider source bytes transferred through staging.
+  iree_device_size_t source_byte_length;
+  // Total final parameter slab bytes populated by encoder dispatches.
+  iree_device_size_t target_byte_length;
+  // Number of encoder dispatches submitted by the encoded load run.
+  iree_host_size_t encoder_dispatch_count;
+} id4_pipeline_parameter_encode_statistics_t;
+
+// Queries the exact bounded staging allocation and transfer statistics used by
+// the parameter encoder for one contiguous encoded load run.
+iree_status_t id4_pipeline_parameter_encode_query_statistics(
+    const id4_pipeline_parameter_request_table_t* request_table,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_device_size_t staging_chunk_byte_capacity,
+    id4_pipeline_parameter_encode_statistics_t* out_statistics);
+
 // Returns a direct provider-gather load step into a final parameter slab.
 static inline id4_pipeline_parameter_load_step_t
 id4_pipeline_parameter_gather_load_step(iree_string_view_t name,

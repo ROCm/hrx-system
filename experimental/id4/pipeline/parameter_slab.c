@@ -2019,34 +2019,32 @@ static iree_status_t id4_pipeline_parameter_submit_source_gather_wave(
       gathers);
 }
 
-typedef struct id4_pipeline_parameter_encode_run_statistics_t {
-  // Byte length required by each bounded staging slot.
-  iree_device_size_t staging_slot_byte_length;
-  // Number of staging chunks planned for the encode run.
-  iree_host_size_t staging_chunk_count;
-  // Number of logical provider source tensors gathered into staging.
-  iree_host_size_t logical_source_count;
-  // Number of provider gather batches submitted by the encode run.
-  iree_host_size_t source_gather_batch_count;
-  // Total provider source bytes gathered by the encode run.
-  iree_device_size_t source_byte_length;
-  // Total final target slab bytes populated by the encode run.
-  iree_device_size_t target_byte_length;
-  // Number of encoder dispatches recorded by the encode run.
-  iree_host_size_t encoder_dispatch_count;
-} id4_pipeline_parameter_encode_run_statistics_t;
-
-static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
-    const id4_pipeline_parameter_slab_load_t* load,
-    const id4_pipeline_parameter_load_step_t* steps, iree_host_size_t count,
-    iree_device_size_t chunk_byte_capacity,
-    id4_pipeline_parameter_encode_run_statistics_t* out_statistics) {
+iree_status_t id4_pipeline_parameter_encode_query_statistics(
+    const id4_pipeline_parameter_request_table_t* request_table,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_device_size_t staging_chunk_byte_capacity,
+    id4_pipeline_parameter_encode_statistics_t* out_statistics) {
+  IREE_ASSERT_ARGUMENT(out_statistics);
   memset(out_statistics, 0, sizeof(*out_statistics));
-  out_statistics->encoder_dispatch_count = count;
-  for (iree_host_size_t i = 0; i < count;) {
+  if (load_step_count != 0 && (!request_table || !load_steps)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encode statistics require requests and load steps");
+  }
+  if (load_step_count != 0 && staging_chunk_byte_capacity == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encode statistics require nonzero staging capacity");
+  }
+  out_statistics->staging_slot_count =
+      load_step_count == 0 ? 0
+                           : ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT;
+  out_statistics->encoder_dispatch_count = load_step_count;
+  for (iree_host_size_t i = 0; i < load_step_count;) {
     iree_host_size_t wave_chunk_count = 0;
     bool wave_has_source_batches = false;
-    while (i < count &&
+    while (i < load_step_count &&
            wave_chunk_count <
                ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY) {
       id4_pipeline_parameter_encode_step_staging_layout_t
@@ -2054,8 +2052,8 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
       iree_host_size_t chunk_step_count = 0;
       iree_device_size_t chunk_byte_length = 0;
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_plan_chunk(
-          count - i, &steps[i], chunk_byte_capacity, layouts, &chunk_step_count,
-          &chunk_byte_length));
+          load_step_count - i, &load_steps[i], staging_chunk_byte_capacity,
+          layouts, &chunk_step_count, &chunk_byte_length));
       if (chunk_step_count == 0) {
         return iree_make_status(
             IREE_STATUS_INTERNAL,
@@ -2071,13 +2069,21 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
               {0};
       iree_host_size_t source_batch_count = 0;
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_group_chunk_sources(
-          chunk_step_count, &steps[i], layouts, /*slot_base_offset=*/0,
+          chunk_step_count, &load_steps[i], layouts, /*slot_base_offset=*/0,
           grouped_sources, source_batches, &source_batch_count));
       wave_has_source_batches |= source_batch_count != 0;
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
           1, &out_statistics->staging_chunk_count, "staging chunk"));
       for (iree_host_size_t j = 0; j < chunk_step_count; ++j) {
-        const id4_pipeline_parameter_load_step_t* step = &steps[i + j];
+        const id4_pipeline_parameter_load_step_t* step = &load_steps[i + j];
+        if (step->request_count != 1 || step->request_indices ||
+            step->request_offset >= request_table->count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "encoded parameter load step '%.*s' must target one valid "
+              "contiguous request",
+              (int)step->name.size, step->name.data);
+        }
         IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
             step->source_count, &out_statistics->logical_source_count,
             "logical source"));
@@ -2087,7 +2093,7 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
               "source"));
         }
         const id4_pipeline_parameter_request_t* target_request =
-            &load->request_table->values[step->request_offset];
+            &request_table->values[step->request_offset];
         IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
             target_request->span.length, &out_statistics->target_byte_length,
             "target"));
@@ -2099,6 +2105,14 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
         wave_has_source_batches ? 1 : 0,
         &out_statistics->source_gather_batch_count, "source gather batch"));
   }
+  if (!iree_device_size_checked_mul(
+          out_statistics->staging_slot_byte_length,
+          out_statistics->staging_slot_count,
+          &out_statistics->staging_total_byte_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder staging allocation byte length overflows");
+  }
   return iree_ok_status();
 }
 
@@ -2109,7 +2123,7 @@ static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
     iree_host_size_t load_step_offset, iree_host_size_t load_step_count,
     iree_string_view_t first_load_step_name,
     iree_device_size_t staging_byte_length,
-    const id4_pipeline_parameter_encode_run_statistics_t* statistics,
+    const id4_pipeline_parameter_encode_statistics_t* statistics,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
       id4_pipeline_parameter_slab_make_diagnostic(
@@ -2423,9 +2437,9 @@ static iree_status_t id4_pipeline_parameter_encode_window_record_statistics(
     const id4_pipeline_parameter_load_step_t* steps, iree_host_size_t count,
     iree_device_size_t chunk_byte_capacity,
     id4_pipeline_parameter_encode_window_t* window) {
-  id4_pipeline_parameter_encode_run_statistics_t statistics;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
-      load, steps, count, chunk_byte_capacity, &statistics));
+  id4_pipeline_parameter_encode_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_query_statistics(
+      load->request_table, count, steps, chunk_byte_capacity, &statistics));
   window->planned = true;
   window->staging_slot_byte_length = iree_max(
       window->staging_slot_byte_length, statistics.staging_slot_byte_length);
@@ -2662,21 +2676,14 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list,
     iree_allocator_t host_allocator) {
-  id4_pipeline_parameter_encode_run_statistics_t statistics;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
-      load, steps, step_count, options->encoder_staging_chunk_byte_capacity,
-      &statistics));
+  id4_pipeline_parameter_encode_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_query_statistics(
+      load->request_table, step_count, steps,
+      options->encoder_staging_chunk_byte_capacity, &statistics));
   const iree_device_size_t staging_slot_byte_length =
       statistics.staging_slot_byte_length;
-  iree_device_size_t staging_byte_length = 0;
-  if (!iree_device_size_checked_mul(
-          staging_slot_byte_length,
-          ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
-          &staging_byte_length)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter encoder staging allocation byte length overflows");
-  }
+  const iree_device_size_t staging_byte_length =
+      statistics.staging_total_byte_length;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
           load, stage_name, group_context, load_step_offset, step_count,
@@ -3474,24 +3481,15 @@ static iree_status_t id4_pipeline_parameter_slab_describe_failed_load_group(
       .encoder_dispatch_count = 0,
   };
   if (id4_pipeline_parameter_load_group_is_encode(group)) {
-    id4_pipeline_parameter_encode_run_statistics_t statistics;
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
-        load, step, group.step_count,
+    id4_pipeline_parameter_encode_statistics_t statistics;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_query_statistics(
+        load->request_table, group.step_count, step,
         slab_set->encoder_staging_chunk_byte_capacity, &statistics));
-    iree_device_size_t staging_total_byte_length = 0;
-    if (!iree_device_size_checked_mul(
-            statistics.staging_slot_byte_length,
-            ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
-            &staging_total_byte_length)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "failed parameter load group staging byte length overflows");
-    }
-    parameter_load.staging_slot_count =
-        ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT;
+    parameter_load.staging_slot_count = statistics.staging_slot_count;
     parameter_load.staging_slot_byte_length =
         statistics.staging_slot_byte_length;
-    parameter_load.staging_total_byte_length = staging_total_byte_length;
+    parameter_load.staging_total_byte_length =
+        statistics.staging_total_byte_length;
     parameter_load.staging_chunk_count = statistics.staging_chunk_count;
     parameter_load.logical_source_count = statistics.logical_source_count;
     parameter_load.source_gather_batch_count =

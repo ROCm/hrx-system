@@ -277,42 +277,6 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_host_size_t dispatch_count;
 } id4_pipeline_plan_statistics_t;
 
-// Parameter materialization statistics for fixed-size region windows.
-typedef struct id4_pipeline_parameter_window_statistics_t {
-  // Number of adjacent regions represented by each materialization window.
-  iree_host_size_t region_window_size;
-  // Number of windows covering the plan.
-  iree_host_size_t window_count;
-  // Full target bytes across all planned parameter slabs.
-  iree_device_size_t full_slab_target_byte_length;
-  // Peak target bytes needed by one region window.
-  iree_device_size_t peak_window_target_byte_length;
-  // Peak provider source bytes needed by one region window.
-  iree_device_size_t peak_window_source_byte_length;
-  // Sum of target bytes across all region windows.
-  iree_device_size_t total_window_target_byte_length;
-  // Sum of provider source bytes across all region windows.
-  iree_device_size_t total_window_source_byte_length;
-  // Maximum load-group count used by one region window.
-  iree_host_size_t peak_window_load_group_count;
-  // Sum of load groups used by all region windows.
-  iree_host_size_t total_window_load_group_count;
-  // Maximum encoded load-step count used by one region window.
-  iree_host_size_t peak_window_encode_load_step_count;
-  // Sum of encoded load steps used by all region windows.
-  iree_host_size_t total_window_encode_load_step_count;
-  // Target byte length of the largest single load group.
-  iree_device_size_t largest_load_group_target_byte_length;
-  // Plan-local index of the largest single load group.
-  iree_host_size_t largest_load_group_index;
-  // Target byte length of the largest single parameter request.
-  iree_device_size_t largest_request_target_byte_length;
-  // Global request index of the largest single parameter request.
-  iree_host_size_t largest_request_index;
-  // Plan-local load group containing the largest single parameter request.
-  iree_host_size_t largest_request_load_group_index;
-} id4_pipeline_parameter_window_statistics_t;
-
 // Options for creating an inspectable plan.
 typedef struct id4_pipeline_plan_create_options_t {
   // Size of this structure for versioning.
@@ -507,11 +471,6 @@ const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
 id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
     const id4_pipeline_plan_t* plan);
 
-// Returns parameter materialization statistics for fixed-size region windows.
-iree_status_t id4_pipeline_plan_parameter_window_statistics(
-    const id4_pipeline_plan_t* plan, iree_host_size_t region_window_size,
-    id4_pipeline_parameter_window_statistics_t* out_statistics);
-
 // Loads all planned parameter slabs using |options|.
 iree_status_t id4_pipeline_plan_load_parameter_slabs(
     const id4_pipeline_plan_t* plan,
@@ -558,6 +517,11 @@ iree_status_t id4_pipeline_plan_submit_parameter_load_group(
 // Appends deterministic JSON describing the plan.
 iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder);
+
+// Appends deterministic JSON object fields describing the plan without the
+// enclosing braces so an owning diagnostic object can add policy metadata.
+iree_status_t id4_pipeline_plan_format_json_fields(
+    const id4_pipeline_plan_t* plan, iree_string_builder_t* builder);
 
 #ifdef __cplusplus
 }  // extern "C"

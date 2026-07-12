@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 
+#include "experimental/id4/pipeline/parameter_window.h"
 #include "experimental/id4/stages/qwen3_vl_program.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/testing/gtest.h"
@@ -218,11 +219,17 @@ static iree_device_size_t MaxGenerationParameterWindowPeak(
     const id4_pipeline_plan_t* stage_plan = nullptr;
     IREE_CHECK_OK(id4_ideogram4_generation_plan_stage_at(plan, i, &stage_key,
                                                          &stage_plan));
+    id4_pipeline_parameter_window_statistics_options_t options;
+    std::memset(&options, 0, sizeof(options));
+    options.structure_size = sizeof(options);
+    options.plan = stage_plan;
+    options.concurrent_window_count = region_window_size;
+    options.encoder_staging_chunk_byte_capacity =
+        ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
     id4_pipeline_parameter_window_statistics_t statistics;
-    IREE_CHECK_OK(id4_pipeline_plan_parameter_window_statistics(
-        stage_plan, region_window_size, &statistics));
-    byte_length =
-        std::max(byte_length, statistics.peak_window_target_byte_length);
+    IREE_CHECK_OK(id4_pipeline_parameter_window_query_statistics(
+        &options, iree_allocator_system(), &statistics));
+    byte_length = std::max(byte_length, statistics.peak_live_byte_length);
   }
   return byte_length;
 }
@@ -744,6 +751,12 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"stages\""), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"encoder_staging_byte_length\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(json, IREE_SV("\"peak_live_byte_length\""), 0),
+      IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
 }
 
@@ -813,8 +826,6 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
   EXPECT_EQ(phase_stage_statistics.resident_stage_bundle_byte_length, 0u);
-  EXPECT_GE(phase_stage_statistics.phase_concurrent_parameter_peak_byte_length,
-            issue_phase_statistics.phase_concurrent_parameter_peak_byte_length);
   EXPECT_GT(phase_stage_statistics.stage_serial_parameter_peak_byte_length,
             issue_phase_statistics.stage_serial_parameter_peak_byte_length);
 

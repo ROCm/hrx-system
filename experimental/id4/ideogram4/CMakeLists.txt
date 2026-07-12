@@ -47,6 +47,7 @@ iree_cc_library(
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_window
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::stages::ideogram4_decode
@@ -86,6 +87,7 @@ iree_cc_test(
   DEPS
     ::session
     iree::base
+    iree::experimental::id4::pipeline::parameter_window
     iree::experimental::id4::stages::qwen3_vl_program
     iree::experimental::id4::stages::test_util
     iree::hal

@@ -47,6 +47,7 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_window",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/stages:ideogram4_decode",
@@ -83,6 +84,7 @@ iree_runtime_cc_test(
     srcs = ["session_test.cc"],
     deps = [
         ":session",
+        "//experimental/id4/pipeline:parameter_window",
         "//experimental/id4/stages:qwen3_vl_program",
         "//experimental/id4/stages:test_util",
         "//runtime/src/iree/base",

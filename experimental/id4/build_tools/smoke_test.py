@@ -228,17 +228,19 @@ PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (
 )
 
 PLAN_PARAMETER_WINDOW_STATISTIC_FIELDS = (
-    "region_window_size",
+    "concurrent_window_count",
     "window_count",
     "full_slab_target_byte_length",
-    "peak_window_target_byte_length",
-    "peak_window_source_byte_length",
-    "total_window_target_byte_length",
-    "total_window_source_byte_length",
-    "peak_window_load_group_count",
-    "total_window_load_group_count",
-    "peak_window_encode_load_step_count",
-    "total_window_encode_load_step_count",
+    "peak_target_byte_length",
+    "encoder_staging_byte_length",
+    "peak_live_byte_length",
+    "peak_source_transfer_byte_length",
+    "total_target_byte_length",
+    "total_source_transfer_byte_length",
+    "peak_load_group_count",
+    "total_load_group_count",
+    "peak_encode_load_step_count",
+    "total_encode_load_step_count",
     "largest_load_group_target_byte_length",
     "largest_request_target_byte_length",
 )

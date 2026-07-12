@@ -97,6 +97,7 @@ iree_runtime_cc_library(
     srcs = ["parameter_window.c"],
     hdrs = ["parameter_window.h"],
     deps = [
+        ":parameter_slab",
         ":plan",
         "//runtime/src/iree/base",
     ],

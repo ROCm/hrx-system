@@ -113,6 +113,7 @@ iree_cc_library(
   SRCS
     "parameter_window.c"
   DEPS
+    ::parameter_slab
     ::plan
     iree::base
   PUBLIC
