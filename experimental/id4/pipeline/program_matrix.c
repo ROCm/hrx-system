@@ -20,6 +20,13 @@ typedef enum id4_pipeline_program_matrix_operation_e {
   ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_SWIGLU = 1,
 } id4_pipeline_program_matrix_operation_t;
 
+typedef enum id4_pipeline_program_matrix_input_row_coverage_e {
+  // Candidate reads every allocated input row.
+  ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_CAPACITY = 0,
+  // Candidate masks input rows beyond the semantically valid M extent.
+  ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_VALID_M = 1,
+} id4_pipeline_program_matrix_input_row_coverage_t;
+
 typedef struct id4_pipeline_program_matrix_candidate_config_t {
   // Config key receiving the semantically valid M extent; empty when unused.
   iree_string_view_t valid_m_key;
@@ -50,6 +57,8 @@ typedef struct id4_pipeline_program_matrix_candidate_t {
   id4_pipeline_program_dtype_t input_dtype;
   // Input physical layout accepted by the candidate.
   id4_pipeline_program_matrix_layout_t input_layout;
+  // Physical input-row coverage read by the candidate.
+  id4_pipeline_program_matrix_input_row_coverage_t input_row_coverage;
   // Weight scalar storage type consumed by the candidate.
   id4_pipeline_program_dtype_t weight_dtype;
   // Weight physical layout consumed by the candidate.
@@ -231,6 +240,8 @@ static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix
             ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE,
         .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .input_row_coverage =
+            ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_VALID_M,
         .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
         .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
         .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
@@ -255,6 +266,9 @@ static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix
             },
         .config =
             {
+                .valid_m_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma."
+                    "valid_token_count"),
                 .dispatch_m_key = IREE_SVL(
                     "id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma."
                     "dispatch_token_count"),
@@ -278,6 +292,8 @@ static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix
             ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE,
         .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .input_row_coverage =
+            ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_VALID_M,
         .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
         .weight_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16,
         .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
@@ -302,6 +318,9 @@ static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix
             },
         .config =
             {
+                .valid_m_key = IREE_SVL(
+                    "id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma."
+                    "valid_token_count"),
                 .dispatch_m_key = IREE_SVL(
                     "id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma."
                     "dispatch_token_count"),
@@ -1421,6 +1440,38 @@ static bool id4_pipeline_program_matrix_encoding_uses_scale_source(
              ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE;
 }
 
+static iree_status_t id4_pipeline_program_matrix_input_binding(
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* candidate,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_dispatch_binding_t* out_binding) {
+  *out_binding = id4_pipeline_program_read(input);
+  if (candidate->input_row_coverage ==
+      ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_CAPACITY) {
+    return iree_ok_status();
+  }
+  if (candidate->input_row_coverage !=
+          ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_VALID_M ||
+      problem->input_layout != ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "program matrix candidate has unsupported input-row coverage");
+  }
+  iree_device_size_t read_byte_length = 0;
+  if (!iree_device_size_checked_mul((iree_device_size_t)problem->valid_m,
+                                    (iree_device_size_t)problem->k,
+                                    &read_byte_length) ||
+      !iree_device_size_checked_mul(
+          read_byte_length,
+          id4_pipeline_program_dtype_byte_length(problem->input_dtype),
+          &read_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program matrix input read range overflow");
+  }
+  *out_binding = id4_pipeline_program_read_range(input, 0, read_byte_length);
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_matrix_materialize_parameter(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_matrix_problem_t* problem,
@@ -1487,7 +1538,8 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_prepared(
     const id4_pipeline_program_matrix_prepared_operands_t* operands) {
   id4_pipeline_program_dispatch_binding_t bindings[5];
   iree_host_size_t binding_count = 0;
-  bindings[binding_count++] = id4_pipeline_program_read(operands->input);
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_input_binding(
+      problem, candidate, operands->input, &bindings[binding_count++]));
   bindings[binding_count++] = id4_pipeline_program_read(operands->weight);
   if (candidate->scale_layout !=
       ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_NONE) {

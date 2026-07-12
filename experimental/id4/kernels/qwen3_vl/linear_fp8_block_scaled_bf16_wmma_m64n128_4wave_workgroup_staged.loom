@@ -1,5 +1,7 @@
 amdgpu.target<gfx1100> @id4_gfx1100
 
+config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count : %value: index where [range(%value, 64, 65536), mul(%value, 64)]
 
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
@@ -30,6 +32,7 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %row_tile = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
   %subgroup_id = kernel.subgroup.id : index
+  %valid_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size : index
   %output_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size : index
@@ -63,6 +66,7 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %fp8_dense_layout = encoding.layout.dense : encoding<layout>
   %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
   %fp8_storage = encoding.define #physical_storage {layout = %fp8_dense_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %zero_lhs = vector.constant 0.0 : vector<16xbf16>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %input_noalias, %weight_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %weight, %scale, %output : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
@@ -96,15 +100,21 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %row_scratch_origin1 = index.add %row_scratch_origin0, %sixteen : index
   %row_scratch_origin2 = index.add %row_scratch_origin0, %thirty_two : index
   %row_scratch_origin3 = index.add %row_scratch_origin0, %forty_eight : index
+  %global_token = index.add %token_base, %lane : index
+  %last_valid_token = index.sub %valid_token_count, %one : index
+  %safe_global_token = index.min %global_token, %last_valid_token : index
+  %global_token_valid = index.cmp ult, %global_token, %valid_token_count : index
+  %global_token_mask = vector.splat %global_token_valid : vector<16xi1>
   %result00, %result01, %result02, %result03, %result10, %result11, %result12, %result13 = scf.for %k_tile0 = [%zero to %k_tile_count step %two](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc02 = %init02 : vector<8xf32>, %acc03 = %init03 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>, %acc12 = %init12 : vector<8xf32>, %acc13 = %init13 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %k_tile1 = index.add %k_tile0, %one : index
     %k_origin0 = index.mul %k_tile0, %sixteen : index
     %k_origin1 = index.mul %k_tile1, %sixteen : index
     %lane_stages_lhs = index.cmp ult, %lane, %sixty_four : index
     scf.if %lane_stages_lhs {
-      %global_token = index.add %token_base, %lane : index
-      %lhs_values0 = vector.load %input_view[%global_token, %k_origin0] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
-      %lhs_values1 = vector.load %input_view[%global_token, %k_origin1] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+      %loaded_lhs_values0 = vector.load %input_view[%safe_global_token, %k_origin0] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+      %loaded_lhs_values1 = vector.load %input_view[%safe_global_token, %k_origin1] : view<[%dispatch_token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+      %lhs_values0 = vector.select %global_token_mask, %loaded_lhs_values0, %zero_lhs : vector<16xbf16>
+      %lhs_values1 = vector.select %global_token_mask, %loaded_lhs_values1, %zero_lhs : vector<16xbf16>
       vector.store %lhs_values0, %lhs_scratch_view0[%lane, %zero] : vector<16xbf16>, view<64x16xbf16, #dense>
       vector.store %lhs_values1, %lhs_scratch_view1[%lane, %zero] : vector<16xbf16>, view<64x16xbf16, #dense>
     }
@@ -182,6 +192,17 @@ check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_
   %output = check.generate.fill value(0.0) : tensor<64x128xbf16>
   %expected = check.generate.fill value(256.0) : tensor<64x128xbf16>
   func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<64x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case {
+  %input = check.generate.fill value(1.0) : tensor<33x128xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<16384xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<1x1xf32>
+  %output = check.generate.fill value(1.0) : tensor<64x128xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<64x128xbf16>
+  func.call @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged(%input, %weight, %scale, %output) : (tensor<33x128xbf16>, tensor<16384xf8E4M3>, tensor<1x1xf32>, tensor<64x128xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x128xbf16>
   check.return
 }

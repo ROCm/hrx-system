@@ -66,6 +66,39 @@ class ProgramMatrixTest : public ::testing::Test {
     return tensor;
   }
 
+  id4_pipeline_program_tensor_t AcquireInitializedPrefix(
+      iree_string_view_t name, id4_pipeline_program_dtype_t dtype,
+      id4_pipeline_program_shape_t shape,
+      iree_device_size_t initialized_byte_length) {
+    id4_pipeline_program_tensor_t tensor = Acquire(name, dtype, shape);
+    const id4_pipeline_program_dispatch_binding_t bindings[] = {
+        id4_pipeline_program_write_range(tensor, 0, initialized_byte_length),
+    };
+    const id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+        /*.structure_size=*/sizeof(dispatch_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("initialize.prefix"),
+        /*.kernel=*/
+        {
+            /*.module_path=*/IREE_SV("test/initialize_prefix"),
+            /*.function_name=*/IREE_SV("initialize_prefix"),
+        },
+        /*.config_binding_count=*/0,
+        /*.config_bindings=*/nullptr,
+        /*.binding_count=*/IREE_ARRAYSIZE(bindings),
+        /*.bindings=*/bindings,
+    };
+    IREE_CHECK_OK(
+        id4_pipeline_program_dispatch_loom(builder_, &dispatch_options));
+    const id4_pipeline_program_barrier_options_t barrier_options = {
+        /*.structure_size=*/sizeof(barrier_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("initialize.prefix.ready"),
+    };
+    IREE_CHECK_OK(id4_pipeline_program_barrier(builder_, &barrier_options));
+    return tensor;
+  }
+
   void SealAndRelease() {
     id4_pipeline_program_t* program = nullptr;
     IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
@@ -288,6 +321,40 @@ TEST_F(ProgramMatrixTest, AcceptsBlockScaledParameterContraction) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
   SealAndRelease();
+}
+
+TEST_F(ProgramMatrixTest, DeclaresMaskedCandidateValidInputRows) {
+  id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
+  const iree_device_size_t valid_input_byte_length =
+      (iree_device_size_t)options.problem.valid_m * options.problem.k *
+      sizeof(uint16_t);
+  options.operands.input = AcquireInitializedPrefix(
+      IREE_SV("partial_input"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(options.problem.m_capacity,
+                                            options.problem.k),
+      valid_input_byte_length);
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder_, iree_allocator_system(), &program));
+  const id4_pipeline_program_dispatch_binding_t* input_binding = nullptr;
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (op && op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM &&
+        iree_string_view_equal(op->payload.dispatch_loom.name, options.name)) {
+      input_binding = &op->payload.dispatch_loom.bindings[0];
+      break;
+    }
+  }
+  ASSERT_NE(input_binding, nullptr);
+  EXPECT_TRUE(
+      iree_all_bits_set(input_binding->flags,
+                        ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_READ_RANGE));
+  EXPECT_EQ(input_binding->read_range.offset, 0u);
+  EXPECT_EQ(input_binding->read_range.length, valid_input_byte_length);
+  id4_pipeline_program_release(program);
 }
 
 TEST_F(ProgramMatrixTest, AcceptsRowScaledParameterContraction) {

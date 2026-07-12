@@ -8026,6 +8026,7 @@ _KERNEL_CASES = [
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_case",
         "benchmark": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small",
         "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=128",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=128",
@@ -8037,6 +8038,7 @@ _KERNEL_CASES = [
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case",
         "benchmark": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero",
         "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=12288",
@@ -8048,6 +8050,7 @@ _KERNEL_CASES = [
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small_case",
         "benchmark": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small",
         "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=128",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=128",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=128",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=128",
@@ -8059,6 +8062,7 @@ _KERNEL_CASES = [
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case",
         "benchmark": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero",
         "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=12288",
@@ -8070,6 +8074,7 @@ _KERNEL_CASES = [
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero_case",
         "benchmark": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero",
         "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=4096",
@@ -9664,6 +9669,28 @@ _KERNEL_CASES = [
 ]
 
 _KERNEL_CORRECTNESS_CASES = [
+    {
+        "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=33",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=128",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=128",
+        ],
+        "source": "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom",
+        "target_name": "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix_case",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=65",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=128",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=128",
+            "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=128",
+        ],
+        "source": "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom",
+        "target_name": "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix",
+    },
     {
         "actual_case": "@id4_ideogram4_dense_bias_fp8_f32_bf16_scale_rounding_case",
         "configs": [

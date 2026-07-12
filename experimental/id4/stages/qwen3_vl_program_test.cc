@@ -412,6 +412,43 @@ TEST(Qwen3VlProgram, AuthorsForwardContractAndDerivedPlan) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Qwen3VlProgram, AuthorsCompactFp8ForwardPlan) {
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/2);
+  options.model.vocab_size = 128;
+  options.model.hidden_size = 128;
+  options.model.intermediate_size = 128;
+  options.model.attention_head_count = 2;
+  options.model.key_value_head_count = 2;
+  options.model.head_size = 64;
+  options.parameter_format =
+      ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED;
+  options.weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS;
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t plan_options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &plan_options, iree_allocator_system(), &plan));
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
 TEST(Qwen3VlProgram, RejectsInvalidModelDimensions) {
   ProgramBuilderScope builder_scope;
   id4_qwen3_vl_program_options_t options = MakeProgramOptions(

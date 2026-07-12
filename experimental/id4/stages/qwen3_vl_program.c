@@ -4626,6 +4626,14 @@ static iree_status_t id4_qwen3_vl_program_author_attention_online_packed_value(
       ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA,
       IREE_ARRAYSIZE(config_values), config_values, IREE_ARRAYSIZE(bindings),
       bindings));
+  bool captures_context = false;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
+      options, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
+      &captures_context));
+  if (id4_qwen3_vl_program_uses_resident_fp8_matrix_family(options) &&
+      !captures_context) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_zero_bf16_tail(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       *out_context, &context_coverage));

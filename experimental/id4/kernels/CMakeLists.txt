@@ -12040,6 +12040,7 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small"
     "--dry-run"
     "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=128"
@@ -12057,6 +12058,7 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=4096"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=12288"
@@ -12074,6 +12076,7 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small"
     "--dry-run"
     "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=128"
@@ -12091,6 +12094,7 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=4096"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=12288"
@@ -12108,6 +12112,7 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero"
     "--dry-run"
     "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=12288"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=4096"
@@ -28703,6 +28708,7 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_small_case"
     "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=128"
@@ -28724,6 +28730,7 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case"
     "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=4096"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=12288"
@@ -28745,6 +28752,7 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_small_case"
     "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=128"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=128"
@@ -28766,6 +28774,7 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_up_shape_nonzero_case"
     "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=4096"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=12288"
@@ -28787,6 +28796,7 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
     "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_qwen_mlp_down_shape_nonzero_case"
     "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=512"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=12288"
     "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=4096"
@@ -31824,6 +31834,50 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.vae.conv_bias_epilogue.row_count=1024"
     "--config=id4.vae.conv_bias_epilogue.column_count=512"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged.loom}}"
+    "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=33"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.dispatch_token_count=64"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.input_size=128"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.output_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom}}"
+    "--case=@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_masked_input_prefix_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count=65"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count=128"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size=128"
+    "--config=id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size=128"
   SRC
     loom::tools::iree-test-loom
   LABELS
