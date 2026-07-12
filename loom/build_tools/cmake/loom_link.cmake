@@ -1,0 +1,101 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 WITH LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Loom module linking helpers.
+
+function(_loom_link_source_paths OUTPUT_PATHS)
+  set(_PATHS)
+  foreach(_PATH IN LISTS ARGN)
+    if(IS_ABSOLUTE "${_PATH}")
+      list(APPEND _PATHS "${_PATH}")
+    else()
+      list(APPEND _PATHS "${CMAKE_CURRENT_SOURCE_DIR}/${_PATH}")
+    endif()
+  endforeach()
+  set(${OUTPUT_PATHS} ${_PATHS} PARENT_SCOPE)
+endfunction()
+
+function(loom_link_module)
+  cmake_parse_arguments(
+    _RULE
+    "INCLUDE_EXPORTED_ROOTS;STRIP_CHECK;REQUIRE_RESOLVED_CONFIG"
+    "NAME;MODE;OUTPUT;OUTPUT_FORMAT"
+    "SRCS;LIBRARIES;ROOTS;CONFIGS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "loom_link_module requires NAME")
+  endif()
+  if(NOT _RULE_SRCS)
+    message(FATAL_ERROR "loom_link_module requires SRCS")
+  endif()
+  if(NOT _RULE_MODE)
+    set(_RULE_MODE "archive")
+  endif()
+  if(NOT _RULE_OUTPUT_FORMAT)
+    set(_RULE_OUTPUT_FORMAT "text")
+  endif()
+  if(NOT _RULE_OUTPUT)
+    if(_RULE_OUTPUT_FORMAT STREQUAL "bc")
+      set(_RULE_OUTPUT "${_RULE_NAME}.loombc")
+    else()
+      set(_RULE_OUTPUT "${_RULE_NAME}.loom")
+    endif()
+  endif()
+
+  _loom_link_source_paths(_SOURCES ${_RULE_SRCS})
+  _loom_link_source_paths(_LIBRARIES ${_RULE_LIBRARIES})
+  set(_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_OUTPUT}")
+  set(_ARGS
+    "--mode=${_RULE_MODE}"
+    "--to=${_RULE_OUTPUT_FORMAT}"
+    ${_SOURCES}
+  )
+  foreach(_LIBRARY IN LISTS _LIBRARIES)
+    list(APPEND _ARGS "--library=${_LIBRARY}")
+  endforeach()
+  foreach(_ROOT IN LISTS _RULE_ROOTS)
+    list(APPEND _ARGS "--root=${_ROOT}")
+  endforeach()
+  foreach(_CONFIG IN LISTS _RULE_CONFIGS)
+    list(APPEND _ARGS "--config=${_CONFIG}")
+  endforeach()
+  if(_RULE_INCLUDE_EXPORTED_ROOTS)
+    list(APPEND _ARGS "--include-exported-roots=true")
+  endif()
+  if(_RULE_STRIP_CHECK)
+    list(APPEND _ARGS "--strip-check=true")
+  endif()
+  if(_RULE_REQUIRE_RESOLVED_CONFIG)
+    list(APPEND _ARGS "--require-resolved-config=true")
+  endif()
+  list(APPEND _ARGS "--output=${_OUTPUT}")
+
+  add_custom_command(
+    OUTPUT
+      "${_OUTPUT}"
+    COMMAND
+      "$<TARGET_FILE:loom::tools::loom-link>" ${_ARGS}
+    DEPENDS
+      loom::tools::loom-link
+      ${_SOURCES}
+      ${_LIBRARIES}
+    COMMENT
+      "Linking Loom module ${_RULE_OUTPUT}"
+    VERBATIM
+  )
+  set_source_files_properties(
+    "${_RULE_OUTPUT}"
+    "${_OUTPUT}"
+    PROPERTIES GENERATED TRUE
+  )
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_TARGET}" DEPENDS "${_OUTPUT}")
+  iree_register_generated_compile_input("${_TARGET}")
+endfunction()
