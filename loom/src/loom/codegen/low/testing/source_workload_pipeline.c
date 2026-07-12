@@ -295,7 +295,7 @@ iree_status_t loom_low_source_workload_run_pipeline(
         out_counters->schedule_node_count +=
             frame.schedule.scheduled_node_count;
         out_counters->schedule_dependency_count +=
-            frame.schedule.dependencies.ordering.count;
+            frame.schedule.dependencies.count;
         out_counters->schedule_resource_use_count +=
             frame.schedule.resource_use_count;
         out_counters->schedule_hazard_gap_count +=

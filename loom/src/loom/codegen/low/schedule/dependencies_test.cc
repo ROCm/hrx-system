@@ -37,38 +37,26 @@ TEST_F(ScheduleDependenciesTest, StableAcrossSegmentBoundaries) {
   constexpr uint32_t kDependencyCount =
       LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY + 1;
   for (uint32_t i = 0; i < kDependencyCount; ++i) {
-    IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append_ordering(
+    IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &source,
         {/*.producer_node=*/i,
          /*.consumer_node=*/i + 1,
          /*.kind=*/LOOM_LOW_SCHEDULE_DEPENDENCY_SSA,
          /*.operand_index=*/i & 3u},
         &arena_));
-    IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append_visibility(
-        &source,
-        {/*.producer_node=*/i,
-         /*.consumer_node=*/i + 2,
-         /*.kind=*/LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT},
-        &arena_));
   }
 
   loom_low_schedule_dependency_graph_t graph;
   loom_low_schedule_dependency_graph_move(&source, &graph);
 
-  EXPECT_EQ(source.ordering.count, 0u);
-  EXPECT_EQ(source.visibility.count, 0u);
-  EXPECT_EQ(graph.ordering.count, kDependencyCount);
-  EXPECT_EQ(graph.visibility.count, kDependencyCount);
+  EXPECT_EQ(source.count, 0u);
+  EXPECT_EQ(graph.count, kDependencyCount);
   for (uint32_t i : {0u, kDependencyCount - 2, kDependencyCount - 1}) {
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_graph_ordering_at(&graph, i);
+        loom_low_schedule_dependency_graph_at(&graph, i);
     EXPECT_EQ(dependency->producer_node, i);
     EXPECT_EQ(dependency->consumer_node, i + 1);
     EXPECT_EQ(dependency->operand_index, i & 3u);
-    const loom_low_schedule_visibility_dependency_t* visibility_dependency =
-        loom_low_schedule_dependency_graph_visibility_at(&graph, i);
-    EXPECT_EQ(visibility_dependency->producer_node, i);
-    EXPECT_EQ(visibility_dependency->consumer_node, i + 2);
   }
 }
 

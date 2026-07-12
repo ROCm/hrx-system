@@ -228,7 +228,7 @@ low.func.def target(@target) @branch_load_join_store_common_wait(%addr: reg<amdg
 // The low.br edges only forward the VMEM payload. The store in the join block
 // is the first hardware consumer, so both incoming paths share one wait there.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_join_store_common_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":5,"node":5,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":6,"insertion_packet":6,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_join_store_common_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":5,"node":5,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":6,"insertion_packet":6,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-wait-counter-plan-json @branch_arg_repair_consumes_load_before_store strategy=source
@@ -327,7 +327,7 @@ low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_us
 // must therefore stay at the carried value's consumer instead of being elided
 // as an already-observed same-block producer.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_branch_arg_waits_at_next_iteration_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":4,"reason_name":"amdgpu.store_source_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_branch_arg_waits_at_next_iteration_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":4,"reason_name":"amdgpu.store_source_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @loop_carried_branch_arg_waits_at_next_iteration_use_assembly strategy=source
@@ -388,7 +388,7 @@ low.func.def target(@target) @branch_load_then_use_join_store(%addr: reg<amdgpu.
 // A real packet in a predecessor block must still wait locally. The join wait
 // only covers the incoming path whose first hardware consumer is the store.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_then_use_join_store","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":3,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":5,"node":5,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":7,"node":7,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":5,"producer_packet":5,"producer_scheduled_ordinal":0,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":8,"insertion_packet":8,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_then_use_join_store","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":3,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":5,"node":5,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":7,"node":7,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":8,"insertion_packet":8,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @branch_load_then_use_join_store_assembly strategy=source
@@ -439,7 +439,7 @@ low.func.def target(@target) @scratch_store_load_cross_block_memory_effect(%addr
 // The scratch load observes a scratch store from a predecessor block without
 // an SSA edge. The wait plan must still drain VMEM stores before the load.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"scratch_store_load_cross_block_memory_effect","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"scratch_store_load_cross_block_memory_effect","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @scratch_store_load_cross_block_memory_effect_assembly strategy=source
@@ -465,6 +465,155 @@ low.func.def target(@target) @scratch_store_load_cross_block_memory_effect_assem
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @cross_block_workgroup_store_barrier strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @cross_block_workgroup_store_barrier(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  ds_write_b32 %addr, %value
+  low.br ^barrier
+^barrier:
+  s_barrier
+  return
+}
+
+// The barrier executes in a successor block with no block-local memory
+// producer. It must still drain the incoming LDS write before synchronizing
+// the workgroup.
+// ----
+  ds_write_b32 v0, v1 offset:0
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cross_block_global_store_program_exit strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @cross_block_global_store_program_exit(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  global_store_b32_saddr %addr, %value, %output
+  low.br ^exit
+^exit:
+  return
+}
+
+// Program exit must observe externally visible stores from predecessor blocks
+// even when the return block contains no memory operation of its own.
+// ----
+  global_store_b32 v0, v1, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %unused = global_load_b32_saddr %addr, %input
+  low.br ^store
+^store:
+  global_store_b32_saddr %addr, %value, %output
+  return
+}
+
+// The store has no SSA relationship with the predecessor load, but may
+// overwrite the location while its read is outstanding. The successor must
+// fully drain VMEM reads before issuing the store.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"global_load_store_cross_block_antidependency","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @global_load_store_cross_block_antidependency strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %unused = global_load_b32_saddr %addr, %input
+  low.br ^store
+^store:
+  global_store_b32_saddr %addr, %value, %output
+  return
+}
+
+// ----
+  global_load_b32 v2, v0, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v0, v1, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency_cdna3 strategy=source
+
+amdgpu.target<gfx942> @target {subgroup_size = 64}
+low.func.def target(@target) @global_load_store_cross_block_antidependency_cdna3(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.cdna3.core> {
+  %m0 = s_mov_b32_m0_imm 0
+  %unused = global_load_dword_saddr %addr, %input, %m0
+  low.br ^store
+^store:
+  global_store_dword_saddr %addr, %value, %output, %m0
+  return
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"global_load_store_cross_block_antidependency_cdna3","target":"target","descriptor_set":"amdgpu.cdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":4,"insertion_packet":4,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency_rdna4 strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+low.func.def target(@target) @global_load_store_cross_block_antidependency_rdna4(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.core> {
+  %unused = global_load_b32_saddr %addr, %input
+  low.br ^store
+^store:
+  global_store_b32_saddr %addr, %value, %output
+  return
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"global_load_store_cross_block_antidependency_rdna4","target":"target","descriptor_set":"amdgpu.rdna4.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @cross_block_generic_read_aliases_global_write strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @cross_block_generic_read_aliases_global_write(%flat_addr: reg<amdgpu.vgpr x2>, %store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %unused = flat_load_dwordx2 %flat_addr
+  low.br ^store
+^store:
+  global_store_b32_saddr %store_addr, %value, %output
+  return
+}
+
+// A flat access may resolve to global memory, so the generic-space read must
+// alias the concrete global write and drain VMEM reads before the store.
+// ----
+  flat_load_dwordx2 v[0:1], v[0:1], off offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v2, v3, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @cross_block_disjoint_memory_spaces strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @cross_block_disjoint_memory_spaces(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %unused = ds_read_b32 %addr
+  low.br ^store
+^store:
+  global_store_b32_saddr %addr, %value, %output
+  return
+}
+
+// Workgroup and global memory cannot alias. The global store must not acquire
+// an LDS read wait merely because both effects cross the same CFG edge.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"cross_block_disjoint_memory_spaces","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_store_load_backedge_memory_effect strategy=source
 
 amdgpu.target<gfx1100> @target
@@ -482,10 +631,10 @@ low.func.def target(@target) @scratch_store_load_backedge_memory_effect(%addr: r
 
 // The scratch store is in a statically later block, but dynamically reaches the
 // next loop-header scratch load on the backedge. The wait plan must preserve
-// that visibility hazard instead of requiring producer ordinals to precede
+// that memory hazard instead of requiring producer ordinals to precede
 // consumer ordinals.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"scratch_store_load_backedge_memory_effect","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":3,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":2,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":1,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":0,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"scratch_store_load_backedge_memory_effect","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":3,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":2,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":1,"insertion_packet":1,"block":1,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":2,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @scratch_store_load_backedge_memory_effect_assembly strategy=source
@@ -510,6 +659,7 @@ low.func.def target(@target) @scratch_store_load_backedge_memory_effect_assembly
   scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
   s_cbranch_scc0 .Lbb3
 .Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
   s_branch .Lbb1
 .Lbb3:

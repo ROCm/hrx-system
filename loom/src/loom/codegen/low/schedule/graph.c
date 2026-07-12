@@ -34,41 +34,6 @@ typedef struct loom_low_schedule_effect_frontier_t {
   iree_host_size_t write_count;
 } loom_low_schedule_effect_frontier_t;
 
-typedef struct loom_low_schedule_memory_effect_t {
-  // Memory access summary used for alias checks.
-  loom_low_memory_access_summary_t summary;
-  // True when the node reads memory under summary.
-  bool reads;
-  // True when the node writes memory under summary.
-  bool writes;
-  // True when the node has an ordered effect.
-  bool ordered;
-} loom_low_schedule_memory_effect_t;
-
-static bool loom_low_schedule_memory_summary_equal(
-    const loom_low_memory_access_summary_t* lhs,
-    const loom_low_memory_access_summary_t* rhs) {
-  return lhs->memory_space == rhs->memory_space &&
-         lhs->alias_root_id == rhs->alias_root_id &&
-         lhs->alias_group_id == rhs->alias_group_id &&
-         lhs->precision_flags == rhs->precision_flags &&
-         lhs->byte_interval == rhs->byte_interval;
-}
-
-static void loom_low_schedule_memory_effect_merge_summary(
-    loom_low_schedule_memory_effect_t* effect,
-    const loom_low_memory_access_summary_t* summary) {
-  if (!effect->reads && !effect->writes && !effect->ordered) {
-    effect->summary = *summary;
-    return;
-  }
-  if (loom_low_schedule_memory_summary_equal(&effect->summary, summary)) {
-    return;
-  }
-  effect->summary =
-      loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
-}
-
 static bool loom_low_schedule_op_is_descriptor_packet(const loom_op_t* op) {
   return loom_low_op_isa(op) || loom_low_const_isa(op);
 }
@@ -191,40 +156,18 @@ static iree_status_t loom_low_schedule_append_dependency(
     loom_low_schedule_build_state_t* state, uint32_t producer_node,
     uint32_t consumer_node, loom_low_schedule_dependency_kind_t kind,
     uint32_t operand_index) {
-  if (state->dependencies.ordering.count >= UINT32_MAX) {
+  if (state->dependencies.count >= UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "low schedule dependency count exceeds uint32_t index capacity");
   }
-  return loom_low_schedule_dependency_graph_append_ordering(
+  return loom_low_schedule_dependency_graph_append(
       &state->dependencies,
       (loom_low_schedule_dependency_t){
           .producer_node = producer_node,
           .consumer_node = consumer_node,
           .kind = kind,
           .operand_index = operand_index,
-      },
-      state->arena);
-}
-
-static iree_status_t loom_low_schedule_append_visibility_dependency(
-    loom_low_schedule_build_state_t* state, uint32_t producer_node,
-    uint32_t consumer_node, loom_low_schedule_dependency_kind_t kind) {
-  if (producer_node == consumer_node) {
-    return iree_ok_status();
-  }
-  if (state->dependencies.visibility.count >= UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "low schedule visibility dependency count exceeds uint32_t index "
-        "capacity");
-  }
-  return loom_low_schedule_dependency_graph_append_visibility(
-      &state->dependencies,
-      (loom_low_schedule_visibility_dependency_t){
-          .producer_node = producer_node,
-          .consumer_node = consumer_node,
-          .kind = kind,
       },
       state->arena);
 }
@@ -236,10 +179,10 @@ static iree_status_t loom_low_schedule_add_dependency(
   if (producer_node == consumer_node) {
     return iree_ok_status();
   }
-  const iree_host_size_t dependency_count = state->dependencies.ordering.count;
+  const iree_host_size_t dependency_count = state->dependencies.count;
   if (dependency_count != 0 &&
       loom_low_schedule_dependency_equal(
-          loom_low_schedule_dependency_graph_ordering_at(
+          loom_low_schedule_dependency_graph_at(
               &state->dependencies, (uint32_t)(dependency_count - 1)),
           producer_node, consumer_node, kind, operand_index)) {
     return iree_ok_status();
@@ -1228,6 +1171,9 @@ iree_status_t loom_low_schedule_fill_nodes(
       if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
+      if (loom_low_return_isa(op)) {
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY;
+      }
       if (op->kind == LOOM_OP_LOW_COPY && loom_low_copy_detached(op)) {
         ++state->detached_copy_node_count;
       }
@@ -1429,130 +1375,6 @@ loom_low_schedule_lookup_memory_access_summary(
   return &record->summary;
 }
 
-static iree_status_t loom_low_schedule_resolve_descriptor_memory_effect(
-    loom_low_schedule_build_state_t* state, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor,
-    loom_low_schedule_memory_effect_t* out_effect) {
-  *out_effect = (loom_low_schedule_memory_effect_t){0};
-  if (descriptor->effect_count == 0) {
-    return iree_ok_status();
-  }
-
-  const loom_low_memory_access_summary_t* source_summary =
-      loom_low_schedule_lookup_memory_access_summary(state, node_index,
-                                                     descriptor);
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->target.descriptor_set;
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (loom_low_schedule_effect_orders_memory(effect)) {
-      loom_low_memory_access_summary_t summary =
-          loom_low_memory_access_summary_synthetic(
-              LOOM_LOW_MEMORY_SPACE_GENERIC);
-      loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-      out_effect->ordered = true;
-      return iree_ok_status();
-    }
-  }
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY)) {
-      continue;
-    }
-    loom_low_memory_access_summary_t summary =
-        loom_low_memory_access_summary_from_effect(effect);
-    if (source_summary != NULL) {
-      summary = *source_summary;
-    }
-    switch (effect->kind) {
-      case LOOM_LOW_EFFECT_KIND_READ:
-        loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-        out_effect->reads = true;
-        break;
-      case LOOM_LOW_EFFECT_KIND_WRITE:
-        loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-        out_effect->writes = true;
-        break;
-      default: {
-        if (loom_low_schedule_effect_orders_memory(effect)) {
-          loom_low_memory_access_summary_t generic_summary =
-              loom_low_memory_access_summary_synthetic(
-                  LOOM_LOW_MEMORY_SPACE_GENERIC);
-          loom_low_schedule_memory_effect_merge_summary(out_effect,
-                                                        &generic_summary);
-          out_effect->ordered = true;
-          return iree_ok_status();
-        }
-        break;
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static void loom_low_schedule_resolve_structural_memory_effect(
-    const loom_low_schedule_node_t* node,
-    loom_low_schedule_memory_effect_t* out_effect) {
-  *out_effect = (loom_low_schedule_memory_effect_t){0};
-  const loom_low_memory_access_summary_t summary =
-      loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
-                                         LOOM_TRAIT_UNKNOWN_EFFECTS |
-                                         LOOM_TRAIT_CONVERGENT)) {
-    loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-    out_effect->ordered = true;
-    return;
-  }
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_READS_MEMORY)) {
-    loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-    out_effect->reads = true;
-  }
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_WRITES_MEMORY)) {
-    loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-    out_effect->writes = true;
-  }
-}
-
-static bool loom_low_schedule_node_observes_program_exit_memory(
-    const loom_low_schedule_node_t* node) {
-  return node->op != NULL && loom_low_return_isa(node->op);
-}
-
-static void loom_low_schedule_resolve_program_exit_memory_effect(
-    loom_low_schedule_memory_effect_t* out_effect) {
-  *out_effect = (loom_low_schedule_memory_effect_t){0};
-  loom_low_memory_access_summary_t summary =
-      loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
-  loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
-  out_effect->reads = true;
-}
-
-static iree_status_t loom_low_schedule_resolve_memory_effects(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_memory_effect_t* effects, uint32_t node_count) {
-  for (uint32_t node_index = 0; node_index < node_count; ++node_index) {
-    const loom_low_schedule_node_t* node = &state->nodes[node_index];
-    const loom_low_descriptor_t* descriptor = node->descriptor;
-    if (descriptor != NULL) {
-      IREE_RETURN_IF_ERROR(loom_low_schedule_resolve_descriptor_memory_effect(
-          state, node_index, descriptor, &effects[node_index]));
-      continue;
-    }
-    if (loom_low_schedule_node_observes_program_exit_memory(node)) {
-      loom_low_schedule_resolve_program_exit_memory_effect(
-          &effects[node_index]);
-      continue;
-    }
-    if (loom_low_schedule_node_has_effects(node, NULL)) {
-      loom_low_schedule_resolve_structural_memory_effect(node,
-                                                         &effects[node_index]);
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_schedule_note_descriptor_effects(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
@@ -1636,233 +1458,11 @@ static iree_status_t loom_low_schedule_note_structural_effects(
   return iree_ok_status();
 }
 
-static iree_host_size_t loom_low_schedule_bitset_word_count(
-    iree_host_size_t bit_count) {
-  return (bit_count + 63u) / 64u;
-}
-
-static bool loom_low_schedule_bitset_test(const uint64_t* bits,
-                                          uint32_t bit_index) {
-  return iree_any_bit_set(bits[bit_index / 64u], UINT64_C(1)
-                                                     << (bit_index % 64u));
-}
-
-static void loom_low_schedule_bitset_set(uint64_t* bits, uint32_t bit_index) {
-  bits[bit_index / 64u] |= UINT64_C(1) << (bit_index % 64u);
-}
-
-static bool loom_low_schedule_bitset_copy_changed(uint64_t* target,
-                                                  const uint64_t* source,
-                                                  iree_host_size_t word_count) {
-  bool changed = false;
-  for (iree_host_size_t i = 0; i < word_count; ++i) {
-    changed = changed || target[i] != source[i];
-    target[i] = source[i];
-  }
-  return changed;
-}
-
-static bool loom_low_schedule_bitset_union_changed(
-    uint64_t* target, const uint64_t* source, iree_host_size_t word_count) {
-  bool changed = false;
-  for (iree_host_size_t i = 0; i < word_count; ++i) {
-    const uint64_t next = target[i] | source[i];
-    changed = changed || next != target[i];
-    target[i] = next;
-  }
-  return changed;
-}
-
-static uint64_t* loom_low_schedule_block_bitset(uint64_t* bitsets,
-                                                iree_host_size_t word_count,
-                                                uint16_t block_index) {
-  return bitsets + (iree_host_size_t)block_index * word_count;
-}
-
-static bool loom_low_schedule_effect_observes_writes(
-    const loom_low_schedule_memory_effect_t* effect) {
-  return effect->reads || effect->writes || effect->ordered;
-}
-
-static iree_status_t loom_low_schedule_add_cross_block_visibility_dependency(
-    loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_memory_effect_t* effects, uint32_t producer_node,
-    uint32_t consumer_node) {
-  if (state->nodes[producer_node].block_index ==
-      state->nodes[consumer_node].block_index) {
-    return iree_ok_status();
-  }
-  if (!loom_low_memory_access_summaries_may_alias(
-          &effects[producer_node].summary, &effects[consumer_node].summary)) {
-    return iree_ok_status();
-  }
-  return loom_low_schedule_append_visibility_dependency(
-      state, producer_node, consumer_node, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
-}
-
-static iree_status_t loom_low_schedule_add_visibility_dependencies_for_block(
-    loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_memory_effect_t* effects, uint32_t node_count,
-    const uint64_t* incoming_writes, uint64_t* active_writes,
-    const loom_low_schedule_block_t* block_record,
-    iree_host_size_t word_count) {
-  memcpy(active_writes, incoming_writes, word_count * sizeof(*active_writes));
-  const uint32_t block_node_end =
-      block_record->node_start + block_record->node_count;
-  for (uint32_t node_index = block_record->node_start;
-       node_index < block_node_end; ++node_index) {
-    const loom_low_schedule_memory_effect_t* effect = &effects[node_index];
-    if (loom_low_schedule_effect_observes_writes(effect)) {
-      for (iree_host_size_t word_index = 0; word_index < word_count;
-           ++word_index) {
-        uint64_t active_word = active_writes[word_index];
-        while (active_word != 0) {
-          const uint32_t producer_node =
-              (uint32_t)(word_index * 64u) +
-              (uint32_t)iree_math_count_trailing_zeros_u64(active_word);
-          if (producer_node < node_count) {
-            IREE_RETURN_IF_ERROR(
-                loom_low_schedule_add_cross_block_visibility_dependency(
-                    state, effects, producer_node, node_index));
-          }
-          active_word &= active_word - 1u;
-        }
-      }
-    }
-    if (effect->writes || effect->ordered) {
-      loom_low_schedule_bitset_set(active_writes, node_index);
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_build_visibility_dependencies(
-    loom_low_schedule_build_state_t* state, uint32_t node_count) {
-  if (state->body->block_count <= 1 || node_count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_low_schedule_memory_effect_t* effects = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, node_count, sizeof(*effects), (void**)&effects));
-  memset(effects, 0, node_count * sizeof(*effects));
-  IREE_RETURN_IF_ERROR(
-      loom_low_schedule_resolve_memory_effects(state, effects, node_count));
-
-  const iree_host_size_t word_count =
-      loom_low_schedule_bitset_word_count(node_count);
-  const iree_host_size_t block_count = state->body->block_count;
-  uint64_t* block_write_bits = NULL;
-  uint64_t* incoming_bits = NULL;
-  uint64_t* outgoing_bits = NULL;
-  uint64_t* next_incoming_bits = NULL;
-  uint64_t* active_bits = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, block_count * word_count, sizeof(*block_write_bits),
-      (void**)&block_write_bits));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, block_count * word_count, sizeof(*incoming_bits),
-      (void**)&incoming_bits));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, block_count * word_count, sizeof(*outgoing_bits),
-      (void**)&outgoing_bits));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->arena, word_count,
-                                                 sizeof(*next_incoming_bits),
-                                                 (void**)&next_incoming_bits));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, word_count, sizeof(*active_bits), (void**)&active_bits));
-  memset(block_write_bits, 0,
-         block_count * word_count * sizeof(*block_write_bits));
-  memset(incoming_bits, 0, block_count * word_count * sizeof(*incoming_bits));
-  memset(outgoing_bits, 0, block_count * word_count * sizeof(*outgoing_bits));
-
-  for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
-    uint64_t* block_writes = loom_low_schedule_block_bitset(
-        block_write_bits, word_count, block_index);
-    const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
-    const uint32_t block_node_end =
-        block_record->node_start + block_record->node_count;
-    for (uint32_t node_index = block_record->node_start;
-         node_index < block_node_end; ++node_index) {
-      if (effects[node_index].writes || effects[node_index].ordered) {
-        loom_low_schedule_bitset_set(block_writes, node_index);
-      }
-    }
-    uint64_t* block_outgoing =
-        loom_low_schedule_block_bitset(outgoing_bits, word_count, block_index);
-    memcpy(block_outgoing, block_writes, word_count * sizeof(*block_outgoing));
-  }
-
-  const loom_cfg_graph_t* graph = state->cfg_graph;
-  IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT(graph->module == state->module);
-  IREE_ASSERT(graph->region == state->body);
-  IREE_ASSERT_EQ(graph->block_count, state->body->block_count);
-  if (graph->malformed) {
-    return iree_ok_status();
-  }
-
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
-      memset(next_incoming_bits, 0, word_count * sizeof(*next_incoming_bits));
-      loom_cfg_block_index_span_t predecessors =
-          loom_cfg_graph_predecessors(graph, block_index);
-      for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
-        const uint16_t predecessor_index = predecessors.values[i];
-        if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index)) {
-          continue;
-        }
-        const uint64_t* predecessor_outgoing = loom_low_schedule_block_bitset(
-            outgoing_bits, word_count, predecessor_index);
-        loom_low_schedule_bitset_union_changed(
-            next_incoming_bits, predecessor_outgoing, word_count);
-      }
-
-      uint64_t* block_incoming = loom_low_schedule_block_bitset(
-          incoming_bits, word_count, block_index);
-      if (loom_low_schedule_bitset_copy_changed(
-              block_incoming, next_incoming_bits, word_count)) {
-        changed = true;
-      }
-
-      uint64_t* block_outgoing = loom_low_schedule_block_bitset(
-          outgoing_bits, word_count, block_index);
-      memcpy(next_incoming_bits, block_incoming,
-             word_count * sizeof(*next_incoming_bits));
-      const uint64_t* block_writes = loom_low_schedule_block_bitset(
-          block_write_bits, word_count, block_index);
-      loom_low_schedule_bitset_union_changed(next_incoming_bits, block_writes,
-                                             word_count);
-      if (loom_low_schedule_bitset_copy_changed(
-              block_outgoing, next_incoming_bits, word_count)) {
-        changed = true;
-      }
-    }
-  }
-
-  for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
-    if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
-      continue;
-    }
-    const uint64_t* block_incoming =
-        loom_low_schedule_block_bitset(incoming_bits, word_count, block_index);
-    IREE_RETURN_IF_ERROR(
-        loom_low_schedule_add_visibility_dependencies_for_block(
-            state, effects, node_count, block_incoming, active_bits,
-            &state->blocks[block_index], word_count));
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_low_schedule_build_dependencies(
     loom_low_schedule_build_state_t* state) {
-  uint32_t node_count = 0;
   for (iree_host_size_t block_index = 0; block_index < state->body->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
-    node_count += block_record->node_count;
     loom_low_schedule_effect_frontier_t effect_frontier;
     loom_low_schedule_effect_frontier_initialize(state, &effect_frontier);
     if (state->state_chain_read_heads != NULL) {
@@ -1947,5 +1547,5 @@ iree_status_t loom_low_schedule_build_dependencies(
     }
     loom_low_schedule_reset_storage_reads(state);
   }
-  return loom_low_schedule_build_visibility_dependencies(state, node_count);
+  return iree_ok_status();
 }

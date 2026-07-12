@@ -3307,10 +3307,9 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
   }
   loom_target_compile_report_record_schedule(
       report, frame->schedule.node_count, frame->schedule.scheduled_node_count,
-      frame->schedule.dependencies.ordering.count,
-      frame->schedule.resource_use_count, frame->schedule.hazard_gap_count,
-      frame->schedule.model_summary_count, liveness->pressure_summary_count,
-      peak_live_units);
+      frame->schedule.dependencies.count, frame->schedule.resource_use_count,
+      frame->schedule.hazard_gap_count, frame->schedule.model_summary_count,
+      liveness->pressure_summary_count, peak_live_units);
   loom_target_compile_report_record_low_static_instruction_mix(report, frame);
   loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
   iree_status_t status =
