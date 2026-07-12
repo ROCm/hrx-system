@@ -40,6 +40,31 @@ void loom_low_schedule_ready_policy_remove(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_ready_policy_t* policy, uint32_t node_index);
 
+// Scores pair affinity between the pending anchor and |node_index|.
+uint16_t loom_low_schedule_ready_policy_score_candidate_pair(
+    const loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t* out_placement_option_count);
+
+// Scores pair opportunities enabled by scheduling one structural setup node.
+uint16_t loom_low_schedule_ready_policy_score_setup_unlocks(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_ready_policy_t* policy, const uint32_t* indegrees,
+    uint32_t node_index);
+
+// Returns the preferred-pair anchor priority for |node_index|.
+uint16_t loom_low_schedule_ready_policy_preferred_anchor_priority(
+    const loom_low_schedule_build_state_t* state, const uint32_t* indegrees,
+    uint32_t node_index);
+
+// Returns an affinity-compatible ready node for the pending pair anchor.
+uint32_t loom_low_schedule_ready_policy_pair_nominee(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_ready_policy_t* policy);
+
+// Advances pair-affinity state after |node_index| has been scheduled.
+void loom_low_schedule_ready_policy_note_node_scheduled(
+    loom_low_schedule_build_state_t* state, uint32_t node_index);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
