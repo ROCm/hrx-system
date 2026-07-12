@@ -296,6 +296,14 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_assignment_t* assignments;
   // Number of records in |assignments|.
   iree_host_size_t assignment_count;
+  // Dense assigned-location extents retained from allocation search.
+  struct {
+    // Maximum one-past-last assigned location indexed by descriptor register
+    // class ID. The location kind is the canonical kind for each class.
+    const uint32_t* ends_by_reg_class;
+    // Number of entries in |ends_by_reg_class|.
+    iree_host_size_t count;
+  } assigned_extents;
   // Assignment indices by liveness local value ordinal. Entries without an
   // assignment contain UINT32_MAX.
   const uint32_t* assignment_indices_by_value_ordinal;

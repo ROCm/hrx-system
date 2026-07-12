@@ -455,46 +455,20 @@ static iree_status_t loom_low_emission_frame_validate_final(
   return iree_ok_status();
 }
 
-static uint32_t loom_low_emission_frame_allocated_units_for_reg_class(
-    const loom_low_allocation_table_t* allocation, uint16_t reg_class_id) {
-  uint32_t allocated_units = 0;
-  for (iree_host_size_t i = 0; i < allocation->assignment_count; ++i) {
-    const loom_low_allocation_assignment_t* assignment =
-        &allocation->assignments[i];
-    if (assignment->descriptor_reg_class_id != reg_class_id ||
-        assignment->location_kind !=
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-      continue;
-    }
-    const uint64_t location_end =
-        (uint64_t)assignment->location_base + assignment->location_count;
-    IREE_ASSERT_LE(location_end, UINT32_MAX);
-    allocated_units = iree_max(allocated_units, (uint32_t)location_end);
-  }
-  return allocated_units;
-}
-
-static void loom_low_emission_frame_capture_pressure_cliff_units(
-    loom_low_pressure_cliff_table_t pressure_cliffs,
-    const loom_low_allocation_table_t* allocation, uint32_t* out_units) {
-  for (iree_host_size_t i = 0; i < pressure_cliffs.count; ++i) {
-    out_units[i] = loom_low_emission_frame_allocated_units_for_reg_class(
-        allocation, pressure_cliffs.values[i].descriptor_reg_class_id);
-  }
-}
-
 static bool loom_low_emission_frame_crosses_new_pressure_cliff(
     loom_low_pressure_cliff_table_t pressure_cliffs,
-    const uint32_t* baseline_units,
+    const uint32_t* baseline_units_by_reg_class,
     const loom_low_allocation_table_t* allocation) {
+  IREE_ASSERT_EQ(allocation->assigned_extents.count,
+                 pressure_cliffs.range_count);
   for (iree_host_size_t i = 0; i < pressure_cliffs.count; ++i) {
     const loom_low_pressure_cliff_t* cliff = &pressure_cliffs.values[i];
-    if (baseline_units[i] >= cliff->cliff_units) {
+    const uint16_t reg_class_id = cliff->descriptor_reg_class_id;
+    if (baseline_units_by_reg_class[reg_class_id] >= cliff->cliff_units) {
       continue;
     }
     const uint32_t allocated_units =
-        loom_low_emission_frame_allocated_units_for_reg_class(
-            allocation, cliff->descriptor_reg_class_id);
+        allocation->assigned_extents.ends_by_reg_class[reg_class_id];
     if (allocated_units >= cliff->cliff_units) {
       return true;
     }
@@ -623,7 +597,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
   loom_low_placement_pair_use_list_t pair_replication_preferred_pairs =
       loom_low_placement_pair_use_list_empty();
   iree_host_size_t pair_replication_baseline_packet_move_count = 0;
-  uint32_t* pair_replication_baseline_cliff_units = NULL;
+  uint32_t* pair_replication_baseline_units_by_reg_class = NULL;
   loom_low_allocation_pair_replication_result_t pair_replication = {0};
   loom_low_emission_frame_materialization_summary_t materialization_summary = {
       0};
@@ -650,7 +624,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           frame.allocation.spill_count != 0 ||
           loom_low_emission_frame_crosses_new_pressure_cliff(
               frame_options->pressure_cliffs,
-              pair_replication_baseline_cliff_units, &frame.allocation);
+              pair_replication_baseline_units_by_reg_class, &frame.allocation);
       if (!rejected) {
         uint64_t satisfied_packet_savings = 0;
         IREE_RETURN_IF_ERROR(loom_low_allocation_satisfied_pair_packet_savings(
@@ -761,13 +735,16 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           const loom_low_pressure_cliff_table_t pressure_cliffs =
               frame_options->pressure_cliffs;
           if (pressure_cliffs.count != 0) {
+            IREE_ASSERT_EQ(frame.allocation.assigned_extents.count,
+                           pressure_cliffs.range_count);
             IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-                repair_arena, pressure_cliffs.count,
-                sizeof(*pair_replication_baseline_cliff_units),
-                (void**)&pair_replication_baseline_cliff_units));
-            loom_low_emission_frame_capture_pressure_cliff_units(
-                pressure_cliffs, &frame.allocation,
-                pair_replication_baseline_cliff_units);
+                repair_arena, frame.allocation.assigned_extents.count,
+                sizeof(*pair_replication_baseline_units_by_reg_class),
+                (void**)&pair_replication_baseline_units_by_reg_class));
+            memcpy(pair_replication_baseline_units_by_reg_class,
+                   frame.allocation.assigned_extents.ends_by_reg_class,
+                   frame.allocation.assigned_extents.count *
+                       sizeof(*pair_replication_baseline_units_by_reg_class));
           }
           pair_replication_baseline_packet_move_count =
               frame.allocation.packet_move_count;
