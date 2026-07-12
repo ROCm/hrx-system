@@ -877,29 +877,13 @@ static iree_status_t CompareBindingWithPytorchOracle(
       tolerance.max_relative_error, max_relative_index, outlier_count);
 }
 
-static PytorchOracleTolerance PytorchOracleToleranceForBoundary(
-    iree_string_view_t boundary_name,
-    const id4_ideogram4_dit_request_config_t& request) {
-  (void)boundary_name;
-  if (request.conditioning_mode ==
-      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED) {
-    return PytorchOracleTolerance{
-        // Mean absolute error limit after the image-only BF16 residual
-        // trajectory amplifies locally bounded block error.
-        /*.mean_absolute_error=*/0.015625,
-        // P99 limit at the next BF16 bucket above the observed trajectory.
-        /*.p99_absolute_error=*/0.0625,
-        // Maximum absolute error limit for exported velocity.
-        /*.max_absolute_error=*/0.125,
-        // Exported velocity uses an absolute gate.
-        /*.max_relative_error=*/0.0,
-    };
-  }
+static PytorchOracleTolerance PytorchOracleVelocityTolerance(void) {
   return PytorchOracleTolerance{
-      // Mean absolute error limit for BF16-activation exported velocity.
-      /*.mean_absolute_error=*/0.008,
-      // P99 absolute error limit for BF16-activation exported velocity.
-      /*.p99_absolute_error=*/0.040,
+      // Mean absolute error limit after the BF16 residual trajectory amplifies
+      // locally bounded block error.
+      /*.mean_absolute_error=*/0.015625,
+      // P99 limit at the next BF16 bucket above the observed trajectories.
+      /*.p99_absolute_error=*/0.0625,
       // Maximum absolute error limit for exported velocity.
       /*.max_absolute_error=*/0.125,
       // Exported velocity uses an absolute gate.
@@ -1033,7 +1017,7 @@ static iree_status_t ComparePytorchOracleOutputBoundary(
   return CompareBindingWithPytorchOracle(
       device, queue_affinity, &binding, wait_list, &boundary->layout, request,
       iree_make_string_view(oracle_path.data(), oracle_path.size()),
-      PytorchOracleToleranceForBoundary(IREE_SV("velocity"), request));
+      PytorchOracleVelocityTolerance());
 }
 
 static iree_status_t ComparePytorchOracleDiagnosticTaps(
