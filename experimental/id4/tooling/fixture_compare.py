@@ -428,7 +428,7 @@ def _record_text(root: Path, record: dict[str, Any], description: str) -> bytes:
     return path.read_bytes()
 
 
-def _tolerance(record: dict[str, Any]) -> tuple[float, float]:
+def _tolerance(record: dict[str, Any]) -> dict[str, float | str]:
     tolerance = record.get("tolerance")
     if not isinstance(tolerance, dict):
         raise FixtureCompareError(
@@ -436,15 +436,53 @@ def _tolerance(record: dict[str, Any]) -> tuple[float, float]:
         )
     atol = tolerance.get("atol")
     rtol = tolerance.get("rtol")
-    if type(atol) not in (int, float) or type(rtol) not in (int, float):
+    has_elementwise = atol is not None or rtol is not None
+    mean_abs = tolerance.get("mean_abs")
+    p99_abs = tolerance.get("p99_abs")
+    max_abs = tolerance.get("max_abs")
+    has_aggregate = mean_abs is not None or p99_abs is not None or max_abs is not None
+    if has_elementwise and has_aggregate:
         raise FixtureCompareError(
-            f"{record['stage']}/{record['name']} tolerance requires numeric atol/rtol"
+            f"{record['stage']}/{record['name']} tolerance must declare exactly one mode"
         )
-    if atol < 0 or rtol < 0:
+    if has_elementwise:
+        if type(atol) not in (int, float) or type(rtol) not in (int, float):
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} tolerance requires numeric atol/rtol"
+            )
+        if not math.isfinite(atol) or not math.isfinite(rtol) or atol < 0 or rtol < 0:
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} tolerance must be finite and "
+                "non-negative"
+            )
+        return {"mode": "elementwise", "atol": float(atol), "rtol": float(rtol)}
+    if not has_aggregate:
         raise FixtureCompareError(
-            f"{record['stage']}/{record['name']} tolerance must be non-negative"
+            f"{record['stage']}/{record['name']} tolerance must declare a comparison mode"
         )
-    return float(atol), float(rtol)
+    if any(type(value) not in (int, float) for value in (mean_abs, p99_abs, max_abs)):
+        raise FixtureCompareError(
+            f"{record['stage']}/{record['name']} aggregate tolerance requires numeric "
+            "mean_abs/p99_abs/max_abs"
+        )
+    if (
+        not math.isfinite(mean_abs)
+        or not math.isfinite(p99_abs)
+        or not math.isfinite(max_abs)
+        or mean_abs < 0
+        or p99_abs < 0
+        or max_abs < 0
+    ):
+        raise FixtureCompareError(
+            f"{record['stage']}/{record['name']} tolerance must be finite and "
+            "non-negative"
+        )
+    return {
+        "mode": "aggregate",
+        "mean_abs": float(mean_abs),
+        "p99_abs": float(p99_abs),
+        "max_abs": float(max_abs),
+    }
 
 
 def _compare_float_values(
@@ -452,7 +490,10 @@ def _compare_float_values(
     actual: TensorPayload,
     expected_record: dict[str, Any],
 ) -> dict[str, Any]:
-    atol, rtol = _tolerance(expected_record)
+    tolerance = _tolerance(expected_record)
+    tolerance_mode = _require_string(tolerance.get("mode"), "tolerance.mode")
+    atol = float(tolerance.get("atol", 0.0))
+    rtol = float(tolerance.get("rtol", 0.0))
     mismatch_count = 0
     first_mismatch = None
     abs_error_sum = 0.0
@@ -461,6 +502,7 @@ def _compare_float_values(
     max_abs_error_index = None
     max_rel_error = 0.0
     max_rel_error_index = None
+    absolute_errors = []
     for index, (expected_value, actual_value) in enumerate(
         zip(expected.values, actual.values, strict=True)
     ):
@@ -479,8 +521,15 @@ def _compare_float_values(
             else:
                 rel_error = abs_error / abs(float(expected_value))
             passed = abs_error <= atol + rtol * abs(float(expected_value))
+        if tolerance_mode == "aggregate":
+            if not math.isfinite(expected_value) or not math.isfinite(actual_value):
+                abs_error = math.inf
+                rel_error = math.inf
+            passed = True
         abs_error_sum += abs_error
         squared_error_sum += abs_error * abs_error
+        if tolerance_mode == "aggregate":
+            absolute_errors.append(abs_error)
         if abs_error >= max_abs_error:
             max_abs_error = abs_error
             max_abs_error_index = index
@@ -500,9 +549,8 @@ def _compare_float_values(
     element_count = len(expected.values)
     mean_abs_error = abs_error_sum / element_count if element_count != 0 else 0.0
     rmse = math.sqrt(squared_error_sum / element_count) if element_count != 0 else 0.0
-    return {
-        "atol": atol,
-        "rtol": rtol,
+    metrics = {
+        "tolerance_mode": tolerance_mode,
         "element_count": element_count,
         "mismatch_count": mismatch_count,
         "mean_abs_error": mean_abs_error,
@@ -513,6 +561,35 @@ def _compare_float_values(
         "max_rel_error_index": max_rel_error_index,
         "first_mismatch": first_mismatch,
     }
+    if tolerance_mode == "elementwise":
+        metrics.update({"atol": atol, "rtol": rtol})
+        return metrics
+    if not absolute_errors:
+        raise FixtureCompareError(
+            f"{expected_record['stage']}/{expected_record['name']} aggregate "
+            "comparison requires at least one tensor element"
+        )
+    absolute_errors.sort()
+    p99_index = (element_count * 99 + 99) // 100 - 1
+    p99_abs_error = absolute_errors[p99_index]
+    mean_abs_limit = float(tolerance["mean_abs"])
+    p99_abs_limit = float(tolerance["p99_abs"])
+    max_abs_limit = float(tolerance["max_abs"])
+    aggregate_passed = (
+        mean_abs_error <= mean_abs_limit
+        and p99_abs_error <= p99_abs_limit
+        and max_abs_error <= max_abs_limit
+    )
+    metrics.update(
+        {
+            "mean_abs_limit": mean_abs_limit,
+            "p99_abs_error": p99_abs_error,
+            "p99_abs_limit": p99_abs_limit,
+            "max_abs_limit": max_abs_limit,
+            "mismatch_count": 0 if aggregate_passed else 1,
+        }
+    )
+    return metrics
 
 
 def _compare_exact_values(

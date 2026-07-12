@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 import struct
 import tempfile
 import unittest
@@ -449,6 +450,91 @@ class FixtureCompareTest(unittest.TestCase):
             self.assertEqual(comparison["status"], "fail")
             self.assertEqual(comparison["mismatch_count"], 1)
             self.assertEqual(comparison["first_mismatch"]["index"], 0)
+
+    def test_compares_float_tensor_with_aggregate_tolerance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fixture_dir = root / "fixture"
+            actual_dir = root / "actual"
+            _write_tensor_fixture(
+                fixture_dir,
+                "condition.npy",
+                "f32",
+                [4],
+                struct.pack("<4f", 1.0, 2.0, 3.0, 4.0),
+            )
+            _write_tensor_fixture(
+                actual_dir,
+                "condition.npy",
+                "f32",
+                [4],
+                struct.pack("<4f", 1.1, 2.2, 3.3, 4.4),
+            )
+            fixture_manifest = {
+                "fixture_id": "unit_fixture",
+                "records": [
+                    {
+                        "dtype": "f32",
+                        "file": "condition.npy",
+                        "kind": "tensor",
+                        "name": "condition",
+                        "role": "expected",
+                        "shape": [4],
+                        "stage": "qwen.encoder",
+                        "tolerance": {
+                            "mean_abs": 0.251,
+                            "p99_abs": 0.401,
+                            "max_abs": 0.401,
+                        },
+                    }
+                ],
+                "schema_version": 1,
+            }
+            _write_json(fixture_dir / "manifest.json", fixture_manifest)
+            _write_json(
+                actual_dir / "manifest.json",
+                {
+                    "records": [
+                        {
+                            "dtype": "f32",
+                            "file": "condition.npy",
+                            "kind": "tensor",
+                            "name": "condition",
+                            "role": "actual",
+                            "shape": [4],
+                            "stage": "qwen.encoder",
+                        }
+                    ],
+                    "schema_version": 1,
+                },
+            )
+
+            report = fixture_compare.compare_fixtures(fixture_dir, actual_dir)
+
+            comparison = report["comparisons"][0]
+            self.assertEqual(comparison["status"], "pass")
+            self.assertEqual(comparison["tolerance_mode"], "aggregate")
+            self.assertAlmostEqual(comparison["mean_abs_error"], 0.25, places=6)
+            self.assertAlmostEqual(comparison["p99_abs_error"], 0.4, places=6)
+            self.assertAlmostEqual(comparison["max_abs_error"], 0.4, places=6)
+
+            fixture_manifest["records"][0]["tolerance"]["max_abs"] = 0.39
+            _write_json(fixture_dir / "manifest.json", fixture_manifest)
+            report = fixture_compare.compare_fixtures(fixture_dir, actual_dir)
+            self.assertEqual(report["comparisons"][0]["status"], "fail")
+
+            fixture_manifest["records"][0]["tolerance"]["max_abs"] = 0.401
+            _write_json(fixture_dir / "manifest.json", fixture_manifest)
+            _write_tensor_fixture(
+                actual_dir,
+                "condition.npy",
+                "f32",
+                [4],
+                struct.pack("<4f", 1.0, 2.0, 3.0, math.nan),
+            )
+            report = fixture_compare.compare_fixtures(fixture_dir, actual_dir)
+            self.assertEqual(report["comparisons"][0]["status"], "fail")
+            self.assertTrue(math.isinf(report["comparisons"][0]["max_abs_error"]))
 
     def test_compares_expected_slice_against_full_actual_tensor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

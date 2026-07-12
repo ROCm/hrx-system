@@ -229,3 +229,21 @@ py_test(
         "//experimental/id4/build_tools:trace_reduce_lib",
     ],
 )
+
+py_library(
+    name = "acceptance_scorecard_lib",
+    srcs = ["acceptance_scorecard.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "acceptance_scorecard",
+    srcs = ["acceptance_scorecard.py"],
+    deps = [":acceptance_scorecard_lib"],
+)
+
+py_test(
+    name = "acceptance_scorecard_test",
+    srcs = ["acceptance_scorecard_test.py"],
+    deps = [":acceptance_scorecard_lib"],
+)
