@@ -158,36 +158,34 @@ static iree_status_t loom_low_schedule_initialize_storage(
 
 static iree_status_t loom_low_schedule_initialize_storage_read_tables(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
+  IREE_ASSERT_LE(node_count, UINT32_MAX);
+  IREE_RETURN_IF_ERROR(loom_low_schedule_storage_relation_index_initialize(
+      state->module, state->value_domain, state->nodes, (uint32_t)node_count,
+      state->storage_relation_count, state->arena, &state->storage_relations));
   bool needs_storage_read_tracking = false;
   bool needs_edge_source_worklist = false;
   iree_host_size_t max_operand_count = 0;
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
     max_operand_count = iree_max(max_operand_count, node->operand_count);
-    const loom_op_t* op = node->op;
-    const loom_tied_result_t* tied_results = loom_op_tied_results(op);
-    const loom_value_ordinal_t* operand_ordinals =
-        loom_low_schedule_node_const_operand_ordinals(node);
-    for (uint16_t i = 0; i < op->tied_result_count; ++i) {
-      const loom_tied_result_t tied = tied_results[i];
-      IREE_ASSERT_LT(tied.operand_index, node->operand_count);
-      state->values[operand_ordinals[tied.operand_index]].flags |=
-          LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
-      needs_storage_read_tracking = true;
-    }
-    const uint16_t relation_count =
-        loom_low_storage_relation_count(state->module, op);
-    state->storage_reads.relation_count += relation_count;
-    loom_low_storage_relation_iterator_t iterator;
-    loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
-    loom_low_storage_relation_t relation;
-    while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-      if (relation.cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH ||
-          relation.cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD) {
-        const loom_value_ordinal_t destination_ordinal =
-            loom_local_value_domain_ordinal(state->value_domain,
-                                            relation.destination_value_id);
-        state->values[destination_ordinal].flags |=
+    const uint32_t relation_begin =
+        loom_low_schedule_storage_relation_index_begin(
+            &state->storage_relations, (uint32_t)node_index);
+    const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+        &state->storage_relations, (uint32_t)node_index);
+    for (uint32_t relation_index = relation_begin;
+         relation_index < relation_end; ++relation_index) {
+      const loom_low_schedule_storage_relation_t* relation =
+          loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                      relation_index);
+      if (relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT) {
+        state->values[relation->source_ordinal].flags |=
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
+        needs_storage_read_tracking = true;
+      }
+      if (relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH ||
+          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD) {
+        state->values[relation->destination_ordinal].flags |=
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
         needs_storage_read_tracking = true;
         needs_edge_source_worklist = true;

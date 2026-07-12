@@ -15,6 +15,7 @@
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
+#include "loom/codegen/low/schedule/storage_relation_index.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/local_value_domain.h"
@@ -193,6 +194,10 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_node_t* nodes;
   // Stable dependency graph accumulated while building the schedule DAG.
   loom_low_schedule_dependency_graph_t dependencies;
+  // Compact verified storage relations grouped by owning schedule node.
+  loom_low_schedule_storage_relation_index_t storage_relations;
+  // Total storage relations counted while populating schedule nodes.
+  iree_host_size_t storage_relation_count;
   // Compact producer/consumer groups used by list scheduling.
   loom_low_schedule_dependency_index_t dependency_index;
   // Node indices in final scheduled order.
@@ -276,8 +281,6 @@ typedef struct loom_low_schedule_build_state_t {
     uint8_t* operand_relation_flags;
     // Allocated entries in |operand_relation_flags|.
     iree_host_size_t operand_relation_flag_capacity;
-    // Total structural storage relations found while classifying nodes.
-    iree_host_size_t relation_count;
     // Number of populated read records.
     iree_host_size_t record_count;
     // Allocated read record capacity.

@@ -563,13 +563,13 @@ static iree_status_t loom_low_schedule_add_storage_antidependencies(
 }
 
 static bool loom_low_schedule_relation_is_edge_handoff(
-    const loom_low_storage_relation_t* relation) {
+    const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD;
 }
 
 static bool loom_low_schedule_relation_is_structural_alias(
-    const loom_low_storage_relation_t* relation) {
+    const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT;
@@ -603,12 +603,10 @@ static iree_status_t loom_low_schedule_push_edge_source(
 static iree_status_t loom_low_schedule_note_edge_source_writes(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* edge_node,
-    const loom_low_storage_relation_t* edge_relation) {
+    const loom_low_schedule_storage_relation_t* edge_relation) {
   const loom_value_ordinal_t destination_ordinal =
-      loom_local_value_domain_ordinal(state->value_domain,
-                                      edge_relation->destination_value_id);
-  const loom_value_ordinal_t source_ordinal = loom_local_value_domain_ordinal(
-      state->value_domain, edge_relation->source_value_id);
+      edge_relation->destination_ordinal;
+  const loom_value_ordinal_t source_ordinal = edge_relation->source_ordinal;
   iree_host_size_t worklist_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_schedule_push_edge_source(
       state,
@@ -633,33 +631,35 @@ static iree_status_t loom_low_schedule_note_edge_source_writes(
         current.destination_unit_offset, current.unit_count,
         loom_low_schedule_value_full_storage_mask(state, destination_ordinal)));
 
-    const loom_op_t* writer_op = state->nodes[writer_node].op;
-    loom_low_storage_relation_iterator_t iterator;
-    loom_low_storage_relation_iterator_initialize(state->module, writer_op,
-                                                  &iterator);
-    loom_low_storage_relation_t relation;
-    while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-      if (relation.destination_value_id !=
-              state->values[current_ordinal].value_id ||
-          !loom_low_schedule_relation_is_structural_alias(&relation)) {
+    const uint32_t relation_begin =
+        loom_low_schedule_storage_relation_index_begin(
+            &state->storage_relations, writer_node);
+    const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+        &state->storage_relations, writer_node);
+    for (uint32_t relation_index = relation_begin;
+         relation_index < relation_end; ++relation_index) {
+      const loom_low_schedule_storage_relation_t* relation =
+          loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                      relation_index);
+      if (relation->destination_ordinal != current_ordinal ||
+          !loom_low_schedule_relation_is_structural_alias(relation)) {
         continue;
       }
       const uint32_t intersection_offset =
-          current.value_unit_offset > relation.destination_unit_offset
+          current.value_unit_offset > relation->destination_unit_offset
               ? current.value_unit_offset
-              : relation.destination_unit_offset;
+              : relation->destination_unit_offset;
       const uint64_t current_end =
           (uint64_t)current.value_unit_offset + current.unit_count;
-      const uint64_t relation_end =
-          (uint64_t)relation.destination_unit_offset + relation.unit_count;
+      const uint64_t relation_unit_end =
+          (uint64_t)relation->destination_unit_offset + relation->unit_count;
       const uint64_t intersection_end =
-          current_end < relation_end ? current_end : relation_end;
+          current_end < relation_unit_end ? current_end : relation_unit_end;
       if ((uint64_t)intersection_offset >= intersection_end) {
         continue;
       }
       const loom_value_ordinal_t alias_source_ordinal =
-          loom_local_value_domain_ordinal(state->value_domain,
-                                          relation.source_value_id);
+          relation->source_ordinal;
       const uint32_t intersection_count =
           (uint32_t)(intersection_end - intersection_offset);
       IREE_RETURN_IF_ERROR(loom_low_schedule_push_edge_source(
@@ -667,8 +667,8 @@ static iree_status_t loom_low_schedule_note_edge_source_writes(
           (loom_low_schedule_edge_source_record_t){
               .value_ordinal = alias_source_ordinal,
               .value_unit_offset =
-                  relation.source_unit_offset +
-                  (intersection_offset - relation.destination_unit_offset),
+                  relation->source_unit_offset +
+                  (intersection_offset - relation->destination_unit_offset),
               .destination_unit_offset =
                   current.destination_unit_offset +
                   (intersection_offset - current.value_unit_offset),
@@ -686,16 +686,21 @@ static iree_status_t loom_low_schedule_note_edge_storage_writes(
     return iree_ok_status();
   }
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
-  loom_low_storage_relation_iterator_t iterator;
-  loom_low_storage_relation_iterator_initialize(state->module, node->op,
-                                                &iterator);
-  loom_low_storage_relation_t relation;
-  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-    if (!loom_low_schedule_relation_is_edge_handoff(&relation)) {
+  const uint32_t relation_begin =
+      loom_low_schedule_storage_relation_index_begin(&state->storage_relations,
+                                                     node_index);
+  const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+      &state->storage_relations, node_index);
+  for (uint32_t relation_index = relation_begin; relation_index < relation_end;
+       ++relation_index) {
+    const loom_low_schedule_storage_relation_t* relation =
+        loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                    relation_index);
+    if (!loom_low_schedule_relation_is_edge_handoff(relation)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(
-        loom_low_schedule_note_edge_source_writes(state, node, &relation));
+        loom_low_schedule_note_edge_source_writes(state, node, relation));
   }
   return iree_ok_status();
 }
@@ -714,12 +719,9 @@ static iree_status_t loom_low_schedule_note_tied_storage_writes(
   const loom_tied_result_t* tied_results = loom_op_tied_results(op);
   for (uint16_t i = 0; i < op->tied_result_count; ++i) {
     const loom_tied_result_t tied = tied_results[i];
-    if (tied.result_index >= node->result_count ||
-        tied.operand_index >= node->operand_count) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "low schedule saw malformed tied result "
-                              "metadata");
-    }
+    IREE_ASSERT(tied.result_index < node->result_count &&
+                    tied.operand_index < node->operand_count,
+                "verified tied result metadata must reference node values");
     loom_low_register_part_mask_t write_mask =
         loom_low_schedule_value_full_storage_mask(
             state, result_ordinals[tied.result_index]);
@@ -778,22 +780,26 @@ static iree_status_t loom_low_schedule_note_storage_reads(
                sizeof(*state->storage_reads.operand_relation_flags));
   }
 
-  loom_low_storage_relation_iterator_t iterator;
-  loom_low_storage_relation_iterator_initialize(state->module, node->op,
-                                                &iterator);
-  loom_low_storage_relation_t relation;
-  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
-    const uint16_t operand_index = relation.source_operand_index;
+  const uint32_t relation_begin =
+      loom_low_schedule_storage_relation_index_begin(&state->storage_relations,
+                                                     node_index);
+  const uint32_t relation_end = loom_low_schedule_storage_relation_index_end(
+      &state->storage_relations, node_index);
+  for (uint32_t relation_index = relation_begin; relation_index < relation_end;
+       ++relation_index) {
+    const loom_low_schedule_storage_relation_t* relation =
+        loom_low_schedule_storage_relation_index_at(&state->storage_relations,
+                                                    relation_index);
+    const uint16_t operand_index = relation->source_operand_index;
     IREE_ASSERT_LT(operand_index, node->operand_count);
     const loom_value_ordinal_t value_ordinal = operand_ordinals[operand_index];
-    IREE_ASSERT_EQ(state->values[value_ordinal].value_id,
-                   relation.source_value_id);
+    IREE_ASSERT_EQ(value_ordinal, relation->source_ordinal);
     loom_low_register_part_mask_t read_mask = 0;
     IREE_RETURN_IF_ERROR(loom_low_schedule_operand_storage_read_mask(
         state, node_index, descriptor, operand_index, &read_mask));
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_storage_read(
-        state, node_index, value_ordinal, relation.source_unit_offset,
-        relation.unit_count, read_mask));
+        state, node_index, value_ordinal, relation->source_unit_offset,
+        relation->unit_count, read_mask));
     state->storage_reads.operand_relation_flags[operand_index] = 1;
   }
 
@@ -1183,6 +1189,9 @@ iree_status_t loom_low_schedule_fill_nodes(
           loom_low_schedule_resolve_descriptor(state, op, node, &descriptor));
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_initialize_node_value_ordinals(state, node));
+      node->storage_relation_count =
+          loom_low_storage_relation_count(state->module, op);
+      state->storage_relation_count += node->storage_relation_count;
       loom_low_schedule_bind_memory_access_record(state, next_node_index,
                                                   block_index, op);
 

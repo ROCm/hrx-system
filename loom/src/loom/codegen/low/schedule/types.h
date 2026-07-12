@@ -244,6 +244,8 @@ typedef struct loom_low_schedule_node_t {
   uint16_t operand_count;
   // Number of result value ordinals.
   uint16_t result_count;
+  // Number of indexed storage relations owned by this node.
+  uint16_t storage_relation_count;
   // Per-node storage flags.
   loom_low_schedule_node_flags_t flags;
   // Operand ordinals followed by result ordinals. Small nodes store ordinals
