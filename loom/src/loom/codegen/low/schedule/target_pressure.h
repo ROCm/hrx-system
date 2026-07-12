@@ -30,6 +30,10 @@ struct loom_low_schedule_alias_pressure_record_t {
   uint64_t current_live_units;
   // Live-unit delta projected for the candidate being scored.
   int64_t candidate_delta_units;
+  // Candidate-only units retained across an early-clobber definition.
+  uint64_t candidate_transient_units;
+  // Block-local headroom required by aligned contiguous values.
+  uint32_t packing_reserve_units;
   // Mutable loom_low_schedule_alias_pressure_flag_bits_e bits.
   uint8_t flags;
 };

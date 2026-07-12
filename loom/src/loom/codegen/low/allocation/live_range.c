@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/target/registers.h"
 
 struct loom_low_allocation_op_point_entry_t {
   // Operation represented by this entry.
@@ -345,19 +346,10 @@ uint32_t loom_low_allocation_live_range_interval_initial_unit_end_point(
   return interval->start_point;
 }
 
-static bool loom_low_allocation_live_range_is_power_of_two_u32(uint32_t value) {
-  return value != 0 && (value & (value - 1u)) == 0;
-}
-
 uint32_t loom_low_allocation_live_range_interval_alignment(
     const loom_liveness_interval_t* interval) {
   IREE_ASSERT_ARGUMENT(interval);
-  if (interval->unit_count <= 1 ||
-      !loom_low_allocation_live_range_is_power_of_two_u32(
-          interval->unit_count)) {
-    return 1;
-  }
-  return interval->unit_count;
+  return loom_low_register_unit_alignment(interval->unit_count);
 }
 
 uint32_t loom_low_allocation_live_range_assignment_unit_end_point(

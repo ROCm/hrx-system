@@ -27,6 +27,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
     Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorSet,
@@ -57,12 +58,17 @@ def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
     has_barrier_flag = DescriptorFlag.BARRIER in descriptor.flags
     if has_barrier_flag and not has_barrier_effect:
         raise ValueError(f"descriptor '{descriptor.key}' has the barrier flag without a barrier effect")
+    has_early_clobber_constraint = any(constraint.kind is ConstraintKind.EARLY_CLOBBER for constraint in descriptor.constraints)
+    has_early_clobber_flag = DescriptorFlag.EARLY_CLOBBER in descriptor.flags
+    if has_early_clobber_flag and not has_early_clobber_constraint:
+        raise ValueError(f"descriptor '{descriptor.key}' has the early-clobber flag without an early-clobber constraint")
+
+    derived_flags = list(descriptor.flags)
     if has_barrier_effect and not has_barrier_flag:
-        return replace(
-            descriptor,
-            flags=(*descriptor.flags, DescriptorFlag.BARRIER),
-        )
-    return descriptor
+        derived_flags.append(DescriptorFlag.BARRIER)
+    if has_early_clobber_constraint and not has_early_clobber_flag:
+        derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
+    return replace(descriptor, flags=tuple(derived_flags))
 
 
 def _dedupe_by_name[T](items: Sequence[T], get_name: Callable[[T], str]) -> dict[str, T]:

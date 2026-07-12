@@ -113,10 +113,6 @@ static void loom_low_schedule_score_candidate_resource_pressure(
   }
   score->pressure_cliff_penalty = iree_math_saturating_add_u32(
       score->pressure_cliff_penalty, resource_penalty);
-  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-    score->actual_pressure_cliff_penalty = iree_math_saturating_add_u32(
-        score->actual_pressure_cliff_penalty, resource_penalty);
-  }
 }
 
 static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
@@ -149,10 +145,6 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
     if (projected_live_units >= cliff->cliff_units) {
       const uint32_t penalty = cliff->tier_before - cliff->tier_after;
       score->pressure_cliff_penalty += penalty;
-      if (state->options->strategy ==
-          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-        score->actual_pressure_cliff_penalty += penalty;
-      }
       if (score->pressure_cliff_units ==
           LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
         score->pressure_cliff_source_kind =
@@ -200,36 +192,38 @@ static void loom_low_schedule_score_candidate_pressure_cliffs(
 }
 
 static void loom_low_schedule_score_candidate_pressure_limit(
-    const loom_low_schedule_build_state_t* state,
     loom_low_schedule_candidate_score_t* score, uint16_t reg_class_id,
-    uint32_t limit_units, uint64_t current_live_units, int64_t delta_units) {
+    uint32_t limit_units, uint64_t current_live_units, int64_t delta_units,
+    uint64_t transient_units, uint32_t packing_reserve_units) {
   if (limit_units == UINT32_MAX) {
     return;
   }
-  if (current_live_units == 0 && delta_units == 0) {
+  if (current_live_units == 0 && delta_units == 0 && transient_units == 0) {
     return;
   }
   const uint64_t projected_live_units =
       loom_low_schedule_project_live_units(current_live_units, delta_units);
-  uint64_t reserved_live_units = projected_live_units;
-  if (delta_units > 0) {
-    reserved_live_units = iree_math_saturating_add_u64(
-        reserved_live_units, score->pressure_reserve_units);
+  const uint64_t activation_units =
+      delta_units > 0 ? score->activation_reserve_units : 0;
+  const uint64_t temporary_units = iree_max(transient_units, activation_units);
+  uint64_t required_live_units =
+      iree_math_saturating_add_u64(projected_live_units, packing_reserve_units);
+  required_live_units =
+      iree_math_saturating_add_u64(required_live_units, temporary_units);
+  if (projected_live_units >= limit_units) {
+    const uint64_t persistent_limit_debt =
+        projected_live_units - limit_units + 1;
+    const uint32_t persistent_penalty = persistent_limit_debt > UINT32_MAX
+                                            ? UINT32_MAX
+                                            : (uint32_t)persistent_limit_debt;
+    score->persistent_pressure_cliff_penalty = iree_math_saturating_add_u32(
+        score->persistent_pressure_cliff_penalty, persistent_penalty);
   }
-  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      projected_live_units >= limit_units) {
-    const uint64_t actual_limit_debt = projected_live_units - limit_units + 1;
-    const uint32_t actual_penalty = actual_limit_debt > UINT32_MAX
-                                        ? UINT32_MAX
-                                        : (uint32_t)actual_limit_debt;
-    score->actual_pressure_cliff_penalty = iree_math_saturating_add_u32(
-        score->actual_pressure_cliff_penalty, actual_penalty);
-  }
-  if (reserved_live_units >= limit_units) {
-    const uint64_t reserved_limit_debt = reserved_live_units - limit_units + 1;
-    const uint32_t penalty = reserved_limit_debt > UINT32_MAX
+  if (required_live_units >= limit_units) {
+    const uint64_t required_limit_debt = required_live_units - limit_units + 1;
+    const uint32_t penalty = required_limit_debt > UINT32_MAX
                                  ? UINT32_MAX
-                                 : (uint32_t)reserved_limit_debt;
+                                 : (uint32_t)required_limit_debt;
     score->pressure_cliff_penalty =
         iree_math_saturating_add_u32(score->pressure_cliff_penalty, penalty);
     if (score->pressure_cliff_units == LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
@@ -240,7 +234,7 @@ static void loom_low_schedule_score_candidate_pressure_limit(
     }
     return;
   }
-  const uint64_t units_until_limit = limit_units - reserved_live_units;
+  const uint64_t units_until_limit = limit_units - required_live_units;
   if (units_until_limit < score->units_until_pressure_cliff) {
     score->pressure_cliff_source_kind =
         LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
@@ -262,11 +256,15 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
       pressure_state->candidate_delta_touched_flags[reg_class_id]
           ? pressure_state->candidate_delta_units_by_reg_class[reg_class_id]
           : 0;
+  const uint64_t transient_units =
+      pressure_state->candidate_delta_touched_flags[reg_class_id]
+          ? pressure_state->candidate_transient_units_by_reg_class[reg_class_id]
+          : 0;
   loom_low_schedule_score_candidate_pressure_limit(
-      state, score, reg_class_id,
-      state->pressure_limits.by_reg_class[reg_class_id],
+      score, reg_class_id, state->pressure_limits.by_reg_class[reg_class_id],
       pressure_state->current_live_units_by_reg_class[reg_class_id],
-      delta_units);
+      delta_units, transient_units,
+      pressure_state->packing_reserve_units_by_reg_class[reg_class_id]);
 }
 
 static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
@@ -276,11 +274,12 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
   const loom_low_schedule_alias_pressure_record_t* record =
       &pressure_state->alias_sets.records[alias_set_id];
   loom_low_schedule_score_candidate_pressure_limit(
-      state, score,
+      score,
       state->pressure_limits.alias_sets[alias_set_id]
           .representative_reg_class_id,
       state->pressure_limits.alias_sets[alias_set_id].live_unit_limit,
-      record->current_live_units, record->candidate_delta_units);
+      record->current_live_units, record->candidate_delta_units,
+      record->candidate_transient_units, record->packing_reserve_units);
 }
 
 static void loom_low_schedule_score_candidate_pressure_limits(
@@ -335,6 +334,7 @@ void loom_low_schedule_target_pressure_score_candidate(
     loom_low_schedule_score_candidate_resource_pressure(state, pressure_state,
                                                         score);
   }
+  score->persistent_pressure_cliff_penalty = score->pressure_cliff_penalty;
   loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
                                                     score);
 }

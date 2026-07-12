@@ -16,7 +16,44 @@
 typedef enum loom_low_schedule_candidate_compare_mode_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT = 0,
   LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF = 1,
+  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_MODE_COUNT = 2,
 } loom_low_schedule_candidate_compare_mode_t;
+
+enum loom_low_schedule_recovery_policy_flag_bits_e {
+  LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT = 1u << 0,
+  LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS = 1u << 1,
+};
+
+typedef struct loom_low_schedule_recovery_policy_t {
+  // Ready views contributing additional recovery nominees.
+  loom_low_schedule_ready_view_t ready_views[2];
+  // Number of populated entries in ready_views.
+  uint8_t ready_view_count;
+  // loom_low_schedule_recovery_policy_flag_bits_e bits.
+  uint8_t flags;
+} loom_low_schedule_recovery_policy_t;
+
+static const loom_low_schedule_recovery_policy_t kLoomLowScheduleRecoveryPolicies
+    [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_MODE_COUNT] = {
+        [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT] =
+            {
+                .ready_views = {LOOM_LOW_SCHEDULE_READY_VIEW_SCHEDULE},
+                .ready_view_count = 1,
+                .flags =
+                    LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT,
+            },
+        [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF] =
+            {
+                .ready_views =
+                    {
+                        LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
+                        LOOM_LOW_SCHEDULE_READY_VIEW_STORAGE,
+                    },
+                .ready_view_count = 2,
+                .flags =
+                    LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS,
+            },
+};
 
 static int loom_low_schedule_compare_candidate_pressure(
     const loom_low_schedule_candidate_score_t* lhs,
@@ -110,25 +147,20 @@ static bool loom_low_schedule_candidate_pair_affinity_differs(
           lhs->pair_placement_option_count != rhs->pair_placement_option_count);
 }
 
-static bool loom_low_schedule_candidate_threatens_pressure_cliff(
-    const loom_low_schedule_candidate_score_t* score) {
-  return score->pressure_cliff_penalty_delta > 0;
-}
-
 static loom_low_schedule_candidate_compare_mode_t
 loom_low_schedule_choose_candidate_compare_mode(
     const loom_low_schedule_candidate_score_t* scores,
-    iree_host_size_t score_count) {
-  uint8_t combined_flags = 0;
-  for (iree_host_size_t i = 0; i < score_count; ++i) {
-    combined_flags |= scores[i].flags;
+    iree_host_size_t score_count,
+    uint32_t current_persistent_pressure_penalty) {
+  if (current_persistent_pressure_penalty != 0) {
+    return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
   }
-  const uint8_t pressure_relief_flags =
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_PRESSURE_SENSITIVE |
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_MAKES_PRESSURE_PROGRESS;
-  return iree_all_bits_set(combined_flags, pressure_relief_flags)
-             ? LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF
-             : LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
+  for (iree_host_size_t i = 0; i < score_count; ++i) {
+    if (scores[i].pressure_risk != LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE) {
+      return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
+    }
+  }
+  return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
 }
 
 static bool loom_low_schedule_candidate_score_less(
@@ -144,26 +176,27 @@ static bool loom_low_schedule_candidate_score_less(
       loom_low_schedule_compare_candidate_live_values(lhs, rhs);
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF) {
-      const bool lhs_makes_pressure_progress = iree_any_bit_set(
-          lhs->flags, LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_MAKES_PRESSURE_PROGRESS);
-      const bool rhs_makes_pressure_progress = iree_any_bit_set(
-          rhs->flags, LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_MAKES_PRESSURE_PROGRESS);
+      const bool lhs_makes_pressure_progress =
+          lhs->pressure_progress_kind !=
+          LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE;
+      const bool rhs_makes_pressure_progress =
+          rhs->pressure_progress_kind !=
+          LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE;
       if (lhs_makes_pressure_progress != rhs_makes_pressure_progress) {
         return lhs_makes_pressure_progress;
       }
-      if (lhs_makes_pressure_progress) {
-        if (lhs->pressure_cliff_penalty != rhs->pressure_cliff_penalty) {
-          return lhs->pressure_cliff_penalty < rhs->pressure_cliff_penalty;
-        }
-        if (pressure_efficiency_order != 0) {
-          return pressure_efficiency_order < 0;
-        }
-        if (pressure_order != 0) {
-          return pressure_order < 0;
-        }
-        if (lhs->critical_path_cycles != rhs->critical_path_cycles) {
-          return lhs->critical_path_cycles > rhs->critical_path_cycles;
-        }
+      if (lhs->pressure_cliff_penalty != rhs->pressure_cliff_penalty) {
+        return lhs->pressure_cliff_penalty < rhs->pressure_cliff_penalty;
+      }
+      if (pressure_efficiency_order != 0) {
+        return pressure_efficiency_order < 0;
+      }
+      if (pressure_order != 0) {
+        return pressure_order < 0;
+      }
+      if (lhs_makes_pressure_progress &&
+          lhs->critical_path_cycles != rhs->critical_path_cycles) {
+        return lhs->critical_path_cycles > rhs->critical_path_cycles;
       }
     }
     if (lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
@@ -344,20 +377,12 @@ static uint8_t loom_low_schedule_collect_source_nominees(
 
 static void loom_low_schedule_collect_recovery_nominees(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_ready_policy_t* ready_policy, bool pressure_relief,
+    const loom_low_schedule_ready_policy_t* ready_policy,
+    const loom_low_schedule_recovery_policy_t* recovery_policy,
     uint32_t* nominees, uint8_t* nominee_count) {
-  if (pressure_relief) {
+  for (uint8_t i = 0; i < recovery_policy->ready_view_count; ++i) {
     loom_low_schedule_add_ready_view_nominees(
-        ready_policy, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
-        LOOM_LOW_SCHEDULE_READY_VIEW_SEARCH_COUNT,
-        LOOM_LOW_SCHEDULE_READY_VIEW_NOMINEE_COUNT, nominees, nominee_count);
-    loom_low_schedule_add_ready_view_nominees(
-        ready_policy, LOOM_LOW_SCHEDULE_READY_VIEW_STORAGE,
-        LOOM_LOW_SCHEDULE_READY_VIEW_SEARCH_COUNT,
-        LOOM_LOW_SCHEDULE_READY_VIEW_NOMINEE_COUNT, nominees, nominee_count);
-  } else {
-    loom_low_schedule_add_ready_view_nominees(
-        ready_policy, LOOM_LOW_SCHEDULE_READY_VIEW_SCHEDULE,
+        ready_policy, recovery_policy->ready_views[i],
         LOOM_LOW_SCHEDULE_READY_VIEW_SEARCH_COUNT,
         LOOM_LOW_SCHEDULE_READY_VIEW_NOMINEE_COUNT, nominees, nominee_count);
   }
@@ -399,8 +424,9 @@ void loom_low_schedule_candidate_policy_select(
   }
   out_selection->scored_candidate_count = nominee_count;
   const loom_low_schedule_candidate_compare_mode_t compare_mode =
-      loom_low_schedule_choose_candidate_compare_mode(nominee_scores,
-                                                      nominee_count);
+      loom_low_schedule_choose_candidate_compare_mode(
+          nominee_scores, nominee_count,
+          pressure_state->current_persistent_pressure_penalty);
   for (uint8_t i = 0; i < nominee_count; ++i) {
     const uint32_t node_index = nominees[i];
     if (out_selection->chosen_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
@@ -423,30 +449,36 @@ void loom_low_schedule_candidate_policy_select(
   }
 
   const bool recover_pressure =
-      loom_low_schedule_candidate_threatens_pressure_cliff(
-          &out_selection->chosen_score);
+      compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
   if (!recover_pressure &&
       out_selection->chosen_score.effective_stall_cycles == 0) {
     return;
   }
   const uint8_t source_nominee_count = nominee_count;
+  const loom_low_schedule_recovery_policy_t* recovery_policy =
+      &kLoomLowScheduleRecoveryPolicies[compare_mode];
   loom_low_schedule_collect_recovery_nominees(
-      state, ready_policy, recover_pressure, nominees, &nominee_count);
-  const loom_low_schedule_candidate_compare_mode_t recovery_mode =
-      recover_pressure ? LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF
-                       : LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
+      state, ready_policy, recovery_policy, nominees, &nominee_count);
   for (uint8_t i = source_nominee_count; i < nominee_count; ++i) {
     loom_low_schedule_pressure_score_candidate(state, pressure_state,
                                                ready_policy, indegrees,
                                                nominees[i], &nominee_scores[i]);
     ++out_selection->scored_candidate_count;
-    if (recover_pressure &&
-        !iree_any_bit_set(
-            nominee_scores[i].flags,
-            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_MAKES_PRESSURE_PROGRESS)) {
+    if (iree_any_bit_set(
+            recovery_policy->flags,
+            LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT) &&
+        nominee_scores[i].pressure_risk ==
+            LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT) {
       continue;
     }
-    if (loom_low_schedule_candidate_score_less(state, recovery_mode,
+    if (iree_any_bit_set(
+            recovery_policy->flags,
+            LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS) &&
+        nominee_scores[i].pressure_progress_kind ==
+            LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE) {
+      continue;
+    }
+    if (loom_low_schedule_candidate_score_less(state, compare_mode,
                                                &nominee_scores[i],
                                                &out_selection->chosen_score)) {
       out_selection->rejected_node = out_selection->chosen_node;
@@ -455,7 +487,7 @@ void loom_low_schedule_candidate_policy_select(
       out_selection->chosen_score = nominee_scores[i];
     } else if (out_selection->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
                loom_low_schedule_candidate_score_less(
-                   state, recovery_mode, &nominee_scores[i],
+                   state, compare_mode, &nominee_scores[i],
                    &out_selection->rejected_score)) {
       out_selection->rejected_node = nominees[i];
       out_selection->rejected_score = nominee_scores[i];

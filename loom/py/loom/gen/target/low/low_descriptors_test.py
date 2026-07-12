@@ -441,6 +441,41 @@ def test_compiler_rejects_barrier_flag_without_effect() -> None:
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def test_compiler_derives_early_clobber_descriptor_flag() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.EARLY_CLOBBER in compiled.descriptors[0].flags
+
+
+def test_compiler_rejects_early_clobber_flag_without_constraint() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        flags=(
+            *TEST_LOW_ADD_I32_DESCRIPTOR.flags,
+            DescriptorFlag.EARLY_CLOBBER,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has the early-clobber flag without an early-clobber constraint"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_compiler_projects_validated_rematerializable_results() -> None:
     descriptor_set = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
