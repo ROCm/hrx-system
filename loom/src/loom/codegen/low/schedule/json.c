@@ -378,7 +378,8 @@ iree_status_t loom_low_schedule_format_json(
       IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
           &stream,
           "{\"block\":%" PRIu32 ",\"scheduled_ordinal\":%" PRIu32
-          ",\"candidate_count\":%" PRIu32 ",\"chosen_node\":%" PRIu32
+          ",\"ready_candidate_count\":%" PRIu32
+          ",\"scored_candidate_count\":%" PRIu32 ",\"chosen_node\":%" PRIu32
           ",\"chosen_dependency_latency_cycles\":%" PRIu16
           ",\"chosen_latency_cycles\":%" PRIu16
           ",\"chosen_pair_affinity_score\":%" PRIu16
@@ -391,8 +392,8 @@ iree_status_t loom_low_schedule_format_json(
           ",\"chosen_effective_stall_cycles\":%" PRIu32
           ",\"chosen_bottleneck_resource_id\":",
           decision->block_index, decision->scheduled_ordinal,
-          decision->ready_candidate_count, decision->chosen_node,
-          decision->chosen_dependency_latency_cycles,
+          decision->ready_candidate_count, decision->scored_candidate_count,
+          decision->chosen_node, decision->chosen_dependency_latency_cycles,
           decision->chosen_latency_cycles, decision->chosen_pair_affinity_score,
           decision->chosen_projected_live_units,
           decision->chosen_killed_live_units,

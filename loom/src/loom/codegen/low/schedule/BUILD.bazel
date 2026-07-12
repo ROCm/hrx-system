@@ -17,6 +17,17 @@ package(
 )
 
 loom_cc_library(
+    name = "ready_frontier",
+    srcs = ["ready_frontier.c"],
+    hdrs = ["ready_frontier.h"],
+    deps = [
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = [
         "context.h",
@@ -37,6 +48,7 @@ loom_cc_library(
         "types.h",
     ],
     deps = [
+        ":ready_frontier",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
         "//loom/src/loom/codegen/low:descriptors",
@@ -65,6 +77,16 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "ready_frontier_test",
+    srcs = ["ready_frontier_test.cc"],
+    deps = [
+        ":ready_frontier",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

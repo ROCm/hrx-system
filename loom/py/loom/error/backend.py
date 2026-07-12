@@ -240,7 +240,8 @@ ERR_BACKEND_015 = ErrorDef(
         "target '{target_key}' export '{export_name}' config '{config_key}' "
         "'@{function_name}' scheduler chose '{chosen_packet}' over "
         "'{rejected_packet}' at block '{block_name}' ordinal "
-        "{scheduled_ordinal}: {candidate_count} ready candidate(s), chosen "
+        "{scheduled_ordinal}: scored {scored_candidate_count} of "
+        "{ready_candidate_count} ready candidate(s), chosen "
         "dep-latency/latency/pair-affinity/projected/killed/produced "
         "{chosen_dependency_latency_cycles}/{chosen_latency_cycles}/"
         "{chosen_pair_affinity_score}/{chosen_projected_live_units}/"
@@ -272,7 +273,8 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("block_name", ParamKind.STRING),
         ErrorParam("scheduled_ordinal", ParamKind.U32),
-        ErrorParam("candidate_count", ParamKind.U32),
+        ErrorParam("ready_candidate_count", ParamKind.U32),
+        ErrorParam("scored_candidate_count", ParamKind.U32),
         ErrorParam("chosen_packet", ParamKind.STRING),
         ErrorParam("rejected_packet", ParamKind.STRING),
         ErrorParam("chosen_dependency_latency_cycles", ParamKind.U32),
