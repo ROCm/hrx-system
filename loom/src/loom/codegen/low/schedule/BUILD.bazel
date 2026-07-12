@@ -53,6 +53,8 @@ loom_cc_library(
 loom_cc_library(
     name = "schedule",
     srcs = [
+        "candidate_policy.c",
+        "candidate_policy.h",
         "context.h",
         "descriptor_rows.c",
         "descriptor_rows.h",

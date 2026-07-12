@@ -60,6 +60,8 @@ loom_cc_library(
     "run.h"
     "types.h"
   SRCS
+    "candidate_policy.c"
+    "candidate_policy.h"
     "context.h"
     "descriptor_rows.c"
     "descriptor_rows.h"
