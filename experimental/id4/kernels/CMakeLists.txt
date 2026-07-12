@@ -1151,21 +1151,6 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module
-  SRCS
-    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
-  LIBRARIES
-    "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
     qwen3_vl_linear_bf16_bf16_wmma_m64n64_test_module
   SRCS
     "testdata/qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom"
@@ -1974,6 +1959,21 @@ loom_link_module(
     "text"
 )
 
+loom_link_module(
+  NAME
+    qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module
+  SRCS
+    "testdata/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
+  LIBRARIES
+    "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
 add_custom_command(OUTPUT loom_sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch loom_sources.stamp
   DEPENDS
@@ -2054,7 +2054,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom"
-    "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom"
     "qwen3_vl/linear_bf16_f32.loom"
@@ -2195,7 +2194,6 @@ iree_c_embed_data(
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom"
-    "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom"
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom"
     "qwen3_vl/linear_bf16_f32.loom"

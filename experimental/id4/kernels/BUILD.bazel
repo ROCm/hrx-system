@@ -8261,7 +8261,6 @@ _KERNEL_SOURCES = [
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m32n64_compact_rhs.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
-    "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
     "qwen3_vl/linear_bf16_bf16_wmma_m64n64_compact_rhs.loom",
     "qwen3_vl/linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged.loom",
@@ -8326,6 +8325,18 @@ _KERNEL_SOURCES = [
     )
     for source in _KERNEL_SOURCES
 ]
+
+loom_link_module(
+    name = id4_kernel_test_module_name(
+        "qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom",
+    ),
+    srcs = [
+        "testdata/qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs.loom",
+    ],
+    libraries = [
+        "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
+    ],
+)
 
 exports_files(_KERNEL_SOURCES)
 

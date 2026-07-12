@@ -3,6 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+config.def @id4.qwen3_vl.linear_wmma.rhs_storage = 0 : index
 
 check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_small_case {
   %input = check.generate.fill value(1.0) : tensor<48x16xbf16>

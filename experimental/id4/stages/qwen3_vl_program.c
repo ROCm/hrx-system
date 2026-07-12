@@ -859,50 +859,48 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS = 36,
   // Compact RHS fused BF16 WMMA linear projection followed by residual add.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 37,
-  // Compact RHS BF16 activation/weight WMMA linear kernel for 48x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS = 38,
   // Compact RHS FP8 block-scaled weight WMMA linear kernel for 64x64 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS = 39,
+  ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS = 38,
   // Compact RHS block-scaled FP8 fused MLP gate/up/SwiGLU WMMA kernel.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_FP8_BLOCK_SCALED_BF16_WMMA_M32N32_COMPACT_RHS =
-      40,
+      39,
   // Compact RHS block-scaled FP8 fused MLP down/residual WMMA kernel.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS =
-      41,
+      40,
   // Online attention kernel that avoids materialized scores/probabilities.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 42,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 41,
   // Online BF16 WMMA attention kernel that avoids materialized
   // scores/probabilities.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA = 43,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA = 42,
   // Compact RHS BF16 activation/weight two-wave WMMA linear kernel for 128x64
   // tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS = 44,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS = 43,
   // Compact RHS fused BF16 WMMA linear projection followed by residual add for
   // 128x64 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      45,
+      44,
   // Compact RHS fused MLP gate/up/SwiGLU BF16 WMMA kernel for 128x32 two-wave
   // tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M128N32_2WAVE_COMPACT_RHS =
-      46,
+      45,
   // Compact RHS FP8 block-scaled weight WMMA linear kernel for 128x64 two-wave
   // tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_FP8_BLOCK_SCALED_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      47,
+      46,
   // Compact RHS block-scaled FP8 fused MLP down/residual WMMA kernel for
   // 128x64 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M128N64_2WAVE_COMPACT_RHS =
-      48,
+      47,
   // Compact RHS block-scaled FP8 fused MLP gate/up/SwiGLU WMMA kernel for
   // 128x32 two-wave tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_FP8_BLOCK_SCALED_BF16_WMMA_M128N32_2WAVE_COMPACT_RHS =
-      49,
+      48,
   // Compact RHS BF16 activation/weight WMMA linear kernel for 32x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 50,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS = 49,
   // Compact RHS BF16 activation/weight 32x32 WMMA linear kernel with packed
   // output.
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS_TRANSPOSE_OUTPUT =
-      51,
+      50,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -938,6 +936,8 @@ typedef enum id4_qwen3_vl_config_key_e {
   ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT = 14,
   // Total number of elements covered by a padded dispatch tensor.
   ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT = 15,
+  // Physical storage layout selected for a layout-polymorphic linear RHS.
+  ID4_QWEN3_VL_CONFIG_RHS_STORAGE = 16,
 } id4_qwen3_vl_config_key_t;
 
 enum {
@@ -948,8 +948,7 @@ enum {
   ID4_QWEN3_VL_KERNEL_KIND_COUNT =
       ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32_COMPACT_RHS_TRANSPOSE_OUTPUT +
       1,
-  ID4_QWEN3_VL_CONFIG_KEY_COUNT =
-      ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
+  ID4_QWEN3_VL_CONFIG_KEY_COUNT = ID4_QWEN3_VL_CONFIG_RHS_STORAGE + 1,
 };
 
 typedef enum id4_qwen3_vl_program_operation_name_pattern_kind_e {
@@ -1024,11 +1023,22 @@ typedef struct id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t {
   uint32_t compact_rhs_min_token_count;
 } id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t;
 
+typedef enum id4_qwen3_vl_program_linear_rhs_storage_e {
+  // Direct row-major parameter storage.
+  ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_DIRECT = 0,
+  // Prepared 16x16 RHS tile storage.
+  ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_COMPACT = 1,
+  // Storage is fixed by the selected kernel identity instead of config.
+  ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED = 2,
+} id4_qwen3_vl_program_linear_rhs_storage_t;
+
 typedef struct id4_qwen3_vl_program_linear_kernel_selection_t {
   // Kernel kind selected for the dispatch.
   id4_qwen3_vl_kernel_kind_t kernel_kind;
   // Parameter encoding required by the selected kernel.
   id4_pipeline_program_parameter_encoding_t weight_encoding;
+  // Physical RHS storage config, or FIXED when the kernel is layout-specific.
+  id4_qwen3_vl_program_linear_rhs_storage_t rhs_storage;
 } id4_qwen3_vl_program_linear_kernel_selection_t;
 
 typedef struct id4_qwen3_vl_program_linear_weight_t {
@@ -1061,6 +1071,8 @@ static iree_status_t id4_qwen3_vl_program_select_linear_kernel(
     id4_qwen3_vl_kernel_kind_t direct_kernel_kind,
     id4_qwen3_vl_kernel_kind_t compact_rhs_kernel_kind,
     id4_qwen3_vl_program_linear_kernel_selection_t* out_selection) {
+  const bool configures_rhs_storage =
+      direct_kernel_kind == compact_rhs_kernel_kind;
   switch (strategy) {
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
       if (!id4_qwen3_vl_program_kernel_kind_is_valid(direct_kernel_kind)) {
@@ -1072,6 +1084,10 @@ static iree_status_t id4_qwen3_vl_program_select_linear_kernel(
       out_selection->kernel_kind = direct_kernel_kind;
       out_selection->weight_encoding =
           ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+      out_selection->rhs_storage =
+          configures_rhs_storage
+              ? ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_DIRECT
+              : ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED;
       return iree_ok_status();
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_STREAMING_COMPACT_RHS:
@@ -1084,18 +1100,30 @@ static iree_status_t id4_qwen3_vl_program_select_linear_kernel(
       out_selection->kernel_kind = compact_rhs_kernel_kind;
       out_selection->weight_encoding =
           ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+      out_selection->rhs_storage =
+          configures_rhs_storage
+              ? ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_COMPACT
+              : ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED;
       return iree_ok_status();
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
       if (id4_qwen3_vl_program_kernel_kind_is_valid(compact_rhs_kernel_kind)) {
         out_selection->kernel_kind = compact_rhs_kernel_kind;
         out_selection->weight_encoding =
             ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+        out_selection->rhs_storage =
+            configures_rhs_storage
+                ? ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_COMPACT
+                : ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED;
         return iree_ok_status();
       }
       if (id4_qwen3_vl_program_kernel_kind_is_valid(direct_kernel_kind)) {
         out_selection->kernel_kind = direct_kernel_kind;
         out_selection->weight_encoding =
             ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+        out_selection->rhs_storage =
+            configures_rhs_storage
+                ? ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_DIRECT
+                : ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED;
         return iree_ok_status();
       }
       return iree_make_status(
@@ -1117,6 +1145,7 @@ static iree_status_t id4_qwen3_vl_program_select_linear_kernel_for_source(
     uint32_t wmma_token_count, uint32_t token_capacity, uint32_t input_size,
     uint32_t output_size,
     id4_qwen3_vl_program_linear_kernel_selection_t* out_selection) {
+  out_selection->rhs_storage = ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED;
   switch (parameter_format) {
     case ID4_QWEN3_VL_PARAMETER_FORMAT_BF16:
       if (wmma_token_count == 0) return iree_ok_status();
@@ -1149,6 +1178,11 @@ static iree_status_t id4_qwen3_vl_program_select_linear_kernel_for_source(
             wmma_tile->kernels.compact_rhs_output_kernel_kind;
         out_selection->weight_encoding =
             ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE;
+        if (wmma_tile->kernels.direct_output_kernel_kind ==
+            wmma_tile->kernels.compact_rhs_output_kernel_kind) {
+          out_selection->rhs_storage =
+              ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_COMPACT;
+        }
         return iree_ok_status();
       }
       if (wmma_token_count == 0 || wmma_token_count != token_capacity ||
@@ -1249,7 +1283,7 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t
                 .direct_output_kernel_kind =
                     ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32,
                 .compact_rhs_output_kernel_kind =
-                    ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS,
+                    ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32,
                 .direct_transposed_output_kernel_kind =
                     (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
                 .compact_rhs_transposed_output_kernel_kind =
@@ -2055,9 +2089,6 @@ static const id4_pipeline_kernel_ref_t id4_qwen3_vl_program_kernel_refs[ID4_QWEN
     [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32] =
         {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m48n32"),
          IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32")},
-    [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS] =
-        {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m48n32_compact_rhs"),
-         IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_compact_rhs")},
     [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT] =
         {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m32n64"),
          IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_"
@@ -2413,15 +2444,8 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.linear_wmma.input_size"),
                 [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
                     IREE_SVL("id4.qwen3_vl.linear_wmma.output_size"),
-            },
-        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS] =
-            {
-                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
-                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] =
-                    IREE_SVL("id4.qwen3_vl.linear_wmma.input_size"),
-                [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
-                    IREE_SVL("id4.qwen3_vl.linear_wmma.output_size"),
+                [ID4_QWEN3_VL_CONFIG_RHS_STORAGE] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.rhs_storage"),
             },
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT] =
             {
@@ -3812,6 +3836,8 @@ static iree_status_t id4_qwen3_vl_program_prepare_linear_weight(
       .kernel_kind = (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
       // Parameter encoding used by row-major scalar or WMMA paths.
       .weight_encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      // Scalar fallback does not bind a layout-polymorphic WMMA config.
+      .rhs_storage = ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED,
   };
   if (options->weight_execution_strategy ==
           ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS ||
@@ -3952,17 +3978,31 @@ static iree_status_t id4_qwen3_vl_program_author_linear_prepared(
       IREE_RETURN_IF_ERROR(
           id4_qwen3_vl_program_barrier_named(builder, ready_name));
     }
-    const id4_qwen3_vl_program_config_value_t wmma_config_values[] = {
-        {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, wmma_token_count},
-        {ID4_QWEN3_VL_CONFIG_INPUT_SIZE, input_size},
-        {ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE, output_size},
-    };
+    id4_qwen3_vl_program_config_value_t
+        wmma_config_values[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+    iree_host_size_t wmma_config_value_count = 0;
+    wmma_config_values[wmma_config_value_count++] =
+        (id4_qwen3_vl_program_config_value_t){
+            ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, wmma_token_count};
+    wmma_config_values[wmma_config_value_count++] =
+        (id4_qwen3_vl_program_config_value_t){ID4_QWEN3_VL_CONFIG_INPUT_SIZE,
+                                              input_size};
+    wmma_config_values[wmma_config_value_count++] =
+        (id4_qwen3_vl_program_config_value_t){ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE,
+                                              output_size};
+    if (wmma_selection->rhs_storage !=
+        ID4_QWEN3_VL_PROGRAM_LINEAR_RHS_STORAGE_FIXED) {
+      wmma_config_values[wmma_config_value_count++] =
+          (id4_qwen3_vl_program_config_value_t){
+              ID4_QWEN3_VL_CONFIG_RHS_STORAGE,
+              (uint32_t)wmma_selection->rhs_storage};
+    }
     char wmma_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
                            [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
     id4_pipeline_kernel_config_binding_t
         wmma_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-        wmma_selection->kernel_kind, IREE_ARRAYSIZE(wmma_config_values),
+        wmma_selection->kernel_kind, wmma_config_value_count,
         wmma_config_values, wmma_value_buffers, wmma_config_bindings));
     id4_pipeline_program_dispatch_binding_t wmma_bindings[4];
     iree_host_size_t wmma_binding_count = 0;
@@ -3977,8 +4017,8 @@ static iree_status_t id4_qwen3_vl_program_author_linear_prepared(
         id4_pipeline_program_write_range(*out_output, 0, wmma_byte_length);
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_named(
         builder, wmma_name, wmma_selection->kernel_kind,
-        IREE_ARRAYSIZE(wmma_config_values), wmma_config_bindings,
-        wmma_binding_count, wmma_bindings));
+        wmma_config_value_count, wmma_config_bindings, wmma_binding_count,
+        wmma_bindings));
 
     const uint32_t tail_token_count =
         token_count > wmma_token_count ? token_count - wmma_token_count : 0;
