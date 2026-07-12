@@ -221,6 +221,13 @@ iree_status_t loom_low_allocate_function(
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
         .assignment_count = state.interval_assignment.assignment_count,
+        .assigned_extents =
+            {
+                .ends_by_reg_class =
+                    state.target_constraints
+                        .max_assigned_location_end_by_reg_class,
+                .count = state.target.descriptor_set->reg_class_count,
+            },
         .assignment_indices_by_value_ordinal =
             state.interval_assignment.assignment_indices_by_value_ordinal,
         .unit_end_points = state.unit_liveness.end_points,
