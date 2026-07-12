@@ -1,0 +1,87 @@
+config.decl @id4.ideogram4.prelude_image_pack.token_count : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.ideogram4.prelude_image_pack.image_width : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.ideogram4.prelude_image_pack.image_height : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.ideogram4.prelude_image_pack.input_channel_count : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
+
+func.def inline @id4_ideogram4_prelude_image_pack_f32_bf16_source_channel(%linear_channel: index, %ae_channel_count: index) -> (index) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %ae_channel = index.rem %linear_channel, %ae_channel_count : index
+  %patch_pair = index.div %linear_channel, %ae_channel_count : index
+  %patch_h = index.rem %patch_pair, %two : index
+  %patch_w = index.div %patch_pair, %two : index
+  %ae_offset = index.mul %ae_channel, %four : index
+  %patch_w_offset = index.mul %patch_w, %two : index
+  %source_base = index.add %ae_offset, %patch_w_offset : index
+  %source_channel = index.add %source_base, %patch_h : index
+  func.return %source_channel : index
+}
+
+kernel.def export("id4_ideogram4_prelude_image_pack_f32_bf16") @id4_ideogram4_prelude_image_pack_f32_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.prelude_image_pack.token_count : index
+  %input_channel_count = config.get @id4.ideogram4.prelude_image_pack.input_channel_count : index
+  %element_count = index.mul %token_count, %input_channel_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.prelude_image_pack.token_count : index
+  %image_width = config.get @id4.ideogram4.prelude_image_pack.image_width : index
+  %image_height = config.get @id4.ideogram4.prelude_image_pack.image_height : index
+  %input_channel_count = config.get @id4.ideogram4.prelude_image_pack.input_channel_count : index
+  %element_count = index.mul %token_count, %input_channel_count : index
+  %ae_channel_count = index.div %input_channel_count, %four : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%input_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%input_channel_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %token = index.div %element_index, %input_channel_count : index
+    %output_channel = index.rem %element_index, %input_channel_count : index
+    %source_token_x = index.rem %token, %image_width : index
+    %source_token_y = index.div %token, %image_width : index
+    %source_token_x_offset = index.mul %source_token_x, %image_height : index
+    %source_token = index.add %source_token_x_offset, %source_token_y : index
+    %source_channel = func.call @id4_ideogram4_prelude_image_pack_f32_bf16_source_channel(%output_channel, %ae_channel_count) : (index, index) -> (index)
+    %value = view.load %input_view[%source_token, %source_channel] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %rounded_value = scalar.fptrunc %value : f32 to bf16
+    view.store %rounded_value, %output_view[%token, %output_channel] : bf16, view<[%token_count]x[%input_channel_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_prelude_image_pack_f32_bf16_small_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<2x4xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<2x4xbf16>
+  func.call @id4_ideogram4_prelude_image_pack_f32_bf16(%input, %output) : (tensor<2x4xf32>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_prelude_image_pack_f32_bf16_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x128xf32>
+  %output = check.generate.fill value(0.0) : tensor<4096x128xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<4096x128xbf16>
+  func.call @id4_ideogram4_prelude_image_pack_f32_bf16(%input, %output) : (tensor<4096x128xf32>, tensor<4096x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x128xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_prelude_image_pack_f32_bf16_small_case> @id4_ideogram4_prelude_image_pack_f32_bf16_small
+
+check.benchmark<@id4_ideogram4_prelude_image_pack_f32_bf16_1024_shape_case> @id4_ideogram4_prelude_image_pack_f32_bf16_1024_shape

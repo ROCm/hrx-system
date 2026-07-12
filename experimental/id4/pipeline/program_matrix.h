@@ -23,6 +23,8 @@ typedef enum id4_pipeline_program_matrix_layout_e {
   ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR = 2,
   // RHS storage packed as consecutive 16x16 KxN tiles.
   ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16 = 3,
+  // Dense column-major matrix storage.
+  ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR = 4,
 } id4_pipeline_program_matrix_layout_t;
 
 // Scale tensor semantics applied to a stored matrix operand.
@@ -45,6 +47,8 @@ typedef enum id4_pipeline_program_matrix_epilogue_e {
   ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE = 1,
   // Adds a same-shaped residual tensor after output-type rounding.
   ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD = 2,
+  // Adds an N-element bias vector to F32 accumulators before output rounding.
+  ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS = 3,
 } id4_pipeline_program_matrix_epilogue_t;
 
 // Semantic tensor contract for C = A * B, independent of weight storage.
@@ -101,7 +105,7 @@ typedef struct id4_pipeline_program_matrix_operands_t {
   id4_pipeline_program_tensor_t input;
   // Provider-side weight and scale parameter storage.
   id4_pipeline_program_matrix_parameter_t parameter;
-  // Initialized MxN addend tensor, or invalid when the epilogue is NONE.
+  // Initialized epilogue addend, or invalid when the epilogue is NONE.
   id4_pipeline_program_tensor_t addend;
   // Uninitialized MxN output tensor written by the contraction.
   id4_pipeline_program_tensor_t output;
@@ -134,7 +138,7 @@ typedef struct id4_pipeline_program_matrix_prepared_operands_t {
   id4_pipeline_program_tensor_t weight;
   // Initialized scale tensor, or invalid when execution scale_layout is NONE.
   id4_pipeline_program_tensor_t scale;
-  // Initialized MxN addend tensor, or invalid when the epilogue is NONE.
+  // Initialized epilogue addend, or invalid when the epilogue is NONE.
   id4_pipeline_program_tensor_t addend;
   // Uninitialized MxN output tensor written by the contraction.
   id4_pipeline_program_tensor_t output;

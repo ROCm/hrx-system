@@ -312,6 +312,28 @@ TEST_F(ProgramMatrixTest, AcceptsResidualEpilogue) {
   SealAndRelease();
 }
 
+TEST_F(ProgramMatrixTest, AcceptsBroadcastBiasEpilogue) {
+  id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
+  options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS;
+  options.operands.addend =
+      Import(IREE_SV("bias"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+             id4_pipeline_program_make_shape_rank1(options.problem.n));
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+  SealAndRelease();
+}
+
+TEST_F(ProgramMatrixTest, AcceptsColumnMajorBroadcastBiasEpilogue) {
+  id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
+  options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS;
+  options.problem.output_layout =
+      ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR;
+  options.operands.addend =
+      Import(IREE_SV("bias"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+             id4_pipeline_program_make_shape_rank1(options.problem.n));
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+  SealAndRelease();
+}
+
 TEST_F(ProgramMatrixTest, AcceptsBlockScaledSwiGLUProjectionPair) {
   id4_pipeline_program_swiglu_options_t options = MakeSwiGLUOptions(
       ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
@@ -345,6 +367,13 @@ TEST_F(ProgramMatrixTest, RequiresScaleTensorForScaledWeights) {
 TEST_F(ProgramMatrixTest, RequiresAddendForAddEpilogue) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
   options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_program_matrix(builder_, &options));
+}
+
+TEST_F(ProgramMatrixTest, RequiresAddendForBiasEpilogue) {
+  id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
+  options.problem.epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_program_matrix(builder_, &options));
 }

@@ -1,0 +1,264 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.ideogram4.linear_fp8_wmma.token_count : %value: index where [range(%value, 32, 131072)]
+
+config.decl @id4.ideogram4.linear_fp8_wmma.dispatch_token_count : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
+
+config.decl @id4.ideogram4.linear_fp8_wmma.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.ideogram4.linear_fp8_wmma.output_size : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
+
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_fp8_bf16_wmma") @id4_ideogram4_linear_bias_fp8_bf16_wmma() {
+  %unit = index.constant 1 : index
+  %thirty_two = index.constant 32 : index
+  %workgroup_size_x = index.constant 32 : index
+  %dispatch_token_count = config.get @id4.ideogram4.linear_fp8_wmma.dispatch_token_count : index
+  %output_size = config.get @id4.ideogram4.linear_fp8_wmma.output_size : index
+  %token_tile_count = index.div %dispatch_token_count, %thirty_two : index
+  %row_tile_count = index.div %output_size, %thirty_two : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %scale: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.linear_fp8_wmma.token_count : index
+  %input_size = config.get @id4.ideogram4.linear_fp8_wmma.input_size : index
+  %output_size = config.get @id4.ideogram4.linear_fp8_wmma.output_size : index
+  %k_tile_count = index.div %input_size, %sixteen : index
+  %dispatch_token_origin = index.mul %token_tile, %thirty_two : index
+  %token_origin0 = index.add %zero, %dispatch_token_origin : index
+  %token_origin1 = index.add %token_origin0, %sixteen : index
+  %row_origin0 = index.mul %row_pair, %thirty_two : index
+  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_noalias, %weight_noalias, %scale_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %scale, %bias, %output : buffer, buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %bias_aligned = buffer.assume.alignment %bias_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_size]xf32, #dense>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<[%output_size]xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%output_size]xbf16, #dense>
+  %lane_column = index.rem %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %scale0 = view.load %scale_view[%column0] : view<[%output_size]xf32, #dense> -> f32
+  %scale1 = view.load %scale_view[%column1] : view<[%output_size]xf32, #dense> -> f32
+  %scale0_bf16 = scalar.fptrunc %scale0 : f32 to bf16
+  %scale1_bf16 = scalar.fptrunc %scale1 : f32 to bf16
+  %scale0_f32 = scalar.extf %scale0_bf16 : bf16 to f32
+  %scale1_f32 = scalar.extf %scale1_bf16 : bf16 to f32
+  %scale0_rhs_vector = vector.splat %scale0_f32 : vector<16xf32>
+  %scale1_rhs_vector = vector.splat %scale1_f32 : vector<16xf32>
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result00, %result01, %result10, %result11 = scf.for %k_tile = [%zero to %k_tile_count step %one](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %rhs0_f32 = vector.extf %rhs0 : vector<16xbf16> to vector<16xf32>
+    %rhs1_f32 = vector.extf %rhs1 : vector<16xbf16> to vector<16xf32>
+    %scaled_rhs0_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs0_f32, %scale0_rhs_vector : vector<16xf32>
+    %scaled_rhs1_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs1_f32, %scale1_rhs_vector : vector<16xf32>
+    %scaled_rhs0 = vector.fptrunc %scaled_rhs0_f32 : vector<16xf32> to vector<16xbf16>
+    %scaled_rhs1 = vector.fptrunc %scaled_rhs1_f32 : vector<16xf32> to vector<16xbf16>
+    %next00 = vector.mma %lhs0, %scaled_rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %scaled_rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %scaled_rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %scaled_rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %bias0_bf16 = view.load %bias_view[%column0] : view<[%output_size]xbf16, #dense> -> bf16
+  %bias1_bf16 = view.load %bias_view[%column1] : view<[%output_size]xbf16, #dense> -> bf16
+  %bias0_f32 = scalar.extf %bias0_bf16 : bf16 to f32
+  %bias1_f32 = scalar.extf %bias1_bf16 : bf16 to f32
+  %bias0_values = vector.splat %bias0_f32 : vector<8xf32>
+  %bias1_values = vector.splat %bias1_f32 : vector<8xf32>
+  %biased00 = vector.addf<reassoc|nnan|ninf|nsz> %result00, %bias0_values : vector<8xf32>
+  %biased01 = vector.addf<reassoc|nnan|ninf|nsz> %result01, %bias1_values : vector<8xf32>
+  %biased10 = vector.addf<reassoc|nnan|ninf|nsz> %result10, %bias0_values : vector<8xf32>
+  %biased11 = vector.addf<reassoc|nnan|ninf|nsz> %result11, %bias1_values : vector<8xf32>
+  vector.fragment.store<result> %biased00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %biased01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %biased10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %biased11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  kernel.return
+}
+
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major") @id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major() {
+  %unit = index.constant 1 : index
+  %thirty_two = index.constant 32 : index
+  %workgroup_size_x = index.constant 32 : index
+  %dispatch_token_count = config.get @id4.ideogram4.linear_fp8_wmma.dispatch_token_count : index
+  %output_size = config.get @id4.ideogram4.linear_fp8_wmma.output_size : index
+  %token_tile_count = index.div %dispatch_token_count, %thirty_two : index
+  %row_tile_count = index.div %output_size, %thirty_two : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %scale: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.linear_fp8_wmma.token_count : index
+  %input_size = config.get @id4.ideogram4.linear_fp8_wmma.input_size : index
+  %output_size = config.get @id4.ideogram4.linear_fp8_wmma.output_size : index
+  %k_tile_count = index.div %input_size, %sixteen : index
+  %dispatch_token_origin = index.mul %token_tile, %thirty_two : index
+  %token_origin0 = index.add %zero, %dispatch_token_origin : index
+  %token_origin1 = index.add %token_origin0, %sixteen : index
+  %row_origin0 = index.mul %row_pair, %thirty_two : index
+  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %output_layout = encoding.layout.strided [1, %token_count] : encoding<layout>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_noalias, %weight_noalias, %scale_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %scale, %bias, %output : buffer, buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %bias_aligned = buffer.assume.alignment %bias_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_size]xf32, #dense>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<[%output_size]xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%output_size]xbf16, %output_layout>
+  %lane_column = index.rem %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %scale0 = view.load %scale_view[%column0] : view<[%output_size]xf32, #dense> -> f32
+  %scale1 = view.load %scale_view[%column1] : view<[%output_size]xf32, #dense> -> f32
+  %scale0_bf16 = scalar.fptrunc %scale0 : f32 to bf16
+  %scale1_bf16 = scalar.fptrunc %scale1 : f32 to bf16
+  %scale0_f32 = scalar.extf %scale0_bf16 : bf16 to f32
+  %scale1_f32 = scalar.extf %scale1_bf16 : bf16 to f32
+  %scale0_rhs_vector = vector.splat %scale0_f32 : vector<16xf32>
+  %scale1_rhs_vector = vector.splat %scale1_f32 : vector<16xf32>
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result00, %result01, %result10, %result11 = scf.for %k_tile = [%zero to %k_tile_count step %one](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %rhs0_f32 = vector.extf %rhs0 : vector<16xbf16> to vector<16xf32>
+    %rhs1_f32 = vector.extf %rhs1 : vector<16xbf16> to vector<16xf32>
+    %scaled_rhs0_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs0_f32, %scale0_rhs_vector : vector<16xf32>
+    %scaled_rhs1_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs1_f32, %scale1_rhs_vector : vector<16xf32>
+    %scaled_rhs0 = vector.fptrunc %scaled_rhs0_f32 : vector<16xf32> to vector<16xbf16>
+    %scaled_rhs1 = vector.fptrunc %scaled_rhs1_f32 : vector<16xf32> to vector<16xbf16>
+    %next00 = vector.mma %lhs0, %scaled_rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %scaled_rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %scaled_rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %scaled_rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %bias0_bf16 = view.load %bias_view[%column0] : view<[%output_size]xbf16, #dense> -> bf16
+  %bias1_bf16 = view.load %bias_view[%column1] : view<[%output_size]xbf16, #dense> -> bf16
+  %bias0_f32 = scalar.extf %bias0_bf16 : bf16 to f32
+  %bias1_f32 = scalar.extf %bias1_bf16 : bf16 to f32
+  %bias0_values = vector.splat %bias0_f32 : vector<8xf32>
+  %bias1_values = vector.splat %bias1_f32 : vector<8xf32>
+  %biased00 = vector.addf<reassoc|nnan|ninf|nsz> %result00, %bias0_values : vector<8xf32>
+  %biased01 = vector.addf<reassoc|nnan|ninf|nsz> %result01, %bias1_values : vector<8xf32>
+  %biased10 = vector.addf<reassoc|nnan|ninf|nsz> %result10, %bias0_values : vector<8xf32>
+  %biased11 = vector.addf<reassoc|nnan|ninf|nsz> %result11, %bias1_values : vector<8xf32>
+  vector.fragment.store<result> %biased00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, %output_layout>
+  vector.fragment.store<result> %biased01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, %output_layout>
+  vector.fragment.store<result> %biased10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, %output_layout>
+  vector.fragment.store<result> %biased11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, %output_layout>
+  kernel.return
+}
+
+check.case public @id4_ideogram4_linear_bias_fp8_bf16_wmma_small_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<32x16xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<32xf32>
+  %bias = check.generate.fill value(1.0) : tensor<32xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
+  %expected = check.generate.fill value(33.0) : tensor<32x32xbf16>
+  func.call @id4_ideogram4_linear_bias_fp8_bf16_wmma(%input, %weight, %scale, %bias, %output) : (tensor<32x16xbf16>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32xbf16>, tensor<32x32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_bias_fp8_bf16_wmma_bf16_scale_rounding_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(1.5) : tensor<32x16xf8E4M3>
+  %scale = check.generate.fill value(1.0029999999999999) : tensor<32xf32>
+  %bias = check.generate.fill value(1.0) : tensor<32xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
+  %expected = check.generate.fill value(25.0) : tensor<32x32xbf16>
+  func.call @id4_ideogram4_linear_bias_fp8_bf16_wmma(%input, %weight, %scale, %bias, %output) : (tensor<32x16xbf16>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32xbf16>, tensor<32x32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bias_fp8_bf16_wmma_small_case> @id4_ideogram4_linear_bias_fp8_bf16_wmma_small
+
+check.case public @id4_ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<128x4608xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<128xf32>
+  %bias = check.generate.fill value(1.0) : tensor<128xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4096x128xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<4096x128xbf16>
+  func.call @id4_ideogram4_linear_bias_fp8_bf16_wmma(%input, %weight, %scale, %bias, %output) : (tensor<4096x4608xbf16>, tensor<128x4608xf8E4M3>, tensor<128xf32>, tensor<128xbf16>, tensor<4096x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x128xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape_case> @id4_ideogram4_linear_bias_fp8_bf16_wmma_final_projection_1024_shape
+
+check.case public @id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x128xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4608x128xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<4608xf32>
+  %bias = check.generate.fill value(1.0) : tensor<4608xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  func.call @id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major(%input, %weight, %scale, %bias, %output) : (tensor<4096x128xbf16>, tensor<4608x128xf8E4M3>, tensor<4608xf32>, tensor<4608xbf16>, tensor<4096x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape_case> @id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major_input_projection_1024_shape

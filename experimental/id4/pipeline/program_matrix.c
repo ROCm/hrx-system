@@ -814,6 +814,91 @@ static const id4_pipeline_program_matrix_candidate_t id4_pipeline_program_matrix
                 .n_key = IREE_SVL("id4.ideogram4.linear_fp8_wmma.output_size"),
             },
     },
+    // DiT row-scaled contraction with broadcast bias before BF16 rounding.
+    {
+        .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+        .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .source_weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .source_scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .source_scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
+        .weight_encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+        .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .scale_layout = ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
+        .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS,
+        .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .minimum_m_capacity = 32,
+        .m_multiple = 32,
+        .minimum_n = 32,
+        .n_multiple = 32,
+        .k_multiple = 16,
+        .selection_priority = 4,
+        .kernel =
+            {
+                IREE_SVL("ideogram4/linear_bias_fp8_bf16_wmma"),
+                IREE_SVL("id4_ideogram4_linear_bias_fp8_bf16_wmma"),
+            },
+        .config =
+            {
+                .m_capacity_key =
+                    IREE_SVL("id4.ideogram4.linear_fp8_wmma.token_count"),
+                .dispatch_m_key = IREE_SVL(
+                    "id4.ideogram4.linear_fp8_wmma.dispatch_token_count"),
+                .k_key = IREE_SVL("id4.ideogram4.linear_fp8_wmma.input_size"),
+                .n_key = IREE_SVL("id4.ideogram4.linear_fp8_wmma.output_size"),
+            },
+    },
+    // DiT row-scaled contraction with column-major biased BF16 output.
+    {
+        .operation = ID4_PIPELINE_PROGRAM_MATRIX_OPERATION_CONTRACTION,
+        .source_weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .source_weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .source_scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .source_scale_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
+        .weight_encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+        .input_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .input_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+        .weight_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+        .weight_layout =
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,
+        .scale_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .scale_layout = ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_ROW,
+        .accumulator_dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        .epilogue = ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS,
+        .output_dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        .output_layout = ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR,
+        .minimum_m_capacity = 32,
+        .m_multiple = 32,
+        .minimum_n = 32,
+        .n_multiple = 32,
+        .k_multiple = 16,
+        .selection_priority = 4,
+        .kernel =
+            {
+                IREE_SVL("ideogram4/linear_bias_fp8_bf16_wmma"),
+                IREE_SVL(
+                    "id4_ideogram4_linear_bias_fp8_bf16_wmma_column_major"),
+            },
+        .config =
+            {
+                .m_capacity_key =
+                    IREE_SVL("id4.ideogram4.linear_fp8_wmma.token_count"),
+                .dispatch_m_key = IREE_SVL(
+                    "id4.ideogram4.linear_fp8_wmma.dispatch_token_count"),
+                .k_key = IREE_SVL("id4.ideogram4.linear_fp8_wmma.input_size"),
+                .n_key = IREE_SVL("id4.ideogram4.linear_fp8_wmma.output_size"),
+            },
+    },
 };
 
 static iree_status_t id4_pipeline_program_matrix_validate_options_size(
@@ -828,6 +913,7 @@ static iree_status_t id4_pipeline_program_matrix_validate_options_size(
 static bool id4_pipeline_program_matrix_layout_is_valid(
     id4_pipeline_program_matrix_layout_t layout) {
   return layout == ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR ||
+         layout == ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR ||
          layout ==
              ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR ||
          layout == ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TILE_16X16;
@@ -844,7 +930,8 @@ static bool id4_pipeline_program_matrix_scale_layout_is_valid(
 static bool id4_pipeline_program_matrix_epilogue_is_valid(
     id4_pipeline_program_matrix_epilogue_t epilogue) {
   return epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE ||
-         epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
+         epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD ||
+         epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_BIAS;
 }
 
 static bool id4_pipeline_program_matrix_shape_equal(
@@ -996,7 +1083,7 @@ static iree_status_t id4_pipeline_program_matrix_validate_addend(
     const id4_pipeline_program_matrix_problem_t* problem,
     id4_pipeline_program_tensor_t addend) {
   const bool has_addend =
-      problem->epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD;
+      problem->epilogue != ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE;
   if (has_addend != id4_pipeline_program_tensor_is_valid(addend)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1406,7 +1493,7 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_prepared(
       ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_NONE) {
     bindings[binding_count++] = id4_pipeline_program_read(operands->scale);
   }
-  if (problem->epilogue == ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_ADD) {
+  if (problem->epilogue != ID4_PIPELINE_PROGRAM_MATRIX_EPILOGUE_NONE) {
     bindings[binding_count++] = id4_pipeline_program_read(operands->addend);
   }
   bindings[binding_count++] = id4_pipeline_program_write(operands->output);
