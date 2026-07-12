@@ -695,10 +695,14 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
         id4_pipeline_bundle_parameter_slabs(source_bundle.get());
     ASSERT_NE(source_parameter_slabs, nullptr);
     if (defers_parameter_loads) {
+      EXPECT_FALSE(id4_pipeline_plan_matches_resident_parameter_slabs(
+          plan.get(), source_parameter_slabs));
       IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                             id4_pipeline_plan_validate_parameter_slabs(
                                 plan.get(), source_parameter_slabs));
     } else {
+      EXPECT_TRUE(id4_pipeline_plan_matches_resident_parameter_slabs(
+          plan.get(), source_parameter_slabs));
       IREE_ASSERT_OK(id4_pipeline_plan_validate_parameter_slabs(
           plan.get(), source_parameter_slabs));
     }
@@ -959,6 +963,13 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   IREE_ASSERT_OK(id4_pipeline_plan_validate_parameter_slabs(
       source_plan.get(), source_parameter_slabs));
 
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> matching_plan;
+  IREE_ASSERT_OK(CreateTwoRegionAddPlan(
+      source_program.get(), context, /*flags=*/0, iree_string_view_list_empty(),
+      &diagnostics_sink, matching_plan.out()));
+  EXPECT_TRUE(id4_pipeline_plan_matches_resident_parameter_slabs(
+      matching_plan.get(), source_parameter_slabs));
+
   OwningRef<id4_pipeline_program_t, id4_pipeline_program_release>
       shifted_program;
   shifted_program.reset(
@@ -983,6 +994,8 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   ASSERT_NE(source_requests, nullptr);
   ASSERT_NE(shifted_requests, nullptr);
   EXPECT_EQ(source_requests->count, shifted_requests->count);
+  EXPECT_FALSE(id4_pipeline_plan_matches_resident_parameter_slabs(
+      shifted_plan.get(), source_parameter_slabs));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_plan_validate_parameter_slabs(
                             shifted_plan.get(), source_parameter_slabs));

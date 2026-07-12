@@ -13,6 +13,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/ideogram4/session_generation.h"
+#include "experimental/id4/ideogram4/session_parameters.h"
 #include "experimental/id4/ideogram4/session_state.h"
 #include "experimental/id4/ideogram4/session_support.h"
 #include "experimental/id4/pipeline/binding.h"
@@ -74,26 +75,8 @@ static iree_status_t id4_ideogram4_validate_generation_prepare_options(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 generation prepare final signal is required");
   }
-  if (!options->parameter_providers.qwen) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 generation Qwen parameter provider is required");
-  }
-  if (!options->parameter_providers.dit_conditioned) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 generation conditioned DiT parameter provider is required");
-  }
-  if (!options->parameter_providers.dit_unconditioned) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation unconditioned DiT "
-                            "parameter provider is required");
-  }
-  if (!options->parameter_providers.vae) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 generation VAE parameter provider is required");
-  }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_sources_validate(
+      &options->parameter_sources));
   if (!options->kernel_library) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -117,29 +100,12 @@ static void id4_ideogram4_generation_stage_slot_deinitialize(
   memset(slot, 0, sizeof(*slot));
 }
 
-static void id4_ideogram4_generation_parameter_providers_retain(
-    const id4_ideogram4_generation_parameter_providers_t* providers) {
-  iree_io_parameter_provider_retain(providers->qwen);
-  iree_io_parameter_provider_retain(providers->dit_conditioned);
-  iree_io_parameter_provider_retain(providers->dit_unconditioned);
-  iree_io_parameter_provider_retain(providers->vae);
-}
-
-static void id4_ideogram4_generation_parameter_providers_release(
-    id4_ideogram4_generation_parameter_providers_t* providers) {
-  iree_io_parameter_provider_release(providers->vae);
-  iree_io_parameter_provider_release(providers->dit_unconditioned);
-  iree_io_parameter_provider_release(providers->dit_conditioned);
-  iree_io_parameter_provider_release(providers->qwen);
-  memset(providers, 0, sizeof(*providers));
-}
-
-static void id4_ideogram4_generation_bundle_capture_prepare_resources(
+static iree_status_t id4_ideogram4_generation_bundle_capture_prepare_resources(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {
-  bundle->parameter_providers = options->parameter_providers;
-  id4_ideogram4_generation_parameter_providers_retain(
-      &bundle->parameter_providers);
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_sources_clone(
+      &options->parameter_sources, bundle->host_allocator,
+      &bundle->parameter_sources, &bundle->parameter_source_scope_storage));
   bundle->kernel_library = options->kernel_library;
   id4_pipeline_kernel_library_retain(bundle->kernel_library);
   bundle->command_buffer_mode = options->command_buffer_mode;
@@ -172,6 +138,7 @@ static void id4_ideogram4_generation_bundle_capture_prepare_resources(
           options->resident_stage_mask;
       break;
   }
+  return iree_ok_status();
 }
 
 static void id4_ideogram4_generation_bundle_assign_slot(
@@ -427,23 +394,6 @@ static iree_status_t id4_ideogram4_generation_bundle_apply_boundary_aliases(
   return iree_ok_status();
 }
 
-static iree_io_parameter_provider_t*
-id4_ideogram4_generation_prepare_stage_parameter_provider(
-    const id4_ideogram4_generation_parameter_providers_t* providers,
-    id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
-  iree_io_parameter_provider_t*
-      stage_providers[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT] = {
-          NULL,
-          providers->qwen,
-          providers->dit_conditioned,
-          providers->dit_unconditioned,
-          NULL,
-          providers->vae,
-      };
-  if (stage_ordinal >= ID4_IDEOGRAM4_GENERATION_STAGE_COUNT) return NULL;
-  return stage_providers[stage_ordinal];
-}
-
 void id4_ideogram4_generation_bundle_release(
     id4_ideogram4_generation_bundle_t* bundle) {
   if (IREE_LIKELY(bundle) &&
@@ -457,8 +407,9 @@ void id4_ideogram4_generation_bundle_release(
       id4_ideogram4_generation_stage_slot_deinitialize(&bundle->stages[i]);
     }
     id4_pipeline_kernel_library_release(bundle->kernel_library);
-    id4_ideogram4_generation_parameter_providers_release(
-        &bundle->parameter_providers);
+    id4_ideogram4_generation_parameter_sources_deinitialize(
+        &bundle->parameter_sources, bundle->parameter_source_scope_storage,
+        bundle->host_allocator);
     id4_ideogram4_session_release(bundle->session);
     iree_allocator_t host_allocator = bundle->host_allocator;
     iree_allocator_free(host_allocator, bundle);
@@ -674,10 +625,17 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
       prepare_mode ==
           ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS;
 
-  id4_pipeline_parameter_slab_set_t* resident_parameter_slabs =
-      bundle->session->resident_stage_parameter_slabs[stage_ordinal];
+  const id4_pipeline_parameter_source_t* stage_parameter_source =
+      id4_ideogram4_generation_parameter_source_for_stage(
+          &bundle->parameter_sources, stage_ordinal);
+  id4_ideogram4_resident_parameter_cache_entry_t* resident_parameter_entry =
+      &bundle->session->resident_stage_parameters[stage_ordinal];
   const bool reuse_parameter_slabs =
-      retain_parameter_slabs && resident_parameter_slabs != NULL;
+      retain_parameter_slabs &&
+      id4_ideogram4_resident_parameter_cache_entry_matches(
+          resident_parameter_entry, stage_parameter_source, slot->plan);
+  id4_pipeline_parameter_slab_set_t* resident_parameter_slabs =
+      reuse_parameter_slabs ? resident_parameter_entry->slabs : NULL;
   if (reuse_parameter_slabs) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
         slot->plan, resident_parameter_slabs));
@@ -725,9 +683,7 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
         ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, 0);
   } else {
     prepare_options.parameter_policy = id4_pipeline_stage_parameters(
-        id4_pipeline_checkpoint_parameter_source(
-            id4_ideogram4_generation_prepare_stage_parameter_provider(
-                &bundle->parameter_providers, stage_ordinal)),
+        *stage_parameter_source,
         defer_parameter_loads_to_issue
             ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
             : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
@@ -759,9 +715,9 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
       status = id4_pipeline_plan_validate_parameter_slabs(slot->plan,
                                                           parameter_slabs);
       if (iree_status_is_ok(status)) {
-        id4_pipeline_parameter_slab_set_retain(parameter_slabs);
-        bundle->session->resident_stage_parameter_slabs[stage_ordinal] =
-            parameter_slabs;
+        status = id4_ideogram4_resident_parameter_cache_entry_assign(
+            resident_parameter_entry, stage_parameter_source, parameter_slabs,
+            bundle->session->host_allocator);
       }
     }
   }
@@ -893,7 +849,7 @@ id4_ideogram4_generation_bundle_signal_resident_bundles_prepared(
       options->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
-static void id4_ideogram4_session_trim_resident_parameter_slabs(
+static void id4_ideogram4_session_trim_resident_parameters(
     id4_ideogram4_session_t* session,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
   for (iree_host_size_t i = 0;
@@ -905,9 +861,9 @@ static void id4_ideogram4_session_trim_resident_parameter_slabs(
     }
     const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
         descriptor->ordinal;
-    id4_pipeline_parameter_slab_set_release(
-        session->resident_stage_parameter_slabs[stage_ordinal]);
-    session->resident_stage_parameter_slabs[stage_ordinal] = NULL;
+    id4_ideogram4_resident_parameter_cache_entry_deinitialize(
+        &session->resident_stage_parameters[stage_ordinal],
+        session->host_allocator);
   }
 }
 
@@ -1013,8 +969,11 @@ iree_status_t id4_ideogram4_session_prepare_generation(
     status = id4_ideogram4_generation_bundle_apply_boundary_aliases(bundle);
   }
   if (iree_status_is_ok(status)) {
-    id4_ideogram4_generation_bundle_capture_prepare_resources(bundle, options);
-    id4_ideogram4_session_trim_resident_parameter_slabs(
+    status = id4_ideogram4_generation_bundle_capture_prepare_resources(bundle,
+                                                                       options);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_ideogram4_session_trim_resident_parameters(
         session, bundle->residency_policy.request_stage_mask);
   }
   if (iree_status_is_ok(status)) {

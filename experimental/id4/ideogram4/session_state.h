@@ -142,6 +142,16 @@ typedef struct id4_ideogram4_generation_residency_statistics_t {
   iree_device_size_t stage_boundary_byte_length;
 } id4_ideogram4_generation_residency_statistics_t;
 
+// Session-owned resident slabs keyed by their immutable parameter source.
+typedef struct id4_ideogram4_resident_parameter_cache_entry_t {
+  // Resident execution-layout slabs reusable by compatible stage plans.
+  id4_pipeline_parameter_slab_set_t* slabs;
+  // Retained source identity used to populate |slabs|.
+  id4_pipeline_parameter_source_t source;
+  // Owned storage backing an execution-layout source scope string.
+  char* execution_layout_scope_storage;
+} id4_ideogram4_resident_parameter_cache_entry_t;
+
 // Ideogram 4 model session owning coarse pipeline stages.
 struct id4_ideogram4_session_t {
   // Reference count for shared session ownership.
@@ -170,8 +180,8 @@ struct id4_ideogram4_session_t {
   // Ideogram 4 VAE-backed latent decode stage owned by the session.
   id4_pipeline_stage_t* decode_stage;
   // Resident parameter slabs retained across compatible generation plans.
-  id4_pipeline_parameter_slab_set_t*
-      resident_stage_parameter_slabs[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
+  id4_ideogram4_resident_parameter_cache_entry_t
+      resident_stage_parameters[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
   // True after immutable session state has loaded.
   bool is_loaded;
 };
@@ -212,8 +222,10 @@ struct id4_ideogram4_generation_bundle_t {
   iree_hal_device_t* device;
   // Queue affinity shared by every prepared stage in the current plan.
   iree_hal_queue_affinity_t queue_affinity;
-  // Parameter providers retained for stage-bundle preparation.
-  id4_ideogram4_generation_parameter_providers_t parameter_providers;
+  // Parameter sources retained for stage-bundle preparation.
+  id4_ideogram4_generation_parameter_sources_t parameter_sources;
+  // Owned packed storage backing execution-layout source scope strings.
+  char* parameter_source_scope_storage;
   // Kernel library retained for stage-bundle preparation.
   id4_pipeline_kernel_library_t* kernel_library;
   // HAL command-buffer mode used when preparing stage bundles.

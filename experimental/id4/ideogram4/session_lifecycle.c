@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "experimental/id4/ideogram4/session.h"
+#include "experimental/id4/ideogram4/session_parameters.h"
 #include "experimental/id4/ideogram4/session_state.h"
 #include "experimental/id4/ideogram4/session_support.h"
 #include "experimental/id4/stages/ideogram4_decode.h"
@@ -257,8 +258,8 @@ void id4_ideogram4_session_release(id4_ideogram4_session_t* session) {
     iree_allocator_t host_allocator = session->host_allocator;
     for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT;
          ++i) {
-      id4_pipeline_parameter_slab_set_release(
-          session->resident_stage_parameter_slabs[i]);
+      id4_ideogram4_resident_parameter_cache_entry_deinitialize(
+          &session->resident_stage_parameters[i], host_allocator);
     }
     id4_pipeline_stage_release(session->decode_stage);
     id4_pipeline_stage_release(session->sampler_denoise_stage);

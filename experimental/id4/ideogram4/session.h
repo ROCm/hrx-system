@@ -201,17 +201,17 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   id4_vae_attention_implementation_t vae_attention_implementation;
 } id4_ideogram4_generation_plan_summary_t;
 
-// Parameter providers used when preparing one generation plan.
-typedef struct id4_ideogram4_generation_parameter_providers_t {
-  // Provider containing Qwen3-VL text encoder weights.
-  iree_io_parameter_provider_t* qwen;
-  // Provider containing conditioned Ideogram 4 DiT weights.
-  iree_io_parameter_provider_t* dit_conditioned;
-  // Provider containing unconditioned Ideogram 4 DiT weights.
-  iree_io_parameter_provider_t* dit_unconditioned;
-  // Provider containing VAE decode weights.
-  iree_io_parameter_provider_t* vae;
-} id4_ideogram4_generation_parameter_providers_t;
+// Parameter sources used when preparing one generation plan.
+typedef struct id4_ideogram4_generation_parameter_sources_t {
+  // Source containing Qwen3-VL text encoder weights.
+  id4_pipeline_parameter_source_t qwen;
+  // Source containing conditioned Ideogram 4 DiT weights.
+  id4_pipeline_parameter_source_t dit_conditioned;
+  // Source containing unconditioned Ideogram 4 DiT weights.
+  id4_pipeline_parameter_source_t dit_unconditioned;
+  // Source containing VAE decode weights.
+  id4_pipeline_parameter_source_t vae;
+} id4_ideogram4_generation_parameter_sources_t;
 
 // Generation-stage bundle residency policy.
 typedef uint32_t id4_ideogram4_generation_residency_mode_t;
@@ -309,8 +309,8 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
   // Stage-bundle masks materialized for each generation phase.
   id4_ideogram4_generation_resident_stage_mask_t
       phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
-  // Source representation used to populate deferred parameter windows.
-  id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind;
+  // Common source representation used by all parameter-bearing stages.
+  id4_pipeline_parameter_source_kind_t parameter_source_kind;
   // Maximum compact target bytes retained by one deferred stage segment.
   iree_device_size_t maximum_parameter_window_byte_length;
   // Future execution segments whose compact parameter windows may be live.
@@ -364,8 +364,8 @@ typedef struct id4_ideogram4_generation_residency_select_options_t {
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Candidate coarse stage bundles the selector may retain.
   id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask;
-  // Source representation used to populate deferred parameter windows.
-  id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind;
+  // Common source representation used by all parameter-bearing stages.
+  id4_pipeline_parameter_source_kind_t parameter_source_kind;
   // Maximum compact target bytes retained by one deferred stage segment.
   iree_device_size_t maximum_parameter_window_byte_length;
   // Future execution segments whose compact parameter windows may be live.
@@ -395,8 +395,8 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Parameter providers selected for each session-owned model component.
-  id4_ideogram4_generation_parameter_providers_t parameter_providers;
+  // Parameter sources selected for each session-owned model component.
+  id4_ideogram4_generation_parameter_sources_t parameter_sources;
   // Kernel library used to resolve planned Loom module paths.
   id4_pipeline_kernel_library_t* kernel_library;
   // Stage-bundle residency policy selected for this prepared generation.

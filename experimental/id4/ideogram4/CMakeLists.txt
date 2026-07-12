@@ -33,6 +33,8 @@ iree_cc_library(
     "session_generation.c"
     "session_generation.h"
     "session_lifecycle.c"
+    "session_parameters.c"
+    "session_parameters.h"
     "session_plan.c"
     "session_prepare.c"
     "session_prepare.h"
@@ -60,6 +62,7 @@ iree_cc_library(
     iree::experimental::id4::stages::sampler
     iree::experimental::id4::stages::vae_program
     iree::hal
+    iree::io::parameter_index
     iree::io::parameter_provider
     iree::tokenizer
   PUBLIC

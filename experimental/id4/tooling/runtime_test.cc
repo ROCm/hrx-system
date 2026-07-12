@@ -276,6 +276,7 @@ TEST(Id4ToolingRuntimeTest, BatchProviderCreationRequiresRequestedScopes) {
       qwen_provider;
   Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
       vae_provider;
+  Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> qwen_index;
 
   id4_tooling_parameter_provider_request_t requests[] = {
       {
@@ -283,6 +284,8 @@ TEST(Id4ToolingRuntimeTest, BatchProviderCreationRequiresRequestedScopes) {
           /*.scope=*/IREE_SV("qwen"),
           // Qwen provider output.
           /*.out_provider=*/qwen_provider.out(),
+          // Qwen index output.
+          /*.out_index=*/qwen_index.out(),
       },
       {
           // VAE parameter scope required by the caller.
@@ -296,6 +299,7 @@ TEST(Id4ToolingRuntimeTest, BatchProviderCreationRequiresRequestedScopes) {
       id4_tooling_create_parameter_providers_from_flags(
           IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
   EXPECT_EQ(qwen_provider.get(), nullptr);
+  EXPECT_EQ(qwen_index.get(), nullptr);
   EXPECT_EQ(vae_provider.get(), nullptr);
 }
 

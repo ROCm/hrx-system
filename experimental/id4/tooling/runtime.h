@@ -79,6 +79,8 @@ typedef struct id4_tooling_parameter_provider_request_t {
   iree_string_view_t scope;
   // Receives a newly-created provider for |scope| on success.
   iree_io_parameter_provider_t** out_provider;
+  // Optionally receives the retained index exposed by |out_provider|.
+  iree_io_parameter_index_t** out_index;
 } id4_tooling_parameter_provider_request_t;
 
 // One scoped child provider retained by a parameter provider set.

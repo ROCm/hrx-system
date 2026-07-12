@@ -331,8 +331,7 @@ GenerationResourceOptions(
   options.structure_size = sizeof(options);
   options.residency_mode = residency_mode;
   options.resident_stage_mask = resident_stage_mask;
-  options.parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.parameter_source_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.parameter_load_prefetch_segment_distance =
       parameter_load_prefetch_segment_distance;
@@ -364,8 +363,7 @@ static id4_ideogram4_generation_residency_selection_t SelectGenerationResidency(
   options.structure_size = sizeof(options);
   options.issue_policy = issue_policy;
   options.candidate_stage_mask = candidate_stage_mask;
-  options.parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.parameter_source_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.memory_budget_byte_length = memory_budget_byte_length;
   id4_ideogram4_generation_residency_selection_t selection;
@@ -1004,8 +1002,7 @@ TEST_F(SessionTest, ResourceStatisticsRejectInvalidResidencyPolicy) {
   options.structure_size = sizeof(options);
   options.residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
-  options.parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.parameter_source_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -1136,8 +1133,7 @@ TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {
   options.structure_size = sizeof(options);
   options.issue_policy = ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL;
   options.candidate_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
-  options.parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.parameter_source_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.memory_budget_byte_length =
       issue_phase_statistics.stage_serial_total_peak_byte_length - 1;
@@ -1470,7 +1466,7 @@ TEST_F(SessionTest,
   EXPECT_EQ(bundle, nullptr);
 }
 
-TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
+TEST_F(SessionTest, PrepareGenerationRequiresParameterSources) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(

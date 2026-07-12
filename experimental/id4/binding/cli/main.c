@@ -52,6 +52,8 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "scopes below as the branch parameter providers.");
 IREE_FLAG(string, qwen_parameter_format, "fp8_e4m3_block_scaled",
           "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
+IREE_FLAG(string, generation_parameter_source, "checkpoint",
+          "Generation parameter source: checkpoint or execution_layout.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "fp8_compact_rhs",
@@ -613,6 +615,24 @@ static iree_status_t id4_cli_parse_generation_residency_request_mode(
       "selected_stage_bundles, all_stage_bundles, or memory_budgeted");
 }
 
+static iree_status_t id4_cli_parse_generation_parameter_source_kind(
+    id4_pipeline_parameter_source_kind_t* out_kind) {
+  IREE_ASSERT_ARGUMENT(out_kind);
+  const iree_string_view_t value =
+      iree_make_cstring_view(FLAG_generation_parameter_source);
+  if (iree_string_view_equal(value, IREE_SV("checkpoint"))) {
+    *out_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("execution_layout"))) {
+    *out_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--generation_parameter_source must be checkpoint or execution_layout");
+}
+
 static iree_status_t id4_cli_parse_generation_issue_mode(
     id4_cli_generation_issue_mode_t* out_mode) {
   IREE_ASSERT_ARGUMENT(out_mode);
@@ -697,6 +717,7 @@ static iree_status_t id4_cli_resolve_generation_residency(
     id4_cli_generation_issue_mode_t issue_mode,
     id4_cli_generation_residency_request_mode_t request_mode,
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
+    id4_pipeline_parameter_source_kind_t parameter_source_kind,
     iree_host_size_t parameter_load_prefetch_segment_distance,
     iree_device_size_t maximum_parameter_window_byte_length,
     id4_ideogram4_generation_residency_mode_t* out_residency_mode,
@@ -757,8 +778,7 @@ static iree_status_t id4_cli_resolve_generation_residency(
       select_options.structure_size = sizeof(select_options);
       select_options.issue_policy = id4_cli_generation_issue_policy(issue_mode);
       select_options.candidate_stage_mask = requested_stage_mask;
-      select_options.parameter_window_source_kind =
-          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+      select_options.parameter_source_kind = parameter_source_kind;
       select_options.maximum_parameter_window_byte_length =
           maximum_parameter_window_byte_length;
       select_options.parameter_load_prefetch_segment_distance =
@@ -784,20 +804,20 @@ static iree_status_t id4_cli_resolve_generation_resource_options(
     id4_cli_generation_issue_mode_t issue_mode,
     id4_cli_generation_residency_request_mode_t request_mode,
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
+    id4_pipeline_parameter_source_kind_t parameter_source_kind,
     iree_host_size_t parameter_load_prefetch_segment_distance,
     iree_device_size_t maximum_parameter_window_byte_length,
     id4_ideogram4_generation_resource_statistics_options_t* out_options) {
   memset(out_options, 0, sizeof(*out_options));
   out_options->structure_size = sizeof(*out_options);
-  out_options->parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  out_options->parameter_source_kind = parameter_source_kind;
   out_options->maximum_parameter_window_byte_length =
       maximum_parameter_window_byte_length;
   out_options->parameter_load_prefetch_segment_distance =
       parameter_load_prefetch_segment_distance;
   return id4_cli_resolve_generation_residency(
       generation_plan, issue_mode, request_mode, requested_stage_mask,
-      parameter_load_prefetch_segment_distance,
+      parameter_source_kind, parameter_load_prefetch_segment_distance,
       maximum_parameter_window_byte_length, &out_options->residency_mode,
       &out_options->resident_stage_mask, out_options->phase_stage_masks);
 }
@@ -822,11 +842,18 @@ static iree_status_t id4_cli_print_generation_resource_statistics(
   const iree_string_view_t residency_name =
       id4_cli_generation_residency_mode_name(
           statistics_options->residency_mode);
+  const iree_string_view_t parameter_source_name =
+      statistics_options->parameter_source_kind ==
+              ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT
+          ? IREE_SV("execution_layout")
+          : IREE_SV("checkpoint");
   fprintf(stdout,
           "Ideogram 4 generation resources: issue=%.*s residency=%.*s "
+          "parameter_source=%.*s "
           "resident_stage_mask=0x%08x phase_stage_masks=[",
           (int)issue_name.size, issue_name.data, (int)residency_name.size,
-          residency_name.data, statistics_options->resident_stage_mask);
+          residency_name.data, (int)parameter_source_name.size,
+          parameter_source_name.data, statistics_options->resident_stage_mask);
   for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
     fprintf(stdout, "%s0x%08x", i == 0 ? "" : ",",
             statistics_options->phase_stage_masks[i]);
@@ -1823,90 +1850,134 @@ static iree_status_t id4_cli_make_generation_plan_policy(
   return iree_ok_status();
 }
 
-static void id4_cli_release_parameter_providers(
-    id4_ideogram4_generation_parameter_providers_t* providers) {
-  iree_io_parameter_provider_release(providers->vae);
-  iree_io_parameter_provider_release(providers->dit_unconditioned);
-  iree_io_parameter_provider_release(providers->dit_conditioned);
-  iree_io_parameter_provider_release(providers->qwen);
-  memset(providers, 0, sizeof(*providers));
+static void id4_cli_release_parameter_source(
+    id4_pipeline_parameter_source_t* source) {
+  switch (source->kind) {
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      iree_io_parameter_provider_release(source->storage.checkpoint.provider);
+      break;
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      iree_io_parameter_provider_release(
+          source->storage.execution_layout.provider);
+      iree_io_parameter_index_release(source->storage.execution_layout.index);
+      break;
+    default:
+      break;
+  }
+  memset(source, 0, sizeof(*source));
 }
 
-static iree_status_t id4_cli_create_parameter_providers(
+static void id4_cli_release_parameter_sources(
+    id4_ideogram4_generation_parameter_sources_t* sources) {
+  id4_cli_release_parameter_source(&sources->vae);
+  id4_cli_release_parameter_source(&sources->dit_unconditioned);
+  id4_cli_release_parameter_source(&sources->dit_conditioned);
+  id4_cli_release_parameter_source(&sources->qwen);
+}
+
+static id4_pipeline_parameter_source_t id4_cli_make_parameter_source(
+    id4_pipeline_parameter_source_kind_t source_kind,
+    iree_string_view_t scope) {
+  switch (source_kind) {
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      return id4_pipeline_checkpoint_parameter_source(NULL);
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      return id4_pipeline_execution_layout_parameter_source(NULL, NULL, scope);
+    default:
+      return (id4_pipeline_parameter_source_t){0};
+  }
+}
+
+static iree_io_parameter_provider_t** id4_cli_parameter_source_provider_out(
+    id4_pipeline_parameter_source_t* source) {
+  switch (source->kind) {
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      return &source->storage.checkpoint.provider;
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      return &source->storage.execution_layout.provider;
+    default:
+      return NULL;
+  }
+}
+
+static iree_io_parameter_index_t** id4_cli_parameter_source_index_out(
+    id4_pipeline_parameter_source_t* source) {
+  return source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT
+             ? &source->storage.execution_layout.index
+             : NULL;
+}
+
+static iree_status_t id4_cli_create_parameter_sources(
+    id4_pipeline_parameter_source_kind_t source_kind,
     iree_allocator_t host_allocator,
-    id4_ideogram4_generation_parameter_providers_t* out_providers) {
-  memset(out_providers, 0, sizeof(*out_providers));
+    id4_ideogram4_generation_parameter_sources_t* out_sources) {
+  memset(out_sources, 0, sizeof(*out_sources));
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_parameter_format(&dit_parameter_format));
 
-  iree_status_t status = iree_ok_status();
-  if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
-    id4_tooling_parameter_provider_request_t requests[] = {
-        {
-            // Qwen3-VL text encoder parameter scope.
-            .scope = IREE_SV("qwen"),
-            // Qwen provider output.
-            .out_provider = &out_providers->qwen,
-        },
-        {
-            // Conditioned DiT parameter scope.
-            .scope = IREE_SV("dit_cond"),
-            // Conditioned DiT provider output.
-            .out_provider = &out_providers->dit_conditioned,
-        },
-        {
-            // Unconditioned DiT parameter scope.
-            .scope = IREE_SV("dit_uncond"),
-            // Unconditioned DiT provider output.
-            .out_provider = &out_providers->dit_unconditioned,
-        },
-        {
-            // VAE parameter scope.
-            .scope = IREE_SV("vae"),
-            // VAE provider output.
-            .out_provider = &out_providers->vae,
-        },
-    };
-    status = id4_tooling_create_parameter_providers_from_flags(
-        IREE_ARRAYSIZE(requests), requests, host_allocator);
-  } else {
-    const iree_string_view_t dit_conditioned_fp8_scope =
-        iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
-    const iree_string_view_t dit_unconditioned_fp8_scope =
-        iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
-    id4_tooling_parameter_provider_request_t requests[] = {
-        {
-            // Qwen3-VL text encoder parameter scope.
-            .scope = IREE_SV("qwen"),
-            // Qwen provider output.
-            .out_provider = &out_providers->qwen,
-        },
-        {
-            // Conditioned DiT FP8 e4m3 parameter scope.
-            .scope = dit_conditioned_fp8_scope,
-            // Conditioned DiT FP8 e4m3 provider output.
-            .out_provider = &out_providers->dit_conditioned,
-        },
-        {
-            // Unconditioned DiT FP8 e4m3 parameter scope.
-            .scope = dit_unconditioned_fp8_scope,
-            // Unconditioned DiT FP8 e4m3 provider output.
-            .out_provider = &out_providers->dit_unconditioned,
-        },
-        {
-            // VAE parameter scope.
-            .scope = IREE_SV("vae"),
-            // VAE provider output.
-            .out_provider = &out_providers->vae,
-        },
-    };
-    status = id4_tooling_create_parameter_providers_from_flags(
-        IREE_ARRAYSIZE(requests), requests, host_allocator);
-  }
+  const iree_string_view_t qwen_scope = IREE_SV("qwen");
+  const iree_string_view_t conditioned_scope =
+      dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+          ? IREE_SV("dit_cond")
+          : iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+  const iree_string_view_t unconditioned_scope =
+      dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+          ? IREE_SV("dit_uncond")
+          : iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  const iree_string_view_t vae_scope = IREE_SV("vae");
+  out_sources->qwen = id4_cli_make_parameter_source(source_kind, qwen_scope);
+  out_sources->dit_conditioned =
+      id4_cli_make_parameter_source(source_kind, conditioned_scope);
+  out_sources->dit_unconditioned =
+      id4_cli_make_parameter_source(source_kind, unconditioned_scope);
+  out_sources->vae = id4_cli_make_parameter_source(source_kind, vae_scope);
+
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // Qwen3-VL text encoder parameter scope.
+          .scope = qwen_scope,
+          // Qwen provider output.
+          .out_provider =
+              id4_cli_parameter_source_provider_out(&out_sources->qwen),
+          // Qwen archive index output when loading execution layouts.
+          .out_index = id4_cli_parameter_source_index_out(&out_sources->qwen),
+      },
+      {
+          // Conditioned DiT parameter scope.
+          .scope = conditioned_scope,
+          // Conditioned DiT provider output.
+          .out_provider = id4_cli_parameter_source_provider_out(
+              &out_sources->dit_conditioned),
+          // Conditioned DiT archive index output when requested.
+          .out_index =
+              id4_cli_parameter_source_index_out(&out_sources->dit_conditioned),
+      },
+      {
+          // Unconditioned DiT parameter scope.
+          .scope = unconditioned_scope,
+          // Unconditioned DiT provider output.
+          .out_provider = id4_cli_parameter_source_provider_out(
+              &out_sources->dit_unconditioned),
+          // Unconditioned DiT archive index output when requested.
+          .out_index = id4_cli_parameter_source_index_out(
+              &out_sources->dit_unconditioned),
+      },
+      {
+          // VAE parameter scope.
+          .scope = vae_scope,
+          // VAE provider output.
+          .out_provider =
+              id4_cli_parameter_source_provider_out(&out_sources->vae),
+          // VAE archive index output when loading execution layouts.
+          .out_index = id4_cli_parameter_source_index_out(&out_sources->vae),
+      },
+  };
+  iree_status_t status = id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, host_allocator);
   if (!iree_status_is_ok(status)) {
-    id4_cli_release_parameter_providers(out_providers);
+    id4_cli_release_parameter_sources(out_sources);
   }
   return status;
 }
@@ -1932,6 +2003,8 @@ static iree_status_t id4_cli_run_generation_dry_run(
       ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
+  id4_pipeline_parameter_source_kind_t parameter_source_kind =
+      ID4_PIPELINE_PARAMETER_SOURCE_KIND_INVALID;
   iree_host_size_t parameter_load_prefetch_segment_distance = 0;
   iree_device_size_t maximum_parameter_window_byte_length = 0;
   id4_ideogram4_generation_resident_stage_mask_t
@@ -1949,6 +2022,10 @@ static iree_status_t id4_cli_run_generation_dry_run(
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_generation_residency_request_mode(
         &generation_residency_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_parse_generation_parameter_source_kind(&parameter_source_kind);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_non_negative_host_size_flag(
@@ -2022,7 +2099,8 @@ static iree_status_t id4_cli_run_generation_dry_run(
   if (iree_status_is_ok(status)) {
     status = id4_cli_resolve_generation_resource_options(
         generation_plan, generation_issue_mode, generation_residency_mode,
-        requested_stage_mask, parameter_load_prefetch_segment_distance,
+        requested_stage_mask, parameter_source_kind,
+        parameter_load_prefetch_segment_distance,
         maximum_parameter_window_byte_length, &resource_options);
   }
   if (iree_status_is_ok(status)) {
@@ -2112,8 +2190,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   memset(&runtime_context, 0, sizeof(runtime_context));
   bool runtime_context_initialized = false;
   id4_pipeline_kernel_library_t* kernel_library = NULL;
-  id4_ideogram4_generation_parameter_providers_t parameter_providers;
-  memset(&parameter_providers, 0, sizeof(parameter_providers));
+  id4_ideogram4_generation_parameter_sources_t parameter_sources;
+  memset(&parameter_sources, 0, sizeof(parameter_sources));
   id4_ideogram4_session_t* session = NULL;
   id4_ideogram4_generation_plan_t* generation_plan = NULL;
   id4_ideogram4_generation_bundle_t* generation_bundle = NULL;
@@ -2148,6 +2226,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
+  id4_pipeline_parameter_source_kind_t parameter_source_kind =
+      ID4_PIPELINE_PARAMETER_SOURCE_KIND_INVALID;
   iree_host_size_t parameter_load_prefetch_segment_distance = 0;
   iree_device_size_t maximum_parameter_window_byte_length = 0;
   id4_ideogram4_generation_resident_stage_mask_t
@@ -2165,6 +2245,10 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_generation_residency_request_mode(
         &generation_residency_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_parse_generation_parameter_source_kind(&parameter_source_kind);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_non_negative_host_size_flag(
@@ -2220,8 +2304,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
                                            host_allocator, &session);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_cli_create_parameter_providers(host_allocator,
-                                                &parameter_providers);
+    status = id4_cli_create_parameter_sources(
+        parameter_source_kind, host_allocator, &parameter_sources);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_device_t* device =
@@ -2282,7 +2366,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     if (iree_status_is_ok(status)) {
       status = id4_cli_resolve_generation_resource_options(
           generation_plan, generation_issue_mode, generation_residency_mode,
-          requested_stage_mask, parameter_load_prefetch_segment_distance,
+          requested_stage_mask, parameter_source_kind,
+          parameter_load_prefetch_segment_distance,
           maximum_parameter_window_byte_length, &resource_options);
     }
   }
@@ -2310,7 +2395,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     id4_ideogram4_generation_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.parameter_providers = parameter_providers;
+    prepare_options.parameter_sources = parameter_sources;
     prepare_options.kernel_library = kernel_library;
     prepare_options.maximum_parameter_window_byte_length =
         maximum_parameter_window_byte_length;
@@ -2663,7 +2748,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_hal_semaphore_release(completion_semaphore);
   iree_hal_profile_statistics_sink_release(profile_statistics_sink);
   id4_ideogram4_session_release(session);
-  id4_cli_release_parameter_providers(&parameter_providers);
+  id4_cli_release_parameter_sources(&parameter_sources);
   id4_pipeline_kernel_library_release(kernel_library);
   if (runtime_context_initialized) {
     id4_tooling_runtime_context_deinitialize(&runtime_context);

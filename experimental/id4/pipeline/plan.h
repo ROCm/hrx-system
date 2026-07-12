@@ -500,6 +500,12 @@ iree_status_t id4_pipeline_plan_validate_parameter_slabs(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_slab_set_t* slab_set);
 
+// Returns whether resident |slab_set| has the exact parameter allocation and
+// request layout required by |plan|. Source identity is not considered.
+bool id4_pipeline_plan_matches_resident_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_t* slab_set);
+
 // Submits parameter load group |group_index| from |plan| through |context|.
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,

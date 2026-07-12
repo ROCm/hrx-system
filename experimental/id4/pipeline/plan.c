@@ -2375,6 +2375,37 @@ static bool id4_pipeline_parameter_requests_equal(
          lhs->span.length == rhs->span.length;
 }
 
+static bool id4_pipeline_buffer_params_equal(iree_hal_buffer_params_t lhs,
+                                             iree_hal_buffer_params_t rhs) {
+  return lhs.usage == rhs.usage && lhs.access == rhs.access &&
+         lhs.type == rhs.type && lhs.queue_affinity == rhs.queue_affinity &&
+         lhs.min_alignment == rhs.min_alignment;
+}
+
+static bool id4_pipeline_parameter_slab_metadata_equal(
+    const id4_pipeline_parameter_slab_plan_t* lhs,
+    const id4_pipeline_parameter_slab_plan_t* rhs) {
+  return lhs && rhs && lhs->placement_id == rhs->placement_id &&
+         lhs->binding_slot == rhs->binding_slot &&
+         id4_pipeline_buffer_params_equal(lhs->target_params,
+                                          rhs->target_params) &&
+         lhs->byte_length == rhs->byte_length &&
+         lhs->alignment == rhs->alignment;
+}
+
+static bool id4_pipeline_parameter_request_tables_equal(
+    const id4_pipeline_parameter_request_table_t* lhs,
+    const id4_pipeline_parameter_request_table_t* rhs) {
+  if (!lhs || !rhs || lhs->count != rhs->count) return false;
+  for (iree_host_size_t i = 0; i < lhs->count; ++i) {
+    if (!id4_pipeline_parameter_requests_equal(&lhs->values[i],
+                                               &rhs->values[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t id4_pipeline_plan_validate_parameter_slab_metadata(
     const id4_pipeline_parameter_slab_plan_t* plan_slab,
     const id4_pipeline_parameter_slab_plan_t* retained_slab,
@@ -2397,6 +2428,13 @@ static iree_status_t id4_pipeline_plan_validate_parameter_slab_metadata(
         "parameter slab %" PRIhsz
         " binding slot mismatch: plan requires %u but slab set has %u",
         slab_index, plan_slab->binding_slot, retained_slab->binding_slot);
+  }
+  if (!id4_pipeline_buffer_params_equal(plan_slab->target_params,
+                                        retained_slab->target_params)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab %" PRIhsz
+                            " target buffer parameters mismatch",
+                            slab_index);
   }
   if (plan_slab->byte_length != retained_slab->byte_length) {
     return iree_make_status(
@@ -2519,6 +2557,34 @@ iree_status_t id4_pipeline_plan_validate_parameter_slabs(
     }
   }
   return iree_ok_status();
+}
+
+bool id4_pipeline_plan_matches_resident_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_t* slab_set) {
+  if (!plan || !slab_set ||
+      !id4_pipeline_parameter_slab_set_has_resident_buffers(slab_set) ||
+      id4_pipeline_parameter_slab_set_has_deferred_load_context(slab_set) ||
+      id4_pipeline_parameter_slab_set_count(slab_set) !=
+          plan->parameter_slab_count) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    iree_hal_buffer_t* buffer =
+        id4_pipeline_parameter_slab_set_buffer_at(slab_set, i);
+    if (!buffer ||
+        iree_hal_buffer_byte_length(buffer) !=
+            plan->parameter_slabs[i].byte_length ||
+        !id4_pipeline_parameter_slab_metadata_equal(
+            &plan->parameter_slabs[i],
+            id4_pipeline_parameter_slab_set_plan_at(slab_set, i)) ||
+        !id4_pipeline_parameter_request_tables_equal(
+            &plan->parameter_request_tables[i],
+            id4_pipeline_parameter_slab_set_request_table_at(slab_set, i))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(

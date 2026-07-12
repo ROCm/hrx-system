@@ -657,9 +657,14 @@ static void id4_tooling_release_parameter_provider_requests(
     iree_host_size_t request_count,
     const id4_tooling_parameter_provider_request_t* requests) {
   for (iree_host_size_t i = 0; i < request_count; ++i) {
-    if (!requests[i].out_provider) continue;
-    iree_io_parameter_provider_release(*requests[i].out_provider);
-    *requests[i].out_provider = NULL;
+    if (requests[i].out_provider) {
+      iree_io_parameter_provider_release(*requests[i].out_provider);
+      *requests[i].out_provider = NULL;
+    }
+    if (requests[i].out_index) {
+      iree_io_parameter_index_release(*requests[i].out_index);
+      *requests[i].out_index = NULL;
+    }
   }
 }
 
@@ -679,6 +684,9 @@ iree_status_t id4_tooling_create_parameter_providers_from_flags(
           "parameter provider request %" PRIhsz " output is required", i);
     }
     *requests[i].out_provider = NULL;
+    if (requests[i].out_index) {
+      *requests[i].out_index = NULL;
+    }
   }
 
   iree_io_scope_map_t scope_map;
@@ -699,6 +707,10 @@ iree_status_t id4_tooling_create_parameter_providers_from_flags(
           request->scope, index,
           IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
           host_allocator, request->out_provider);
+    }
+    if (iree_status_is_ok(status) && request->out_index) {
+      iree_io_parameter_index_retain(index);
+      *request->out_index = index;
     }
   }
   if (!iree_status_is_ok(status)) {

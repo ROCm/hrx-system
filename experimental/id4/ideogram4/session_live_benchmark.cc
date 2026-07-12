@@ -38,6 +38,8 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "scopes below as the branch parameter providers.");
 IREE_FLAG(string, qwen_parameter_format, "fp8_e4m3_block_scaled",
           "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
+IREE_FLAG(string, generation_parameter_source, "checkpoint",
+          "Generation parameter source: checkpoint or execution_layout.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "fp8_compact_rhs",
@@ -280,6 +282,8 @@ using HalSemaphoreRef =
 using ParameterProviderRef =
     id4::test::OwningRef<iree_io_parameter_provider_t,
                          iree_io_parameter_provider_release>;
+using ParameterIndexRef = id4::test::OwningRef<iree_io_parameter_index_t,
+                                               iree_io_parameter_index_release>;
 using SessionRef = id4::test::OwningRef<id4_ideogram4_session_t,
                                         id4_ideogram4_session_release>;
 using TokenizerRef =
@@ -305,6 +309,10 @@ struct LiveGenerationBenchmarkContext {
     unconditioned_dit_parameter_provider.reset();
     conditioned_dit_parameter_provider.reset();
     qwen_parameter_provider.reset();
+    vae_parameter_index.reset();
+    unconditioned_dit_parameter_index.reset();
+    conditioned_dit_parameter_index.reset();
+    qwen_parameter_index.reset();
     kernel_library.reset();
     if (runtime_context_initialized) {
       id4_tooling_runtime_context_deinitialize(&runtime_context);
@@ -324,6 +332,9 @@ struct LiveGenerationBenchmarkContext {
   // Qwen3-VL parameter source policy selected by benchmark flags.
   id4_qwen3_vl_parameter_format_t qwen_parameter_format =
       ID4_QWEN3_VL_PARAMETER_FORMAT_INVALID;
+  // Common parameter source representation selected by benchmark flags.
+  id4_pipeline_parameter_source_kind_t parameter_source_kind =
+      ID4_PIPELINE_PARAMETER_SOURCE_KIND_INVALID;
   // Generation stage-bundle residency request selected by benchmark flags.
   GenerationResidencyRequestMode generation_residency_request_mode =
       GenerationResidencyRequestMode::kIssuePhases;
@@ -341,12 +352,29 @@ struct LiveGenerationBenchmarkContext {
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   // Provider containing Qwen3-VL text encoder weights.
   ParameterProviderRef qwen_parameter_provider;
+  // Parsed Qwen3-VL execution-layout archive index when selected.
+  ParameterIndexRef qwen_parameter_index;
+  // Qwen3-VL provider scope selected by benchmark flags.
+  iree_string_view_t qwen_parameter_scope = iree_string_view_empty();
   // Provider containing conditioned Ideogram 4 DiT weights.
   ParameterProviderRef conditioned_dit_parameter_provider;
+  // Parsed conditioned DiT execution-layout archive index when selected.
+  ParameterIndexRef conditioned_dit_parameter_index;
+  // Conditioned DiT provider scope selected by benchmark flags.
+  iree_string_view_t conditioned_dit_parameter_scope = iree_string_view_empty();
   // Provider containing unconditioned Ideogram 4 DiT weights.
   ParameterProviderRef unconditioned_dit_parameter_provider;
+  // Parsed unconditioned DiT execution-layout archive index when selected.
+  ParameterIndexRef unconditioned_dit_parameter_index;
+  // Unconditioned DiT provider scope selected by benchmark flags.
+  iree_string_view_t unconditioned_dit_parameter_scope =
+      iree_string_view_empty();
   // Provider containing VAE decode weights.
   ParameterProviderRef vae_parameter_provider;
+  // Parsed VAE execution-layout archive index when selected.
+  ParameterIndexRef vae_parameter_index;
+  // VAE provider scope selected by benchmark flags.
+  iree_string_view_t vae_parameter_scope = iree_string_view_empty();
   // Loaded Ideogram 4 session under benchmark.
   SessionRef session;
   // Tokenizer used to lower prompt text into Qwen inputs.
@@ -385,6 +413,23 @@ static iree_status_t ParseQwenParameterFormat(
       iree_make_cstring_view(FLAG_qwen_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--qwen_parameter_format"));
+}
+
+static iree_status_t ParseGenerationParameterSourceKind(
+    id4_pipeline_parameter_source_kind_t* out_kind) {
+  const iree_string_view_t value =
+      iree_make_cstring_view(FLAG_generation_parameter_source);
+  if (iree_string_view_equal(value, IREE_SV("checkpoint"))) {
+    *out_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("execution_layout"))) {
+    *out_kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--generation_parameter_source must be checkpoint or execution_layout");
 }
 
 static iree_status_t ParseDitWeightExecutionFormat(
@@ -620,6 +665,18 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
   return IREE_SV("unknown");
 }
 
+static iree_string_view_t ParameterSourceKindName(
+    id4_pipeline_parameter_source_kind_t kind) {
+  switch (kind) {
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      return IREE_SV("checkpoint");
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      return IREE_SV("execution_layout");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t ParseParameterLoadPrefetchRegionDistance(
     iree_host_size_t* out_distance) {
   IREE_ASSERT_ARGUMENT(out_distance);
@@ -762,8 +819,7 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
           GenerationIssuePolicy(context.generation_issue_mode);
       select_options.candidate_stage_mask =
           context.generation_resident_stage_mask;
-      select_options.parameter_window_source_kind =
-          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+      select_options.parameter_source_kind = context.parameter_source_kind;
       select_options.maximum_parameter_window_byte_length =
           context.maximum_parameter_window_byte_length;
       select_options.parameter_load_prefetch_segment_distance =
@@ -914,8 +970,7 @@ GenerationBenchmarkResourceOptions(
   options.resident_stage_mask = residency.resident_stage_mask;
   std::memcpy(options.phase_stage_masks, residency.phase_stage_masks,
               sizeof(options.phase_stage_masks));
-  options.parameter_window_source_kind =
-      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.parameter_source_kind = context.parameter_source_kind;
   options.maximum_parameter_window_byte_length =
       context.maximum_parameter_window_byte_length;
   options.parameter_load_prefetch_segment_distance =
@@ -1135,20 +1190,36 @@ static iree_status_t LoadTokenizerFromFlag(iree_tokenizer_t** out_tokenizer) {
   return status;
 }
 
-static id4_ideogram4_generation_parameter_providers_t
-LiveGenerationParameterProviders(
-    const LiveGenerationBenchmarkContext& context) {
-  return id4_ideogram4_generation_parameter_providers_t{
-      // Qwen3-VL text encoder provider.
-      /*.qwen=*/context.qwen_parameter_provider.get(),
-      // Conditioned DiT provider.
-      /*.dit_conditioned=*/context.conditioned_dit_parameter_provider.get(),
-      // Unconditioned DiT provider.
-      /*.dit_unconditioned=*/
-      context.unconditioned_dit_parameter_provider.get(),
-      // VAE decode provider.
-      /*.vae=*/context.vae_parameter_provider.get(),
-  };
+static id4_ideogram4_generation_parameter_sources_t
+LiveGenerationParameterSources(const LiveGenerationBenchmarkContext& context) {
+  id4_ideogram4_generation_parameter_sources_t sources = {};
+  if (context.parameter_source_kind ==
+      ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+    sources.qwen = id4_pipeline_execution_layout_parameter_source(
+        context.qwen_parameter_index.get(),
+        context.qwen_parameter_provider.get(), context.qwen_parameter_scope);
+    sources.dit_conditioned = id4_pipeline_execution_layout_parameter_source(
+        context.conditioned_dit_parameter_index.get(),
+        context.conditioned_dit_parameter_provider.get(),
+        context.conditioned_dit_parameter_scope);
+    sources.dit_unconditioned = id4_pipeline_execution_layout_parameter_source(
+        context.unconditioned_dit_parameter_index.get(),
+        context.unconditioned_dit_parameter_provider.get(),
+        context.unconditioned_dit_parameter_scope);
+    sources.vae = id4_pipeline_execution_layout_parameter_source(
+        context.vae_parameter_index.get(), context.vae_parameter_provider.get(),
+        context.vae_parameter_scope);
+  } else {
+    sources.qwen = id4_pipeline_checkpoint_parameter_source(
+        context.qwen_parameter_provider.get());
+    sources.dit_conditioned = id4_pipeline_checkpoint_parameter_source(
+        context.conditioned_dit_parameter_provider.get());
+    sources.dit_unconditioned = id4_pipeline_checkpoint_parameter_source(
+        context.unconditioned_dit_parameter_provider.get());
+    sources.vae = id4_pipeline_checkpoint_parameter_source(
+        context.vae_parameter_provider.get());
+  }
+  return sources;
 }
 
 static iree_status_t CreateLoadedLiveSession(
@@ -1216,73 +1287,63 @@ static iree_status_t CreateLoadedLiveSession(
   return status;
 }
 
-static iree_status_t CreateParameterProviders(
+static iree_status_t CreateParameterSources(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
-  if (context->dit_parameter_format ==
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
-    id4_tooling_parameter_provider_request_t requests[] = {
-        {
-            // Qwen3-VL text encoder parameter scope.
-            /*.scope=*/IREE_SV("qwen"),
-            // Qwen provider output.
-            /*.out_provider=*/context->qwen_parameter_provider.out(),
-        },
-        {
-            // Conditioned DiT parameter scope.
-            /*.scope=*/IREE_SV("dit_cond"),
-            // Conditioned DiT provider output.
-            /*.out_provider=*/
-            context->conditioned_dit_parameter_provider.out(),
-        },
-        {
-            // Unconditioned DiT parameter scope.
-            /*.scope=*/IREE_SV("dit_uncond"),
-            // Unconditioned DiT provider output.
-            /*.out_provider=*/
-            context->unconditioned_dit_parameter_provider.out(),
-        },
-        {
-            // VAE parameter scope.
-            /*.scope=*/IREE_SV("vae"),
-            // VAE provider output.
-            /*.out_provider=*/context->vae_parameter_provider.out(),
-        },
-    };
-    return id4_tooling_create_parameter_providers_from_flags(
-        IREE_ARRAYSIZE(requests), requests, iree_allocator_system());
-  }
-
-  const iree_string_view_t conditioned_fp8_scope =
-      iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
-  const iree_string_view_t unconditioned_fp8_scope =
-      iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  const bool uses_execution_layout =
+      context->parameter_source_kind ==
+      ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
+  context->qwen_parameter_scope = IREE_SV("qwen");
+  context->conditioned_dit_parameter_scope =
+      context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+          ? IREE_SV("dit_cond")
+          : iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+  context->unconditioned_dit_parameter_scope =
+      context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+          ? IREE_SV("dit_uncond")
+          : iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  context->vae_parameter_scope = IREE_SV("vae");
   id4_tooling_parameter_provider_request_t requests[] = {
       {
           // Qwen3-VL text encoder parameter scope.
-          /*.scope=*/IREE_SV("qwen"),
+          /*.scope=*/context->qwen_parameter_scope,
           // Qwen provider output.
           /*.out_provider=*/context->qwen_parameter_provider.out(),
+          // Qwen archive index output when requested.
+          /*.out_index=*/
+          uses_execution_layout ? context->qwen_parameter_index.out() : nullptr,
       },
       {
-          // Conditioned DiT FP8 e4m3 parameter scope.
-          /*.scope=*/conditioned_fp8_scope,
-          // Conditioned DiT FP8 e4m3 provider output.
+          // Conditioned DiT parameter scope.
+          /*.scope=*/context->conditioned_dit_parameter_scope,
+          // Conditioned DiT provider output.
           /*.out_provider=*/
           context->conditioned_dit_parameter_provider.out(),
+          // Conditioned DiT archive index output when requested.
+          /*.out_index=*/
+          uses_execution_layout ? context->conditioned_dit_parameter_index.out()
+                                : nullptr,
       },
       {
-          // Unconditioned DiT FP8 e4m3 parameter scope.
-          /*.scope=*/unconditioned_fp8_scope,
-          // Unconditioned DiT FP8 e4m3 provider output.
+          // Unconditioned DiT parameter scope.
+          /*.scope=*/context->unconditioned_dit_parameter_scope,
+          // Unconditioned DiT provider output.
           /*.out_provider=*/
           context->unconditioned_dit_parameter_provider.out(),
+          // Unconditioned DiT archive index output when requested.
+          /*.out_index=*/
+          uses_execution_layout
+              ? context->unconditioned_dit_parameter_index.out()
+              : nullptr,
       },
       {
           // VAE parameter scope.
-          /*.scope=*/IREE_SV("vae"),
+          /*.scope=*/context->vae_parameter_scope,
           // VAE provider output.
           /*.out_provider=*/context->vae_parameter_provider.out(),
+          // VAE archive index output when requested.
+          /*.out_index=*/
+          uses_execution_layout ? context->vae_parameter_index.out() : nullptr,
       },
   };
   return id4_tooling_create_parameter_providers_from_flags(
@@ -1310,6 +1371,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
   IREE_RETURN_IF_ERROR(
       ParseQwenParameterFormat(&out_context->qwen_parameter_format));
+  IREE_RETURN_IF_ERROR(
+      ParseGenerationParameterSourceKind(&out_context->parameter_source_kind));
   IREE_RETURN_IF_ERROR(ParseGenerationResidencyRequestMode(
       &out_context->generation_residency_request_mode));
   if (out_context->generation_residency_request_mode !=
@@ -1338,7 +1401,7 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
       &out_context->runtime_context, out_context->dit_parameter_format,
       out_context->qwen_parameter_format, out_context->session.out()));
-  return CreateParameterProviders(out_context);
+  return CreateParameterSources(out_context);
 }
 
 static iree_status_t CreateGenerationPlan(
@@ -1394,8 +1457,7 @@ static iree_status_t PrepareGenerationBundle(
   id4_ideogram4_generation_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_providers =
-      LiveGenerationParameterProviders(context);
+  prepare_options.parameter_sources = LiveGenerationParameterSources(context);
   prepare_options.kernel_library = context.kernel_library.get();
   prepare_options.maximum_parameter_window_byte_length =
       context.maximum_parameter_window_byte_length;
@@ -1779,6 +1841,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       GenerationResidencyModeName(residency.residency_mode);
   const iree_string_view_t issue_mode =
       GenerationIssueModeName(context.generation_issue_mode);
+  const iree_string_view_t parameter_source_kind =
+      ParameterSourceKindName(context.parameter_source_kind);
   const bool stage_serial_issue =
       context.generation_issue_mode == GenerationIssueMode::kStageSerial;
   const iree_device_size_t selected_logical_peak_byte_length =
@@ -1798,7 +1862,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " prefetch_segments=%" PRIhsz
       " resident_stage_mask=0x%08x residency_budget=%" PRIu64
       "MiB"
-      " params=%.*s activation=%.*s weights=%.*s qwen_params=%.*s"
+      " parameter_source=%.*s params=%.*s activation=%.*s weights=%.*s"
+      " qwen_params=%.*s"
       " qwen_weights=%.*s qwen_attention=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
@@ -1855,6 +1920,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       context.parameter_load_prefetch_segment_distance,
       residency.resident_stage_mask,
       CeilMiB(context.generation_residency_budget_byte_length),
+      static_cast<int>(parameter_source_kind.size), parameter_source_kind.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),
