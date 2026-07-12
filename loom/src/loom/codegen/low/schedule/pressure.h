@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
+#include "loom/codegen/low/schedule/pressure_alias.h"
 #include "loom/codegen/low/schedule/ready_policy.h"
 
 #ifdef __cplusplus
@@ -25,7 +26,7 @@ typedef struct loom_low_schedule_unlock_record_t
     loom_low_schedule_unlock_record_t;
 
 // Mutable pressure simulation state for one scheduling run.
-typedef struct loom_low_schedule_pressure_state_t {
+struct loom_low_schedule_pressure_state_t {
   // Current live register units by descriptor register-class ID.
   uint64_t* current_live_units_by_reg_class;
   // Shared pressure state for overlapping register classes.
@@ -90,14 +91,8 @@ typedef struct loom_low_schedule_pressure_state_t {
     // Next descriptor consumer indexed by consumer node.
     uint32_t* descriptor_next_nodes;
   } unlocks;
-  // Active alias lists keyed by source value ordinal.
-  uint32_t* alias_heads;
-  // Source value ordinals touched in alias_heads.
-  loom_value_ordinal_t* alias_source_ordinals;
-  // Active alias units claimed from each source value ordinal.
-  uint32_t* alias_source_unit_counts;
-  // Alias records introduced by scheduled storage-relation results.
-  loom_low_schedule_pressure_alias_t* aliases;
+  // Storage-alias ownership shared by authored and scheduled pressure models.
+  loom_low_schedule_pressure_alias_state_t storage_aliases;
   // Number of touched candidate register classes.
   iree_host_size_t candidate_delta_touched_count;
   // Current aggregate live register units in the simulated schedule.
@@ -110,13 +105,7 @@ typedef struct loom_low_schedule_pressure_state_t {
   iree_host_size_t block_value_count;
   // Number of populated entries in candidate_operand_ordinals.
   iree_host_size_t candidate_operand_count;
-  // Number of populated entries in aliases.
-  iree_host_size_t alias_count;
-  // Number of populated entries in alias_source_ordinals.
-  iree_host_size_t alias_source_count;
-  // Allocated alias record capacity.
-  iree_host_size_t alias_capacity;
-} loom_low_schedule_pressure_state_t;
+};
 
 enum loom_low_schedule_pressure_source_kind_e {
   LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_NONE = 0,

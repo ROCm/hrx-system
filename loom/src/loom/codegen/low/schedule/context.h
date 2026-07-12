@@ -123,6 +123,10 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TOUCHED = 1u << 1,
   // Reads must be tracked because storage can be overwritten in-place.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED = 1u << 2,
+  // Candidate alias claim scratch has been initialized for this value.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_ALIAS_CLAIM = 1u << 3,
+  // Value has at least one active incoming pressure alias relation.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_ACTIVE_PRESSURE_ALIAS = 1u << 4,
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
@@ -149,19 +153,6 @@ typedef struct loom_low_schedule_alias_pressure_limit_t {
   // Representative descriptor register class used by diagnostics.
   uint16_t representative_reg_class_id;
 } loom_low_schedule_alias_pressure_limit_t;
-
-typedef struct loom_low_schedule_pressure_alias_t {
-  // Source value whose live pressure currently covers the alias units.
-  loom_value_ordinal_t source_ordinal;
-  // Result value aliasing units from the source value.
-  loom_value_ordinal_t result_ordinal;
-  // Number of units covered by this alias relation.
-  uint32_t unit_count;
-  // Next alias record for the same source value.
-  uint32_t next_alias;
-  // True once pressure has transferred from the source to the result.
-  bool transferred;
-} loom_low_schedule_pressure_alias_t;
 
 typedef struct loom_low_schedule_build_state_t {
   // Module containing the low function being scheduled.

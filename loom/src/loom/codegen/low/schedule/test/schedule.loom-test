@@ -488,6 +488,186 @@ low.func.def target(@test_target) @resource_stall_caps_repeated_source_alias_uni
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_copy strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_preserves_cliff_after_authored_copy(
+    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
+    reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
+  %copy = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %discarded = low.op<test.add.v4i32>(%source, %copy) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %lane = low.op<test.extract_lane.i32>(%copy) {lane = 0} :
+      (reg<test.i32 x4>) -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %lane, %load : reg<test.i32 x60>, reg<test.i32>,
+      reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_slice strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_preserves_cliff_after_authored_slice(
+    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
+    reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.slice", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
+  %slice = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %discarded = low.op<test.add.v4i32>(%source, %slice) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %lane = low.op<test.extract_lane.i32>(%slice) {lane = 0} :
+      (reg<test.i32 x4>) -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %lane, %load : reg<test.i32 x60>, reg<test.i32>,
+      reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_concat strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_preserves_cliff_after_authored_concat(
+    %pad: reg<test.i32 x60>, %source0: reg<test.i32>,
+    %source1: reg<test.i32>, %source2: reg<test.i32>,
+    %source3: reg<test.i32>, %source4: reg<test.i32>,
+    %source5: reg<test.i32>, %source6: reg<test.i32>,
+    %source7: reg<test.i32>, %ptr: reg<test.ptr>) ->
+    (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.concat", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="70"}
+  %packed = low.concat(%source0, %source1, %source2, %source3, %source4,
+      %source5, %source6, %source7) : (reg<test.i32>, reg<test.i32>,
+      reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
+      reg<test.i32>, reg<test.i32>) -> reg<test.i32 x8>
+  // REMARK@+1: BACKEND/015
+  %lane0 = low.slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded0 = low.op<test.add.i32>(%source0, %lane0) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane1 = low.slice %packed[1] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded1 = low.op<test.add.i32>(%source1, %lane1) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane2 = low.slice %packed[2] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded2 = low.op<test.add.i32>(%source2, %lane2) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane3 = low.slice %packed[3] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded3 = low.op<test.add.i32>(%source3, %lane3) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane4 = low.slice %packed[4] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded4 = low.op<test.add.i32>(%source4, %lane4) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane5 = low.slice %packed[5] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded5 = low.op<test.add.i32>(%source5, %lane5) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane6 = low.slice %packed[6] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded6 = low.op<test.add.i32>(%source6, %lane6) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %lane7 = low.slice %packed[7] : reg<test.i32 x8> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded7 = low.op<test.add.i32>(%source7, %lane7) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %result_lane = low.slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %result_lane, %load : reg<test.i32 x60>, reg<test.i32>,
+      reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_tied_result strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_preserves_cliff_after_authored_tied_result(
+    %pad: reg<test.i32 x65>, %source: reg<test.i32>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x65>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.tied.any", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="70"}
+  %next = low.op<test.tied.any>(%source) :
+      (reg<test.i32>) -> %source as reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %discarded = low.op<test.add.i32>(%next, %next) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %load : reg<test.i32 x65>, reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_reuses_released_alias_capacity strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_reuses_released_alias_capacity(
+    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32 x4>,
+    reg<test.i32 x4>, reg<test.i32 x4>) {
+  %first = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %discarded = low.op<test.add.v4i32>(%first, %source) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.op<test.barrier>() : ()
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", rejected_produced_live_units="4"}
+  %second = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %source, %second, %load : reg<test.i32 x66>,
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_resets_aliases_at_cfg_handoffs strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_resets_aliases_at_cfg_handoffs(
+    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
+    reg<test.i32 x4>) {
+  low.br ^body(%pad: reg<test.i32 x60>, %source: reg<test.i32 x4>)
+^body(%block_pad: reg<test.i32 x60>, %block_source: reg<test.i32 x4>):
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
+  %copy = low.copy %block_source : reg<test.i32 x4> -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %discarded = low.op<test.add.v4i32>(%block_source, %copy) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %lane = low.op<test.extract_lane.i32>(%copy) {lane = 0} :
+      (reg<test.i32 x4>) -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  low.br ^exit(%block_pad: reg<test.i32 x60>, %lane: reg<test.i32>,
+      %load: reg<test.i32 x4>)
+^exit(%result_pad: reg<test.i32 x60>, %result_lane: reg<test.i32>,
+      %result_load: reg<test.i32 x4>):
+  low.return %result_pad, %result_lane, %result_load : reg<test.i32 x60>,
+      reg<test.i32>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_compacts_ready_concat_before_scalar_work strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
