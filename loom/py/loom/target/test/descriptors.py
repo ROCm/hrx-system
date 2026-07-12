@@ -465,6 +465,20 @@ TEST_LOW_ADD_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR = Descriptor(
+    key="test.early_clobber.v4i32",
+    mnemonic="test.early_clobber.v4i32",
+    semantic_tag="test.early_clobber.v4i32",
+    operands=(
+        _v4i32_result(),
+        _v4i32_operand("src"),
+    ),
+    constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_DOT4I_S8S8_DESCRIPTOR = Descriptor(
     key="test.dot4i.s8s8",
     mnemonic="test.dot4i.s8s8",
@@ -1206,6 +1220,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
         TEST_LOW_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
+        TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
         TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
         TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR,
         TEST_LOW_SHUFFLE_V4I32_DESCRIPTOR,

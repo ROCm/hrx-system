@@ -393,6 +393,7 @@ loom_cc_library(
     loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::ir
+    loom::target::registers
   PUBLIC
 )
 

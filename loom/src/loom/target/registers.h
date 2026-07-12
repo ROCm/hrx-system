@@ -64,6 +64,14 @@ static inline uint32_t loom_low_register_type_unit_count(loom_type_t type) {
   return (uint32_t)((loom_type_register_payload1(type) >> 16) & 0xFFFFFFFFu);
 }
 
+// Returns the preferred base-unit alignment for a contiguous register value.
+// Power-of-two widths align to their width so packet-sized values naturally
+// occupy encodable register groups; other widths have no extra alignment.
+static inline uint32_t loom_low_register_unit_alignment(uint32_t unit_count) {
+  return unit_count > 1 && (unit_count & (unit_count - 1u)) == 0 ? unit_count
+                                                                 : 1u;
+}
+
 // Returns a register type with the same descriptor/class identity as |type|
 // and a different unit count.
 static inline loom_type_t loom_low_register_type_with_unit_count(

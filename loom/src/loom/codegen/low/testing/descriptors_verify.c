@@ -1712,13 +1712,14 @@ static iree_status_t loom_low_verify_descriptor(
     uint32_t descriptor_index) {
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[descriptor_index];
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_known_flags(descriptor->flags,
-                                  LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO,
-                                  "descriptor", descriptor_index));
+  IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
+      descriptor->flags,
+      LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+          LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+          LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
+          LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
+          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER,
+      "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
       descriptor_set, descriptor->key_string_offset, "descriptor.key",

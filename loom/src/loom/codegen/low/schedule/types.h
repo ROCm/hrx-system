@@ -58,6 +58,8 @@ enum loom_low_schedule_node_flag_bits_e {
   LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP = 1u << 2,
   // Node observes completion of externally visible program-exit memory.
   LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY = 1u << 3,
+  // Descriptor results overwrite storage before untied operands are consumed.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER = 1u << 4,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 

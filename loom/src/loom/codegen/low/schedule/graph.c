@@ -90,6 +90,10 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
 
   node->descriptor = packet.descriptor;
   if (iree_any_bit_set(packet.descriptor->flags,
+                       LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER)) {
+    node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER;
+  }
+  if (iree_any_bit_set(packet.descriptor->flags,
                        LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
     node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
   }

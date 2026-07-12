@@ -29,6 +29,8 @@ typedef struct loom_low_schedule_unlock_record_t
 struct loom_low_schedule_pressure_state_t {
   // Current live register units by descriptor register-class ID.
   uint64_t* current_live_units_by_reg_class;
+  // Block-local aligned-packing headroom by descriptor register-class ID.
+  uint32_t* packing_reserve_units_by_reg_class;
   // Shared pressure state for overlapping register classes.
   struct {
     // Mutable records indexed by one-based alias-set ID.
@@ -72,6 +74,8 @@ struct loom_low_schedule_pressure_state_t {
   loom_value_ordinal_t* candidate_operand_ordinals;
   // Scratch live-unit delta by descriptor register-class ID.
   int64_t* candidate_delta_units_by_reg_class;
+  // Candidate-only early-clobber units by descriptor register-class ID.
+  uint64_t* candidate_transient_units_by_reg_class;
   // True when a register class has candidate delta state to reset.
   uint8_t* candidate_delta_touched_flags;
   // Register-class IDs touched in candidate_delta_units_by_reg_class.
@@ -97,8 +101,8 @@ struct loom_low_schedule_pressure_state_t {
   iree_host_size_t candidate_delta_touched_count;
   // Current aggregate live register units in the simulated schedule.
   uint64_t current_live_units;
-  // Pressure-cliff penalty for the current simulated schedule state.
-  uint32_t current_pressure_cliff_penalty;
+  // Persistent pressure-cliff penalty for the current schedule state.
+  uint32_t current_persistent_pressure_penalty;
   // Number of populated entries in block_reg_class_ids.
   iree_host_size_t block_reg_class_count;
   // Number of populated entries in block_value_ordinals.
@@ -114,6 +118,28 @@ enum loom_low_schedule_pressure_source_kind_e {
 };
 typedef uint8_t loom_low_schedule_pressure_source_kind_t;
 
+typedef enum loom_low_schedule_pressure_progress_kind_e {
+  // Candidate does not provide a bounded pressure-recovery step.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE = 0,
+  // Candidate reduces persistent live register units.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_REDUCTION = 1,
+  // Candidate advances storage aliases without growing persistent pressure.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_STORAGE = 2,
+  // Candidate exposes a descriptor frontier proven not to grow pressure.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER = 3,
+  // Candidate advances register work without growing persistent pressure.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING = 4,
+} loom_low_schedule_pressure_progress_kind_t;
+
+typedef enum loom_low_schedule_pressure_risk_e {
+  // Candidate and its bounded downstream demand remain below pressure limits.
+  LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE = 0,
+  // Candidate remains below a cliff but reaches its bounded demand horizon.
+  LOOM_LOW_SCHEDULE_PRESSURE_RISK_NEAR_CLIFF = 1,
+  // Candidate's required physical pressure crosses a protected cliff.
+  LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT = 2,
+} loom_low_schedule_pressure_risk_t;
+
 // Complete bounded score for one ready scheduling candidate.
 typedef struct loom_low_schedule_candidate_score_t {
   // Aggregate live register units after scheduling the candidate.
@@ -122,8 +148,6 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint64_t killed_live_units;
   // Register result units made live by the candidate.
   uint64_t produced_live_units;
-  // Projected pressure-cliff penalty relative to current state.
-  int64_t pressure_cliff_penalty_delta;
   // Live register values whose last use is the candidate.
   uint32_t killed_live_value_count;
   // Register result values made live by the candidate.
@@ -132,8 +156,8 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t critical_path_cycles;
   // Downstream visible register demand reached through structural nodes.
   uint32_t pressure_demand_units;
-  // Register headroom reserved for results opened by the candidate.
-  uint32_t pressure_reserve_units;
+  // Register headroom needed by the downstream frontier this candidate opens.
+  uint32_t activation_reserve_units;
   // Cycles until all same-block SSA producers are ready.
   uint32_t data_ready_stall_cycles;
   // Cycles until descriptor resources can accept this candidate.
@@ -142,13 +166,13 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t hazard_stall_cycles;
   // Maximum stall across data, resources, and target hazards.
   uint32_t effective_stall_cycles;
-  // Target pressure-cliff penalty from projected live units.
+  // Penalty from the candidate's maximum required physical pressure.
   uint32_t pressure_cliff_penalty;
-  // Pressure-cliff penalty excluding speculative reserve units.
-  uint32_t actual_pressure_cliff_penalty;
+  // Pressure-cliff penalty from persistent state after the candidate.
+  uint32_t persistent_pressure_cliff_penalty;
   // Crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t pressure_cliff_units;
-  // Live units before the next cliff, or PRESSURE_CLIFF_NONE.
+  // Required physical units before the next cliff, or PRESSURE_CLIFF_NONE.
   uint32_t units_until_pressure_cliff;
   // Source-order tie breaker.
   uint32_t source_ordinal;
@@ -168,17 +192,17 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint16_t pressure_cliff_source_id;
   // Interpretation of pressure_cliff_source_id.
   loom_low_schedule_pressure_source_kind_t pressure_cliff_source_kind;
-  // Candidate properties used by pressure-aware comparison.
+  // Bounded pressure-recovery behavior of the candidate.
+  loom_low_schedule_pressure_progress_kind_t pressure_progress_kind;
+  // Physical-pressure risk introduced by the candidate.
+  loom_low_schedule_pressure_risk_t pressure_risk;
+  // Descriptor-frontier facts discovered while scoring the candidate.
   uint8_t flags;
 } loom_low_schedule_candidate_score_t;
 
 enum loom_low_schedule_candidate_flag_bits_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR = 1u << 0,
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR = 1u << 1,
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_PRESERVES_ZERO_PRESSURE_PENALTY = 1u << 2,
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_MULTI_USE_RESULT = 1u << 3,
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_MAKES_PRESSURE_PROGRESS = 1u << 4,
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_PRESSURE_SENSITIVE = 1u << 5,
 };
 
 // Returns true when |strategy| simulates register and target pressure.
