@@ -268,9 +268,12 @@ static iree_status_t loom_low_schedule_pressure_budget_for_class(
   const uint16_t reg_class_id = value_class.register_class_id;
   const loom_low_reg_class_t* reg_class =
       &state->target.descriptor_set->reg_classes[reg_class_id];
-  if (state->pressure_limit_units_by_reg_class != NULL) {
+  if (state->pressure_limits.by_reg_class != NULL) {
     const uint32_t limit_units =
-        state->pressure_limit_units_by_reg_class[reg_class_id];
+        reg_class->alias_set_id != 0
+            ? state->pressure_limits.alias_sets[reg_class->alias_set_id]
+                  .live_unit_limit
+            : state->pressure_limits.by_reg_class[reg_class_id];
     if (limit_units != UINT32_MAX) {
       *out_budget = limit_units;
       *out_has_budget = true;

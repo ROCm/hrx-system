@@ -49,6 +49,7 @@ from loom.target.low_descriptors import (
     OperandRole,
     RegClassAlt,
     RegClassAltFlag,
+    RegClassFlag,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -346,6 +347,73 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
             )
             == descriptor.encoding_field_values
         )
+
+
+def test_compiler_rejects_sparse_register_alias_set_ids() -> None:
+    register_classes = tuple(
+        replace(register_class, alias_set_id=register_class.alias_set_id + 1) if register_class.alias_set_id != 0 else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias-set IDs must be dense from 1; found [2, 3]"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_location_kind_mismatch() -> None:
+    register_classes = tuple(
+        replace(
+            register_class,
+            flags=(RegClassFlag.VIRTUAL_ONLY,),
+            allocatable_count=0,
+        )
+        if register_class.name == "test.alias64"
+        else register_class
+        for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 mixes physical and virtual location classes 'test.alias32' and 'test.alias64'"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_target_bank_mismatch() -> None:
+    register_classes = tuple(replace(register_class, target_bank_id=1) if register_class.name == "test.alias64" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 classes 'test.alias32' and 'test.alias64' use different target banks"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_capacity_mismatch() -> None:
+    register_classes = tuple(replace(register_class, allocatable_count=2) if register_class.name == "test.alias64" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 classes 'test.alias32' and 'test.alias64' have different allocatable counts"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 def test_compiler_derives_barrier_descriptor_flag() -> None:

@@ -586,6 +586,7 @@ def compile_descriptor_set(
     if spec.generator_version == 0:
         raise ValueError(f"descriptor set '{spec.key}' has zero generator version")
     reg_class_inputs = _dedupe_by_name(spec.reg_classes, lambda item: item.name)
+    validation.validate_register_classes(spec.key, tuple(reg_class_inputs.values()))
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
     resource_inputs = _dedupe_by_name(spec.resources, lambda item: item.name)
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)

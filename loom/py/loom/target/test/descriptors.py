@@ -56,6 +56,8 @@ _REG_PHYS = "test.phys"
 _REG_SPECIAL = "test.special"
 _REG_ALIAS32 = "test.alias32"
 _REG_ALIAS64 = "test.alias64"
+_REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
+_REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 
 _REG_PART_I32_LOW16 = "test.i32.low16"
 _REG_PART_I32_HIGH16 = "test.i32.high16"
@@ -83,6 +85,7 @@ _I32_I64_ALT = (RegClassAlt(_REG_I32), RegClassAlt(_REG_I64))
 _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
+_PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 
 
 def _asm(
@@ -105,12 +108,12 @@ def _asm(
     )
 
 
-def _i32_result(field_name: str = "dst") -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _I32_ALT)
+def _i32_result(field_name: str = "dst", *, unit_count: int = 1) -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _I32_ALT, unit_count=unit_count)
 
 
-def _i32_operand(field_name: str) -> Operand:
-    return Operand(field_name, OperandRole.OPERAND, _I32_ALT)
+def _i32_operand(field_name: str, *, unit_count: int = 1) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _I32_ALT, unit_count=unit_count)
 
 
 def _i32_low16_result(field_name: str = "dst") -> Operand:
@@ -183,6 +186,26 @@ def _special_result(field_name: str = "dst") -> Operand:
 
 def _special_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _SPECIAL_ALT)
+
+
+def _pressure_alias32_result(
+    field_name: str = "dst", *, unit_count: int = 1
+) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.RESULT,
+        _PRESSURE_ALIAS32_ALT,
+        unit_count=unit_count,
+    )
+
+
+def _pressure_alias32_operand(field_name: str, *, unit_count: int = 1) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        _PRESSURE_ALIAS32_ALT,
+        unit_count=unit_count,
+    )
 
 
 def _special_state_operand(field_name: str) -> Operand:
@@ -668,6 +691,29 @@ TEST_LOW_ADD_PHYS_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR = Descriptor(
+    key="test.move.to.pressure.alias32",
+    mnemonic="test.move.to.pressure.alias32",
+    semantic_tag="test.move.to.pressure.alias32",
+    operands=(_pressure_alias32_result(), _i32_operand("src")),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR = Descriptor(
+    key="test.move.from.pressure.alias32.x5",
+    mnemonic="test.move.from.pressure.alias32.x5",
+    semantic_tag="test.move.from.pressure.alias32.x5",
+    operands=(
+        _i32_result(unit_count=5),
+        _pressure_alias32_operand("src", unit_count=5),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_ADD_SPECIAL_DESCRIPTOR = Descriptor(
     key="test.add.special",
     mnemonic="test.add.special",
@@ -1041,6 +1087,22 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             allocatable_count=1,
             alias_set_id=1,
         ),
+        RegClass(
+            _REG_PRESSURE_ALIAS32,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(RegClassFlag.PHYSICAL,),
+            allocatable_count=8,
+            alias_set_id=2,
+        ),
+        RegClass(
+            _REG_PRESSURE_ALIAS64,
+            64,
+            SpillSlotSpace.STACK,
+            flags=(RegClassFlag.PHYSICAL,),
+            allocatable_count=8,
+            alias_set_id=2,
+        ),
     ),
     register_parts=(
         RegisterPart(_REG_PART_I32_LOW16, _REG_I32, 0x1),
@@ -1152,6 +1214,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_EXTRACT_LANE_I32_DESCRIPTOR,
         TEST_LOW_SHUFFLE_BYTES_DESCRIPTOR,
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
+        TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
+        TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
         TEST_LOW_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR,
