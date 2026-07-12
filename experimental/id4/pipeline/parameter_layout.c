@@ -177,9 +177,19 @@ static iree_status_t id4_pipeline_parameter_layout_candidate(
   out_entry->kind = ID4_PIPELINE_PARAMETER_LAYOUT_ENTRY_KIND_EXECUTION;
   out_entry->key = parameter_tensor->layout.name;
   out_entry->encoding = parameter_op->encoding;
-  out_entry->dtype = parameter_tensor->layout.dtype;
-  out_entry->shape = parameter_tensor->layout.shape;
-  out_entry->byte_length = parameter_tensor->layout.byte_length;
+  if (parameter_op->encoding ==
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
+    const id4_pipeline_program_parameter_source_t* source =
+        &parameter_op->sources[0];
+    out_entry->dtype = id4_pipeline_program_region_convert_dtype(source->dtype);
+    out_entry->shape = id4_pipeline_parameter_layout_shape(source->shape);
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+        source->dtype, source->shape, &out_entry->byte_length));
+  } else {
+    out_entry->dtype = parameter_tensor->layout.dtype;
+    out_entry->shape = parameter_tensor->layout.shape;
+    out_entry->byte_length = parameter_tensor->layout.byte_length;
+  }
   out_entry->alignment = parameter_tensor->layout.alignment;
   out_entry->source_scope = iree_string_view_empty();
   out_entry->parameter_slab_index = parameter_tensor->parameter_slab_index;

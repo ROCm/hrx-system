@@ -213,12 +213,19 @@ static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
     }
     return iree_ok_status();
   }
+  iree_device_size_t source_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+      source->dtype, source->shape, &source_byte_length));
+  iree_device_size_t target_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+      options->dtype, options->shape, &target_byte_length));
   if (!iree_string_view_equal(source->key, options->key) ||
       source->dtype != options->dtype ||
-      !id4_pipeline_program_shape_equal(source->shape, options->shape)) {
+      source_byte_length != target_byte_length) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "direct parameter %.*s source metadata must match execution metadata",
+        "direct parameter %.*s source key, dtype, and byte length must match "
+        "execution storage",
         (int)options->key.size, options->key.data);
   }
   return iree_ok_status();

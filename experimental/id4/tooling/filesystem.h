@@ -28,6 +28,12 @@ iree_status_t id4_tooling_format_child_path(iree_string_view_t directory,
 void id4_tooling_free_path(iree_string_view_t* path,
                            iree_allocator_t host_allocator);
 
+// Atomically publishes |source_path| at |target_path|, replacing an existing
+// target file when the platform supports atomic replacement.
+iree_status_t id4_tooling_replace_file(iree_string_view_t source_path,
+                                       iree_string_view_t target_path,
+                                       iree_allocator_t host_allocator);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

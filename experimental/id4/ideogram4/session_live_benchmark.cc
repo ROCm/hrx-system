@@ -1295,11 +1295,13 @@ static iree_status_t CreateParameterSources(
       ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
   context->qwen_parameter_scope = IREE_SV("qwen");
   context->conditioned_dit_parameter_scope =
-      context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+      uses_execution_layout ? IREE_SV("dit_conditioned")
+      : context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
           ? IREE_SV("dit_cond")
           : iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
   context->unconditioned_dit_parameter_scope =
-      context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
+      uses_execution_layout ? IREE_SV("dit_unconditioned")
+      : context->dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16
           ? IREE_SV("dit_uncond")
           : iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
   context->vae_parameter_scope = IREE_SV("vae");

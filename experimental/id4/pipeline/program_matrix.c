@@ -1111,15 +1111,22 @@ static iree_status_t id4_pipeline_program_matrix_validate_parameter(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program matrix provider weight layout is invalid");
   }
-  const id4_pipeline_program_shape_t expected_weight_shape =
-      id4_pipeline_program_make_shape_rank2(problem->n, problem->k);
-  if (!id4_pipeline_program_matrix_shape_equal(parameter->weight.shape,
-                                               expected_weight_shape)) {
+  iree_device_size_t expected_weight_element_count = 0;
+  if (!iree_device_size_checked_mul(problem->n, problem->k,
+                                    &expected_weight_element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program matrix weight element count overflows");
+  }
+  uint64_t actual_weight_element_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_shape_element_count(
+      parameter->weight.shape, &actual_weight_element_count));
+  if (actual_weight_element_count != expected_weight_element_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "program matrix provider weight shape must be [N=%" PRIu32
-        ", K=%" PRIu32 "]",
-        problem->n, problem->k);
+        "program matrix provider weight storage has %" PRIu64
+        " elements but [N=%" PRIu32 ", K=%" PRIu32 "] requires %" PRIu64,
+        actual_weight_element_count, problem->n, problem->k,
+        (uint64_t)expected_weight_element_count);
   }
   if (!id4_pipeline_program_matrix_scale_layout_is_valid(
           parameter->scale_layout)) {

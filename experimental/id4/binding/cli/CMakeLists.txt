@@ -9,12 +9,41 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    parameter_bake
+  HDRS
+    "parameter_bake.h"
+  SRCS
+    "parameter_bake.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::ideogram4::session
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_layout
+    iree::experimental::id4::pipeline::parameter_slab
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::stages::vae_parameters
+    iree::experimental::id4::tooling::filesystem
+    iree::experimental::id4::tooling::runtime
+    iree::hal
+    iree::io::file_handle
+    iree::io::formats::irpa
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::io::stream
+  PUBLIC
+)
+
 iree_cc_binary(
   NAME
     id4
   SRCS
     "main.c"
   DEPS
+    ::parameter_bake
     iree::base
     iree::base::internal
     iree::base::tooling::flags
@@ -22,6 +51,7 @@ iree_cc_binary(
     iree::experimental::id4::ideogram4::session
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::tooling::capture
     iree::experimental::id4::tooling::diagnostics

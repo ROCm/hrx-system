@@ -43,7 +43,7 @@ typedef struct id4_pipeline_parameter_layout_entry_t {
   id4_pipeline_program_parameter_encoding_t encoding;
   // Scalar dtype of the stored bytes.
   id4_pipeline_tensor_dtype_t dtype;
-  // Logical shape of the stored tensor.
+  // Canonical physical shape of the stored tensor.
   id4_pipeline_tensor_shape_t shape;
   // Exact stored byte length.
   iree_device_size_t byte_length;

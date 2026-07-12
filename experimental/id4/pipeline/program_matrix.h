@@ -77,7 +77,7 @@ typedef struct id4_pipeline_program_matrix_problem_t {
 
 // Provider-side storage for one logical KxN parameter matrix.
 typedef struct id4_pipeline_program_matrix_parameter_t {
-  // Provider tensor containing logical NxK weight rows.
+  // Provider tensor whose physical bytes are viewed as logical NxK weight rows.
   id4_pipeline_program_parameter_source_t weight;
   // Physical layout of the provider weight tensor.
   id4_pipeline_program_matrix_layout_t weight_layout;

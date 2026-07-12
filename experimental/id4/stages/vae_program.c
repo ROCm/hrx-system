@@ -1715,8 +1715,7 @@ static iree_status_t id4_vae_program_author_conv3x3_matrix_bf16(
                               .source_scope = parameter_scope,
                               .key = resolved_weight_key,
                               .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-                              .shape = id4_pipeline_program_make_shape_rank2(
-                                  output_channel_count, inner_dimension),
+                              .shape = packed_weight_shape,
                           },
                       .weight_layout =
                           ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,

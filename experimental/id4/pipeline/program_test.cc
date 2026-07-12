@@ -214,6 +214,37 @@ TEST(PipelineProgram, AuthorsDirectParameterFromDenseSourceSpans) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgram, AuthorsDirectParameterWithBytePreservingReshape) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t source = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("conv.weight.packed"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank4(8, 3, 3, 4),
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&source,
+      /*.key=*/source.key,
+      /*.dtype=*/source.dtype,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 36),
+  };
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(id4_pipeline_program_parameter(builder, &options, &weight));
+
+  options.shape = id4_pipeline_program_make_shape_rank2(8, 35);
+  id4_pipeline_program_tensor_t invalid_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_program_parameter(builder, &options, &invalid_weight));
+}
+
 TEST(PipelineProgram, RejectsDirectParameterSourceSpanReuseMismatch) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();

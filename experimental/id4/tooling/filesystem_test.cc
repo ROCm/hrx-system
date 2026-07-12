@@ -55,4 +55,26 @@ TEST(FilesystemTest, RejectsExistingNonDirectory) {
                                                      iree_allocator_system()));
 }
 
+TEST(FilesystemTest, ReplacesPublishedFile) {
+  iree::testing::TempFilePath source_path("id4_tooling_replace_source");
+  iree::testing::TempFilePath target_path("id4_tooling_replace_target");
+  {
+    std::ofstream source(source_path.path());
+    source << "new contents";
+  }
+  {
+    std::ofstream target(target_path.path());
+    target << "old contents";
+  }
+
+  IREE_ASSERT_OK(id4_tooling_replace_file(source_path.path_view(),
+                                          target_path.path_view(),
+                                          iree_allocator_system()));
+  EXPECT_FALSE(source_path.Exists());
+  std::ifstream target(target_path.path());
+  std::string contents;
+  std::getline(target, contents);
+  EXPECT_EQ(contents, "new contents");
+}
+
 }  // namespace

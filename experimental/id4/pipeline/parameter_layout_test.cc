@@ -145,6 +145,36 @@ static ProgramPtr CreateParameterProgram() {
   return ProgramPtr(program, id4_pipeline_program_release);
 }
 
+static ProgramPtr CreateDirectViewParameterProgram(
+    id4_pipeline_program_shape_t source_shape,
+    id4_pipeline_program_shape_t execution_shape) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+  const id4_pipeline_program_parameter_source_t source = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("conv.weight.packed"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/source_shape,
+  };
+  const id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&source,
+      /*.key=*/source.key,
+      /*.dtype=*/source.dtype,
+      /*.shape=*/execution_shape,
+  };
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(id4_pipeline_program_parameter(builder, &options, &weight));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  return ProgramPtr(program, id4_pipeline_program_release);
+}
+
 static PlanPtr CreateParameterPlan(const id4_pipeline_program_t* program,
                                    iree_hal_device_group_t* device_group) {
   const id4_pipeline_device_placement_t placement = {
@@ -300,6 +330,37 @@ TEST(ParameterLayoutTest, PreservesDynamicSourcesAndBakesExecutionStorage) {
                         id4_pipeline_parameter_layout_validate_index(
                             plan.get(), incompatible_index));
 
+  iree_io_parameter_archive_builder_deinitialize(&archive_builder);
+}
+
+TEST(ParameterLayoutTest, DirectStorageSurvivesConsumerReshape) {
+  DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
+                              iree_hal_device_group_release);
+  const id4_pipeline_program_shape_t source_shape =
+      id4_pipeline_program_make_shape_rank4(8, 3, 3, 4);
+  ProgramPtr convolution_program =
+      CreateDirectViewParameterProgram(source_shape, source_shape);
+  ProgramPtr matrix_program = CreateDirectViewParameterProgram(
+      source_shape, id4_pipeline_program_make_shape_rank2(8, 36));
+  PlanPtr convolution_plan =
+      CreateParameterPlan(convolution_program.get(), device_group.get());
+  PlanPtr matrix_plan =
+      CreateParameterPlan(matrix_program.get(), device_group.get());
+
+  const id4_pipeline_parameter_layout_entry_t matrix_entry =
+      FindEntry(matrix_plan.get(), IREE_SV("conv.weight.packed"));
+  ASSERT_EQ(matrix_entry.shape.rank, source_shape.rank);
+  for (uint32_t i = 0; i < source_shape.rank; ++i) {
+    EXPECT_EQ(matrix_entry.shape.dims[i], source_shape.dims[i]);
+  }
+
+  iree_io_parameter_archive_builder_t archive_builder;
+  IREE_ASSERT_OK(iree_io_parameter_archive_builder_initialize(
+      iree_allocator_system(), &archive_builder));
+  IREE_ASSERT_OK(id4_pipeline_parameter_layout_add_archive_entries(
+      convolution_plan.get(), &archive_builder));
+  IREE_EXPECT_OK(id4_pipeline_parameter_layout_validate_index(
+      matrix_plan.get(), archive_builder.index));
   iree_io_parameter_archive_builder_deinitialize(&archive_builder);
 }
 

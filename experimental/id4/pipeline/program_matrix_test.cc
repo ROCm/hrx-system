@@ -263,7 +263,7 @@ class ProgramMatrixTest : public ::testing::Test {
             /*.source_scope=*/IREE_SV("vae"),
             /*.key=*/IREE_SV("conv.weight.packed_oc_ky_kx_ic.bf16"),
             /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-            /*.shape=*/id4_pipeline_program_make_shape_rank2(512, 4608),
+            /*.shape=*/id4_pipeline_program_make_shape_rank4(512, 3, 3, 512),
         },
         /*.weight_layout=*/
         ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_RHS_TRANSPOSED_ROW_MAJOR,

@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+load(
+    "//runtime/build_tools/bazel:cc.bzl",
+    "iree_runtime_cc_binary",
+    "iree_runtime_cc_library",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,14 +16,41 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+iree_runtime_cc_library(
+    name = "parameter_bake",
+    srcs = ["parameter_bake.c"],
+    hdrs = ["parameter_bake.h"],
+    deps = [
+        "//experimental/id4/ideogram4:session",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_layout",
+        "//experimental/id4/pipeline:parameter_slab",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/stages:vae_parameters",
+        "//experimental/id4/tooling:filesystem",
+        "//experimental/id4/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/io/formats/irpa",
+    ],
+)
+
 iree_runtime_cc_binary(
     name = "id4",
     srcs = ["main.c"],
     deps = [
+        ":parameter_bake",
         "//experimental/id4/ideogram4:request",
         "//experimental/id4/ideogram4:session",
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_slab",
         "//experimental/id4/stages:ideogram4_dit_parameters",
         "//experimental/id4/tooling:capture",
         "//experimental/id4/tooling:diagnostics",

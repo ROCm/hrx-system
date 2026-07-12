@@ -7,10 +7,12 @@
 #include "experimental/id4/tooling/filesystem.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #if defined(IREE_PLATFORM_WINDOWS)
 #include <direct.h>
+#include <windows.h>
 #endif  // IREE_PLATFORM_WINDOWS
 #include <sys/stat.h>
 
@@ -166,4 +168,41 @@ void id4_tooling_free_path(iree_string_view_t* path,
   if (!path) return;
   iree_allocator_free(host_allocator, (void*)path->data);
   *path = iree_string_view_empty();
+}
+
+iree_status_t id4_tooling_replace_file(iree_string_view_t source_path,
+                                       iree_string_view_t target_path,
+                                       iree_allocator_t host_allocator) {
+  if (iree_string_view_is_empty(source_path) ||
+      iree_string_view_is_empty(target_path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source and target file paths are required");
+  }
+  char* source_cstring = NULL;
+  IREE_RETURN_IF_ERROR(
+      id4_tooling_dup_cstring(source_path, host_allocator, &source_cstring));
+  char* target_cstring = NULL;
+  iree_status_t status =
+      id4_tooling_dup_cstring(target_path, host_allocator, &target_cstring);
+  if (iree_status_is_ok(status)) {
+#if defined(IREE_PLATFORM_WINDOWS)
+    if (!MoveFileExA(source_cstring, target_cstring,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "failed to publish file `%s` as `%s` (Windows error %lu)",
+          source_cstring, target_cstring, (unsigned long)GetLastError());
+    }
+#else
+    if (rename(source_cstring, target_cstring) != 0) {
+      const int saved_errno = errno;
+      status = iree_make_status(iree_status_code_from_errno(saved_errno),
+                                "failed to publish file `%s` as `%s` (%d)",
+                                source_cstring, target_cstring, saved_errno);
+    }
+#endif  // IREE_PLATFORM_WINDOWS
+  }
+  iree_allocator_free(host_allocator, target_cstring);
+  iree_allocator_free(host_allocator, source_cstring);
+  return status;
 }
