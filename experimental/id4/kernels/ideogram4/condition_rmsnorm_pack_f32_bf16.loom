@@ -1,6 +1,9 @@
 config.decl @id4.ideogram4.condition_rmsnorm_pack.text_token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.ideogram4.condition_rmsnorm_pack.padded_token_count : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+
 config.decl @id4.ideogram4.condition_rmsnorm_pack.feature_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.condition_rmsnorm_pack.hidden_state_layer_count : %value: index where [range(%value, 1, 64)]
 
 func.def inline @id4_ideogram4_condition_rmsnorm_pack_f32_bf16_source_feature(%feature: index, %feature_layer_size: index, %hidden_state_layer_count: index) -> (index) {
@@ -29,10 +32,9 @@ kernel.def export("id4_ideogram4_condition_rmsnorm_pack_f32_bf16") @id4_ideogram
   %token_valid = index.cmp ult, %token, %text_token_count : index
   %zero_f32 = scalar.constant 0.0 : f32
   %zero_bf16 = scalar.constant 0.0 : bf16
-  %epsilon = scalar.constant 0.000001 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
   %feature_count_i32 = index.cast %feature_count : index to i32
   %feature_count_f32 = scalar.sitofp %feature_count_i32 : i32 to f32
-
   %input_noalias, %weight_noalias, %packed_output_noalias = buffer.assume.noalias %input, %weight, %packed_output : buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -40,11 +42,12 @@ kernel.def export("id4_ideogram4_condition_rmsnorm_pack_f32_bf16") @id4_ideogram
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%feature_count]x[%text_token_count]xf32, #dense>
   %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%feature_count]xbf16, #dense>
   %packed_output_view = buffer.view %packed_output_global[%base] : buffer -> view<[%padded_token_count]x[%feature_count]xbf16, #dense>
-
   %lane_square_sum = scf.if %token_valid -> (f32) {
     %sum = scf.for %feature = [%lane to %feature_count step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
       %source_feature = func.call @id4_ideogram4_condition_rmsnorm_pack_f32_bf16_source_feature(%feature, %feature_layer_size, %hidden_state_layer_count) : (index, index, index) -> (index)
-      %value = view.load %input_view[%source_feature, %token] : view<[%feature_count]x[%text_token_count]xf32, #dense> -> f32
+      %source_value = view.load %input_view[%source_feature, %token] : view<[%feature_count]x[%text_token_count]xf32, #dense> -> f32
+      %value_bf16 = scalar.fptrunc %source_value : f32 to bf16
+      %value = scalar.extf %value_bf16 : bf16 to f32
       %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
       scf.yield %next : f32
@@ -57,11 +60,12 @@ kernel.def export("id4_ideogram4_condition_rmsnorm_pack_f32_bf16") @id4_ideogram
   %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %feature_count_f32 : f32
   %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
   %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean_square_epsilon : f32
-
   scf.for %feature = [%lane to %feature_count step %workgroup_size_x] {
     %packed = scf.if %token_valid -> (bf16) {
       %source_feature = func.call @id4_ideogram4_condition_rmsnorm_pack_f32_bf16_source_feature(%feature, %feature_layer_size, %hidden_state_layer_count) : (index, index, index) -> (index)
-      %value = view.load %input_view[%source_feature, %token] : view<[%feature_count]x[%text_token_count]xf32, #dense> -> f32
+      %source_value = view.load %input_view[%source_feature, %token] : view<[%feature_count]x[%text_token_count]xf32, #dense> -> f32
+      %value_bf16 = scalar.fptrunc %source_value : f32 to bf16
+      %value = scalar.extf %value_bf16 : bf16 to f32
       %weight_bf16 = view.load %weight_view[%feature] : view<[%feature_count]xbf16, #dense> -> bf16
       %weight_value = scalar.extf %weight_bf16 : bf16 to f32
       %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
