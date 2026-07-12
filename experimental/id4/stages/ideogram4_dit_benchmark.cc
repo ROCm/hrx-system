@@ -438,8 +438,9 @@ static iree_status_t PrepareDitBundle(DitBenchmarkContext* context,
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      context->parameter_provider.get(),
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(
+          context->parameter_provider.get()),
       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = context->kernel_library.get();

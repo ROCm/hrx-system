@@ -718,14 +718,16 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   if (!has_parameter_slabs) {
-    prepare_options.parameter_source = id4_pipeline_stage_no_parameters();
+    prepare_options.parameter_policy = id4_pipeline_stage_no_parameters();
   } else if (reuse_parameter_slabs) {
-    prepare_options.parameter_source =
-        id4_pipeline_stage_resident_parameters(resident_parameter_slabs);
+    prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+        id4_pipeline_resident_parameter_source(resident_parameter_slabs),
+        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, 0);
   } else {
-    prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-        id4_ideogram4_generation_prepare_stage_parameter_provider(
-            &bundle->parameter_providers, stage_ordinal),
+    prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+        id4_pipeline_checkpoint_parameter_source(
+            id4_ideogram4_generation_prepare_stage_parameter_provider(
+                &bundle->parameter_providers, stage_ordinal)),
         defer_parameter_loads_to_issue
             ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
             : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,

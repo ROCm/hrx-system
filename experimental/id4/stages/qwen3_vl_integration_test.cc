@@ -228,8 +228,9 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithParameters) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      parameter_provider.get(), ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(parameter_provider.get()),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();

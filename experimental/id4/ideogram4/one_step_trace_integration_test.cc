@@ -629,8 +629,9 @@ static iree_status_t PrepareStage(
   id4_pipeline_stage_prepare_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      parameter_provider, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(parameter_provider),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   options.kernel_library = kernel_library;
   options.wait_semaphore_list = wait_list;

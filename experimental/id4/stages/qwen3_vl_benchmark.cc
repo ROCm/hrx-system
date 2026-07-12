@@ -763,8 +763,9 @@ static iree_status_t PrepareQwenBundle(QwenBenchmarkContext* context,
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      context->parameter_provider.get(),
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(
+          context->parameter_provider.get()),
       defers_parameter_loads ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
                              : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       defers_parameter_loads ? IREE_DEVICE_SIZE_MAX : 0);

@@ -466,9 +466,9 @@ static iree_status_t SmokeStagePrepare(
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(plan);
   if (parameter_slab_count != 0 &&
-      (options->parameter_source.kind !=
-           ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT ||
-       options->parameter_source.residency !=
+      (options->parameter_policy.source.kind !=
+           ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT ||
+       options->parameter_policy.residency !=
            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke resident checkpoint parameters are "
@@ -484,7 +484,7 @@ static iree_status_t SmokeStagePrepare(
     load_options.encoder_staging_memory_type =
         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     load_options.provider =
-        options->parameter_source.storage.checkpoint.provider;
+        options->parameter_policy.source.storage.checkpoint.provider;
     load_options.wait_semaphore_list = options->wait_semaphore_list;
     load_options.signal_semaphore_list = options->signal_semaphore_list;
     load_options.diagnostics_sink = options->diagnostics_sink;
@@ -1024,8 +1024,9 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      &provider.base, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(&provider.base),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = prepare_signal_list;
@@ -1083,8 +1084,9 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      &provider.base, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(&provider.base),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = prepare_signal_list;
@@ -1192,8 +1194,9 @@ TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      &provider.base, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(&provider.base),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
@@ -1258,8 +1261,9 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      &provider.base, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(&provider.base),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
@@ -1409,8 +1413,9 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      &provider.base, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(&provider.base),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
@@ -1535,8 +1540,9 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      provider, ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(provider),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;

@@ -656,21 +656,21 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
   if (uses_execution_layout) {
-    stage_prepare_options.parameter_source =
-        id4_pipeline_stage_execution_layout_parameters(
+    stage_prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+        id4_pipeline_execution_layout_parameter_source(
             baked_archive_index.get(), baked_archive_provider.get(),
-            IREE_SV("baked"), ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
-            /*maximum_parameter_window_byte_length=*/4 * sizeof(float));
+            IREE_SV("baked")),
+        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
+        /*maximum_parameter_window_byte_length=*/4 * sizeof(float));
   } else {
-    stage_prepare_options.parameter_source =
-        id4_pipeline_stage_checkpoint_parameters(
-            parameter_provider.get(),
-            defers_parameter_loads
-                ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
-                : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
-            segments_parameter_residency ? 4 * sizeof(float)
-            : defers_parameter_loads     ? IREE_DEVICE_SIZE_MAX
-                                         : 0);
+    stage_prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+        id4_pipeline_checkpoint_parameter_source(parameter_provider.get()),
+        defers_parameter_loads
+            ? ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING
+            : ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+        segments_parameter_residency ? 4 * sizeof(float)
+        : defers_parameter_loads     ? IREE_DEVICE_SIZE_MAX
+                                     : 0);
   }
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -708,8 +708,10 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                 sizeof(reuse_stage_prepare_options));
     reuse_stage_prepare_options.structure_size =
         sizeof(reuse_stage_prepare_options);
-    reuse_stage_prepare_options.parameter_source =
-        id4_pipeline_stage_resident_parameters(source_parameter_slabs);
+    reuse_stage_prepare_options.parameter_policy =
+        id4_pipeline_stage_parameters(
+            id4_pipeline_resident_parameter_source(source_parameter_slabs),
+            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, 0);
     reuse_stage_prepare_options.kernel_library = kernel_library.get();
     reuse_stage_prepare_options.wait_semaphore_list =
         iree_hal_semaphore_list_empty();
@@ -930,11 +932,10 @@ TEST(ProgramStageIntegration, RejectsParameterSlabReuseWhenRequestsDiffer) {
   id4_pipeline_stage_prepare_options_t stage_prepare_options;
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
-  stage_prepare_options.parameter_source =
-      id4_pipeline_stage_checkpoint_parameters(
-          parameter_provider.get(),
-          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
-          /*maximum_parameter_window_byte_length=*/0);
+  stage_prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(parameter_provider.get()),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+      /*maximum_parameter_window_byte_length=*/0);
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
   stage_prepare_options.command_buffer_mode = context.value.command_buffer_mode;

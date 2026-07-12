@@ -148,52 +148,54 @@ static iree_status_t id4_pipeline_validate_prepare_options(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "prepare extension structures are not supported");
   }
-  const id4_pipeline_stage_parameter_source_t* parameter_source =
-      &options->parameter_source;
+  const id4_pipeline_stage_parameter_policy_t* parameter_policy =
+      &options->parameter_policy;
+  const id4_pipeline_parameter_source_t* parameter_source =
+      &parameter_policy->source;
   switch (parameter_source->kind) {
-    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE:
-      if (parameter_source->residency !=
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE:
+      if (parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE ||
-          parameter_source->maximum_parameter_window_byte_length != 0) {
+          parameter_policy->maximum_parameter_window_byte_length != 0) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "parameter-free preparation cannot select parameter residency");
       }
       break;
-    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
       if (!parameter_source->storage.checkpoint.provider) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "checkpoint parameter provider is required");
       }
-      if (parameter_source->residency !=
+      if (parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT &&
-          parameter_source->residency !=
+          parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "checkpoint parameter residency policy is invalid");
       }
-      if ((parameter_source->residency ==
+      if ((parameter_policy->residency ==
            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING) !=
-          (parameter_source->maximum_parameter_window_byte_length != 0)) {
+          (parameter_policy->maximum_parameter_window_byte_length != 0)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "checkpoint streaming requires a nonzero parameter window budget "
             "and resident preparation requires a zero budget");
       }
       break;
-    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
-      if (parameter_source->residency !=
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      if (parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT &&
-          parameter_source->residency !=
+          parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "baked execution-layout parameter residency policy is invalid");
       }
-      if ((parameter_source->residency ==
+      if ((parameter_policy->residency ==
            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING) !=
-          (parameter_source->maximum_parameter_window_byte_length != 0)) {
+          (parameter_policy->maximum_parameter_window_byte_length != 0)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "baked execution-layout streaming requires a nonzero parameter "
@@ -212,10 +214,10 @@ static iree_status_t id4_pipeline_validate_prepare_options(
             "and supported scope");
       }
       break;
-    case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT:
-      if (parameter_source->residency !=
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT:
+      if (parameter_policy->residency !=
               ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT ||
-          parameter_source->maximum_parameter_window_byte_length != 0 ||
+          parameter_policy->maximum_parameter_window_byte_length != 0 ||
           !parameter_source->storage.resident.slabs) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -228,14 +230,13 @@ static iree_status_t id4_pipeline_validate_prepare_options(
                               parameter_source->kind);
   }
   const bool submits_parameter_work =
-      parameter_source->residency ==
+      parameter_policy->residency ==
           ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT &&
       (parameter_source->kind ==
-           ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT ||
-       parameter_source->kind ==
-           ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT);
+           ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT ||
+       parameter_source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT);
   const bool streams_parameters =
-      parameter_source->residency ==
+      parameter_policy->residency ==
       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
   if (submits_parameter_work && options->signal_semaphore_list.count == 0) {
     return iree_make_status(

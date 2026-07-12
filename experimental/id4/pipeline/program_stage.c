@@ -348,7 +348,7 @@ static iree_status_t id4_pipeline_program_stage_emit_lifecycle(
 
 typedef struct id4_pipeline_program_stage_parameter_policy_name_t {
   // Parameter source kind selected by the policy.
-  id4_pipeline_stage_parameter_source_kind_t kind;
+  id4_pipeline_parameter_source_kind_t kind;
   // Parameter residency selected by the policy.
   id4_pipeline_stage_parameter_residency_t residency;
   // Stable diagnostic name for the complete policy.
@@ -356,28 +356,28 @@ typedef struct id4_pipeline_program_stage_parameter_policy_name_t {
 } id4_pipeline_program_stage_parameter_policy_name_t;
 
 static iree_string_view_t id4_pipeline_program_stage_parameter_policy_name(
-    const id4_pipeline_stage_parameter_source_t* source) {
+    const id4_pipeline_stage_parameter_policy_t* policy) {
   static const id4_pipeline_program_stage_parameter_policy_name_t names[] = {
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE, IREE_SVL("none")},
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
        IREE_SVL("checkpoint/resident")},
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
        IREE_SVL("checkpoint/streaming")},
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
        IREE_SVL("execution_layout/resident")},
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING,
        IREE_SVL("execution_layout/streaming")},
-      {ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT,
+      {ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT,
        ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, IREE_SVL("resident")},
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
-    if (names[i].kind == source->kind &&
-        names[i].residency == source->residency) {
+    if (names[i].kind == policy->source.kind &&
+        names[i].residency == policy->residency) {
       return names[i].name;
     }
   }
@@ -505,22 +505,23 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
   }
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
-  const id4_pipeline_stage_parameter_source_t* parameter_source =
-      &options->stage_options->parameter_source;
+  const id4_pipeline_stage_parameter_policy_t* parameter_policy =
+      &options->stage_options->parameter_policy;
+  const id4_pipeline_parameter_source_t* parameter_source =
+      &parameter_policy->source;
   if (parameter_slab_count == 0 &&
-      parameter_source->kind != ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE) {
+      parameter_source->kind != ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program stage parameter source requires planned parameter slabs");
   }
   if (parameter_slab_count != 0 &&
-      parameter_source->kind == ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE) {
+      parameter_source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program stage parameter source is required by the plan");
   }
-  if (parameter_source->kind ==
-      ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
+  if (parameter_source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT) {
     if (id4_pipeline_parameter_slab_set_has_deferred_load_context(
             parameter_source->storage.resident.slabs)) {
       return iree_make_status(
@@ -546,28 +547,30 @@ iree_status_t id4_pipeline_program_stage_prepare(
       options->stage_name, options->stage_options->diagnostics_sink,
       IREE_SV("stage.prepare.parameter_policy"),
       id4_pipeline_program_stage_parameter_policy_name(
-          &options->stage_options->parameter_source)));
+          &options->stage_options->parameter_policy)));
 
   id4_pipeline_parameter_slab_set_t* parameter_slabs = NULL;
   id4_pipeline_parameter_residency_plan_t* parameter_residency_plan = NULL;
   id4_pipeline_program_prepared_t* prepared_program = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
   bool parameter_load_submitted = false;
-  const id4_pipeline_stage_parameter_source_t* parameter_source =
-      &options->stage_options->parameter_source;
+  const id4_pipeline_stage_parameter_policy_t* parameter_policy =
+      &options->stage_options->parameter_policy;
+  const id4_pipeline_parameter_source_t* parameter_source =
+      &parameter_policy->source;
   const bool streams_parameters =
-      parameter_source->residency ==
+      parameter_policy->residency ==
       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING;
   id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind =
       ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_INVALID;
   iree_status_t status = iree_ok_status();
   if (streams_parameters) {
     switch (parameter_source->kind) {
-      case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT:
+      case ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT:
         parameter_window_source_kind =
             ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
         break;
-      case ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
+      case ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT:
         parameter_window_source_kind =
             ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT;
         break;
@@ -586,20 +589,19 @@ iree_status_t id4_pipeline_program_stage_prepare(
     residency_options.plan = options->plan;
     residency_options.source_kind = parameter_window_source_kind;
     residency_options.maximum_target_byte_length =
-        parameter_source->maximum_parameter_window_byte_length;
+        parameter_policy->maximum_parameter_window_byte_length;
     residency_options.encoder_staging_chunk_byte_capacity =
         ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
     status = id4_pipeline_parameter_residency_plan_create(
         &residency_options, host_allocator, &parameter_residency_plan);
   }
   if (iree_status_is_ok(status) &&
-      parameter_source->kind ==
-          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT) {
+      parameter_source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT) {
     parameter_slabs = parameter_source->storage.resident.slabs;
     id4_pipeline_parameter_slab_set_retain(parameter_slabs);
   } else if (iree_status_is_ok(status) &&
              parameter_source->kind ==
-                 ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
+                 ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
     id4_pipeline_parameter_slab_set_load_options_t load_options;
     memset(&load_options, 0, sizeof(load_options));
     load_options.structure_size = sizeof(load_options);
@@ -630,7 +632,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     }
   } else if (iree_status_is_ok(status) &&
              parameter_source->kind ==
-                 ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+                 ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
     if (streams_parameters) {
       status = id4_pipeline_parameter_layout_validate_index(
           options->plan, parameter_source->storage.execution_layout.index);
@@ -678,7 +680,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
       prepare_options.parameter_window_source.kind =
           parameter_window_source_kind;
       if (parameter_source->kind ==
-          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+          ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
         prepare_options.parameter_window_source.execution_layout_scope =
             parameter_source->storage.execution_layout.scope;
       }

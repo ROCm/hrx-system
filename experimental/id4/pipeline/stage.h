@@ -80,22 +80,22 @@ typedef struct id4_pipeline_stage_plan_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;
 
-// Source supplying one prepared stage's parameters.
-typedef uint32_t id4_pipeline_stage_parameter_source_kind_t;
+// Source supplying planned parameters.
+typedef uint32_t id4_pipeline_parameter_source_kind_t;
 
 // Parameter source kind values.
-typedef enum id4_pipeline_stage_parameter_source_kind_e {
+typedef enum id4_pipeline_parameter_source_kind_e {
   // Invalid or unspecified parameter source.
-  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_INVALID = 0,
+  ID4_PIPELINE_PARAMETER_SOURCE_KIND_INVALID = 0,
   // The plan has no parameters.
-  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE = 1,
+  ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE = 1,
   // Framework-layout checkpoint tensors requiring plan-directed preparation.
-  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT = 2,
+  ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT = 2,
   // Baked tensors already stored in the plan's execution layouts.
-  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT = 3,
+  ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT = 3,
   // Caller-owned execution-layout slabs already resident on their devices.
-  ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT = 4,
-} id4_pipeline_stage_parameter_source_kind_e;
+  ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT = 4,
+} id4_pipeline_parameter_source_kind_e;
 
 // Lifetime policy for prepared parameter storage.
 typedef uint32_t id4_pipeline_stage_parameter_residency_t;
@@ -114,15 +114,10 @@ typedef enum id4_pipeline_stage_parameter_residency_e {
   ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_STREAMING = 3,
 } id4_pipeline_stage_parameter_residency_e;
 
-// Closed parameter source and residency selection for stage preparation.
-typedef struct id4_pipeline_stage_parameter_source_t {
+// Source identity and handles independent of stage storage lifetime.
+typedef struct id4_pipeline_parameter_source_t {
   // Active member of |storage|.
-  id4_pipeline_stage_parameter_source_kind_t kind;
-  // Storage lifetime policy selected for this source.
-  id4_pipeline_stage_parameter_residency_t residency;
-  // Maximum compact target bytes retained by streaming policy. Must be zero
-  // for non-streaming policies.
-  iree_device_size_t maximum_parameter_window_byte_length;
+  id4_pipeline_parameter_source_kind_t kind;
   // Source-specific handles borrowed for the duration of prepare.
   union {
     // Framework-layout checkpoint source.
@@ -145,45 +140,44 @@ typedef struct id4_pipeline_stage_parameter_source_t {
       id4_pipeline_parameter_slab_set_t* slabs;
     } resident;
   } storage;
-} id4_pipeline_stage_parameter_source_t;
+} id4_pipeline_parameter_source_t;
 
-// Returns a parameter-free source selection.
-static inline id4_pipeline_stage_parameter_source_t
-id4_pipeline_stage_no_parameters(void) {
-  id4_pipeline_stage_parameter_source_t source = {0};
-  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_NONE;
-  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE;
+// Closed parameter source and residency selection for stage preparation.
+typedef struct id4_pipeline_stage_parameter_policy_t {
+  // Source supplying parameters in the selected physical representation.
+  id4_pipeline_parameter_source_t source;
+  // Storage lifetime policy selected for |source|.
+  id4_pipeline_stage_parameter_residency_t residency;
+  // Maximum compact target bytes retained by streaming policy. Must be zero
+  // for non-streaming policies.
+  iree_device_size_t maximum_parameter_window_byte_length;
+} id4_pipeline_stage_parameter_policy_t;
+
+// Returns a parameter-free source.
+static inline id4_pipeline_parameter_source_t id4_pipeline_no_parameter_source(
+    void) {
+  id4_pipeline_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_NONE;
   return source;
 }
 
-// Returns a checkpoint source with an explicit residency policy.
-static inline id4_pipeline_stage_parameter_source_t
-id4_pipeline_stage_checkpoint_parameters(
-    iree_io_parameter_provider_t* provider,
-    id4_pipeline_stage_parameter_residency_t residency,
-    iree_device_size_t maximum_parameter_window_byte_length) {
-  id4_pipeline_stage_parameter_source_t source = {0};
-  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT;
-  source.residency = residency;
-  source.maximum_parameter_window_byte_length =
-      maximum_parameter_window_byte_length;
+// Returns a framework-layout checkpoint source.
+static inline id4_pipeline_parameter_source_t
+id4_pipeline_checkpoint_parameter_source(
+    iree_io_parameter_provider_t* provider) {
+  id4_pipeline_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT;
   source.storage.checkpoint.provider = provider;
   return source;
 }
 
-// Returns a baked execution-layout archive source with an explicit residency
-// policy.
-static inline id4_pipeline_stage_parameter_source_t
-id4_pipeline_stage_execution_layout_parameters(
+// Returns a baked execution-layout archive source.
+static inline id4_pipeline_parameter_source_t
+id4_pipeline_execution_layout_parameter_source(
     iree_io_parameter_index_t* index, iree_io_parameter_provider_t* provider,
-    iree_string_view_t scope,
-    id4_pipeline_stage_parameter_residency_t residency,
-    iree_device_size_t maximum_parameter_window_byte_length) {
-  id4_pipeline_stage_parameter_source_t source = {0};
-  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
-  source.residency = residency;
-  source.maximum_parameter_window_byte_length =
-      maximum_parameter_window_byte_length;
+    iree_string_view_t scope) {
+  id4_pipeline_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT;
   source.storage.execution_layout.index = index;
   source.storage.execution_layout.provider = provider;
   source.storage.execution_layout.scope = scope;
@@ -191,15 +185,36 @@ id4_pipeline_stage_execution_layout_parameters(
 }
 
 // Returns an already resident execution-layout slab source.
-static inline id4_pipeline_stage_parameter_source_t
-id4_pipeline_stage_resident_parameters(
+static inline id4_pipeline_parameter_source_t
+id4_pipeline_resident_parameter_source(
     id4_pipeline_parameter_slab_set_t* slabs) {
-  id4_pipeline_stage_parameter_source_t source = {0};
-  source.kind = ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_RESIDENT;
-  source.residency = ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT;
-  source.maximum_parameter_window_byte_length = 0;
+  id4_pipeline_parameter_source_t source = {0};
+  source.kind = ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT;
   source.storage.resident.slabs = slabs;
   return source;
+}
+
+// Returns a closed stage parameter policy from an independent source and
+// lifetime selection.
+static inline id4_pipeline_stage_parameter_policy_t
+id4_pipeline_stage_parameters(
+    id4_pipeline_parameter_source_t source,
+    id4_pipeline_stage_parameter_residency_t residency,
+    iree_device_size_t maximum_parameter_window_byte_length) {
+  id4_pipeline_stage_parameter_policy_t policy = {
+      source,
+      residency,
+      maximum_parameter_window_byte_length,
+  };
+  return policy;
+}
+
+// Returns a parameter-free stage policy.
+static inline id4_pipeline_stage_parameter_policy_t
+id4_pipeline_stage_no_parameters(void) {
+  return id4_pipeline_stage_parameters(
+      id4_pipeline_no_parameter_source(),
+      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_NONE, 0);
 }
 
 // Options for preparing a reusable execution bundle from a plan.
@@ -209,7 +224,7 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   // Extension structure chain; must be NULL for now.
   const void* next;
   // Exact source and residency policy for planned parameters.
-  id4_pipeline_stage_parameter_source_t parameter_source;
+  id4_pipeline_stage_parameter_policy_t parameter_policy;
   // Kernel library used to resolve planned Loom module paths.
   id4_pipeline_kernel_library_t* kernel_library;
   // Semaphores that submitted parameter loading waits on.

@@ -169,8 +169,8 @@ static iree_status_t id4_ideogram4_qwen_prepare_bundle(
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_source = id4_pipeline_stage_checkpoint_parameters(
-      options->parameter_provider,
+  prepare_options.parameter_policy = id4_pipeline_stage_parameters(
+      id4_pipeline_checkpoint_parameter_source(options->parameter_provider),
       ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
       /*maximum_parameter_window_byte_length=*/0);
   prepare_options.kernel_library = options->kernel_library;

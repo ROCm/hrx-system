@@ -723,9 +723,9 @@ static iree_status_t id4_smoke_stage_prepare(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage kernel library is required");
   }
-  if (options->parameter_source.kind !=
-          ID4_PIPELINE_STAGE_PARAMETER_SOURCE_KIND_CHECKPOINT ||
-      options->parameter_source.residency !=
+  if (options->parameter_policy.source.kind !=
+          ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT ||
+      options->parameter_policy.residency !=
           ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage requires resident checkpoint "
@@ -768,7 +768,8 @@ static iree_status_t id4_smoke_stage_prepare(
   load_options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   load_options.encoder_staging_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  load_options.provider = options->parameter_source.storage.checkpoint.provider;
+  load_options.provider =
+      options->parameter_policy.source.storage.checkpoint.provider;
   load_options.kernel_library = options->kernel_library;
   load_options.kernel_cache = stage->kernel_cache;
   load_options.executable_cache = stage->base.services.executable_cache;
