@@ -1232,10 +1232,14 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
     const loom_low_placement_relation_range_t* result_range,
     bool* out_assigned) {
   *out_assigned = false;
-  // Source-side reservation is only for scalar concat slices seen before the
-  // concat op. Wider sources should allocate normally and let the eventual
-  // concat result choose placement after transient source pressure has passed.
-  if (source_interval->unit_count != 1) {
+  // Scalar slices benefit from reserving the aggregate span even when the
+  // assembled value remains live. Wider slices only reserve packet-local
+  // aggregates: holding the full span across intervening packets can increase
+  // pressure substantially, while delaying a packet-local reservation leaves
+  // independently assigned slices unable to satisfy contiguous packet inputs.
+  const uint32_t result_lifetime =
+      result_interval->end_point - result_interval->start_point;
+  if (source_interval->unit_count != 1 && result_lifetime != 1) {
     return iree_ok_status();
   }
   loom_low_allocation_class_capacity_t capacity = {0};

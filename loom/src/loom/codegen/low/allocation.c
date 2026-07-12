@@ -180,7 +180,15 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_copy_decision_plan_build(
         &copy_decision_context, arena, &state.copy_decision_plan);
   }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+  // Parallel-move scratch belongs to the final physical assignment. Spill
+  // repair rewrites the IR and rebuilds the frame, so any move plan built from
+  // a provisional spill assignment would be discarded and may report false
+  // scratch conflicts against registers that repair will release.
+  const bool assignment_is_final =
+      state.interval_assignment.spill_plan_count == 0 &&
+      state.interval_assignment.spill_count == 0;
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      assignment_is_final) {
     const loom_low_allocation_edge_copy_context_t edge_copy_context = {
         .body = state.body,
         .descriptor_set = state.target.descriptor_set,
@@ -193,7 +201,8 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_edge_copy_plan_build(&edge_copy_context, arena,
                                                       &state.edge_copy_plan);
   }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      assignment_is_final) {
     const loom_low_allocation_packet_move_context_t packet_move_context = {
         .module = state.module,
         .body = state.body,
