@@ -817,6 +817,43 @@ static iree_status_t id4_pipeline_program_validate_config_bindings(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_validate_semantic_attributes(
+    iree_string_view_t dispatch_name,
+    iree_string_pair_list_t semantic_attributes) {
+  if (semantic_attributes.count != 0 && !semantic_attributes.pairs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dispatch %.*s semantic attribute array is required",
+        (int)dispatch_name.size, dispatch_name.data);
+  }
+  for (iree_host_size_t i = 0; i < semantic_attributes.count; ++i) {
+    const iree_string_pair_t* attribute = &semantic_attributes.pairs[i];
+    if (iree_string_view_is_empty(attribute->key)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch %.*s semantic attribute %" PRIhsz
+                              " key is required",
+                              (int)dispatch_name.size, dispatch_name.data, i);
+    }
+    if (iree_string_view_is_empty(attribute->value)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch %.*s semantic attribute %" PRIhsz
+                              " value is required",
+                              (int)dispatch_name.size, dispatch_name.data, i);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(attribute->key,
+                                 semantic_attributes.pairs[j].key)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dispatch %.*s semantic attribute key %.*s is duplicated",
+            (int)dispatch_name.size, dispatch_name.data,
+            (int)attribute->key.size, attribute->key.data);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static void id4_pipeline_program_free_config_bindings(
     iree_host_size_t config_binding_count,
     const id4_pipeline_kernel_config_binding_t* config_bindings,
@@ -864,6 +901,65 @@ static iree_status_t id4_pipeline_program_copy_config_bindings(
                                               host_allocator);
   }
   return status;
+}
+
+static void id4_pipeline_program_free_semantic_attributes(
+    iree_string_pair_list_t* semantic_attributes,
+    iree_allocator_t host_allocator) {
+  if (!semantic_attributes || !semantic_attributes->pairs) return;
+  // The pair table begins the packed [pairs][string bytes] allocation.
+  iree_allocator_free(host_allocator, (void*)semantic_attributes->pairs);
+  *semantic_attributes = iree_string_pair_list_empty();
+}
+
+static iree_status_t id4_pipeline_program_copy_semantic_attributes(
+    iree_string_pair_list_t source, iree_allocator_t host_allocator,
+    iree_string_pair_list_t* out_target) {
+  *out_target = iree_string_pair_list_empty();
+  if (source.count == 0) return iree_ok_status();
+
+  iree_host_size_t string_byte_length = 0;
+  for (iree_host_size_t i = 0; i < source.count; ++i) {
+    if (!iree_host_size_checked_add(string_byte_length,
+                                    source.pairs[i].key.size,
+                                    &string_byte_length) ||
+        !iree_host_size_checked_add(string_byte_length,
+                                    source.pairs[i].value.size,
+                                    &string_byte_length)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program semantic attribute string byte length overflow");
+    }
+  }
+
+  iree_host_size_t pair_offset = 0;
+  iree_host_size_t string_offset = 0;
+  iree_host_size_t allocation_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      /*base_size=*/0, &allocation_size,
+      IREE_STRUCT_FIELD(source.count, iree_string_pair_t, &pair_offset),
+      IREE_STRUCT_FIELD(string_byte_length, uint8_t, &string_offset)));
+  void* allocation = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, allocation_size, &allocation));
+  uint8_t* allocation_bytes = (uint8_t*)allocation;
+  iree_string_pair_t* target_pairs =
+      (iree_string_pair_t*)(allocation_bytes + pair_offset);
+  char* string_cursor = (char*)allocation_bytes + string_offset;
+  for (iree_host_size_t i = 0; i < source.count; ++i) {
+    memcpy(string_cursor, source.pairs[i].key.data, source.pairs[i].key.size);
+    target_pairs[i].key =
+        iree_make_string_view(string_cursor, source.pairs[i].key.size);
+    string_cursor += source.pairs[i].key.size;
+    memcpy(string_cursor, source.pairs[i].value.data,
+           source.pairs[i].value.size);
+    target_pairs[i].value =
+        iree_make_string_view(string_cursor, source.pairs[i].value.size);
+    string_cursor += source.pairs[i].value.size;
+  }
+  out_target->count = source.count;
+  out_target->pairs = target_pairs;
+  return iree_ok_status();
 }
 
 static void id4_pipeline_program_free_dispatch_bindings(
@@ -1018,6 +1114,8 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
   if (!op) return;
   switch (op->kind) {
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      id4_pipeline_program_free_semantic_attributes(
+          &op->payload.dispatch_loom.semantic_attributes, host_allocator);
       id4_pipeline_program_free_dispatch_bindings(
           op->payload.dispatch_loom.bindings, host_allocator);
       id4_pipeline_program_free_config_bindings(
@@ -1137,6 +1235,11 @@ static iree_status_t id4_pipeline_program_copy_op(
             source->payload.dispatch_loom.binding_count,
             source->payload.dispatch_loom.bindings, host_allocator,
             &target->payload.dispatch_loom.bindings);
+      }
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_program_copy_semantic_attributes(
+            source->payload.dispatch_loom.semantic_attributes, host_allocator,
+            &target->payload.dispatch_loom.semantic_attributes);
       }
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
@@ -1891,6 +1994,8 @@ iree_status_t id4_pipeline_program_dispatch_loom(
       id4_pipeline_program_validate_kernel_ref(options->kernel, options->name));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_config_bindings(
       options->name, options->config_binding_count, options->config_bindings));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_semantic_attributes(
+      options->name, options->semantic_attributes));
   if (options->binding_count == 0 || !options->bindings) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dispatch %.*s binding array is required",
@@ -1940,6 +2045,7 @@ iree_status_t id4_pipeline_program_dispatch_loom(
               .config_bindings = options->config_bindings,
               .binding_count = options->binding_count,
               .bindings = options->bindings,
+              .semantic_attributes = options->semantic_attributes,
           },
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_append_op(builder, &op));

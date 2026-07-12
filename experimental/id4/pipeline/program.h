@@ -281,6 +281,8 @@ typedef struct id4_pipeline_program_dispatch_loom_op_t {
   iree_host_size_t binding_count;
   // Tensor bindings in kernel ABI order.
   const id4_pipeline_program_dispatch_binding_t* bindings;
+  // Semantic diagnostic attributes excluded from specialization and execution.
+  iree_string_pair_list_t semantic_attributes;
 } id4_pipeline_program_dispatch_loom_op_t;
 
 // Execution barrier operation payload.
@@ -460,6 +462,8 @@ typedef struct id4_pipeline_program_dispatch_loom_options_t {
   iree_host_size_t binding_count;
   // Tensor bindings in kernel ABI order.
   const id4_pipeline_program_dispatch_binding_t* bindings;
+  // Semantic diagnostic attributes borrowed for the dispatch call.
+  iree_string_pair_list_t semantic_attributes;
 } id4_pipeline_program_dispatch_loom_options_t;
 
 // Options for authoring an execution barrier.

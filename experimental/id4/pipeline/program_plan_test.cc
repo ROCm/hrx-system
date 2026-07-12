@@ -258,6 +258,10 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       id4_pipeline_program_read(weight),
       id4_pipeline_program_write(output),
   };
+  const iree_string_pair_t first_semantic_attributes[] = {
+      iree_make_cstring_pair("semantic.family", "matrix"),
+      iree_make_cstring_pair("matrix.m", "1"),
+  };
   id4_pipeline_program_dispatch_loom_options_t first_dispatch_options = {
       /*.structure_size=*/sizeof(first_dispatch_options),
       /*.next=*/nullptr,
@@ -268,6 +272,11 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
       /*.bindings=*/first_bindings,
+      /*.semantic_attributes=*/
+      {
+          /*.count=*/IREE_ARRAYSIZE(first_semantic_attributes),
+          /*.pairs=*/first_semantic_attributes,
+      },
   };
   IREE_CHECK_OK(
       id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
@@ -1602,6 +1611,10 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ExpectFinds(json, IREE_SV("\"module_path\":\"test/linear\""));
   ExpectFinds(json, IREE_SV("\"function_name\":\"linear\""));
   ExpectFinds(json, IREE_SV("\"config_bindings\":[{\"key\":\"@batch\""));
+  ExpectFinds(json,
+              IREE_SV("\"semantic_attributes\":[{\"key\":\"semantic.family\","
+                      "\"value\":\"matrix\"},{\"key\":\"matrix.m\","
+                      "\"value\":\"1\"}]"));
   ExpectFinds(json, IREE_SV("\"bindings\":[{\"index\":0"));
   ExpectFinds(json, IREE_SV("\"name\":\"hidden_states.input\""));
   ExpectFinds(json, IREE_SV("\"access\":\"read\""));

@@ -11,6 +11,38 @@
 
 namespace {
 
+static const id4_pipeline_program_op_t* FindDispatchByName(
+    const id4_pipeline_program_t* program, iree_string_view_t name) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (op && op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM &&
+        iree_string_view_equal(op->payload.dispatch_loom.name, name)) {
+      return op;
+    }
+  }
+  return nullptr;
+}
+
+static iree_string_view_t FindSemanticAttribute(
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch,
+    iree_string_view_t key) {
+  for (iree_host_size_t i = 0; i < dispatch->semantic_attributes.count; ++i) {
+    const iree_string_pair_t* attribute =
+        &dispatch->semantic_attributes.pairs[i];
+    if (iree_string_view_equal(attribute->key, key)) return attribute->value;
+  }
+  return iree_string_view_empty();
+}
+
+static void ExpectSemanticAttribute(
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch,
+    iree_string_view_t key, iree_string_view_t expected_value) {
+  const iree_string_view_t actual_value = FindSemanticAttribute(dispatch, key);
+  EXPECT_TRUE(iree_string_view_equal(actual_value, expected_value));
+}
+
 class ProgramMatrixTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -323,6 +355,40 @@ TEST_F(ProgramMatrixTest, AcceptsBlockScaledParameterContraction) {
   SealAndRelease();
 }
 
+TEST_F(ProgramMatrixTest, PreservesSemanticContractionDiagnostics) {
+  id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder_, iree_allocator_system(), &program));
+  const id4_pipeline_program_op_t* op =
+      FindDispatchByName(program, options.name);
+  ASSERT_NE(op, nullptr);
+  const id4_pipeline_program_dispatch_loom_op_t* dispatch =
+      &op->payload.dispatch_loom;
+  ExpectSemanticAttribute(dispatch, IREE_SV("semantic.family"),
+                          IREE_SV("matrix"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("semantic.operation"),
+                          IREE_SV("contraction"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.valid_m"), IREE_SV("451"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.m_capacity"),
+                          IREE_SV("512"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.n"), IREE_SV("1024"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.k"), IREE_SV("4096"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.input.dtype"),
+                          IREE_SV("bf16"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.accumulator.dtype"),
+                          IREE_SV("f32"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.output.dtype"),
+                          IREE_SV("bf16"));
+  ExpectSemanticAttribute(dispatch, IREE_SV("matrix.execution.weight.dtype"),
+                          IREE_SV("f8e4m3"));
+  ExpectSemanticAttribute(dispatch,
+                          IREE_SV("matrix.execution.input_row_coverage"),
+                          IREE_SV("valid_m"));
+  id4_pipeline_program_release(program);
+}
+
 TEST_F(ProgramMatrixTest, DeclaresMaskedCandidateValidInputRows) {
   id4_pipeline_program_matrix_options_t options = MakeBlockScaledOptions();
   const iree_device_size_t valid_input_byte_length =
@@ -407,6 +473,45 @@ TEST_F(ProgramMatrixTest, AcceptsBlockScaledSwiGLUProjectionPair) {
       id4_pipeline_program_make_shape_rank2(96, 32));
   IREE_ASSERT_OK(id4_pipeline_program_swiglu(builder_, &options));
   SealAndRelease();
+}
+
+TEST_F(ProgramMatrixTest, SwiGLUDispatchesRetainOneSemanticRequest) {
+  id4_pipeline_program_swiglu_options_t options = MakeSwiGLUOptions(
+      ID4_PIPELINE_PROGRAM_MATRIX_SCALE_LAYOUT_OUTPUT_INPUT_BLOCK_128X128,
+      id4_pipeline_program_make_shape_rank2(96, 32));
+  IREE_ASSERT_OK(id4_pipeline_program_swiglu(builder_, &options));
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder_, iree_allocator_system(), &program));
+  iree_host_size_t semantic_dispatch_count = 0;
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) continue;
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch =
+        &op->payload.dispatch_loom;
+    if (!iree_string_view_equal(
+            FindSemanticAttribute(dispatch, IREE_SV("semantic.family")),
+            IREE_SV("matrix"))) {
+      continue;
+    }
+    ++semantic_dispatch_count;
+    ExpectSemanticAttribute(dispatch, IREE_SV("semantic.operation"),
+                            IREE_SV("swiglu"));
+    EXPECT_FALSE(iree_string_view_is_empty(
+        FindSemanticAttribute(dispatch, IREE_SV("semantic.role"))));
+    EXPECT_FALSE(iree_string_view_is_empty(
+        FindSemanticAttribute(dispatch, IREE_SV("semantic.schedule"))));
+    ExpectSemanticAttribute(dispatch, IREE_SV("matrix.valid_m"),
+                            IREE_SV("451"));
+    ExpectSemanticAttribute(dispatch, IREE_SV("matrix.m_capacity"),
+                            IREE_SV("512"));
+    ExpectSemanticAttribute(dispatch, IREE_SV("matrix.n"), IREE_SV("12288"));
+    ExpectSemanticAttribute(dispatch, IREE_SV("matrix.k"), IREE_SV("4096"));
+  }
+  EXPECT_GT(semantic_dispatch_count, 0u);
+  id4_pipeline_program_release(program);
 }
 
 TEST_F(ProgramMatrixTest, AcceptsRowScaledSwiGLUProjectionPair) {

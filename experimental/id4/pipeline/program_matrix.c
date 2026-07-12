@@ -13,6 +13,8 @@
 enum {
   ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_CAPACITY = 5,
   ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_VALUE_CAPACITY = 16,
+  ID4_PIPELINE_PROGRAM_MATRIX_SEMANTIC_ATTRIBUTE_CAPACITY = 20,
+  ID4_PIPELINE_PROGRAM_MATRIX_SEMANTIC_NUMERIC_VALUE_CAPACITY = 5,
 };
 
 typedef enum id4_pipeline_program_matrix_operation_e {
@@ -26,6 +28,40 @@ typedef enum id4_pipeline_program_matrix_input_row_coverage_e {
   // Candidate masks input rows beyond the semantically valid M extent.
   ID4_PIPELINE_PROGRAM_MATRIX_INPUT_ROW_COVERAGE_VALID_M = 1,
 } id4_pipeline_program_matrix_input_row_coverage_t;
+
+static const iree_string_view_t id4_pipeline_program_matrix_dtype_names[] = {
+    IREE_SVL("invalid"), IREE_SVL("f32"), IREE_SVL("f16"),    IREE_SVL("bf16"),
+    IREE_SVL("i32"),     IREE_SVL("u32"), IREE_SVL("f8e4m3"),
+};
+
+static const iree_string_view_t id4_pipeline_program_matrix_layout_names[] = {
+    IREE_SVL("invalid"),
+    IREE_SVL("row_major"),
+    IREE_SVL("rhs_transposed_row_major"),
+    IREE_SVL("rhs_tile_16x16"),
+    IREE_SVL("column_major"),
+};
+
+static const iree_string_view_t
+    id4_pipeline_program_matrix_scale_layout_names[] = {
+        IREE_SVL("invalid"),
+        IREE_SVL("none"),
+        IREE_SVL("output_row"),
+        IREE_SVL("output_input_block_128x128"),
+};
+
+static const iree_string_view_t id4_pipeline_program_matrix_epilogue_names[] = {
+    IREE_SVL("invalid"),
+    IREE_SVL("none"),
+    IREE_SVL("add"),
+    IREE_SVL("bias"),
+};
+
+static const iree_string_view_t
+    id4_pipeline_program_matrix_input_row_coverage_names[] = {
+        IREE_SVL("capacity"),
+        IREE_SVL("valid_m"),
+};
 
 typedef struct id4_pipeline_program_matrix_candidate_config_t {
   // Config key receiving the semantically valid M extent; empty when unused.
@@ -145,6 +181,20 @@ typedef struct id4_pipeline_program_matrix_schedule_t {
   const id4_pipeline_program_matrix_composition_candidate_t*
       composition_candidate;
 } id4_pipeline_program_matrix_schedule_t;
+
+typedef struct id4_pipeline_program_matrix_semantic_attributes_t {
+  // Key/value attributes borrowed by one immediate dispatch authoring call.
+  iree_string_pair_t
+      pairs[ID4_PIPELINE_PROGRAM_MATRIX_SEMANTIC_ATTRIBUTE_CAPACITY];
+  // Storage for formatted numeric attribute values.
+  char numeric_values
+      [ID4_PIPELINE_PROGRAM_MATRIX_SEMANTIC_NUMERIC_VALUE_CAPACITY]
+      [ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_VALUE_CAPACITY];
+  // Number of initialized entries in pairs.
+  iree_host_size_t pair_count;
+  // Number of initialized entries in numeric_values.
+  iree_host_size_t numeric_value_count;
+} id4_pipeline_program_matrix_semantic_attributes_t;
 
 static const id4_pipeline_program_matrix_composition_candidate_t
     id4_pipeline_program_matrix_composition_candidates[] = {
@@ -1315,8 +1365,152 @@ static iree_status_t id4_pipeline_program_matrix_append_config(
   return iree_ok_status();
 }
 
+static iree_string_view_t id4_pipeline_program_matrix_enum_name(
+    uint32_t value, iree_host_size_t name_count,
+    const iree_string_view_t* names) {
+  return value < name_count ? names[value] : IREE_SV("invalid");
+}
+
+static iree_status_t id4_pipeline_program_matrix_append_semantic_attribute(
+    id4_pipeline_program_matrix_semantic_attributes_t* attributes,
+    iree_string_view_t key, iree_string_view_t value) {
+  if (attributes->pair_count >= IREE_ARRAYSIZE(attributes->pairs)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "program matrix semantic attribute capacity exceeded");
+  }
+  attributes->pairs[attributes->pair_count++] =
+      iree_make_string_pair(key, value);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_matrix_append_semantic_u32_attribute(
+    id4_pipeline_program_matrix_semantic_attributes_t* attributes,
+    iree_string_view_t key, uint32_t value) {
+  if (attributes->numeric_value_count >=
+      IREE_ARRAYSIZE(attributes->numeric_values)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "program matrix semantic numeric value capacity exceeded");
+  }
+  char* value_buffer =
+      attributes->numeric_values[attributes->numeric_value_count++];
+  int value_length =
+      snprintf(value_buffer, ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_VALUE_CAPACITY,
+               "%" PRIu32, value);
+  if (value_length < 0 ||
+      value_length >= ID4_PIPELINE_PROGRAM_MATRIX_CONFIG_VALUE_CAPACITY) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program matrix semantic numeric value is too large");
+  }
+  return id4_pipeline_program_matrix_append_semantic_attribute(
+      attributes, key,
+      iree_make_string_view(value_buffer, (iree_host_size_t)value_length));
+}
+
+static iree_status_t id4_pipeline_program_matrix_build_semantic_attributes(
+    iree_string_view_t operation, iree_string_view_t role,
+    iree_string_view_t schedule,
+    const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* candidate,
+    id4_pipeline_program_matrix_semantic_attributes_t* out_attributes) {
+  memset(out_attributes, 0, sizeof(*out_attributes));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("semantic.family"), IREE_SV("matrix")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("semantic.operation"), operation));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("semantic.role"), role));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("semantic.schedule"), schedule));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_append_semantic_u32_attribute(
+          out_attributes, IREE_SV("matrix.valid_m"), problem->valid_m));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_append_semantic_u32_attribute(
+          out_attributes, IREE_SV("matrix.m_capacity"), problem->m_capacity));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_append_semantic_u32_attribute(
+          out_attributes, IREE_SV("matrix.n"), problem->n));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_matrix_append_semantic_u32_attribute(
+          out_attributes, IREE_SV("matrix.k"), problem->k));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.input.dtype"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->input_dtype,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_dtype_names),
+          id4_pipeline_program_matrix_dtype_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.input.layout"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->input_layout,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_layout_names),
+          id4_pipeline_program_matrix_layout_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.accumulator.dtype"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->accumulator_dtype,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_dtype_names),
+          id4_pipeline_program_matrix_dtype_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.epilogue"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->epilogue,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_epilogue_names),
+          id4_pipeline_program_matrix_epilogue_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.output.dtype"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->output_dtype,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_dtype_names),
+          id4_pipeline_program_matrix_dtype_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.output.layout"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)problem->output_layout,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_layout_names),
+          id4_pipeline_program_matrix_layout_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.execution.weight.dtype"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)candidate->weight_dtype,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_dtype_names),
+          id4_pipeline_program_matrix_dtype_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.execution.weight.layout"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)candidate->weight_layout,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_layout_names),
+          id4_pipeline_program_matrix_layout_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.execution.scale.dtype"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)candidate->scale_dtype,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_dtype_names),
+          id4_pipeline_program_matrix_dtype_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.execution.scale.layout"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)candidate->scale_layout,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_scale_layout_names),
+          id4_pipeline_program_matrix_scale_layout_names)));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_append_semantic_attribute(
+      out_attributes, IREE_SV("matrix.execution.input_row_coverage"),
+      id4_pipeline_program_matrix_enum_name(
+          (uint32_t)candidate->input_row_coverage,
+          IREE_ARRAYSIZE(id4_pipeline_program_matrix_input_row_coverage_names),
+          id4_pipeline_program_matrix_input_row_coverage_names)));
+  return id4_pipeline_program_matrix_append_semantic_u32_attribute(
+      out_attributes, IREE_SV("matrix.selection_priority"),
+      candidate->selection_priority);
+}
+
 static iree_status_t id4_pipeline_program_matrix_dispatch_candidate(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t semantic_operation, iree_string_view_t semantic_role,
+    iree_string_view_t semantic_schedule,
     const id4_pipeline_program_matrix_problem_t* problem,
     const id4_pipeline_program_matrix_candidate_t* candidate,
     iree_host_size_t binding_count,
@@ -1345,6 +1539,11 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_candidate(
       candidate->config.n_key, problem->n, value_buffers[config_binding_count],
       &config_binding_count, config_bindings));
 
+  id4_pipeline_program_matrix_semantic_attributes_t semantic_attributes;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_build_semantic_attributes(
+      semantic_operation, semantic_role, semantic_schedule, problem, candidate,
+      &semantic_attributes));
+
   id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
       .structure_size = sizeof(dispatch_options),
       .name = name,
@@ -1353,13 +1552,21 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_candidate(
       .config_bindings = config_bindings,
       .binding_count = binding_count,
       .bindings = bindings,
+      .semantic_attributes =
+          {
+              .count = semantic_attributes.pair_count,
+              .pairs = semantic_attributes.pairs,
+          },
   };
   return id4_pipeline_program_dispatch_loom(builder, &dispatch_options);
 }
 
 static iree_status_t id4_pipeline_program_matrix_dispatch_composition_candidate(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t semantic_operation, iree_string_view_t semantic_role,
+    iree_string_view_t semantic_schedule,
     const id4_pipeline_program_matrix_problem_t* problem,
+    const id4_pipeline_program_matrix_candidate_t* primary_candidate,
     const id4_pipeline_program_matrix_composition_candidate_t* candidate,
     id4_pipeline_program_tensor_t lhs, id4_pipeline_program_tensor_t rhs,
     id4_pipeline_program_tensor_t output) {
@@ -1380,6 +1587,10 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_composition_candidate(
       id4_pipeline_program_read(rhs),
       id4_pipeline_program_write(output),
   };
+  id4_pipeline_program_matrix_semantic_attributes_t semantic_attributes;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_build_semantic_attributes(
+      semantic_operation, semantic_role, semantic_schedule, problem,
+      primary_candidate, &semantic_attributes));
   const id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
       .structure_size = sizeof(dispatch_options),
       .name = name,
@@ -1388,6 +1599,11 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_composition_candidate(
       .config_bindings = config_bindings,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,
+      .semantic_attributes =
+          {
+              .count = semantic_attributes.pair_count,
+              .pairs = semantic_attributes.pairs,
+          },
   };
   return id4_pipeline_program_dispatch_loom(builder, &dispatch_options);
 }
@@ -1533,6 +1749,8 @@ static iree_status_t id4_pipeline_program_matrix_materialize_parameter(
 
 static iree_status_t id4_pipeline_program_matrix_dispatch_prepared(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t semantic_operation, iree_string_view_t semantic_role,
+    iree_string_view_t semantic_schedule,
     const id4_pipeline_program_matrix_problem_t* problem,
     const id4_pipeline_program_matrix_candidate_t* candidate,
     const id4_pipeline_program_matrix_prepared_operands_t* operands) {
@@ -1550,11 +1768,13 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_prepared(
   }
   bindings[binding_count++] = id4_pipeline_program_write(operands->output);
   return id4_pipeline_program_matrix_dispatch_candidate(
-      builder, name, problem, candidate, binding_count, bindings);
+      builder, name, semantic_operation, semantic_role, semantic_schedule,
+      problem, candidate, binding_count, bindings);
 }
 
 static iree_status_t id4_pipeline_program_swiglu_dispatch_prepared(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t semantic_role, iree_string_view_t semantic_schedule,
     const id4_pipeline_program_matrix_problem_t* problem,
     const id4_pipeline_program_matrix_candidate_t* candidate,
     const id4_pipeline_program_swiglu_prepared_operands_t* operands) {
@@ -1573,7 +1793,8 @@ static iree_status_t id4_pipeline_program_swiglu_dispatch_prepared(
   }
   bindings[binding_count++] = id4_pipeline_program_write(operands->output);
   return id4_pipeline_program_matrix_dispatch_candidate(
-      builder, name, problem, candidate, binding_count, bindings);
+      builder, name, IREE_SV("swiglu"), semantic_role, semantic_schedule,
+      problem, candidate, binding_count, bindings);
 }
 
 static bool id4_pipeline_program_matrix_should_compose(
@@ -1722,7 +1943,8 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_composed_add(
       .output = contraction_output,
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
-      builder, child_name, &contraction_problem, contraction_candidate,
+      builder, child_name, IREE_SV("contraction"), IREE_SV("contraction"),
+      IREE_SV("composed"), &contraction_problem, contraction_candidate,
       &contraction_operands));
 
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
@@ -1735,8 +1957,10 @@ static iree_status_t id4_pipeline_program_matrix_dispatch_composed_add(
       name, IREE_SV("epilogue"), child_name_buffer,
       IREE_ARRAYSIZE(child_name_buffer), &child_name));
   return id4_pipeline_program_matrix_dispatch_composition_candidate(
-      builder, child_name, problem, composition_candidate, contraction_output,
-      operands->addend, operands->output);
+      builder, child_name, IREE_SV("contraction"), IREE_SV("epilogue"),
+      IREE_SV("composed"), problem, contraction_candidate,
+      composition_candidate, contraction_output, operands->addend,
+      operands->output);
 }
 
 static iree_status_t id4_pipeline_program_swiglu_dispatch_composed(
@@ -1775,7 +1999,8 @@ static iree_status_t id4_pipeline_program_swiglu_dispatch_composed(
       .output = gate_output,
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
-      builder, child_name, problem, contraction_candidate, &gate_operands));
+      builder, child_name, IREE_SV("swiglu"), IREE_SV("gate"),
+      IREE_SV("composed"), problem, contraction_candidate, &gate_operands));
 
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
       name, IREE_SV("up"), child_name_buffer, IREE_ARRAYSIZE(child_name_buffer),
@@ -1788,7 +2013,8 @@ static iree_status_t id4_pipeline_program_swiglu_dispatch_composed(
       .output = up_output,
   };
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_dispatch_prepared(
-      builder, child_name, problem, contraction_candidate, &up_operands));
+      builder, child_name, IREE_SV("swiglu"), IREE_SV("up"),
+      IREE_SV("composed"), problem, contraction_candidate, &up_operands));
 
   IREE_RETURN_IF_ERROR(id4_pipeline_program_matrix_format_child_name(
       name, IREE_SV("projections_ready"), child_name_buffer,
@@ -1800,8 +2026,9 @@ static iree_status_t id4_pipeline_program_swiglu_dispatch_composed(
       name, IREE_SV("product"), child_name_buffer,
       IREE_ARRAYSIZE(child_name_buffer), &child_name));
   return id4_pipeline_program_matrix_dispatch_composition_candidate(
-      builder, child_name, problem, composition_candidate, gate_output,
-      up_output, operands->output);
+      builder, child_name, IREE_SV("swiglu"), IREE_SV("product"),
+      IREE_SV("composed"), problem, contraction_candidate,
+      composition_candidate, gate_output, up_output, operands->output);
 }
 
 iree_status_t id4_pipeline_program_matrix(
@@ -1862,7 +2089,8 @@ iree_status_t id4_pipeline_program_matrix(
         schedule.composition_candidate, &prepared_operands);
   }
   return id4_pipeline_program_matrix_dispatch_prepared(
-      builder, options->name, &options->problem, schedule.primary_candidate,
+      builder, options->name, IREE_SV("contraction"), IREE_SV("contraction"),
+      IREE_SV("fused"), &options->problem, schedule.primary_candidate,
       &prepared_operands);
 }
 
@@ -1919,7 +2147,8 @@ iree_status_t id4_pipeline_program_matrix_prepared(
         schedule.composition_candidate, &options->operands);
   }
   return id4_pipeline_program_matrix_dispatch_prepared(
-      builder, options->name, &options->problem, schedule.primary_candidate,
+      builder, options->name, IREE_SV("contraction"), IREE_SV("contraction"),
+      IREE_SV("fused"), &options->problem, schedule.primary_candidate,
       &options->operands);
 }
 
@@ -2001,6 +2230,6 @@ iree_status_t id4_pipeline_program_swiglu(
         &prepared_operands);
   }
   return id4_pipeline_program_swiglu_dispatch_prepared(
-      builder, options->name, &options->projection, schedule.primary_candidate,
-      &prepared_operands);
+      builder, options->name, IREE_SV("fused"), IREE_SV("fused"),
+      &options->projection, schedule.primary_candidate, &prepared_operands);
 }

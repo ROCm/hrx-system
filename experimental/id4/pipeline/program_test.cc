@@ -320,6 +320,12 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
       id4_pipeline_program_read(weight),
       id4_pipeline_program_write(output),
   };
+  char semantic_family[] = "matrix";
+  const iree_string_pair_t semantic_attributes[] = {
+      iree_make_string_pair(IREE_SV("semantic.family"),
+                            iree_make_cstring_view(semantic_family)),
+      iree_make_cstring_pair("matrix.m", "1"),
+  };
   id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
       /*.structure_size=*/sizeof(dispatch_options),
       /*.next=*/nullptr,
@@ -330,9 +336,15 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(bindings),
       /*.bindings=*/bindings,
+      /*.semantic_attributes=*/
+      {
+          /*.count=*/IREE_ARRAYSIZE(semantic_attributes),
+          /*.pairs=*/semantic_attributes,
+      },
   };
   IREE_ASSERT_OK(
       id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+  semantic_family[0] = 'x';
 
   id4_pipeline_program_tap_options_t tap_options = {
       /*.structure_size=*/sizeof(tap_options),
@@ -406,6 +418,19 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
             weight.ordinal);
   EXPECT_EQ(dispatch->payload.dispatch_loom.bindings[2].access,
             ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE);
+  ASSERT_EQ(dispatch->payload.dispatch_loom.semantic_attributes.count, 2u);
+  ExpectStringViewEqual(
+      dispatch->payload.dispatch_loom.semantic_attributes.pairs[0].key,
+      IREE_SV("semantic.family"));
+  ExpectStringViewEqual(
+      dispatch->payload.dispatch_loom.semantic_attributes.pairs[0].value,
+      IREE_SV("matrix"));
+  ExpectStringViewEqual(
+      dispatch->payload.dispatch_loom.semantic_attributes.pairs[1].key,
+      IREE_SV("matrix.m"));
+  ExpectStringViewEqual(
+      dispatch->payload.dispatch_loom.semantic_attributes.pairs[1].value,
+      IREE_SV("1"));
 
   const id4_pipeline_program_op_t* exported =
       id4_pipeline_program_operation_at(program, 6);

@@ -3446,8 +3446,26 @@ static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
       iree_string_builder_append_cstring(builder, ",\"config_bindings\":"));
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_config_bindings_json(
       builder, dispatch->config_binding_count, dispatch->config_bindings));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, ",\"semantic_attributes\":["));
+  for (iree_host_size_t i = 0; i < dispatch->semantic_attributes.count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    const iree_string_pair_t* attribute =
+        &dispatch->semantic_attributes.pairs[i];
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, "{\"key\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, attribute->key));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"value\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, attribute->value));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  }
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ",\"bindings\":["));
+      iree_string_builder_append_cstring(builder, "],\"bindings\":["));
   for (iree_host_size_t i = 0; i < dispatch->binding_count; ++i) {
     if (i != 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
