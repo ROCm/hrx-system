@@ -20,6 +20,7 @@ iree_runtime_cc_library(
     hdrs = ["request.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/tokenizer",
     ],
@@ -75,6 +76,7 @@ iree_runtime_cc_test(
     deps = [
         ":request",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",

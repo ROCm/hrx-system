@@ -18,6 +18,7 @@ iree_cc_library(
     "request.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::json
     iree::tokenizer
   PUBLIC
@@ -76,6 +77,7 @@ iree_cc_test(
   DEPS
     ::request
     iree::base
+    iree::base::internal
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer::format::huggingface::tokenizer_json

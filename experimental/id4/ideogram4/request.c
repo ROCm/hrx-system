@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "iree/base/internal/json.h"
+#include "iree/base/internal/math.h"
 
 static const char id4_ideogram4_qwen_prompt_prefix[] = "<|im_start|>user\n";
 static const char id4_ideogram4_qwen_prompt_suffix[] =
@@ -909,6 +910,17 @@ static iree_host_size_t id4_ideogram4_request_dit_position_embedding_offset(
          token_ordinal;
 }
 
+static float id4_ideogram4_request_dit_mrope_inv_frequency(
+    uint32_t half_channel, uint32_t attention_head_size) {
+  const float exponent =
+      (2.0f * (float)half_channel) / (float)attention_head_size;
+  const float inv_frequency =
+      1.0f / powf(id4_ideogram4_dit_mrope_theta, exponent);
+  // The official BF16 model stores this non-persistent MRoPE buffer in BF16
+  // before widening it to F32 for position multiplication.
+  return iree_math_bf16_to_f32(iree_math_f32_to_bf16(inv_frequency));
+}
+
 static void id4_ideogram4_request_fill_dit_branch_inputs(
     id4_ideogram4_request_dit_branch_kind_t branch_kind,
     const id4_ideogram4_dit_lowering_options_t* options,
@@ -926,10 +938,8 @@ static void id4_ideogram4_request_fill_dit_branch_inputs(
   const uint32_t half_size = options->attention_head_size / 2;
   for (uint32_t half_channel = 0; half_channel < half_size; ++half_channel) {
     const uint32_t axis = id4_ideogram4_request_dit_position_axis(half_channel);
-    const float exponent =
-        (2.0f * (float)half_channel) / (float)options->attention_head_size;
-    const float inv_frequency =
-        1.0f / powf(id4_ideogram4_dit_mrope_theta, exponent);
+    const float inv_frequency = id4_ideogram4_request_dit_mrope_inv_frequency(
+        half_channel, options->attention_head_size);
     for (uint32_t token_ordinal = 0; token_ordinal < inputs->token_count;
          ++token_ordinal) {
       uint32_t position[3] = {0, 0, 0};

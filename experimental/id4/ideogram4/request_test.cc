@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 
+#include "iree/base/internal/math.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
@@ -93,8 +94,10 @@ static size_t DitPositionEmbeddingOffset(
 
 static float Ideogram4MRoPEInvFrequency(uint32_t half_channel,
                                         uint32_t attention_head_size) {
-  return 1.0f / std::pow(5000000.0f, (2.0f * (float)half_channel) /
-                                         (float)attention_head_size);
+  const float inv_frequency =
+      1.0f / std::pow(5000000.0f, (2.0f * (float)half_channel) /
+                                      (float)attention_head_size);
+  return iree_math_bf16_to_f32(iree_math_f32_to_bf16(inv_frequency));
 }
 
 TEST(Ideogram4RequestTest, ParsesStructuredPromptJson) {
@@ -469,7 +472,7 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
   options.structure_size = sizeof(options);
   options.generation = &generation;
   options.text_token_count = 2;
-  options.attention_head_size = 128;
+  options.attention_head_size = 256;
 
   ScopedDitInputs inputs;
   IREE_ASSERT_OK(id4_ideogram4_request_lower_dit_inputs(
@@ -483,9 +486,9 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
   EXPECT_EQ(inputs.value.unconditioned.image_indicator_byte_length,
             6u * sizeof(int32_t));
   EXPECT_EQ(inputs.value.conditioned.position_embedding_byte_length,
-            2u * 2u * 64u * 8u * sizeof(float));
+            2u * 2u * 128u * 8u * sizeof(float));
   EXPECT_EQ(inputs.value.unconditioned.position_embedding_byte_length,
-            2u * 2u * 64u * 6u * sizeof(float));
+            2u * 2u * 128u * 6u * sizeof(float));
 
   ASSERT_NE(inputs.value.conditioned.image_indicator, nullptr);
   EXPECT_EQ(inputs.value.conditioned.image_indicator[0], 0);
@@ -516,7 +519,8 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
                       conditioned_token_count, half_size, 1, 1, 0, 0)],
                   1.0f);
 
-  const float text_frequency = 1.0f * Ideogram4MRoPEInvFrequency(0, 128);
+  const float text_frequency =
+      1.0f * Ideogram4MRoPEInvFrequency(0, options.attention_head_size);
   EXPECT_NEAR(conditioned_position[DitPositionEmbeddingOffset(
                   conditioned_token_count, half_size, 0, 0, 0, 1)],
               std::cos(text_frequency), 1e-6f);
@@ -528,7 +532,7 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
               -std::sin(text_frequency), 1e-6f);
 
   const float first_image_frequency =
-      65536.0f * Ideogram4MRoPEInvFrequency(0, 128);
+      65536.0f * Ideogram4MRoPEInvFrequency(0, options.attention_head_size);
   EXPECT_NEAR(conditioned_position[DitPositionEmbeddingOffset(
                   conditioned_token_count, half_size, 0, 0, 0, 2)],
               std::cos(first_image_frequency), 1e-6f);
@@ -537,7 +541,7 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
               std::sin(first_image_frequency), 1e-6f);
 
   const float image_width_frequency =
-      65537.0f * Ideogram4MRoPEInvFrequency(2, 128);
+      65537.0f * Ideogram4MRoPEInvFrequency(2, options.attention_head_size);
   EXPECT_NEAR(conditioned_position[DitPositionEmbeddingOffset(
                   conditioned_token_count, half_size, 0, 0, 2, 3)],
               std::cos(image_width_frequency), 1e-5f);
@@ -550,12 +554,16 @@ TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
   EXPECT_NEAR(conditioned_position[DitPositionEmbeddingOffset(
                   conditioned_token_count, half_size, 1, 1, 2, 3)],
               std::cos(image_width_frequency), 1e-5f);
+  // Official BF16 model loading rounds inv_freq before F32 position math.
+  EXPECT_NEAR(conditioned_position[DitPositionEmbeddingOffset(
+                  conditioned_token_count, half_size, 0, 1, 20, 2)],
+              0.6094503998756409f, 1e-5f);
 
   ASSERT_NE(inputs.value.unconditioned.position_embedding, nullptr);
   const float* unconditioned_position =
       inputs.value.unconditioned.position_embedding;
   const float unconditioned_width_frequency =
-      65537.0f * Ideogram4MRoPEInvFrequency(2, 128);
+      65537.0f * Ideogram4MRoPEInvFrequency(2, options.attention_head_size);
   EXPECT_NEAR(
       unconditioned_position[DitPositionEmbeddingOffset(
           inputs.value.unconditioned.token_count, half_size, 0, 0, 2, 1)],
