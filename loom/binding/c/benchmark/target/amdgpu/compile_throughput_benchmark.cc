@@ -53,9 +53,8 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
   AmdgpuI32ChainScenario(
       iree_host_size_t job_count,
       std::initializer_list<iree_host_size_t> operation_counts,
-      AmdgpuBenchmarkTarget target,
-      iree_host_size_t workspace_usable_block_size = 0)
-      : TargetCompileScenario(workspace_usable_block_size),
+      AmdgpuBenchmarkTarget target, iree_host_size_t workspace_block_size = 0)
+      : TargetCompileScenario(workspace_block_size),
         job_count_(std::max<iree_host_size_t>(job_count, 1)),
         target_(target) {
     operation_counts_.reserve(operation_counts.size());
@@ -94,7 +93,7 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
     IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
     IREE_RETURN_IF_ERROR(
-        CreateWorkspace(/*usable_block_size=*/0, &template_workspace_));
+        CreateWorkspace(/*block_size=*/0, &template_workspace_));
     return DeserializeSource(context_.get(), template_workspace_.get(),
                              source_.get(), &template_module_);
   }

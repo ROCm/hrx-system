@@ -58,7 +58,7 @@ struct WorkerSlot {
 
 class CompileScenario {
  public:
-  explicit CompileScenario(iree_host_size_t workspace_usable_block_size = 0);
+  explicit CompileScenario(iree_host_size_t workspace_block_size = 0);
 
   virtual ~CompileScenario();
 
@@ -101,9 +101,9 @@ class CompileScenario {
   std::vector<WorkerSlot> workers_;
 
  private:
-  // Usable block capacity requested for each worker workspace. Zero selects
-  // the production default.
-  iree_host_size_t workspace_usable_block_size_ = 0;
+  // Total block size requested for each worker workspace. Zero selects the
+  // production default.
+  iree_host_size_t workspace_block_size_ = 0;
 
   // Total result artifact bytes observed by timed benchmark iterations.
   std::atomic<int64_t> artifact_bytes_{0};
@@ -112,8 +112,7 @@ class CompileScenario {
 // Shared production target setup for compile-and-emit benchmark scenarios.
 class TargetCompileScenario : public CompileScenario {
  public:
-  explicit TargetCompileScenario(
-      iree_host_size_t workspace_usable_block_size = 0);
+  explicit TargetCompileScenario(iree_host_size_t workspace_block_size = 0);
 
  protected:
   iree_status_t SetUpTarget(iree_host_size_t worker_count,
@@ -190,7 +189,7 @@ iree_status_t CreateTextSource(const std::string& identifier,
 iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
                                           SourcePtr* out_source);
 
-iree_status_t CreateWorkspace(iree_host_size_t usable_block_size,
+iree_status_t CreateWorkspace(iree_host_size_t block_size,
                               WorkspacePtr* out_workspace);
 
 iree_status_t DeserializeSource(loomc_context_t* context,

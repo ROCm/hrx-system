@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <limits>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -29,46 +28,6 @@ TEST(ArenaBlockPool, Lifetime) {
   EXPECT_EQ(pool.total_block_size, kBlockSize);
   EXPECT_EQ(pool.usable_block_size, kBlockSize - sizeof(iree_arena_block_t));
   iree_arena_block_pool_deinitialize(&pool);
-}
-
-TEST(ArenaBlockPool, UsableBlockSize) {
-  static constexpr iree_host_size_t kUsableBlockSize = 128 * 1024;
-  iree_arena_block_pool_t pool;
-  IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
-      kUsableBlockSize, iree_allocator_system(), &pool));
-  EXPECT_EQ(pool.usable_block_size, kUsableBlockSize);
-  EXPECT_EQ(pool.total_block_size,
-            kUsableBlockSize + sizeof(iree_arena_block_t));
-
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&pool, &arena);
-  void* allocation = NULL;
-  IREE_ASSERT_OK(iree_arena_allocate(&arena, kUsableBlockSize, &allocation));
-  ASSERT_NE(allocation, nullptr);
-
-  iree_arena_block_pool_statistics_t statistics;
-  iree_arena_block_pool_query_statistics(&pool, &statistics);
-#if IREE_STATISTICS_ENABLE
-  EXPECT_EQ(statistics.block_system_allocation_count, 1u);
-  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
-#else
-  EXPECT_EQ(statistics.block_system_allocation_count, 0u);
-  EXPECT_EQ(statistics.oversized_allocation_count, 0u);
-#endif  // IREE_STATISTICS_ENABLE
-
-  iree_arena_deinitialize(&arena);
-  iree_arena_block_pool_deinitialize(&pool);
-}
-
-TEST(ArenaBlockPool, UsableBlockSizeValidation) {
-  iree_arena_block_pool_t pool;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        iree_arena_block_pool_initialize_with_usable_size(
-                            0, iree_allocator_system(), &pool));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_arena_block_pool_initialize_with_usable_size(
-                            std::numeric_limits<iree_host_size_t>::max(),
-                            iree_allocator_system(), &pool));
 }
 
 TEST(ArenaBlockPool, Preallocate) {
@@ -279,19 +238,27 @@ TEST(Arena, AllocationThatOnlyFitsBeforeAlignmentIsOversized) {
   ASSERT_FALSE(
       iree_host_size_has_alignment(pool.usable_block_size, iree_max_align_t));
 
+  void* block_limit = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(
+      &arena, iree_arena_block_pool_max_allocation_size(&pool), &block_limit));
+  ASSERT_NE(block_limit, nullptr);
+  EXPECT_NE(arena.block_head, nullptr);
+  EXPECT_EQ(arena.allocation_head, nullptr);
+  iree_arena_block_t* const full_block = arena.block_head;
+
   void* near_block_limit = NULL;
   IREE_ASSERT_OK(
       iree_arena_allocate(&arena, pool.usable_block_size, &near_block_limit));
   ASSERT_NE(near_block_limit, nullptr);
   memset(near_block_limit, 0xAB, pool.usable_block_size);
-  EXPECT_EQ(arena.block_head, nullptr);
+  EXPECT_EQ(arena.block_head, full_block);
   EXPECT_NE(arena.allocation_head, nullptr);
 
   void* block_allocation = NULL;
   IREE_ASSERT_OK(iree_arena_allocate(&arena, 32, &block_allocation));
   ASSERT_NE(block_allocation, nullptr);
   memset(block_allocation, 0xCD, 32);
-  EXPECT_NE(arena.block_head, nullptr);
+  EXPECT_NE(arena.block_head, full_block);
   EXPECT_LE(arena.block_bytes_remaining, pool.usable_block_size);
 
   iree_arena_deinitialize(&arena);

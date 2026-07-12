@@ -47,8 +47,8 @@ enum class ModuleMaterializationMode {
 
 class SpirvScenarioBase : public TargetCompileScenario {
  protected:
-  explicit SpirvScenarioBase(iree_host_size_t workspace_usable_block_size = 0)
-      : TargetCompileScenario(workspace_usable_block_size) {}
+  explicit SpirvScenarioBase(iree_host_size_t workspace_block_size = 0)
+      : TargetCompileScenario(workspace_block_size) {}
 
   iree_status_t SetUpSpirv(iree_host_size_t worker_count) {
     TargetEnvironmentPtr target_environment;
@@ -184,7 +184,7 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
       IREE_RETURN_IF_ERROR(
-          CreateWorkspace(/*usable_block_size=*/0, &template_workspace_));
+          CreateWorkspace(/*block_size=*/0, &template_workspace_));
       IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
                                              template_workspace_.get(),
                                              source_.get(), &template_module_));
@@ -248,8 +248,8 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
   SpirvI32ChainScenario(iree_host_size_t job_count,
                         iree_host_size_t operation_count,
                         ModuleMaterializationMode materialization_mode,
-                        iree_host_size_t workspace_usable_block_size = 0)
-      : SpirvScenarioBase(workspace_usable_block_size),
+                        iree_host_size_t workspace_block_size = 0)
+      : SpirvScenarioBase(workspace_block_size),
         job_count_(job_count),
         operation_count_(std::max<iree_host_size_t>(operation_count, 1)),
         operation_count_value_(std::to_string(operation_count_)),
@@ -261,7 +261,7 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
       IREE_RETURN_IF_ERROR(
-          CreateWorkspace(/*usable_block_size=*/0, &template_workspace_));
+          CreateWorkspace(/*block_size=*/0, &template_workspace_));
       IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
                                              template_workspace_.get(),
                                              source_.get(), &template_module_));

@@ -195,14 +195,14 @@ iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
                           (int)identifier.size, identifier.data);
 }
 
-iree_status_t CreateWorkspace(iree_host_size_t usable_block_size,
+iree_status_t CreateWorkspace(iree_host_size_t block_size,
                               WorkspacePtr* out_workspace) {
   out_workspace->reset();
   const loomc_workspace_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.usable_block_size=*/usable_block_size,
+      /*.block_size=*/block_size,
   };
   loomc_workspace_t* workspace = nullptr;
   IREE_RETURN_IF_ERROR(to_iree_status(
@@ -271,8 +271,8 @@ iree_status_t PreparePassProgram(loomc_context_t* context,
   return iree_ok_status();
 }
 
-CompileScenario::CompileScenario(iree_host_size_t workspace_usable_block_size)
-    : workspace_usable_block_size_(workspace_usable_block_size) {}
+CompileScenario::CompileScenario(iree_host_size_t workspace_block_size)
+    : workspace_block_size_(workspace_block_size) {}
 
 CompileScenario::~CompileScenario() = default;
 
@@ -346,6 +346,8 @@ void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
     loomc_workspace_statistics_t statistics;
     loomc_workspace_query_statistics(workers_.front().workspace.get(),
                                      &statistics);
+    state.counters["workspace_block_size"] =
+        (double)statistics.total_block_size;
     state.counters["workspace_usable_block_size"] =
         (double)statistics.usable_block_size;
   }
@@ -371,7 +373,7 @@ iree_status_t CompileScenario::SetUpWorkerSlots(iree_host_size_t worker_count) {
   workers_.resize(worker_count);
   for (WorkerSlot& worker : workers_) {
     IREE_RETURN_IF_ERROR(
-        CreateWorkspace(workspace_usable_block_size_, &worker.workspace));
+        CreateWorkspace(workspace_block_size_, &worker.workspace));
   }
   return iree_ok_status();
 }
@@ -385,8 +387,8 @@ void CompileScenario::RecordArtifactBytes(int64_t byte_count) {
 }
 
 TargetCompileScenario::TargetCompileScenario(
-    iree_host_size_t workspace_usable_block_size)
-    : CompileScenario(workspace_usable_block_size) {}
+    iree_host_size_t workspace_block_size)
+    : CompileScenario(workspace_block_size) {}
 
 iree_status_t TargetCompileScenario::SetUpTarget(
     iree_host_size_t worker_count, TargetEnvironmentPtr target_environment,

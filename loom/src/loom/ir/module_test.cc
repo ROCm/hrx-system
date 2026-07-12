@@ -31,8 +31,8 @@ static const loom_encoding_vtable_t kDenseEncodingVtable = {
 class ModuleTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
-        32 * 1024, iree_allocator_system(), &block_pool_));
+    iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
+                                     &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(
         loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));

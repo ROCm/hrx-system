@@ -16,7 +16,7 @@
 #include "loom/ir/module.h"
 
 enum {
-  LOOM_RUN_DEFAULT_BLOCK_POOL_USABLE_BLOCK_SIZE = 128 * 1024,
+  LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE = 128 * 1024,
   LOOM_RUN_DEFAULT_MAX_PARSE_ERRORS = 20,
 };
 
@@ -24,8 +24,7 @@ void loom_run_session_options_initialize(
     loom_run_session_options_t* out_options) {
   *out_options = (loom_run_session_options_t){
       .host_allocator = iree_allocator_system(),
-      .block_pool_usable_block_size =
-          LOOM_RUN_DEFAULT_BLOCK_POOL_USABLE_BLOCK_SIZE,
+      .block_pool_block_size = LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE,
   };
 }
 
@@ -36,13 +35,21 @@ iree_status_t loom_run_session_initialize(
       .host_allocator = options->host_allocator,
   };
 
-  const iree_host_size_t block_pool_usable_block_size =
-      options->block_pool_usable_block_size == 0
-          ? LOOM_RUN_DEFAULT_BLOCK_POOL_USABLE_BLOCK_SIZE
-          : options->block_pool_usable_block_size;
-  IREE_RETURN_IF_ERROR(iree_arena_block_pool_initialize_with_usable_size(
-      block_pool_usable_block_size, options->host_allocator,
-      &out_session->block_pool));
+  const iree_host_size_t block_pool_block_size =
+      options->block_pool_block_size == 0
+          ? LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE
+          : options->block_pool_block_size;
+  if (IREE_UNLIKELY(block_pool_block_size < sizeof(iree_arena_block_t))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "session block pool size is too small");
+  }
+  if (IREE_UNLIKELY(
+          !iree_arena_block_pool_is_valid_total_size(block_pool_block_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "session block pool size is too large");
+  }
+  iree_arena_block_pool_initialize(
+      block_pool_block_size, options->host_allocator, &out_session->block_pool);
   out_session->block_pool_initialized = true;
 
   iree_status_t status = options->initialize_low_descriptor_registry.fn(

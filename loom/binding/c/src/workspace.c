@@ -8,10 +8,9 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
-#include "loomc/iree.h"
 
 enum {
-  LOOMC_WORKSPACE_DEFAULT_USABLE_BLOCK_SIZE = 128 * 1024,
+  LOOMC_WORKSPACE_DEFAULT_BLOCK_SIZE = 128 * 1024,
 };
 
 struct loomc_workspace_t {
@@ -53,6 +52,16 @@ static loomc_status_t loomc_workspace_validate_options(
     return loomc_make_status(LOOMC_STATUS_UNIMPLEMENTED,
                              "workspace option extensions are not supported");
   }
+  if (options->block_size != 0) {
+    if (options->block_size < sizeof(iree_arena_block_t)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "workspace block_size is too small");
+    }
+    if (!iree_arena_block_pool_is_valid_total_size(options->block_size)) {
+      return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
+                               "workspace block_size is too large");
+    }
+  }
   return loomc_ok_status();
 }
 
@@ -71,19 +80,13 @@ loomc_status_t loomc_workspace_create(const loomc_workspace_options_t* options,
                                                (void**)&workspace));
   iree_atomic_ref_count_init(&workspace->ref_count);
   workspace->allocator = allocator;
-  iree_host_size_t usable_block_size =
-      LOOMC_WORKSPACE_DEFAULT_USABLE_BLOCK_SIZE;
-  if (options && options->usable_block_size != 0) {
-    usable_block_size = options->usable_block_size;
+  iree_host_size_t block_size = LOOMC_WORKSPACE_DEFAULT_BLOCK_SIZE;
+  if (options && options->block_size != 0) {
+    block_size = options->block_size;
   }
-  loomc_status_t status =
-      loomc_status_from_iree(iree_arena_block_pool_initialize_with_usable_size(
-          usable_block_size, loomc_workspace_iree_allocator(allocator),
-          &workspace->block_pool));
-  if (!loomc_status_is_ok(status)) {
-    loomc_allocator_free(allocator, workspace);
-    return status;
-  }
+  iree_arena_block_pool_initialize(block_size,
+                                   loomc_workspace_iree_allocator(allocator),
+                                   &workspace->block_pool);
   *out_workspace = workspace;
   return loomc_ok_status();
 }
@@ -103,7 +106,8 @@ void loomc_workspace_query_statistics(
   iree_arena_block_pool_query_statistics(&workspace->block_pool, &statistics);
   *out_statistics = (loomc_workspace_statistics_t){
       .total_block_size = workspace->block_pool.total_block_size,
-      .usable_block_size = workspace->block_pool.usable_block_size,
+      .usable_block_size =
+          iree_arena_block_pool_max_allocation_size(&workspace->block_pool),
       .block_system_allocation_count = statistics.block_system_allocation_count,
       .block_system_allocation_bytes = statistics.block_system_allocation_bytes,
       .oversized_allocation_count = statistics.oversized_allocation_count,

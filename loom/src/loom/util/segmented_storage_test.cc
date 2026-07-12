@@ -17,8 +17,8 @@ namespace {
 class SegmentedStorageTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
-        32 * 1024, iree_allocator_system(), &block_pool_));
+    iree_arena_block_pool_initialize(128 * 1024, iree_allocator_system(),
+                                     &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
   }
 
