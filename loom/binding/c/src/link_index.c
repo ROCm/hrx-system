@@ -21,7 +21,7 @@
 #include "source.h"
 
 enum {
-  LOOMC_LINK_INDEX_DEFAULT_USABLE_BLOCK_SIZE = 32 * 1024,
+  LOOMC_LINK_INDEX_DEFAULT_BLOCK_SIZE = 32 * 1024,
 };
 
 typedef struct loomc_link_index_builder_source_t {
@@ -98,6 +98,16 @@ static loomc_status_t loomc_link_index_validate_builder_options(
     return loomc_make_status(
         LOOMC_STATUS_UNIMPLEMENTED,
         "link index builder option extensions are not supported");
+  }
+  if (options->block_size != 0) {
+    if (options->block_size < sizeof(iree_arena_block_t)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "link index builder block_size is too small");
+    }
+    if (!iree_arena_block_pool_is_valid_total_size(options->block_size)) {
+      return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
+                               "link index builder block_size is too large");
+    }
   }
   return loomc_ok_status();
 }
@@ -469,22 +479,16 @@ loomc_status_t loomc_link_index_builder_create(
   builder->context = context;
   loomc_context_retain(context);
 
-  iree_host_size_t usable_block_size =
-      LOOMC_LINK_INDEX_DEFAULT_USABLE_BLOCK_SIZE;
-  if (options && options->usable_block_size != 0) {
-    usable_block_size = options->usable_block_size;
+  iree_host_size_t block_size = LOOMC_LINK_INDEX_DEFAULT_BLOCK_SIZE;
+  if (options && options->block_size != 0) {
+    block_size = options->block_size;
   }
   loomc_status_t status = loomc_allocator_malloc(
       allocator, sizeof(*builder->block_pool), (void**)&builder->block_pool);
   if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(
-        iree_arena_block_pool_initialize_with_usable_size(
-            usable_block_size, loomc_link_index_iree_allocator(allocator),
-            builder->block_pool));
-    if (!loomc_status_is_ok(status)) {
-      loomc_allocator_free(allocator, builder->block_pool);
-      builder->block_pool = NULL;
-    }
+    iree_arena_block_pool_initialize(block_size,
+                                     loomc_link_index_iree_allocator(allocator),
+                                     builder->block_pool);
   }
 
   if (loomc_status_is_ok(status)) {

@@ -68,7 +68,9 @@ typedef struct iree_arena_block_pool_t {
   // Block size, in bytes. All blocks in the available_slist will have this
   // byte size which includes the iree_arena_block_t footer.
   iree_host_size_t total_block_size;
-  // Block size, in bytes, of the usable bytes within a block.
+  // Raw payload bytes preceding the block trailer. Arena allocations are
+  // rounded to iree_max_align_t and may not consume a trailing partial unit;
+  // use iree_arena_block_pool_max_allocation_size for that limit.
   iree_host_size_t usable_block_size;
   // Allocator used for allocating/freeing each allocation block.
   iree_allocator_t block_allocator;
@@ -84,6 +86,24 @@ typedef struct iree_arena_block_pool_t {
   } statistics;)
 } iree_arena_block_pool_t;
 
+// Returns true when |total_block_size| can be initialized without alignment
+// overflow and has room for the required block trailer.
+static inline bool iree_arena_block_pool_is_valid_total_size(
+    iree_host_size_t total_block_size) {
+  return total_block_size >= sizeof(iree_arena_block_t) &&
+         total_block_size <=
+             IREE_HOST_SIZE_MAX - (iree_alignof(iree_arena_block_t) - 1);
+}
+
+// Returns the largest naturally aligned arena allocation that remains within
+// one fixed-size block. Raw acquired blocks may use all of usable_block_size,
+// while iree_arena_allocate rounds each request up to iree_max_align_t.
+static inline iree_host_size_t iree_arena_block_pool_max_allocation_size(
+    const iree_arena_block_pool_t* block_pool) {
+  return block_pool->usable_block_size &
+         ~(iree_host_size_t)(iree_max_align_t - 1);
+}
+
 // Initializes a new block pool in |out_block_pool|.
 // |block_allocator| will be used to allocate and free blocks for the pool.
 // Each block allocated will be at least |total_block_size| but have a slightly
@@ -93,13 +113,6 @@ typedef struct iree_arena_block_pool_t {
 void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
                                       iree_allocator_t block_allocator,
                                       iree_arena_block_pool_t* out_block_pool);
-
-// Initializes a new block pool with at least |usable_block_size| payload bytes
-// available in each block. The block trailer is added to the system allocation
-// size instead of consuming the requested payload capacity.
-iree_status_t iree_arena_block_pool_initialize_with_usable_size(
-    iree_host_size_t usable_block_size, iree_allocator_t block_allocator,
-    iree_arena_block_pool_t* out_block_pool);
 
 // Deinitializes a block pool and frees all allocations.
 // All blocks that were acquired from the pool must have already been released

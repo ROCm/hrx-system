@@ -167,9 +167,9 @@ typedef struct loomc_link_index_builder_options_t {
   /// Extension chain for future builder options.
   const void* next;
 
-  /// Usable arena payload bytes retained per persistent frozen-index block.
-  /// The builder adds its internal block trailer outside this capacity.
-  loomc_host_size_t usable_block_size;
+  /// Total bytes acquired from the host allocator per persistent frozen-index
+  /// block. Internal tracking metadata consumes part of this capacity.
+  loomc_host_size_t block_size;
 } loomc_link_index_builder_options_t;
 
 /// Deterministic source slot reserved by a link-index builder.

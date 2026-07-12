@@ -286,8 +286,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   descriptors[7].schedule_class_id = 4;
   loom_low_schedule_node_t schedule_nodes[13] = {};
   iree_arena_block_pool_t block_pool;
-  IREE_ASSERT_OK(iree_arena_block_pool_initialize_with_usable_size(
-      32 * 1024, iree_allocator_system(), &block_pool));
+  iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
+                                   &block_pool);
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);
   IREE_ASSERT_OK(loom_context_finalize(&context));

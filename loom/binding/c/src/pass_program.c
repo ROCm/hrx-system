@@ -26,7 +26,7 @@
 #include "target.h"
 
 enum {
-  LOOMC_PASS_PROGRAM_DEFAULT_USABLE_BLOCK_SIZE = 32 * 1024,
+  LOOMC_PASS_PROGRAM_DEFAULT_BLOCK_SIZE = 32 * 1024,
 };
 
 struct loomc_pass_program_t {
@@ -173,19 +173,14 @@ static loomc_status_t loomc_pass_program_allocate_storage(
   pass_program->allocator = allocator;
   pass_program->context = context;
   loomc_context_retain(context);
-  loomc_status_t status =
-      loomc_status_from_iree(iree_arena_block_pool_initialize_with_usable_size(
-          LOOMC_PASS_PROGRAM_DEFAULT_USABLE_BLOCK_SIZE,
-          iree_allocator_from_loomc(allocator), &pass_program->block_pool));
-  if (loomc_status_is_ok(status)) {
-    status = loomc_target_pass_registry_initialize(
-        loomc_context_target_environment(context),
-        &pass_program->registry_storage, &pass_program->registry);
-  }
+  iree_arena_block_pool_initialize(LOOMC_PASS_PROGRAM_DEFAULT_BLOCK_SIZE,
+                                   iree_allocator_from_loomc(allocator),
+                                   &pass_program->block_pool);
+  loomc_status_t status = loomc_target_pass_registry_initialize(
+      loomc_context_target_environment(context),
+      &pass_program->registry_storage, &pass_program->registry);
   if (!loomc_status_is_ok(status)) {
-    if (pass_program->block_pool.total_block_size != 0) {
-      iree_arena_block_pool_deinitialize(&pass_program->block_pool);
-    }
+    iree_arena_block_pool_deinitialize(&pass_program->block_pool);
     loomc_context_release(context);
     loomc_allocator_free(allocator, pass_program);
     return status;

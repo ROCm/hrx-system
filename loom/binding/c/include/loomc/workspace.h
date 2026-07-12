@@ -69,9 +69,9 @@ typedef struct loomc_workspace_options_t {
   /// Extension chain for future workspace options.
   const void* next;
 
-  /// Usable arena payload bytes retained per fixed-size block. The workspace
-  /// adds its internal block trailer outside this capacity.
-  loomc_host_size_t usable_block_size;
+  /// Total bytes acquired from the host allocator per fixed-size arena block.
+  /// Internal tracking metadata consumes part of this capacity.
+  loomc_host_size_t block_size;
 } loomc_workspace_options_t;
 
 /// Monotonic allocation statistics for a workspace block pool.
@@ -79,7 +79,8 @@ typedef struct loomc_workspace_statistics_t {
   /// Total bytes acquired from the host allocator for each fixed-size block.
   loomc_host_size_t total_block_size;
 
-  /// Payload bytes available to arena allocations in each fixed-size block.
+  /// Largest arena allocation served by one fixed-size block without falling
+  /// back to an oversized host allocation.
   loomc_host_size_t usable_block_size;
 
   /// Number of fixed-size blocks acquired from the host allocator.

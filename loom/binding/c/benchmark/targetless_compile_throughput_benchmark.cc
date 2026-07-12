@@ -36,8 +36,8 @@ using loomc::bench::WorkspacePtr;
 class TunerFlowScenario final : public CompileScenario {
  public:
   explicit TunerFlowScenario(iree_host_size_t job_count,
-                             iree_host_size_t workspace_usable_block_size = 0)
-      : CompileScenario(workspace_usable_block_size), job_count_(job_count) {}
+                             iree_host_size_t workspace_block_size = 0)
+      : CompileScenario(workspace_block_size), job_count_(job_count) {}
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(CompileScenario::SetUp(worker_count));
