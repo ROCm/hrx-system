@@ -374,9 +374,8 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t chosen_bottleneck_resource_id;
   // Chosen target pressure-cliff penalty.
   uint32_t chosen_pressure_cliff_penalty;
-  // Chosen register class closest to a pressure cliff, or
-  // LOOM_LOW_REG_CLASS_NONE.
-  uint16_t chosen_pressure_cliff_reg_class_id;
+  // Chosen register class or derived resource closest to a pressure cliff.
+  iree_string_view_t chosen_pressure_cliff_source;
   // Chosen crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t chosen_pressure_cliff_units;
   // Chosen live units remaining before the next pressure cliff, or
@@ -395,9 +394,9 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t rejected_bottleneck_resource_id;
   // Best rejected target pressure-cliff penalty.
   uint32_t rejected_pressure_cliff_penalty;
-  // Best rejected register class closest to a pressure cliff, or
-  // LOOM_LOW_REG_CLASS_NONE.
-  uint16_t rejected_pressure_cliff_reg_class_id;
+  // Best rejected register class or derived resource closest to a pressure
+  // cliff.
+  iree_string_view_t rejected_pressure_cliff_source;
   // Best rejected crossed pressure cliff, or
   // LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t rejected_pressure_cliff_units;
@@ -575,8 +574,8 @@ typedef struct loom_low_schedule_options_t {
   // Optional source-derived memory summaries for the modeled function. Empty
   // uses conservative descriptor effect summaries.
   loom_low_memory_access_table_t memory_access_table;
-  // Optional target-provided register-pressure cliff table.
-  loom_low_pressure_cliff_table_t pressure_cliffs;
+  // Optional immutable target pressure policy.
+  const loom_low_pressure_model_t* pressure_model;
   // Optional explicit allocation budgets. These are interpreted as hard
   // pressure limits by the scheduler so resource-stall scheduling can shorten
   // live ranges before allocation reaches the final physical storage ceiling.

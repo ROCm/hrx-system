@@ -41,8 +41,8 @@ typedef struct loom_low_emission_frame_options_t {
   loom_target_selection_t target_selection;
   // Optional source-derived memory summaries for the scheduled low function.
   loom_low_memory_access_table_t memory_access_table;
-  // Optional target-provided register-pressure cliff table.
-  loom_low_pressure_cliff_table_t pressure_cliffs;
+  // Optional immutable target pressure policy.
+  const loom_low_pressure_model_t* pressure_model;
   // Optional target-provided descriptor pair-affinity table.
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities;
   // Optional target-provided implicit state reads for structural low

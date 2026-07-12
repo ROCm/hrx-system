@@ -194,8 +194,8 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Returns the generated target pressure-cliff table for |descriptor_set|.
-loom_low_pressure_cliff_table_t loom_amdgpu_occupancy_pressure_cliffs(
+// Returns the generated target pressure model for |descriptor_set|.
+const loom_low_pressure_model_t* loom_amdgpu_occupancy_pressure_model(
     const loom_low_descriptor_set_t* descriptor_set);
 
 // Appends a compact JSON representation of |table| to |builder|.

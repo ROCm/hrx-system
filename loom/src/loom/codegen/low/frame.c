@@ -245,7 +245,7 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   loom_low_schedule_options_t schedule_options = {
       .memory_access_table = options->memory_access_table,
-      .pressure_cliffs = options->pressure_cliffs,
+      .pressure_model = options->pressure_model,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,
       .pair_affinities = options->schedule_pair_affinities,
@@ -455,15 +455,37 @@ static iree_status_t loom_low_emission_frame_validate_final(
   return iree_ok_status();
 }
 
+static uint64_t loom_low_emission_frame_pressure_resource_units(
+    const loom_low_pressure_resource_table_t* resource_table,
+    uint16_t resource_id, const uint32_t* units_by_reg_class,
+    iree_host_size_t reg_class_count) {
+  const loom_low_pressure_resource_t* resource =
+      &resource_table->resources[resource_id];
+  uint64_t resource_units = 0;
+  for (uint16_t i = 0; i < resource->member_count; ++i) {
+    const loom_low_pressure_resource_member_t* member =
+        &resource_table->members[resource->member_start + i];
+    IREE_ASSERT_EQ(member->resource_id, resource_id);
+    IREE_ASSERT_LT(member->descriptor_reg_class_id, reg_class_count);
+    const uint64_t contribution = loom_low_pressure_round_resource_units(
+        units_by_reg_class[member->descriptor_reg_class_id],
+        member->contribution_granularity);
+    if (resource_units > UINT64_MAX - contribution) return UINT64_MAX;
+    resource_units += contribution;
+  }
+  return resource_units;
+}
+
 static bool loom_low_emission_frame_crosses_new_pressure_cliff(
-    loom_low_pressure_cliff_table_t pressure_cliffs,
+    const loom_low_pressure_model_t* pressure_model,
     const uint32_t* baseline_units_by_reg_class,
     const loom_low_allocation_table_t* allocation) {
-  IREE_ASSERT_EQ(allocation->assigned_extents.count,
-                 pressure_cliffs.range_count);
-  for (iree_host_size_t i = 0; i < pressure_cliffs.count; ++i) {
-    const loom_low_pressure_cliff_t* cliff = &pressure_cliffs.values[i];
-    const uint16_t reg_class_id = cliff->descriptor_reg_class_id;
+  if (loom_low_pressure_model_is_empty(pressure_model)) return false;
+  const loom_low_pressure_cliff_table_t* pressure_cliffs =
+      &pressure_model->register_class_cliffs;
+  for (iree_host_size_t i = 0; i < pressure_cliffs->count; ++i) {
+    const loom_low_pressure_cliff_t* cliff = &pressure_cliffs->values[i];
+    const uint16_t reg_class_id = cliff->pressure_source_id;
     if (baseline_units_by_reg_class[reg_class_id] >= cliff->cliff_units) {
       continue;
     }
@@ -471,6 +493,33 @@ static bool loom_low_emission_frame_crosses_new_pressure_cliff(
         allocation->assigned_extents.ends_by_reg_class[reg_class_id];
     if (allocated_units >= cliff->cliff_units) {
       return true;
+    }
+  }
+  const loom_low_pressure_resource_table_t* resource_table =
+      &pressure_model->resources;
+  for (uint16_t resource_id = 0; resource_id < resource_table->resource_count;
+       ++resource_id) {
+    const loom_low_pressure_resource_t* resource =
+        &resource_table->resources[resource_id];
+    const uint64_t baseline_resource_units =
+        loom_low_emission_frame_pressure_resource_units(
+            resource_table, resource_id, baseline_units_by_reg_class,
+            allocation->assigned_extents.count);
+    const uint64_t allocated_resource_units =
+        loom_low_emission_frame_pressure_resource_units(
+            resource_table, resource_id,
+            allocation->assigned_extents.ends_by_reg_class,
+            allocation->assigned_extents.count);
+    const uint16_t cliff_end = resource->cliff_start + resource->cliff_count;
+    for (uint16_t cliff_index = resource->cliff_start; cliff_index < cliff_end;
+         ++cliff_index) {
+      const loom_low_pressure_cliff_t* cliff =
+          &resource_table->cliffs[cliff_index];
+      IREE_ASSERT_EQ(cliff->pressure_source_id, resource_id);
+      if (baseline_resource_units < cliff->cliff_units &&
+          allocated_resource_units >= cliff->cliff_units) {
+        return true;
+      }
     }
   }
   return false;
@@ -566,6 +615,33 @@ static iree_status_t loom_low_emission_frame_apply_materialization_summary(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_emission_frame_replay_diagnostics(
+    loom_module_t* module, loom_op_t* low_func_op,
+    const loom_low_emission_frame_options_t* frame_options,
+    loom_low_placement_pair_use_list_t preferred_pair_uses,
+    const iree_arena_checkpoint_t* frame_checkpoint,
+    iree_arena_allocator_t* repair_arena, iree_arena_allocator_t* scratch_arena,
+    iree_arena_allocator_t* arena, loom_low_planning_statistics_t* statistics,
+    loom_low_emission_frame_t* out_frame) {
+  loom_low_emission_frame_record_memory_high_water(
+      frame_checkpoint, repair_arena, scratch_arena, statistics);
+  iree_arena_checkpoint_restore(frame_checkpoint);
+  *out_frame = (loom_low_emission_frame_t){0};
+  if (statistics != NULL) {
+    ++statistics->repair.diagnostic_replay_count;
+  }
+  return loom_low_emission_frame_build_with_diagnostic_emitter(
+      module, low_func_op, frame_options, preferred_pair_uses,
+      frame_options->emitter, arena, statistics, out_frame);
+}
+
+static bool loom_low_emission_frame_diagnostics_requested(
+    const loom_low_emission_frame_options_t* frame_options) {
+  return frame_options->emitter.fn != NULL &&
+         (frame_options->schedule_diagnostic_flags != 0 ||
+          frame_options->allocation_diagnostic_flags != 0);
+}
+
 static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,
@@ -581,6 +657,8 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         "spill-free low emission frame construction requires spill-free "
         "options");
   }
+  const loom_low_pressure_model_t* pressure_model =
+      frame_options->pressure_model;
 
   loom_low_emission_frame_lower_spill_traffic_result_t spill_lowering_result = {
       0};
@@ -623,8 +701,8 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           frame.allocation.spill_plan_count != 0 ||
           frame.allocation.spill_count != 0 ||
           loom_low_emission_frame_crosses_new_pressure_cliff(
-              frame_options->pressure_cliffs,
-              pair_replication_baseline_units_by_reg_class, &frame.allocation);
+              pressure_model, pair_replication_baseline_units_by_reg_class,
+              &frame.allocation);
       if (!rejected) {
         uint64_t satisfied_packet_savings = 0;
         IREE_RETURN_IF_ERROR(loom_low_allocation_satisfied_pair_packet_savings(
@@ -655,18 +733,10 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     }
     if (frame.schedule.error_count != 0) {
       if (frame_options->emitter.fn != NULL) {
-        loom_low_emission_frame_record_memory_high_water(
-            frame_checkpoint, repair_arena, scratch_arena, statistics);
-        iree_arena_checkpoint_restore(frame_checkpoint);
-        frame = (loom_low_emission_frame_t){0};
-        if (statistics != NULL) {
-          ++statistics->repair.diagnostic_replay_count;
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_low_emission_frame_build_with_diagnostic_emitter(
-                module, low_func_op, frame_options,
-                loom_low_placement_pair_use_list_empty(),
-                frame_options->emitter, arena, statistics, &frame));
+        IREE_RETURN_IF_ERROR(loom_low_emission_frame_replay_diagnostics(
+            module, low_func_op, frame_options,
+            loom_low_placement_pair_use_list_empty(), frame_checkpoint,
+            repair_arena, scratch_arena, arena, statistics, &frame));
       }
       *out_frame = frame;
       return iree_ok_status();
@@ -694,18 +764,10 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         }
       }
       if (frame_options->emitter.fn != NULL) {
-        loom_low_emission_frame_record_memory_high_water(
-            frame_checkpoint, repair_arena, scratch_arena, statistics);
-        iree_arena_checkpoint_restore(frame_checkpoint);
-        frame = (loom_low_emission_frame_t){0};
-        if (statistics != NULL) {
-          ++statistics->repair.diagnostic_replay_count;
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_low_emission_frame_build_with_diagnostic_emitter(
-                module, low_func_op, frame_options,
-                loom_low_placement_pair_use_list_empty(),
-                frame_options->emitter, arena, statistics, &frame));
+        IREE_RETURN_IF_ERROR(loom_low_emission_frame_replay_diagnostics(
+            module, low_func_op, frame_options,
+            loom_low_placement_pair_use_list_empty(), frame_checkpoint,
+            repair_arena, scratch_arena, arena, statistics, &frame));
       }
       *out_frame = frame;
       return iree_ok_status();
@@ -732,11 +794,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           IREE_RETURN_IF_ERROR(loom_low_emission_frame_copy_pair_uses(
               frame.schedule.placement_pair_uses, repair_arena,
               &pair_replication_preferred_pairs));
-          const loom_low_pressure_cliff_table_t pressure_cliffs =
-              frame_options->pressure_cliffs;
-          if (pressure_cliffs.count != 0) {
-            IREE_ASSERT_EQ(frame.allocation.assigned_extents.count,
-                           pressure_cliffs.range_count);
+          if (!loom_low_pressure_model_is_empty(pressure_model)) {
             IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
                 repair_arena, frame.allocation.assigned_extents.count,
                 sizeof(*pair_replication_baseline_units_by_reg_class),
@@ -781,6 +839,15 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           frame_options, spill_free_options, &frame, scratch_arena, &accepted));
       if (!accepted) {
         return iree_ok_status();
+      }
+      if (loom_low_emission_frame_diagnostics_requested(frame_options)) {
+        IREE_RETURN_IF_ERROR(loom_low_emission_frame_replay_diagnostics(
+            module, low_func_op, frame_options,
+            pair_replication.edit_count != 0
+                ? pair_replication_preferred_pairs
+                : loom_low_placement_pair_use_list_empty(),
+            frame_checkpoint, repair_arena, scratch_arena, arena, statistics,
+            &frame));
       }
       IREE_RETURN_IF_ERROR(
           loom_low_emission_frame_apply_materialization_summary(

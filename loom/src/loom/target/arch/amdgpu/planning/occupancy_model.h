@@ -30,26 +30,6 @@ typedef struct loom_amdgpu_occupancy_register_class_model_t {
   uint32_t allocation_granularity;
 } loom_amdgpu_occupancy_register_class_model_t;
 
-typedef struct loom_amdgpu_occupancy_resource_member_model_t {
-  // Index into loom_amdgpu_occupancy_model_t::register_classes.
-  uint16_t register_class_index;
-  // Member contribution granularity applied before summing pressure.
-  uint32_t contribution_granularity;
-} loom_amdgpu_occupancy_resource_member_model_t;
-
-typedef struct loom_amdgpu_occupancy_resource_model_t {
-  // Stable target-low resource name.
-  iree_string_view_t resource;
-  // Occupancy resource pool shared by resident waves.
-  uint32_t pool_units;
-  // Allocation granularity used by occupancy calculations.
-  uint32_t allocation_granularity;
-  // Register-class members contributing to this resource.
-  const loom_amdgpu_occupancy_resource_member_model_t* members;
-  // Number of entries in members.
-  iree_host_size_t member_count;
-} loom_amdgpu_occupancy_resource_model_t;
-
 typedef struct loom_amdgpu_occupancy_model_t {
   // Dense generated AMDGPU descriptor-set ordinal.
   uint16_t descriptor_set_ordinal;
@@ -57,8 +37,8 @@ typedef struct loom_amdgpu_occupancy_model_t {
   uint32_t wave_size;
   // Maximum resident waves per SIMD.
   uint32_t max_waves_per_simd;
-  // Target throughput cliffs shared by scheduling and allocation.
-  loom_low_pressure_cliff_table_t pressure_cliffs;
+  // Target pressure policy shared by scheduling and final occupancy.
+  loom_low_pressure_model_t pressure_model;
   // Register-class occupancy models in diagnostic order.
   const loom_amdgpu_occupancy_register_class_model_t* register_classes;
   // Number of entries in register_classes.
@@ -68,10 +48,6 @@ typedef struct loom_amdgpu_occupancy_model_t {
   const uint16_t* register_class_indices_by_descriptor_reg_class_id;
   // Number of entries in register_class_indices_by_descriptor_reg_class_id.
   iree_host_size_t descriptor_reg_class_count;
-  // Derived occupancy resources in diagnostic order.
-  const loom_amdgpu_occupancy_resource_model_t* resources;
-  // Number of entries in resources.
-  iree_host_size_t resource_count;
 } loom_amdgpu_occupancy_model_t;
 
 // Returns the occupancy model for |descriptor_set_ordinal|, or NULL when the

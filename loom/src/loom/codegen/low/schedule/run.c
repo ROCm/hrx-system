@@ -36,6 +36,15 @@ enum loom_low_schedule_alias_pressure_flag_bits_e {
   LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 1,
 };
 
+enum loom_low_schedule_resource_pressure_flag_bits_e {
+  LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 0,
+};
+
+typedef enum loom_low_schedule_resource_high_water_mode_e {
+  LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SOURCE_BASELINE = 0,
+  LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED = 1,
+} loom_low_schedule_resource_high_water_mode_t;
+
 typedef struct loom_low_schedule_alias_pressure_record_t {
   // Current live units in the shared alias namespace.
   uint64_t current_live_units;
@@ -44,6 +53,19 @@ typedef struct loom_low_schedule_alias_pressure_record_t {
   // Mutable loom_low_schedule_alias_pressure_flag_bits_e bits.
   uint8_t flags;
 } loom_low_schedule_alias_pressure_record_t;
+
+typedef struct loom_low_schedule_resource_pressure_record_t {
+  // Current sum of rounded member-class high-water marks.
+  uint64_t current_peak_units;
+  // Additional resource units projected by the candidate being scored.
+  uint64_t candidate_added_units;
+  // Penalty accumulated above the authored source-order baseline.
+  uint32_t pressure_cliff_penalty;
+  // First target cliff not yet crossed by the scheduled high-water mark.
+  uint16_t next_cliff_index;
+  // Mutable loom_low_schedule_resource_pressure_flag_bits_e bits.
+  uint8_t flags;
+} loom_low_schedule_resource_pressure_record_t;
 
 typedef struct loom_low_schedule_pressure_state_t {
   // Current live register units by descriptor register-class ID.
@@ -61,6 +83,19 @@ typedef struct loom_low_schedule_pressure_state_t {
     // Number of populated entries in candidate_delta_touched_ids.
     iree_host_size_t candidate_delta_touched_count;
   } alias_sets;
+  // Incremental high-water state for derived target pressure resources.
+  struct {
+    // Per-class high-water marks, dense by descriptor register-class ID.
+    uint64_t* peak_live_units_by_reg_class;
+    // Mutable records indexed by pressure-resource ID.
+    loom_low_schedule_resource_pressure_record_t* records;
+    // Resource IDs touched by the current candidate.
+    uint16_t* candidate_touched_ids;
+    // Number of populated entries in |candidate_touched_ids|.
+    uint16_t candidate_touched_count;
+    // Current aggregate penalty across all derived resources.
+    uint32_t pressure_cliff_penalty;
+  } resources;
   // First target pressure cliff above the source-order pressure ceiling,
   // indexed by descriptor register-class ID.
   uint32_t* first_actionable_pressure_cliff_indices;
@@ -138,6 +173,13 @@ typedef enum loom_low_schedule_ready_membership_change_e {
   LOOM_LOW_SCHEDULE_READY_MEMBERSHIP_INSERT = 1,
 } loom_low_schedule_ready_membership_change_t;
 
+enum loom_low_schedule_pressure_source_kind_e {
+  LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_NONE = 0,
+  LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS = 1,
+  LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE = 2,
+};
+typedef uint8_t loom_low_schedule_pressure_source_kind_t;
+
 typedef struct loom_low_schedule_candidate_score_t {
   // Aggregate live register units after scheduling the candidate.
   uint64_t projected_live_units;
@@ -188,8 +230,10 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint16_t pair_placement_option_count;
   // Number of storage-relation rows owned by the candidate.
   uint16_t storage_relation_count;
-  // Register class for the closest crossed or future pressure cliff.
-  uint16_t pressure_cliff_reg_class_id;
+  // Register-class or resource ID for the closest pressure cliff.
+  uint16_t pressure_cliff_source_id;
+  // Interpretation of pressure_cliff_source_id.
+  loom_low_schedule_pressure_source_kind_t pressure_cliff_source_kind;
   // Candidate properties used by pressure-aware comparison.
   uint8_t flags;
 } loom_low_schedule_candidate_score_t;
@@ -706,9 +750,6 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         state->arena, reg_class_count, sizeof(*state->state_read_heads),
         (void**)&state->state_read_heads));
   }
-  IREE_ASSERT(
-      loom_low_pressure_cliff_table_is_empty(state->options->pressure_cliffs) ||
-      state->options->pressure_cliffs.range_count == reg_class_count);
   IREE_RETURN_IF_ERROR(loom_low_schedule_initialize_pressure_limits(state));
   for (uint32_t operand_index = 0;
        operand_index < descriptor_set->operand_count; ++operand_index) {
@@ -962,8 +1003,8 @@ static iree_status_t loom_low_schedule_allocate_pressure_state(
         state->arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_delta_touched_reg_class_ids),
         (void**)&out_pressure_state->candidate_delta_touched_reg_class_ids));
-    if (!loom_low_pressure_cliff_table_is_empty(
-            state->options->pressure_cliffs)) {
+    if (state->pressure_cliffs != NULL &&
+        !loom_low_pressure_cliff_table_is_empty(*state->pressure_cliffs)) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, reg_class_count,
           sizeof(*out_pressure_state->first_actionable_pressure_cliff_indices),
@@ -972,8 +1013,8 @@ static iree_status_t loom_low_schedule_allocate_pressure_state(
       for (uint16_t reg_class_id = 0; reg_class_id < reg_class_count;
            ++reg_class_id) {
         const loom_low_pressure_cliff_range_t range =
-            loom_low_pressure_cliff_table_range(
-                &state->options->pressure_cliffs, reg_class_id);
+            loom_low_pressure_cliff_table_range(state->pressure_cliffs,
+                                                reg_class_id);
         out_pressure_state
             ->first_actionable_pressure_cliff_indices[reg_class_id] =
             range.start;
@@ -1007,6 +1048,33 @@ static iree_status_t loom_low_schedule_allocate_pressure_state(
     out_pressure_state->alias_sets.block_ids = touched_ids;
     out_pressure_state->alias_sets.candidate_delta_touched_ids =
         touched_ids + alias_set_count;
+  }
+  if (state->pressure_resources != NULL) {
+    const uint16_t resource_count = state->pressure_resources->resource_count;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, reg_class_count,
+        sizeof(*out_pressure_state->resources.peak_live_units_by_reg_class),
+        (void**)&out_pressure_state->resources.peak_live_units_by_reg_class));
+    memset(
+        out_pressure_state->resources.peak_live_units_by_reg_class, 0,
+        reg_class_count *
+            sizeof(
+                *out_pressure_state->resources.peak_live_units_by_reg_class));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, resource_count,
+        sizeof(*out_pressure_state->resources.records),
+        (void**)&out_pressure_state->resources.records));
+    memset(out_pressure_state->resources.records, 0,
+           resource_count * sizeof(*out_pressure_state->resources.records));
+    for (uint16_t resource_id = 0; resource_id < resource_count;
+         ++resource_id) {
+      out_pressure_state->resources.records[resource_id].next_cliff_index =
+          state->pressure_resources->resources[resource_id].cliff_start;
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, resource_count,
+        sizeof(*out_pressure_state->resources.candidate_touched_ids),
+        (void**)&out_pressure_state->resources.candidate_touched_ids));
   }
   const uint32_t descriptor_count =
       state->target.descriptor_set->descriptor_count;
@@ -1129,6 +1197,88 @@ static void loom_low_schedule_reset_block_alias_pressure(
   pressure_state->alias_sets.block_count = 0;
 }
 
+static void loom_low_schedule_advance_resource_cliffs(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state, uint16_t resource_id,
+    loom_low_schedule_resource_high_water_mode_t mode) {
+  const loom_low_pressure_resource_t* resource =
+      &state->pressure_resources->resources[resource_id];
+  loom_low_schedule_resource_pressure_record_t* record =
+      &pressure_state->resources.records[resource_id];
+  const uint16_t cliff_end = resource->cliff_start + resource->cliff_count;
+  while (record->next_cliff_index < cliff_end) {
+    const loom_low_pressure_cliff_t* cliff =
+        &state->pressure_resources->cliffs[record->next_cliff_index];
+    if (cliff->cliff_units > record->current_peak_units) break;
+    if (mode == LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED) {
+      const uint32_t penalty = cliff->tier_before - cliff->tier_after;
+      record->pressure_cliff_penalty =
+          iree_math_saturating_add_u32(record->pressure_cliff_penalty, penalty);
+      pressure_state->resources.pressure_cliff_penalty =
+          iree_math_saturating_add_u32(
+              pressure_state->resources.pressure_cliff_penalty, penalty);
+    }
+    ++record->next_cliff_index;
+  }
+}
+
+static void loom_low_schedule_note_resource_high_water(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state, uint16_t reg_class_id,
+    loom_low_schedule_resource_high_water_mode_t mode) {
+  if (state->pressure_resources == NULL) return;
+  const uint64_t current_live_units =
+      pressure_state->current_live_units_by_reg_class[reg_class_id];
+  uint64_t* peak_live_units =
+      &pressure_state->resources.peak_live_units_by_reg_class[reg_class_id];
+  if (current_live_units <= *peak_live_units) return;
+  const uint64_t previous_peak_live_units = *peak_live_units;
+  *peak_live_units = current_live_units;
+  const loom_low_pressure_resource_member_range_t range =
+      loom_low_pressure_resource_table_member_range(state->pressure_resources,
+                                                    reg_class_id);
+  for (uint16_t i = 0; i < range.count; ++i) {
+    const uint16_t member_index =
+        state->pressure_resources->member_indices_by_reg_class[range.start + i];
+    const loom_low_pressure_resource_member_t* member =
+        &state->pressure_resources->members[member_index];
+    IREE_ASSERT_EQ(member->descriptor_reg_class_id, reg_class_id);
+    const uint64_t previous_contribution =
+        loom_low_pressure_round_resource_units(
+            previous_peak_live_units, member->contribution_granularity);
+    const uint64_t current_contribution =
+        loom_low_pressure_round_resource_units(
+            current_live_units, member->contribution_granularity);
+    loom_low_schedule_resource_pressure_record_t* record =
+        &pressure_state->resources.records[member->resource_id];
+    record->current_peak_units = iree_math_saturating_add_u64(
+        record->current_peak_units,
+        current_contribution - previous_contribution);
+    loom_low_schedule_advance_resource_cliffs(state, pressure_state,
+                                              member->resource_id, mode);
+  }
+}
+
+static void loom_low_schedule_reset_source_resource_pressure(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state) {
+  if (state->pressure_resources == NULL) return;
+  memset(pressure_state->resources.peak_live_units_by_reg_class, 0,
+         state->target.descriptor_set->reg_class_count *
+             sizeof(*pressure_state->resources.peak_live_units_by_reg_class));
+  for (uint16_t resource_id = 0;
+       resource_id < state->pressure_resources->resource_count; ++resource_id) {
+    loom_low_schedule_resource_pressure_record_t* record =
+        &pressure_state->resources.records[resource_id];
+    record->current_peak_units = 0;
+    record->candidate_added_units = 0;
+    record->pressure_cliff_penalty = 0;
+    record->flags = 0;
+  }
+  pressure_state->resources.candidate_touched_count = 0;
+  pressure_state->resources.pressure_cliff_penalty = 0;
+}
+
 static void loom_low_schedule_advance_source_pressure_cliff_floor(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint16_t reg_class_id) {
@@ -1136,16 +1286,15 @@ static void loom_low_schedule_advance_source_pressure_cliff_floor(
     return;
   }
   const loom_low_pressure_cliff_range_t range =
-      loom_low_pressure_cliff_table_range(&state->options->pressure_cliffs,
-                                          reg_class_id);
+      loom_low_pressure_cliff_table_range(state->pressure_cliffs, reg_class_id);
   const uint32_t range_end = range.start + range.count;
   uint32_t* first_actionable_cliff =
       &pressure_state->first_actionable_pressure_cliff_indices[reg_class_id];
   const uint64_t source_live_units =
       pressure_state->current_live_units_by_reg_class[reg_class_id];
   while (*first_actionable_cliff < range_end &&
-         state->options->pressure_cliffs.values[*first_actionable_cliff]
-                 .cliff_units <= source_live_units) {
+         state->pressure_cliffs->values[*first_actionable_cliff].cliff_units <=
+             source_live_units) {
     ++*first_actionable_cliff;
   }
 }
@@ -1199,6 +1348,9 @@ static void loom_low_schedule_add_source_pressure_value(
                                           (int64_t)value->unit_count);
   loom_low_schedule_advance_source_pressure_cliff_floor(state, pressure_state,
                                                         reg_class_id);
+  loom_low_schedule_note_resource_high_water(
+      state, pressure_state, reg_class_id,
+      LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SOURCE_BASELINE);
 }
 
 static void loom_low_schedule_reverse_source_pressure_node(
@@ -1250,6 +1402,7 @@ static void loom_low_schedule_reset_source_pressure_sweep(
   }
   pressure_state->block_reg_class_count = 0;
   loom_low_schedule_reset_block_alias_pressure(pressure_state);
+  loom_low_schedule_reset_source_resource_pressure(state, pressure_state);
   pressure_state->current_live_units = 0;
 }
 
@@ -1483,6 +1636,9 @@ static void loom_low_schedule_initialize_block_pressure(
           unit_count;
       loom_low_schedule_adjust_alias_pressure(
           state, pressure_state, reg_class_id, (int64_t)unit_count);
+      loom_low_schedule_note_resource_high_water(
+          state, pressure_state, reg_class_id,
+          LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED);
     }
   }
 }
@@ -1592,6 +1748,16 @@ static void loom_low_schedule_reset_candidate_pressure_deltas(
     record->flags &= ~LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED;
   }
   pressure_state->alias_sets.candidate_delta_touched_count = 0;
+  for (uint16_t i = 0; i < pressure_state->resources.candidate_touched_count;
+       ++i) {
+    loom_low_schedule_resource_pressure_record_t* record =
+        &pressure_state->resources
+             .records[pressure_state->resources.candidate_touched_ids[i]];
+    record->candidate_added_units = 0;
+    record->flags &=
+        ~LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED;
+  }
+  pressure_state->resources.candidate_touched_count = 0;
 }
 
 static void loom_low_schedule_note_candidate_pressure_delta(
@@ -1791,6 +1957,128 @@ static uint64_t loom_low_schedule_project_live_units(
   return current_live_units + added_units;
 }
 
+static iree_string_view_t loom_low_schedule_reg_class_name(
+    const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
+  IREE_ASSERT_LT(reg_class_id, state->target.descriptor_set->reg_class_count);
+  return loom_low_descriptor_set_string(
+      state->target.descriptor_set,
+      state->target.descriptor_set->reg_classes[reg_class_id]
+          .name_string_offset);
+}
+
+static iree_string_view_t loom_low_schedule_pressure_source_name(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_source_kind_t source_kind, uint16_t source_id) {
+  switch (source_kind) {
+    case LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS:
+      return loom_low_schedule_reg_class_name(state, source_id);
+    case LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE:
+      IREE_ASSERT(state->pressure_resources != NULL);
+      IREE_ASSERT_LT(source_id, state->pressure_resources->resource_count);
+      return state->pressure_resources->resources[source_id].name;
+    default:
+      return iree_string_view_empty();
+  }
+}
+
+static void loom_low_schedule_project_candidate_resource_pressure(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state) {
+  for (iree_host_size_t i = 0;
+       i < pressure_state->candidate_delta_touched_count; ++i) {
+    const uint16_t reg_class_id =
+        pressure_state->candidate_delta_touched_reg_class_ids[i];
+    const uint64_t projected_live_units = loom_low_schedule_project_live_units(
+        pressure_state->current_live_units_by_reg_class[reg_class_id],
+        pressure_state->candidate_delta_units_by_reg_class[reg_class_id]);
+    const uint64_t peak_live_units =
+        pressure_state->resources.peak_live_units_by_reg_class[reg_class_id];
+    if (projected_live_units <= peak_live_units) continue;
+    const loom_low_pressure_resource_member_range_t range =
+        loom_low_pressure_resource_table_member_range(state->pressure_resources,
+                                                      reg_class_id);
+    for (uint16_t j = 0; j < range.count; ++j) {
+      const uint16_t member_index =
+          state->pressure_resources
+              ->member_indices_by_reg_class[range.start + j];
+      const loom_low_pressure_resource_member_t* member =
+          &state->pressure_resources->members[member_index];
+      IREE_ASSERT_EQ(member->descriptor_reg_class_id, reg_class_id);
+      const uint64_t peak_contribution = loom_low_pressure_round_resource_units(
+          peak_live_units, member->contribution_granularity);
+      const uint64_t projected_contribution =
+          loom_low_pressure_round_resource_units(
+              projected_live_units, member->contribution_granularity);
+      loom_low_schedule_resource_pressure_record_t* record =
+          &pressure_state->resources.records[member->resource_id];
+      if (!iree_any_bit_set(
+              record->flags,
+              LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED)) {
+        record->flags |=
+            LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED;
+        pressure_state->resources.candidate_touched_ids
+            [pressure_state->resources.candidate_touched_count++] =
+            member->resource_id;
+      }
+      record->candidate_added_units = iree_math_saturating_add_u64(
+          record->candidate_added_units,
+          projected_contribution - peak_contribution);
+    }
+  }
+}
+
+static void loom_low_schedule_score_candidate_resource_pressure(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_low_schedule_candidate_score_t* score) {
+  uint32_t resource_penalty = pressure_state->resources.pressure_cliff_penalty;
+  for (uint16_t i = 0; i < pressure_state->resources.candidate_touched_count;
+       ++i) {
+    const uint16_t resource_id =
+        pressure_state->resources.candidate_touched_ids[i];
+    const loom_low_schedule_resource_pressure_record_t* record =
+        &pressure_state->resources.records[resource_id];
+    const uint64_t projected_peak_units = iree_math_saturating_add_u64(
+        record->current_peak_units, record->candidate_added_units);
+    const loom_low_pressure_resource_t* resource =
+        &state->pressure_resources->resources[resource_id];
+    const uint16_t cliff_end = resource->cliff_start + resource->cliff_count;
+    uint16_t cliff_index = record->next_cliff_index;
+    while (cliff_index < cliff_end) {
+      const loom_low_pressure_cliff_t* cliff =
+          &state->pressure_resources->cliffs[cliff_index];
+      if (cliff->cliff_units > projected_peak_units) {
+        const uint64_t units_until_cliff =
+            cliff->cliff_units - projected_peak_units;
+        if (units_until_cliff < score->units_until_pressure_cliff) {
+          score->pressure_cliff_source_kind =
+              LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE;
+          score->pressure_cliff_source_id = resource_id;
+          score->units_until_pressure_cliff = (uint32_t)units_until_cliff;
+        }
+        break;
+      }
+      const uint32_t penalty = cliff->tier_before - cliff->tier_after;
+      resource_penalty =
+          iree_math_saturating_add_u32(resource_penalty, penalty);
+      if (score->pressure_cliff_units ==
+          LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
+        score->pressure_cliff_source_kind =
+            LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE;
+        score->pressure_cliff_source_id = resource_id;
+        score->pressure_cliff_units = cliff->cliff_units;
+      }
+      ++cliff_index;
+    }
+  }
+  score->pressure_cliff_penalty = iree_math_saturating_add_u32(
+      score->pressure_cliff_penalty, resource_penalty);
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+    score->actual_pressure_cliff_penalty = iree_math_saturating_add_u32(
+        score->actual_pressure_cliff_penalty, resource_penalty);
+  }
+}
+
 static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
@@ -1807,15 +2095,14 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
   const uint64_t projected_live_units =
       loom_low_schedule_project_live_units(current_live_units, delta_units);
   const loom_low_pressure_cliff_range_t range =
-      loom_low_pressure_cliff_table_range(&state->options->pressure_cliffs,
-                                          reg_class_id);
+      loom_low_pressure_cliff_table_range(state->pressure_cliffs, reg_class_id);
   IREE_ASSERT(pressure_state->first_actionable_pressure_cliff_indices != NULL);
   for (uint32_t cliff_index =
            pressure_state
                ->first_actionable_pressure_cliff_indices[reg_class_id];
        cliff_index < range.start + range.count; ++cliff_index) {
     const loom_low_pressure_cliff_t* cliff =
-        &state->options->pressure_cliffs.values[cliff_index];
+        &state->pressure_cliffs->values[cliff_index];
     // Protect target tiers that the source order preserves. Cliffs already
     // crossed by the authored function are excluded so greedy local decisions
     // do not attempt a global occupancy recovery.
@@ -1828,7 +2115,9 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
       }
       if (score->pressure_cliff_units ==
           LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
-        score->pressure_cliff_reg_class_id = reg_class_id;
+        score->pressure_cliff_source_kind =
+            LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
+        score->pressure_cliff_source_id = reg_class_id;
         score->pressure_cliff_units = cliff->cliff_units;
       }
       continue;
@@ -1836,7 +2125,9 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
     const uint64_t units_until_cliff =
         cliff->cliff_units - projected_live_units;
     if (units_until_cliff < score->units_until_pressure_cliff) {
-      score->pressure_cliff_reg_class_id = reg_class_id;
+      score->pressure_cliff_source_kind =
+          LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
+      score->pressure_cliff_source_id = reg_class_id;
       score->units_until_pressure_cliff = (uint32_t)units_until_cliff;
     }
     break;
@@ -1847,7 +2138,8 @@ static void loom_low_schedule_score_candidate_pressure_cliffs(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     loom_low_schedule_candidate_score_t* score) {
-  if (loom_low_pressure_cliff_table_is_empty(state->options->pressure_cliffs) ||
+  if (state->pressure_cliffs == NULL ||
+      loom_low_pressure_cliff_table_is_empty(*state->pressure_cliffs) ||
       pressure_state->current_live_units_by_reg_class == NULL) {
     return;
   }
@@ -1901,14 +2193,18 @@ static void loom_low_schedule_score_candidate_pressure_limit(
     score->pressure_cliff_penalty =
         iree_math_saturating_add_u32(score->pressure_cliff_penalty, penalty);
     if (score->pressure_cliff_units == LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
-      score->pressure_cliff_reg_class_id = reg_class_id;
+      score->pressure_cliff_source_kind =
+          LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
+      score->pressure_cliff_source_id = reg_class_id;
       score->pressure_cliff_units = limit_units;
     }
     return;
   }
   const uint64_t units_until_limit = limit_units - reserved_live_units;
   if (units_until_limit < score->units_until_pressure_cliff) {
-    score->pressure_cliff_reg_class_id = reg_class_id;
+    score->pressure_cliff_source_kind =
+        LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
+    score->pressure_cliff_source_id = reg_class_id;
     score->units_until_pressure_cliff = (uint32_t)units_until_limit;
   }
 }
@@ -1992,12 +2288,15 @@ static void loom_low_schedule_initialize_current_pressure_cliff_penalty(
     loom_low_schedule_pressure_state_t* pressure_state) {
   loom_low_schedule_reset_candidate_pressure_deltas(pressure_state);
   loom_low_schedule_candidate_score_t score = {
-      .pressure_cliff_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
       .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
   };
   loom_low_schedule_score_candidate_pressure_cliffs(state, pressure_state,
                                                     &score);
+  if (state->pressure_resources != NULL) {
+    loom_low_schedule_score_candidate_resource_pressure(state, pressure_state,
+                                                        &score);
+  }
   loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
                                                     &score);
   pressure_state->current_pressure_cliff_penalty =
@@ -2780,7 +3079,6 @@ static void loom_low_schedule_score_candidate(
       .pair_placement_option_count = pair_placement_option_count,
       .storage_relation_count = storage_relation_count,
       .bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE,
-      .pressure_cliff_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
       .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .source_ordinal = node->source_ordinal,
@@ -2791,6 +3089,12 @@ static void loom_low_schedule_score_candidate(
   }
   loom_low_schedule_score_candidate_pressure_cliffs(state, pressure_state,
                                                     out_score);
+  if (state->pressure_resources != NULL) {
+    loom_low_schedule_project_candidate_resource_pressure(state,
+                                                          pressure_state);
+    loom_low_schedule_score_candidate_resource_pressure(state, pressure_state,
+                                                        out_score);
+  }
   loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
                                                     out_score);
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
@@ -3066,8 +3370,10 @@ static void loom_low_schedule_record_candidate_decision(
           .chosen_effective_stall_cycles = chosen_score->effective_stall_cycles,
           .chosen_bottleneck_resource_id = chosen_score->bottleneck_resource_id,
           .chosen_pressure_cliff_penalty = chosen_score->pressure_cliff_penalty,
-          .chosen_pressure_cliff_reg_class_id =
-              chosen_score->pressure_cliff_reg_class_id,
+          .chosen_pressure_cliff_source =
+              loom_low_schedule_pressure_source_name(
+                  state, chosen_score->pressure_cliff_source_kind,
+                  chosen_score->pressure_cliff_source_id),
           .chosen_pressure_cliff_units = chosen_score->pressure_cliff_units,
           .chosen_units_until_pressure_cliff =
               chosen_score->units_until_pressure_cliff,
@@ -3082,8 +3388,10 @@ static void loom_low_schedule_record_candidate_decision(
               rejected_score->bottleneck_resource_id,
           .rejected_pressure_cliff_penalty =
               rejected_score->pressure_cliff_penalty,
-          .rejected_pressure_cliff_reg_class_id =
-              rejected_score->pressure_cliff_reg_class_id,
+          .rejected_pressure_cliff_source =
+              loom_low_schedule_pressure_source_name(
+                  state, rejected_score->pressure_cliff_source_kind,
+                  rejected_score->pressure_cliff_source_id),
           .rejected_pressure_cliff_units = rejected_score->pressure_cliff_units,
           .rejected_units_until_pressure_cliff =
               rejected_score->units_until_pressure_cliff,
@@ -3322,6 +3630,9 @@ static void loom_low_schedule_note_pressure_node_scheduled(
           unit_count;
       loom_low_schedule_adjust_alias_pressure(
           state, pressure_state, reg_class_id, (int64_t)unit_count);
+      loom_low_schedule_note_resource_high_water(
+          state, pressure_state, reg_class_id,
+          LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED);
     }
   }
   IREE_ASSERT_EQ(pressure_state->current_live_units,
@@ -3753,7 +4064,8 @@ static void loom_low_schedule_compute_node_priorities(
       state->node_pressure_activation_units[node_index] =
           pressure_activation_units != 0 ? pressure_activation_units : 1;
     }
-    if (pressure_state->first_actionable_pressure_cliff_indices != NULL) {
+    if (pressure_state->first_actionable_pressure_cliff_indices != NULL ||
+        state->pressure_resources != NULL) {
       loom_low_schedule_reverse_source_pressure_node(state, pressure_state,
                                                      node);
       const loom_low_schedule_block_t* block_record =
@@ -3764,7 +4076,8 @@ static void loom_low_schedule_compute_node_priorities(
       }
     }
   }
-  if (pressure_state->first_actionable_pressure_cliff_indices != NULL) {
+  if (pressure_state->first_actionable_pressure_cliff_indices != NULL ||
+      state->pressure_resources != NULL) {
     // The reverse source sweep shares the existing priority traversal and
     // leaves only its immutable per-class cliff floors behind.
     loom_low_schedule_reset_source_pressure_sweep(state, pressure_state);
@@ -4186,6 +4499,14 @@ iree_status_t loom_low_schedule_function(
   loom_low_schedule_build_state_t state = {
       .module = model->module,
       .options = options,
+      .pressure_cliffs = options->pressure_model != NULL
+                             ? &options->pressure_model->register_class_cliffs
+                             : NULL,
+      .pressure_resources = options->pressure_model != NULL &&
+                                    !loom_low_pressure_resource_table_is_empty(
+                                        &options->pressure_model->resources)
+                                ? &options->pressure_model->resources
+                                : NULL,
       .arena = arena,
       .function_op = model->function_op,
       .body = model->body,
