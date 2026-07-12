@@ -46,7 +46,7 @@ typedef iree_status_t(
     IREE_API_PTR* id4_pipeline_program_region_resolve_parameter_fn_t)(
     void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
     const id4_pipeline_program_tensor_record_t* tensor,
-    iree_host_size_t parameter_ordinal,
+    iree_host_size_t segment_ordinal, iree_host_size_t parameter_ordinal,
     id4_pipeline_tensor_import_t* out_import);
 
 // Resolves a semantic constant operation into a packed constant slab import.
@@ -78,6 +78,16 @@ typedef iree_status_t(
     const id4_pipeline_program_tensor_record_t* tensor,
     iree_host_size_t tap_ordinal, id4_pipeline_tensor_import_t* out_import);
 
+// One contiguous recording interval inside a semantic program region.
+typedef struct id4_pipeline_program_region_segment_t {
+  // First source-program operation emitted into this segment.
+  iree_host_size_t source_operation_offset;
+  // Number of contiguous source-program operations in this segment.
+  iree_host_size_t source_operation_count;
+  // Borrowed begun command buffer receiving this segment in record mode.
+  iree_hal_command_buffer_t* command_buffer;
+} id4_pipeline_program_region_segment_t;
+
 // Options for lowering a semantic program into a region builder.
 typedef struct id4_pipeline_program_region_lower_options_t {
   // Size of this structure for versioning.
@@ -86,10 +96,10 @@ typedef struct id4_pipeline_program_region_lower_options_t {
   const void* next;
   // Immutable semantic program to lower.
   const id4_pipeline_program_t* program;
-  // First source-program operation ordinal to emit into the region.
-  iree_host_size_t source_operation_offset;
-  // Number of source-program operations to emit into the region.
-  iree_host_size_t source_operation_count;
+  // Number of contiguous recording segments covering the semantic region.
+  iree_host_size_t segment_count;
+  // Ordered recording segments covering the semantic region exactly once.
+  const id4_pipeline_program_region_segment_t* segments;
   // Region builder receiving lowered operations.
   id4_pipeline_region_builder_t* builder;
   // Diagnostic tap lowering mode.

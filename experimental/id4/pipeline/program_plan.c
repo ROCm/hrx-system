@@ -1948,8 +1948,9 @@ static iree_status_t id4_pipeline_program_plan_resolve_import(
 static iree_status_t id4_pipeline_program_plan_resolve_parameter(
     void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
     const id4_pipeline_program_tensor_record_t* tensor,
-    iree_host_size_t parameter_ordinal,
+    iree_host_size_t segment_ordinal, iree_host_size_t parameter_ordinal,
     id4_pipeline_tensor_import_t* out_import) {
+  (void)segment_ordinal;
   (void)parameter_op;
   id4_pipeline_program_plan_lowering_context_t* context =
       (id4_pipeline_program_plan_lowering_context_t*)user_data;
@@ -2108,15 +2109,23 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
       .diagnostic_taps = diagnostic_taps,
   };
   if (iree_status_is_ok(status)) {
+    const id4_pipeline_program_region_segment_t segment = {
+        // First semantic operation in the dry-run region.
+        .source_operation_offset = range->source_operation_offset,
+        // Number of semantic operations in the dry-run region.
+        .source_operation_count = range->source_operation_count,
+        // Dry-run lowering never records a HAL command buffer.
+        .command_buffer = NULL,
+    };
     id4_pipeline_program_region_lower_options_t lower_options = {
         // Size of this structure for versioning.
         .structure_size = sizeof(lower_options),
         // Semantic program being planned.
         .program = options->program,
-        // Dry-run emits the selected source-program interval.
-        .source_operation_offset = range->source_operation_offset,
-        // Dry-run emits the selected source-program interval.
-        .source_operation_count = range->source_operation_count,
+        // Dry-run uses one recording segment for the semantic region.
+        .segment_count = 1,
+        // Dry-run segment covering the semantic region.
+        .segments = &segment,
         // Dry-run region builder.
         .builder = builder,
         // Diagnostic tap lowering policy.

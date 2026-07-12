@@ -719,8 +719,9 @@ id4_pipeline_program_prepare_resolve_window_parameter_tensor(
 static iree_status_t id4_pipeline_program_prepare_resolve_parameter(
     void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
     const id4_pipeline_program_tensor_record_t* tensor,
-    iree_host_size_t parameter_ordinal,
+    iree_host_size_t segment_ordinal, iree_host_size_t parameter_ordinal,
     id4_pipeline_tensor_import_t* out_import) {
+  (void)segment_ordinal;
   id4_pipeline_program_prepare_context_t* context =
       (id4_pipeline_program_prepare_context_t*)user_data;
   const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
@@ -1037,12 +1038,20 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
                               : NULL,
   };
   if (iree_status_is_ok(status)) {
+    const id4_pipeline_program_region_segment_t segment = {
+        // First semantic operation recorded by this region.
+        .source_operation_offset = region->source_operation_offset,
+        // Number of semantic operations recorded by this region.
+        .source_operation_count = region->source_operation_count,
+        // Begun reusable HAL command buffer receiving the region.
+        .command_buffer = command_buffer,
+    };
     id4_pipeline_program_region_lower_options_t lower_options;
     memset(&lower_options, 0, sizeof(lower_options));
     lower_options.structure_size = sizeof(lower_options);
     lower_options.program = options->program;
-    lower_options.source_operation_offset = region->source_operation_offset;
-    lower_options.source_operation_count = region->source_operation_count;
+    lower_options.segment_count = 1;
+    lower_options.segments = &segment;
     lower_options.builder = builder;
     lower_options.tap_mode = diagnostic_tap_count == 0
                                  ? ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE

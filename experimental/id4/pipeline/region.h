@@ -398,6 +398,13 @@ void id4_pipeline_region_builder_destroy(
 id4_pipeline_region_builder_mode_t id4_pipeline_region_builder_mode(
     const id4_pipeline_region_builder_t* builder);
 
+// Selects the borrowed HAL command buffer receiving subsequent record-mode
+// operations. Switching after operations have been authored requires an idle
+// epoch produced by an execution barrier.
+iree_status_t id4_pipeline_region_builder_set_recording_command_buffer(
+    id4_pipeline_region_builder_t* builder,
+    iree_hal_command_buffer_t* command_buffer);
+
 // Returns the current builder epoch.
 uint32_t id4_pipeline_region_builder_current_epoch(
     const id4_pipeline_region_builder_t* builder);

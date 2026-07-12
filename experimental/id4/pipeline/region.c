@@ -1100,6 +1100,42 @@ id4_pipeline_region_builder_mode_t id4_pipeline_region_builder_mode(
   return builder->mode;
 }
 
+iree_status_t id4_pipeline_region_builder_set_recording_command_buffer(
+    id4_pipeline_region_builder_t* builder,
+    iree_hal_command_buffer_t* command_buffer) {
+  IREE_ASSERT_ARGUMENT(builder);
+  if (builder->mode == ID4_PIPELINE_REGION_BUILDER_MODE_DRY_RUN) {
+    if (command_buffer) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dry-run region builders cannot select a HAL command buffer");
+    }
+    return iree_ok_status();
+  }
+  if (!command_buffer) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "record region builders require a HAL command buffer");
+  }
+  if (builder->statistics.operation_count != 0 &&
+      builder->command_buffer != command_buffer) {
+    for (iree_host_size_t i = 0; i < builder->tensor_record_count; ++i) {
+      const id4_pipeline_region_tensor_record_t* record =
+          &builder->tensor_records[i];
+      if (record->access_epoch == builder->statistics.current_epoch &&
+          record->epoch_access != 0) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "region command buffer switch requires an authored barrier after "
+            "tensor %.*s access",
+            (int)record->name.size, record->name.data);
+      }
+    }
+  }
+  builder->command_buffer = command_buffer;
+  return iree_ok_status();
+}
+
 uint32_t id4_pipeline_region_builder_current_epoch(
     const id4_pipeline_region_builder_t* builder) {
   IREE_ASSERT_ARGUMENT(builder);

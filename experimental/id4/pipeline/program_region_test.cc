@@ -96,6 +96,16 @@ static id4_pipeline_tensor_layout_t MakeTensorLayout(
   };
 }
 
+static id4_pipeline_program_region_segment_t MakeDryRunSegment(
+    iree_host_size_t source_operation_offset,
+    iree_host_size_t source_operation_count) {
+  return id4_pipeline_program_region_segment_t{
+      /*.source_operation_offset=*/source_operation_offset,
+      /*.source_operation_count=*/source_operation_count,
+      /*.command_buffer=*/nullptr,
+  };
+}
+
 static iree_status_t ResolveImport(
     void* user_data, const id4_pipeline_program_import_op_t* import_op,
     const id4_pipeline_program_tensor_record_t* tensor,
@@ -127,6 +137,33 @@ static iree_status_t ResolveSharedTensor(
       /*.binding_slot=*/1,
       /*.offset=*/0,
       /*.flags=*/0,
+  };
+  return iree_ok_status();
+}
+
+typedef struct SegmentParameterResolutionContext {
+  // Resolver call counts indexed by segment then parameter ordinal.
+  iree_host_size_t call_counts[2][2];
+} SegmentParameterResolutionContext;
+
+static iree_status_t ResolveSegmentParameter(
+    void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t segment_ordinal, iree_host_size_t parameter_ordinal,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)parameter_op;
+  if (segment_ordinal >= 2 || parameter_ordinal >= 2) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "test parameter resolution ordinal is invalid");
+  }
+  SegmentParameterResolutionContext* context =
+      (SegmentParameterResolutionContext*)user_data;
+  ++context->call_counts[segment_ordinal][parameter_ordinal];
+  *out_import = id4_pipeline_tensor_import_t{
+      /*.layout=*/MakeTensorLayout(tensor),
+      /*.binding_slot=*/(uint32_t)(1 + parameter_ordinal),
+      /*.offset=*/0,
+      /*.flags=*/ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED,
   };
   return iree_ok_status();
 }
@@ -190,6 +227,94 @@ static id4_pipeline_program_t* CreateBoundaryDispatchProgram() {
       /*.bindings=*/bindings,
   };
   IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
+static id4_pipeline_program_t* CreateSegmentedParameterProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t source_a = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("parameter.a"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  id4_pipeline_program_parameter_options_t parameter_a_options = {
+      /*.structure_size=*/sizeof(parameter_a_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&source_a,
+      /*.key=*/IREE_SV("parameter.a"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  id4_pipeline_program_tensor_t parameter_a =
+      id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(id4_pipeline_program_parameter(builder, &parameter_a_options,
+                                               &parameter_a));
+
+  const id4_pipeline_program_parameter_source_t source_b = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("parameter.b"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  id4_pipeline_program_parameter_options_t parameter_b_options = {
+      /*.structure_size=*/sizeof(parameter_b_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&source_b,
+      /*.key=*/IREE_SV("parameter.b"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  id4_pipeline_program_tensor_t parameter_b =
+      id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(id4_pipeline_program_parameter(builder, &parameter_b_options,
+                                               &parameter_b));
+
+  id4_pipeline_program_dispatch_binding_t read_a =
+      id4_pipeline_program_read(parameter_a);
+  id4_pipeline_program_dispatch_loom_options_t read_a_options = {
+      /*.structure_size=*/sizeof(read_a_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read.a"),
+      /*.kernel= */
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_a,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &read_a_options));
+  id4_pipeline_program_barrier_options_t barrier_options = {
+      /*.structure_size=*/sizeof(barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after.a"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &barrier_options));
+  id4_pipeline_program_dispatch_binding_t read_b =
+      id4_pipeline_program_read(parameter_b);
+  id4_pipeline_program_dispatch_loom_options_t read_b_options = {
+      /*.structure_size=*/sizeof(read_b_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read.b"),
+      /*.kernel= */
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_b,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &read_b_options));
 
   id4_pipeline_program_t* program = nullptr;
   IREE_CHECK_OK(id4_pipeline_program_builder_seal(
@@ -449,13 +574,16 @@ static id4_pipeline_program_t* CreateDestructiveSubviewProgram() {
 TEST(PipelineProgramRegion, LowersSourceRangeWithPriorBoundaryDeclarations) {
   id4_pipeline_program_t* program = CreateBoundaryDispatchProgram();
   RegionBuilderScope region_scope;
+  const id4_pipeline_program_region_segment_t segment =
+      MakeDryRunSegment(/*source_operation_offset=*/2,
+                        /*source_operation_count=*/1);
 
   id4_pipeline_program_region_lower_options_t lower_options = {
       /*.structure_size=*/sizeof(lower_options),
       /*.next=*/nullptr,
       /*.program=*/program,
-      /*.source_operation_offset=*/2,
-      /*.source_operation_count=*/1,
+      /*.segment_count=*/1,
+      /*.segments=*/&segment,
       /*.builder=*/region_scope.builder(),
       /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
       /*.captured_tap_names=*/iree_string_view_list_empty(),
@@ -480,17 +608,92 @@ TEST(PipelineProgramRegion, LowersSourceRangeWithPriorBoundaryDeclarations) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgramRegion, RebindsOnlyParametersUsedByEachSegment) {
+  id4_pipeline_program_t* program = CreateSegmentedParameterProgram();
+  RegionBuilderScope region_scope;
+  const id4_pipeline_program_region_segment_t segments[] = {
+      MakeDryRunSegment(/*source_operation_offset=*/2,
+                        /*source_operation_count=*/2),
+      MakeDryRunSegment(/*source_operation_offset=*/4,
+                        /*source_operation_count=*/1),
+  };
+  SegmentParameterResolutionContext resolution_context = {};
+  id4_pipeline_program_region_lower_options_t lower_options = {
+      /*.structure_size=*/sizeof(lower_options),
+      /*.next=*/nullptr,
+      /*.program=*/program,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
+      /*.segments=*/segments,
+      /*.builder=*/region_scope.builder(),
+      /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
+      /*.captured_tap_names=*/iree_string_view_list_empty(),
+      /*.local_tensor_alignment=*/16,
+      /*.user_data=*/&resolution_context,
+      /*.resolve_import=*/nullptr,
+      /*.resolve_parameter=*/ResolveSegmentParameter,
+      /*.resolve_constant=*/nullptr,
+      /*.resolve_shared_tensor=*/nullptr,
+      /*.resolve_kernel=*/nullptr,
+      /*.resolve_tap=*/nullptr,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_region_lower(&lower_options,
+                                                   iree_allocator_system()));
+
+  EXPECT_EQ(resolution_context.call_counts[0][0], 1u);
+  EXPECT_EQ(resolution_context.call_counts[0][1], 0u);
+  EXPECT_EQ(resolution_context.call_counts[1][0], 0u);
+  EXPECT_EQ(resolution_context.call_counts[1][1], 1u);
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramRegion, RejectsSegmentCutWithoutAuthoredBarrier) {
+  id4_pipeline_program_t* program = CreateSegmentedParameterProgram();
+  RegionBuilderScope region_scope;
+  const id4_pipeline_program_region_segment_t segments[] = {
+      MakeDryRunSegment(/*source_operation_offset=*/2,
+                        /*source_operation_count=*/1),
+      MakeDryRunSegment(/*source_operation_offset=*/3,
+                        /*source_operation_count=*/2),
+  };
+  id4_pipeline_program_region_lower_options_t lower_options = {
+      /*.structure_size=*/sizeof(lower_options),
+      /*.next=*/nullptr,
+      /*.program=*/program,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
+      /*.segments=*/segments,
+      /*.builder=*/region_scope.builder(),
+      /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
+      /*.captured_tap_names=*/iree_string_view_list_empty(),
+      /*.local_tensor_alignment=*/16,
+      /*.user_data=*/nullptr,
+      /*.resolve_import=*/nullptr,
+      /*.resolve_parameter=*/nullptr,
+      /*.resolve_constant=*/nullptr,
+      /*.resolve_shared_tensor=*/nullptr,
+      /*.resolve_kernel=*/nullptr,
+      /*.resolve_tap=*/nullptr,
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        id4_pipeline_program_region_lower(
+                            &lower_options, iree_allocator_system()));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgramRegion, LowersSubviewAsOneRootAllocation) {
   id4_pipeline_program_t* program = CreateDestructiveSubviewProgram();
   RegionBuilderScope region_scope;
+  const id4_pipeline_program_region_segment_t segment = MakeDryRunSegment(
+      /*source_operation_offset=*/0,
+      /*source_operation_count=*/id4_pipeline_program_operation_count(program));
 
   id4_pipeline_program_region_lower_options_t lower_options = {
       /*.structure_size=*/sizeof(lower_options),
       /*.next=*/nullptr,
       /*.program=*/program,
-      /*.source_operation_offset=*/0,
-      /*.source_operation_count=*/
-      id4_pipeline_program_operation_count(program),
+      /*.segment_count=*/1,
+      /*.segments=*/&segment,
       /*.builder=*/region_scope.builder(),
       /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
       /*.captured_tap_names=*/iree_string_view_list_empty(),
@@ -541,17 +744,27 @@ TEST(PipelineProgramRegion, LowersSubviewAsOneRootAllocation) {
   id4_pipeline_program_release(program);
 }
 
-TEST(PipelineProgramRegion, RejectsLocalTensorCrossingSourceRange) {
+TEST(PipelineProgramRegion, PreservesLocalStateAcrossRecordingSegments) {
   id4_pipeline_program_t* program = CreateLocalCrossingProgram();
-  RegionBuilderScope region_scope;
+  RegionBuilderScope whole_region_scope;
+  RegionBuilderScope segmented_region_scope;
+  const id4_pipeline_program_region_segment_t whole_region_segment =
+      MakeDryRunSegment(/*source_operation_offset=*/1,
+                        /*source_operation_count=*/4);
+  const id4_pipeline_program_region_segment_t segments[] = {
+      MakeDryRunSegment(/*source_operation_offset=*/1,
+                        /*source_operation_count=*/3),
+      MakeDryRunSegment(/*source_operation_offset=*/4,
+                        /*source_operation_count=*/1),
+  };
 
   id4_pipeline_program_region_lower_options_t lower_options = {
       /*.structure_size=*/sizeof(lower_options),
       /*.next=*/nullptr,
       /*.program=*/program,
-      /*.source_operation_offset=*/1,
-      /*.source_operation_count=*/2,
-      /*.builder=*/region_scope.builder(),
+      /*.segment_count=*/1,
+      /*.segments=*/&whole_region_segment,
+      /*.builder=*/whole_region_scope.builder(),
       /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
       /*.captured_tap_names=*/iree_string_view_list_empty(),
       /*.local_tensor_alignment=*/16,
@@ -562,9 +775,33 @@ TEST(PipelineProgramRegion, RejectsLocalTensorCrossingSourceRange) {
       /*.resolve_kernel=*/nullptr,
       /*.resolve_tap=*/nullptr,
   };
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        id4_pipeline_program_region_lower(
-                            &lower_options, iree_allocator_system()));
+  IREE_ASSERT_OK(id4_pipeline_program_region_lower(&lower_options,
+                                                   iree_allocator_system()));
+  lower_options.segment_count = IREE_ARRAYSIZE(segments);
+  lower_options.segments = segments;
+  lower_options.builder = segmented_region_scope.builder();
+  IREE_ASSERT_OK(id4_pipeline_program_region_lower(&lower_options,
+                                                   iree_allocator_system()));
+
+  id4_pipeline_region_statistics_t whole_statistics = {};
+  id4_pipeline_region_builder_statistics(whole_region_scope.builder(),
+                                         &whole_statistics);
+  id4_pipeline_region_statistics_t segmented_statistics = {};
+  id4_pipeline_region_builder_statistics(segmented_region_scope.builder(),
+                                         &segmented_statistics);
+  EXPECT_EQ(segmented_statistics.operation_count,
+            whole_statistics.operation_count);
+  EXPECT_EQ(segmented_statistics.dispatch_count,
+            whole_statistics.dispatch_count);
+  EXPECT_EQ(segmented_statistics.barrier_count, whole_statistics.barrier_count);
+  EXPECT_EQ(segmented_statistics.local_acquire_count,
+            whole_statistics.local_acquire_count);
+  EXPECT_EQ(segmented_statistics.local_release_count,
+            whole_statistics.local_release_count);
+  EXPECT_EQ(segmented_statistics.local_slab_byte_length,
+            whole_statistics.local_slab_byte_length);
+  EXPECT_EQ(segmented_statistics.local_slab_high_water_mark,
+            whole_statistics.local_slab_high_water_mark);
 
   id4_pipeline_program_release(program);
 }
@@ -574,13 +811,16 @@ TEST(PipelineProgramRegion,
   id4_pipeline_program_t* program = CreateSharedPartialWriteProgram();
   RegionBuilderScope region_scope;
   iree_string_view_t captured_tap_names[] = {IREE_SV("shared")};
+  const id4_pipeline_program_region_segment_t segment =
+      MakeDryRunSegment(/*source_operation_offset=*/3,
+                        /*source_operation_count=*/3);
 
   id4_pipeline_program_region_lower_options_t lower_options = {
       /*.structure_size=*/sizeof(lower_options),
       /*.next=*/nullptr,
       /*.program=*/program,
-      /*.source_operation_offset=*/3,
-      /*.source_operation_count=*/3,
+      /*.segment_count=*/1,
+      /*.segments=*/&segment,
       /*.builder=*/region_scope.builder(),
       /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE,
       /*.captured_tap_names=*/
