@@ -233,6 +233,7 @@ void loom_low_schedule_pressure_score_candidate(
     const uint32_t* indegrees, uint32_t node_index,
     loom_low_schedule_candidate_score_t* out_score);
 
+// Resolves a pressure source to its target descriptor-authored name.
 iree_string_view_t loom_low_schedule_pressure_source_name(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_source_kind_t source_kind, uint16_t source_id);
