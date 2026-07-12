@@ -698,6 +698,7 @@ static iree_status_t id4_cli_resolve_generation_residency(
     id4_cli_generation_residency_request_mode_t request_mode,
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
     iree_host_size_t parameter_load_prefetch_segment_distance,
+    iree_device_size_t maximum_parameter_window_byte_length,
     id4_ideogram4_generation_residency_mode_t* out_residency_mode,
     id4_ideogram4_generation_resident_stage_mask_t* out_resident_stage_mask,
     id4_ideogram4_generation_resident_stage_mask_t* out_phase_stage_masks) {
@@ -756,6 +757,10 @@ static iree_status_t id4_cli_resolve_generation_residency(
       select_options.structure_size = sizeof(select_options);
       select_options.issue_policy = id4_cli_generation_issue_policy(issue_mode);
       select_options.candidate_stage_mask = requested_stage_mask;
+      select_options.parameter_window_source_kind =
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+      select_options.maximum_parameter_window_byte_length =
+          maximum_parameter_window_byte_length;
       select_options.parameter_load_prefetch_segment_distance =
           parameter_load_prefetch_segment_distance;
       select_options.memory_budget_byte_length = memory_budget;
@@ -774,36 +779,37 @@ static iree_status_t id4_cli_resolve_generation_residency(
   }
 }
 
-static iree_status_t id4_cli_print_generation_resource_statistics(
+static iree_status_t id4_cli_resolve_generation_resource_options(
     const id4_ideogram4_generation_plan_t* generation_plan,
     id4_cli_generation_issue_mode_t issue_mode,
     id4_cli_generation_residency_request_mode_t request_mode,
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
-    iree_host_size_t parameter_load_prefetch_segment_distance) {
-  id4_ideogram4_generation_residency_mode_t residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
-  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
-  id4_ideogram4_generation_resident_stage_mask_t
-      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
-  memset(phase_stage_masks, 0, sizeof(phase_stage_masks));
-  IREE_RETURN_IF_ERROR(id4_cli_resolve_generation_residency(
-      generation_plan, issue_mode, request_mode, requested_stage_mask,
-      parameter_load_prefetch_segment_distance, &residency_mode,
-      &resident_stage_mask, phase_stage_masks));
-
-  id4_ideogram4_generation_resource_statistics_options_t statistics_options;
-  memset(&statistics_options, 0, sizeof(statistics_options));
-  statistics_options.structure_size = sizeof(statistics_options);
-  statistics_options.residency_mode = residency_mode;
-  statistics_options.resident_stage_mask = resident_stage_mask;
-  memcpy(statistics_options.phase_stage_masks, phase_stage_masks,
-         sizeof(statistics_options.phase_stage_masks));
-  statistics_options.parameter_load_prefetch_segment_distance =
+    iree_host_size_t parameter_load_prefetch_segment_distance,
+    iree_device_size_t maximum_parameter_window_byte_length,
+    id4_ideogram4_generation_resource_statistics_options_t* out_options) {
+  memset(out_options, 0, sizeof(*out_options));
+  out_options->structure_size = sizeof(*out_options);
+  out_options->parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  out_options->maximum_parameter_window_byte_length =
+      maximum_parameter_window_byte_length;
+  out_options->parameter_load_prefetch_segment_distance =
       parameter_load_prefetch_segment_distance;
+  return id4_cli_resolve_generation_residency(
+      generation_plan, issue_mode, request_mode, requested_stage_mask,
+      parameter_load_prefetch_segment_distance,
+      maximum_parameter_window_byte_length, &out_options->residency_mode,
+      &out_options->resident_stage_mask, out_options->phase_stage_masks);
+}
+
+static iree_status_t id4_cli_print_generation_resource_statistics(
+    const id4_ideogram4_generation_plan_t* generation_plan,
+    id4_cli_generation_issue_mode_t issue_mode,
+    const id4_ideogram4_generation_resource_statistics_options_t*
+        statistics_options) {
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_resource_statistics(
-      generation_plan, &statistics_options, &statistics));
+      generation_plan, statistics_options, &statistics));
 
   const id4_ideogram4_generation_issue_policy_t issue_policy =
       id4_cli_generation_issue_policy(issue_mode);
@@ -814,14 +820,16 @@ static iree_status_t id4_cli_print_generation_resource_statistics(
   const iree_string_view_t issue_name =
       id4_cli_generation_issue_mode_name(issue_mode);
   const iree_string_view_t residency_name =
-      id4_cli_generation_residency_mode_name(residency_mode);
+      id4_cli_generation_residency_mode_name(
+          statistics_options->residency_mode);
   fprintf(stdout,
           "Ideogram 4 generation resources: issue=%.*s residency=%.*s "
           "resident_stage_mask=0x%08x phase_stage_masks=[",
           (int)issue_name.size, issue_name.data, (int)residency_name.size,
-          residency_name.data, resident_stage_mask);
+          residency_name.data, statistics_options->resident_stage_mask);
   for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
-    fprintf(stdout, "%s0x%08x", i == 0 ? "" : ",", phase_stage_masks[i]);
+    fprintf(stdout, "%s0x%08x", i == 0 ? "" : ",",
+            statistics_options->phase_stage_masks[i]);
   }
   fprintf(stdout,
           "] selected_peak=%" PRIu64 "MiB phase_peak=%" PRIu64
@@ -948,13 +956,15 @@ static iree_hal_command_buffer_mode_t id4_cli_generation_command_buffer_mode(
 
 static iree_status_t id4_cli_write_generation_plan(
     iree_string_view_t output_path, const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_resource_statistics_options_t*
+        resource_options,
     iree_allocator_t host_allocator) {
   if (iree_string_view_is_empty(output_path)) return iree_ok_status();
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(host_allocator, &builder);
-  iree_status_t status =
-      id4_ideogram4_generation_plan_format_json(plan, &builder);
+  iree_status_t status = id4_ideogram4_generation_plan_format_json(
+      plan, resource_options, &builder);
   if (iree_status_is_ok(status)) {
     iree_string_view_t json = iree_string_builder_view(&builder);
     status = iree_io_file_contents_write(
@@ -1923,11 +1933,14 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
   iree_host_size_t parameter_load_prefetch_segment_distance = 0;
+  iree_device_size_t maximum_parameter_window_byte_length = 0;
   id4_ideogram4_generation_resident_stage_mask_t
       region_per_dispatch_stage_mask =
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
       ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  id4_ideogram4_generation_resource_statistics_options_t resource_options;
+  memset(&resource_options, 0, sizeof(resource_options));
 
   iree_status_t status = id4_cli_validate_dry_run_flags();
   if (iree_status_is_ok(status)) {
@@ -1942,6 +1955,11 @@ static iree_status_t id4_cli_run_generation_dry_run(
         FLAG_parameter_load_prefetch_segment_distance,
         IREE_SV("--parameter_load_prefetch_segment_distance"),
         &parameter_load_prefetch_segment_distance);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_positive_i64_flag(
+        FLAG_parameter_window_budget, IREE_SV("--parameter_window_budget"),
+        &maximum_parameter_window_byte_length);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -2002,9 +2020,15 @@ static iree_status_t id4_cli_run_generation_dry_run(
     }
   }
   if (iree_status_is_ok(status)) {
-    status =
-        id4_cli_write_generation_plan(iree_make_cstring_view(FLAG_dump_plan),
-                                      generation_plan, host_allocator);
+    status = id4_cli_resolve_generation_resource_options(
+        generation_plan, generation_issue_mode, generation_residency_mode,
+        requested_stage_mask, parameter_load_prefetch_segment_distance,
+        maximum_parameter_window_byte_length, &resource_options);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_write_generation_plan(
+        iree_make_cstring_view(FLAG_dump_plan), generation_plan,
+        &resource_options, host_allocator);
   }
   if (iree_status_is_ok(status)) {
     id4_ideogram4_generation_plan_summary_t summary;
@@ -2032,8 +2056,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_print_generation_resource_statistics(
-        generation_plan, generation_issue_mode, generation_residency_mode,
-        requested_stage_mask, parameter_load_prefetch_segment_distance);
+        generation_plan, generation_issue_mode, &resource_options);
   }
 
   id4_ideogram4_generation_plan_release(generation_plan);
@@ -2131,6 +2154,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       region_per_dispatch_stage_mask =
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   id4_pipeline_stage_issue_flags_t stage_issue_flags = 0;
+  id4_ideogram4_generation_resource_statistics_options_t resource_options;
+  memset(&resource_options, 0, sizeof(resource_options));
   const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
@@ -2250,9 +2275,21 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_ideogram4_generation_plan_summary(generation_plan, &summary);
   }
   if (iree_status_is_ok(status)) {
+    id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
+        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
     status =
-        id4_cli_write_generation_plan(iree_make_cstring_view(FLAG_dump_plan),
-                                      generation_plan, host_allocator);
+        id4_cli_parse_generation_resident_stage_mask(&requested_stage_mask);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_resolve_generation_resource_options(
+          generation_plan, generation_issue_mode, generation_residency_mode,
+          requested_stage_mask, parameter_load_prefetch_segment_distance,
+          maximum_parameter_window_byte_length, &resource_options);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_write_generation_plan(
+        iree_make_cstring_view(FLAG_dump_plan), generation_plan,
+        &resource_options, host_allocator);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_device_t* device =
@@ -2277,19 +2314,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     prepare_options.kernel_library = kernel_library;
     prepare_options.maximum_parameter_window_byte_length =
         maximum_parameter_window_byte_length;
-    id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
-        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
-    if (iree_status_is_ok(status)) {
-      status =
-          id4_cli_parse_generation_resident_stage_mask(&requested_stage_mask);
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_cli_resolve_generation_residency(
-          generation_plan, generation_issue_mode, generation_residency_mode,
-          requested_stage_mask, parameter_load_prefetch_segment_distance,
-          &prepare_options.residency_mode, &prepare_options.resident_stage_mask,
-          prepare_options.phase_stage_masks);
-    }
+    prepare_options.residency_mode = resource_options.residency_mode;
+    prepare_options.resident_stage_mask = resource_options.resident_stage_mask;
+    memcpy(prepare_options.phase_stage_masks,
+           resource_options.phase_stage_masks,
+           sizeof(prepare_options.phase_stage_masks));
     prepare_options.command_buffer_mode =
         id4_cli_generation_command_buffer_mode(
             runtime_context.command_buffer_mode);

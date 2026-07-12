@@ -22,6 +22,9 @@
 
 namespace {
 
+static constexpr iree_device_size_t kParameterWindowByteBudget =
+    2ull * 1024ull * 1024ull * 1024ull;
+
 static iree_string_view_t GetEmbeddedTokenizerJson() {
   const iree_file_toc_t* toc = iree_tokenizer_streaming_testdata_create();
   for (size_t i = 0; i < iree_tokenizer_streaming_testdata_size(); ++i) {
@@ -285,9 +288,9 @@ static iree_device_size_t RawGenerationBoundaryByteLength(
   return byte_length;
 }
 
-static iree_device_size_t MaxGenerationParameterWindowPeak(
+static iree_device_size_t MaxGenerationParameterResidencyPeak(
     const id4_ideogram4_generation_plan_t* plan,
-    iree_host_size_t region_window_size) {
+    iree_host_size_t parameter_load_prefetch_segment_distance) {
   iree_device_size_t byte_length = 0;
   const iree_host_size_t stage_count =
       id4_ideogram4_generation_plan_stage_count(plan);
@@ -296,24 +299,30 @@ static iree_device_size_t MaxGenerationParameterWindowPeak(
     const id4_pipeline_plan_t* stage_plan = nullptr;
     IREE_CHECK_OK(id4_ideogram4_generation_plan_stage_at(plan, i, &stage_key,
                                                          &stage_plan));
-    id4_pipeline_parameter_window_statistics_options_t options;
+    if (id4_pipeline_plan_parameter_slab_count(stage_plan) == 0) continue;
+    id4_pipeline_parameter_residency_plan_create_options_t options;
     std::memset(&options, 0, sizeof(options));
     options.structure_size = sizeof(options);
     options.plan = stage_plan;
-    options.concurrent_window_count = region_window_size;
+    options.source_kind = ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+    options.maximum_target_byte_length = kParameterWindowByteBudget;
     options.encoder_staging_chunk_byte_capacity =
         ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+    id4_pipeline_parameter_residency_plan_t* raw_residency_plan = nullptr;
+    IREE_CHECK_OK(id4_pipeline_parameter_residency_plan_create(
+        &options, iree_allocator_system(), &raw_residency_plan));
+    ParameterResidencyPlanPtr residency_plan(raw_residency_plan);
     id4_pipeline_parameter_window_statistics_t statistics;
-    IREE_CHECK_OK(id4_pipeline_parameter_window_query_statistics(
-        &options, iree_allocator_system(), &statistics));
+    IREE_CHECK_OK(id4_pipeline_parameter_residency_plan_query_live_statistics(
+        residency_plan.get(), parameter_load_prefetch_segment_distance,
+        &statistics));
     byte_length = std::max(byte_length, statistics.peak_live_byte_length);
   }
   return byte_length;
 }
 
-static id4_ideogram4_generation_resource_statistics_t
-EstimateGenerationResources(
-    const id4_ideogram4_generation_plan_t* plan,
+static id4_ideogram4_generation_resource_statistics_options_t
+GenerationResourceOptions(
     id4_ideogram4_generation_residency_mode_t residency_mode,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
     iree_host_size_t parameter_load_prefetch_segment_distance = 0) {
@@ -322,8 +331,23 @@ EstimateGenerationResources(
   options.structure_size = sizeof(options);
   options.residency_mode = residency_mode;
   options.resident_stage_mask = resident_stage_mask;
+  options.parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.parameter_load_prefetch_segment_distance =
       parameter_load_prefetch_segment_distance;
+  return options;
+}
+
+static id4_ideogram4_generation_resource_statistics_t
+EstimateGenerationResources(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_residency_mode_t residency_mode,
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    iree_host_size_t parameter_load_prefetch_segment_distance = 0) {
+  const id4_ideogram4_generation_resource_statistics_options_t options =
+      GenerationResourceOptions(residency_mode, resident_stage_mask,
+                                parameter_load_prefetch_segment_distance);
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_CHECK_OK(id4_ideogram4_generation_plan_resource_statistics(
       plan, &options, &statistics));
@@ -340,6 +364,9 @@ static id4_ideogram4_generation_residency_selection_t SelectGenerationResidency(
   options.structure_size = sizeof(options);
   options.issue_policy = issue_policy;
   options.candidate_stage_mask = candidate_stage_mask;
+  options.parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.memory_budget_byte_length = memory_budget_byte_length;
   id4_ideogram4_generation_residency_selection_t selection;
   IREE_CHECK_OK(id4_ideogram4_generation_plan_select_residency(plan, &options,
@@ -835,8 +862,12 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
+  const id4_ideogram4_generation_resource_statistics_options_t
+      resource_options = GenerationResourceOptions(
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
   IREE_ASSERT_OK(id4_ideogram4_generation_plan_format_json(
-      long_plan_owner.get(), &builder));
+      long_plan_owner.get(), &resource_options, &builder));
   iree_string_view_t json = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"ideogram4_generation\""), 0),
             IREE_STRING_VIEW_NPOS);
@@ -906,7 +937,9 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
             issue_phase_statistics.boundary_buffer_byte_length);
   EXPECT_EQ(issue_phase_statistics.resident_stage_bundle_byte_length, 0u);
   EXPECT_EQ(issue_phase_statistics.stage_serial_parameter_peak_byte_length,
-            MaxGenerationParameterWindowPeak(plan.get(), 1));
+            MaxGenerationParameterResidencyPeak(
+                plan.get(),
+                /*parameter_load_prefetch_segment_distance=*/0));
   EXPECT_GE(issue_phase_statistics.phase_concurrent_total_peak_byte_length,
             issue_phase_statistics.stage_serial_total_peak_byte_length);
 
@@ -916,7 +949,9 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE,
           /*parameter_load_prefetch_segment_distance=*/1);
   EXPECT_EQ(prefetched_statistics.stage_serial_parameter_peak_byte_length,
-            MaxGenerationParameterWindowPeak(plan.get(), 2));
+            MaxGenerationParameterResidencyPeak(
+                plan.get(),
+                /*parameter_load_prefetch_segment_distance=*/1));
   EXPECT_GE(prefetched_statistics.stage_serial_parameter_peak_byte_length,
             issue_phase_statistics.stage_serial_parameter_peak_byte_length);
 
@@ -969,6 +1004,9 @@ TEST_F(SessionTest, ResourceStatisticsRejectInvalidResidencyPolicy) {
   options.structure_size = sizeof(options);
   options.residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+  options.parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_generation_plan_resource_statistics(
@@ -1098,6 +1136,9 @@ TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {
   options.structure_size = sizeof(options);
   options.issue_policy = ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL;
   options.candidate_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
+  options.parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.maximum_parameter_window_byte_length = kParameterWindowByteBudget;
   options.memory_budget_byte_length =
       issue_phase_statistics.stage_serial_total_peak_byte_length - 1;
   id4_ideogram4_generation_residency_selection_t selection;
@@ -1161,8 +1202,12 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
-  IREE_ASSERT_OK(
-      id4_ideogram4_generation_plan_format_json(plan_owner.get(), &builder));
+  const id4_ideogram4_generation_resource_statistics_options_t
+      resource_options = GenerationResourceOptions(
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_format_json(
+      plan_owner.get(), &resource_options, &builder));
   iree_string_view_t json = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(
                 json, IREE_SV("\"source_scope\":\"dit_cond_fp8\""), 0),

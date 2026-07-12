@@ -290,6 +290,23 @@ TEST(ParameterResidencyTest, CutsOnlyBetweenAuthoredBarrierEpochs) {
   EXPECT_EQ(statistics.duplicated_source_transfer_byte_length, 64u);
   EXPECT_EQ(statistics.total_load_group_count, 4u);
 
+  id4_pipeline_parameter_window_statistics_t issue_statistics;
+  IREE_ASSERT_OK(id4_pipeline_parameter_residency_plan_query_live_statistics(
+      residency_plan.get(),
+      /*parameter_load_prefetch_segment_distance=*/0, &issue_statistics));
+  EXPECT_EQ(issue_statistics.concurrent_window_count, 1u);
+  EXPECT_EQ(issue_statistics.window_count, 2u);
+  EXPECT_EQ(issue_statistics.peak_target_byte_length, 160u);
+  EXPECT_EQ(issue_statistics.peak_live_byte_length, 160u);
+  EXPECT_EQ(issue_statistics.total_target_byte_length, 304u);
+
+  IREE_ASSERT_OK(id4_pipeline_parameter_residency_plan_query_live_statistics(
+      residency_plan.get(),
+      /*parameter_load_prefetch_segment_distance=*/1, &issue_statistics));
+  EXPECT_EQ(issue_statistics.concurrent_window_count, 2u);
+  EXPECT_EQ(issue_statistics.peak_target_byte_length, 304u);
+  EXPECT_EQ(issue_statistics.peak_live_byte_length, 304u);
+
   const id4_pipeline_parameter_residency_segment_t* first =
       id4_pipeline_parameter_residency_plan_segment_at(residency_plan.get(), 0);
   ASSERT_NE(first, nullptr);

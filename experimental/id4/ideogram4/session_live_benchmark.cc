@@ -762,6 +762,10 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
           GenerationIssuePolicy(context.generation_issue_mode);
       select_options.candidate_stage_mask =
           context.generation_resident_stage_mask;
+      select_options.parameter_window_source_kind =
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+      select_options.maximum_parameter_window_byte_length =
+          context.maximum_parameter_window_byte_length;
       select_options.parameter_load_prefetch_segment_distance =
           context.parameter_load_prefetch_segment_distance;
       select_options.memory_budget_byte_length =
@@ -899,11 +903,10 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
   return iree_ok_status();
 }
 
-static iree_status_t QueryGenerationBenchmarkResourceStatistics(
-    const id4_ideogram4_generation_plan_t* plan,
-    const GenerationResidencyResolution& residency,
-    iree_host_size_t parameter_load_prefetch_segment_distance,
-    id4_ideogram4_generation_resource_statistics_t* out_statistics) {
+static id4_ideogram4_generation_resource_statistics_options_t
+GenerationBenchmarkResourceOptions(
+    const LiveGenerationBenchmarkContext& context,
+    const GenerationResidencyResolution& residency) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
@@ -911,8 +914,22 @@ static iree_status_t QueryGenerationBenchmarkResourceStatistics(
   options.resident_stage_mask = residency.resident_stage_mask;
   std::memcpy(options.phase_stage_masks, residency.phase_stage_masks,
               sizeof(options.phase_stage_masks));
+  options.parameter_window_source_kind =
+      ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.maximum_parameter_window_byte_length =
+      context.maximum_parameter_window_byte_length;
   options.parameter_load_prefetch_segment_distance =
-      parameter_load_prefetch_segment_distance;
+      context.parameter_load_prefetch_segment_distance;
+  return options;
+}
+
+static iree_status_t QueryGenerationBenchmarkResourceStatistics(
+    const LiveGenerationBenchmarkContext& context,
+    const id4_ideogram4_generation_plan_t* plan,
+    const GenerationResidencyResolution& residency,
+    id4_ideogram4_generation_resource_statistics_t* out_statistics) {
+  const id4_ideogram4_generation_resource_statistics_options_t options =
+      GenerationBenchmarkResourceOptions(context, residency);
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1050,6 +1067,8 @@ static iree_status_t ParsePromptRequest(const GenerationPrompt& prompt,
 
 static iree_status_t WriteGenerationPlanJsonIfRequested(
     iree_string_view_t prompt_label,
+    const LiveGenerationBenchmarkContext& context,
+    const GenerationResidencyResolution& residency,
     const id4_ideogram4_generation_plan_t* plan) {
   IREE_ASSERT_ARGUMENT(plan);
   const iree_string_view_t output_directory =
@@ -1075,7 +1094,10 @@ static iree_status_t WriteGenerationPlanJsonIfRequested(
         iree_allocator_system(), &output_path);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_plan_format_json(plan, &json_builder);
+    const id4_ideogram4_generation_resource_statistics_options_t options =
+        GenerationBenchmarkResourceOptions(context, residency);
+    status = id4_ideogram4_generation_plan_format_json(plan, &options,
+                                                       &json_builder);
   }
   if (iree_status_is_ok(status)) {
     iree_string_view_t json = iree_string_builder_view(&json_builder);
@@ -2045,9 +2067,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     id4_ideogram4_generation_resource_statistics_t resource_statistics;
     if (iree_status_is_ok(status)) {
       status = QueryGenerationBenchmarkResourceStatistics(
-          plan.get(), residency,
-          context.parameter_load_prefetch_segment_distance,
-          &resource_statistics);
+          context, plan.get(), residency, &resource_statistics);
     }
     if (iree_status_is_ok(status)) {
       last_residency = residency;
@@ -2056,7 +2076,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
     if (iree_status_is_ok(status) && !plan_json_written) {
       iree_benchmark_pause_timing(benchmark_state);
-      status = WriteGenerationPlanJsonIfRequested(prompt_label, plan.get());
+      status = WriteGenerationPlanJsonIfRequested(prompt_label, context,
+                                                  residency, plan.get());
       iree_benchmark_resume_timing(benchmark_state);
       plan_json_written = iree_status_is_ok(status);
     }
@@ -2187,11 +2208,10 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       ResolveGenerationBenchmarkResidency(context, plan.get(), &residency));
   id4_ideogram4_generation_resource_statistics_t resource_statistics;
   IREE_RETURN_IF_ERROR(QueryGenerationBenchmarkResourceStatistics(
-      plan.get(), residency, context.parameter_load_prefetch_segment_distance,
-      &resource_statistics));
+      context, plan.get(), residency, &resource_statistics));
 
-  IREE_RETURN_IF_ERROR(
-      WriteGenerationPlanJsonIfRequested(prompt_label, plan.get()));
+  IREE_RETURN_IF_ERROR(WriteGenerationPlanJsonIfRequested(
+      prompt_label, context, residency, plan.get()));
 
   uint64_t prepare_value = 1;
   uint64_t completion_value = 0;

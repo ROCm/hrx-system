@@ -11,22 +11,22 @@
 
 #include "experimental/id4/pipeline/parameter_window.h"
 
-typedef struct id4_pipeline_parameter_region_window_statistics_t {
-  // Exact compact target allocation bytes for one region window.
+typedef struct id4_pipeline_parameter_window_entry_statistics_t {
+  // Exact compact target allocation bytes for one ordered window.
   iree_device_size_t target_byte_length;
-  // Provider source transfer bytes required to populate one region window.
+  // Provider source transfer bytes required to populate one ordered window.
   iree_device_size_t source_transfer_byte_length;
-  // Number of load groups submitted for one region window.
+  // Number of load groups submitted for one ordered window.
   iree_host_size_t load_group_count;
-  // Number of encoded load steps submitted for one region window.
+  // Number of encoded load steps submitted for one ordered window.
   iree_host_size_t encode_load_step_count;
-} id4_pipeline_parameter_region_window_statistics_t;
+} id4_pipeline_parameter_window_entry_statistics_t;
 
 typedef struct id4_pipeline_parameter_slab_window_statistics_t {
   // Stage-owned encoder staging allocation for this target slab.
   iree_device_size_t staging_byte_length;
-  // First semantic region whose compact window submits an encoded load.
-  iree_host_size_t first_encode_region;
+  // First ordered window whose compact schedule submits an encoded load.
+  iree_host_size_t first_encode_window;
 } id4_pipeline_parameter_slab_window_statistics_t;
 
 static iree_status_t id4_pipeline_parameter_window_statistics_add_device_size(
@@ -190,17 +190,17 @@ id4_pipeline_parameter_window_schedule_encode_group_statistics(
       staging_chunk_byte_capacity, out_statistics);
 }
 
-static iree_status_t id4_pipeline_parameter_window_region_statistics(
+static iree_status_t id4_pipeline_parameter_window_entry_statistics(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_window_t* window,
-    iree_host_size_t region_index,
+    iree_host_size_t window_index,
     iree_device_size_t staging_chunk_byte_capacity,
     id4_pipeline_parameter_window_statistics_t* statistics,
     iree_host_size_t slab_statistics_count,
     id4_pipeline_parameter_slab_window_statistics_t* slab_statistics,
     iree_allocator_t host_allocator,
-    id4_pipeline_parameter_region_window_statistics_t* out_region) {
-  memset(out_region, 0, sizeof(*out_region));
+    id4_pipeline_parameter_window_entry_statistics_t* out_window) {
+  memset(out_window, 0, sizeof(*out_window));
   const iree_host_size_t window_slab_count =
       id4_pipeline_parameter_window_slab_count(window);
   for (iree_host_size_t i = 0; i < window_slab_count; ++i) {
@@ -208,8 +208,8 @@ static iree_status_t id4_pipeline_parameter_window_region_statistics(
         id4_pipeline_parameter_window_slab_at(window, i);
     IREE_RETURN_IF_ERROR(
         id4_pipeline_parameter_window_statistics_add_device_size(
-            slab->byte_length, IREE_SV("region target"),
-            &out_region->target_byte_length));
+            slab->byte_length, IREE_SV("window target"),
+            &out_window->target_byte_length));
   }
 
   id4_pipeline_parameter_window_schedule_create_options_t schedule_options;
@@ -220,16 +220,17 @@ static iree_status_t id4_pipeline_parameter_window_region_statistics(
   id4_pipeline_parameter_window_schedule_t* schedule = NULL;
   iree_status_t status = id4_pipeline_parameter_window_schedule_create(
       &schedule_options, host_allocator, &schedule);
-  const iree_host_size_t load_step_count =
-      id4_pipeline_parameter_window_schedule_load_step_count(schedule);
-  const id4_pipeline_parameter_load_step_t* load_steps =
-      id4_pipeline_parameter_window_schedule_load_steps(schedule);
+  iree_host_size_t load_step_count = 0;
+  const id4_pipeline_parameter_load_step_t* load_steps = NULL;
   if (iree_status_is_ok(status)) {
-    out_region->load_group_count =
+    load_step_count =
+        id4_pipeline_parameter_window_schedule_load_step_count(schedule);
+    load_steps = id4_pipeline_parameter_window_schedule_load_steps(schedule);
+    out_window->load_group_count =
         id4_pipeline_parameter_window_schedule_load_group_count(schedule);
   }
   for (iree_host_size_t compact_group_index = 0;
-       compact_group_index < out_region->load_group_count &&
+       compact_group_index < out_window->load_group_count &&
        iree_status_is_ok(status);
        ++compact_group_index) {
     id4_pipeline_parameter_load_group_t group;
@@ -255,8 +256,8 @@ static iree_status_t id4_pipeline_parameter_window_region_statistics(
     switch (group.kind) {
       case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER:
         status = id4_pipeline_parameter_window_statistics_add_device_size(
-            group_target_byte_length, IREE_SV("region source transfer"),
-            &out_region->source_transfer_byte_length);
+            group_target_byte_length, IREE_SV("window source transfer"),
+            &out_window->source_transfer_byte_length);
         break;
       case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE: {
         id4_pipeline_parameter_encode_statistics_t encode_statistics;
@@ -265,13 +266,13 @@ static iree_status_t id4_pipeline_parameter_window_region_statistics(
         if (iree_status_is_ok(status)) {
           status = id4_pipeline_parameter_window_statistics_add_device_size(
               encode_statistics.source_byte_length,
-              IREE_SV("region source transfer"),
-              &out_region->source_transfer_byte_length);
+              IREE_SV("window source transfer"),
+              &out_window->source_transfer_byte_length);
         }
         if (iree_status_is_ok(status)) {
           status = id4_pipeline_parameter_window_statistics_add_host_size(
-              group.step_count, IREE_SV("region encoded load step"),
-              &out_region->encode_load_step_count);
+              group.step_count, IREE_SV("window encoded load step"),
+              &out_window->encode_load_step_count);
         }
         if (!iree_status_is_ok(status)) break;
         const id4_pipeline_parameter_window_slab_t* window_slab =
@@ -300,8 +301,8 @@ static iree_status_t id4_pipeline_parameter_window_region_statistics(
         slab->staging_byte_length =
             iree_max(slab->staging_byte_length,
                      encode_statistics.staging_total_byte_length);
-        slab->first_encode_region =
-            iree_min(slab->first_encode_region, region_index);
+        slab->first_encode_window =
+            iree_min(slab->first_encode_window, window_index);
         break;
       }
       default:
@@ -386,7 +387,7 @@ iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
       memset(&slab_statistics[i], 0, sizeof(slab_statistics[i]));
-      slab_statistics[i].first_encode_region = IREE_HOST_SIZE_MAX;
+      slab_statistics[i].first_encode_window = IREE_HOST_SIZE_MAX;
     }
   }
 
@@ -395,24 +396,24 @@ iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
   aggregate_statistics.largest_load_group_index = IREE_HOST_SIZE_MAX;
   aggregate_statistics.largest_request_index = IREE_HOST_SIZE_MAX;
   aggregate_statistics.largest_request_load_group_index = IREE_HOST_SIZE_MAX;
-  id4_pipeline_parameter_region_window_statistics_t region_statistics;
-  memset(&region_statistics, 0, sizeof(region_statistics));
+  id4_pipeline_parameter_window_entry_statistics_t window_statistics;
+  memset(&window_statistics, 0, sizeof(window_statistics));
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_window_region_statistics(
-        plan, window, /*region_index=*/0, encoder_staging_chunk_byte_capacity,
+    status = id4_pipeline_parameter_window_entry_statistics(
+        plan, window, /*window_index=*/0, encoder_staging_chunk_byte_capacity,
         &aggregate_statistics, parameter_slab_count, slab_statistics,
-        host_allocator, &region_statistics);
+        host_allocator, &window_statistics);
   }
 
   id4_pipeline_parameter_window_resource_statistics_t statistics;
   memset(&statistics, 0, sizeof(statistics));
   if (iree_status_is_ok(status)) {
-    statistics.target_byte_length = region_statistics.target_byte_length;
+    statistics.target_byte_length = window_statistics.target_byte_length;
     statistics.source_transfer_byte_length =
-        region_statistics.source_transfer_byte_length;
-    statistics.load_group_count = region_statistics.load_group_count;
+        window_statistics.source_transfer_byte_length;
+    statistics.load_group_count = window_statistics.load_group_count;
     statistics.encode_load_step_count =
-        region_statistics.encode_load_step_count;
+        window_statistics.encode_load_step_count;
     status = id4_pipeline_parameter_window_finalize_slab_statistics(
         parameter_slab_count, slab_statistics,
         &statistics.encoder_staging_byte_length);
@@ -424,49 +425,77 @@ iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
   return status;
 }
 
-static iree_status_t id4_pipeline_parameter_window_statistics_validate_options(
-    const id4_pipeline_parameter_window_statistics_options_t* options) {
+static void id4_pipeline_parameter_window_statistics_initialize(
+    id4_pipeline_parameter_window_statistics_t* statistics) {
+  memset(statistics, 0, sizeof(*statistics));
+  statistics->largest_load_group_index = IREE_HOST_SIZE_MAX;
+  statistics->largest_request_index = IREE_HOST_SIZE_MAX;
+  statistics->largest_request_load_group_index = IREE_HOST_SIZE_MAX;
+}
+
+static iree_status_t
+id4_pipeline_parameter_window_sequence_statistics_validate_options(
+    const id4_pipeline_parameter_window_sequence_statistics_options_t*
+        options) {
   if (!options || options->structure_size < sizeof(*options)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameter window statistics options are invalid");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter window sequence statistics options are invalid");
   }
   if (options->next) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "parameter window statistics extension structures are not supported");
+        "parameter window sequence statistics extension structures are not "
+        "supported");
   }
   if (!options->plan || options->concurrent_window_count == 0 ||
+      (options->window_count != 0 && !options->windows)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter window sequence statistics require a plan, ordered "
+        "windows, and a concurrent window count");
+  }
+  if (options->source_kind !=
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT &&
+      options->source_kind !=
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_EXECUTION_LAYOUT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter window sequence source representation is invalid");
+  }
+  if (options->source_kind ==
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT &&
       options->encoder_staging_chunk_byte_capacity == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter window statistics require a plan, concurrent windows, and "
-        "encoder staging capacity");
+        "checkpoint parameter window sequence statistics require an encoder "
+        "staging capacity");
+  }
+  for (iree_host_size_t i = 0; i < options->window_count; ++i) {
+    if (!options->windows[i]) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter window sequence entry %" PRIhsz " is NULL", i);
+    }
   }
   return iree_ok_status();
 }
 
-iree_status_t id4_pipeline_parameter_window_query_statistics(
-    const id4_pipeline_parameter_window_statistics_options_t* options,
+iree_status_t id4_pipeline_parameter_window_query_sequence_statistics(
+    const id4_pipeline_parameter_window_sequence_statistics_options_t* options,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_statistics_t* out_statistics) {
   IREE_ASSERT_ARGUMENT(out_statistics);
-  memset(out_statistics, 0, sizeof(*out_statistics));
-  out_statistics->largest_load_group_index = IREE_HOST_SIZE_MAX;
-  out_statistics->largest_request_index = IREE_HOST_SIZE_MAX;
-  out_statistics->largest_request_load_group_index = IREE_HOST_SIZE_MAX;
+  id4_pipeline_parameter_window_statistics_initialize(out_statistics);
   IREE_RETURN_IF_ERROR(
-      id4_pipeline_parameter_window_statistics_validate_options(options));
+      id4_pipeline_parameter_window_sequence_statistics_validate_options(
+          options));
 
   id4_pipeline_parameter_window_statistics_t statistics;
-  memset(&statistics, 0, sizeof(statistics));
-  statistics.largest_load_group_index = IREE_HOST_SIZE_MAX;
-  statistics.largest_request_index = IREE_HOST_SIZE_MAX;
-  statistics.largest_request_load_group_index = IREE_HOST_SIZE_MAX;
-  const iree_host_size_t region_count =
-      id4_pipeline_plan_region_count(options->plan);
+  id4_pipeline_parameter_window_statistics_initialize(&statistics);
   statistics.concurrent_window_count =
-      iree_min(region_count, options->concurrent_window_count);
-  statistics.window_count = region_count;
+      iree_min(options->window_count, options->concurrent_window_count);
+  statistics.window_count = options->window_count;
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
   for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
@@ -478,109 +507,125 @@ iree_status_t id4_pipeline_parameter_window_query_statistics(
             &statistics.full_slab_target_byte_length));
   }
 
-  id4_pipeline_parameter_region_window_statistics_t* region_statistics = NULL;
+  id4_pipeline_parameter_window_entry_statistics_t* window_statistics = NULL;
   id4_pipeline_parameter_slab_window_statistics_t* slab_statistics = NULL;
   iree_status_t status = iree_ok_status();
-  if (region_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, region_count,
-                                         sizeof(region_statistics[0]),
-                                         (void**)&region_statistics);
+  if (options->window_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, options->window_count,
+                                         sizeof(window_statistics[0]),
+                                         (void**)&window_statistics);
   }
-  if (iree_status_is_ok(status) && parameter_slab_count != 0) {
+  if (iree_status_is_ok(status) &&
+      options->source_kind ==
+          ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT &&
+      parameter_slab_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, parameter_slab_count,
                                          sizeof(slab_statistics[0]),
                                          (void**)&slab_statistics);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && slab_statistics) {
     for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
       memset(&slab_statistics[i], 0, sizeof(slab_statistics[i]));
-      slab_statistics[i].first_encode_region = IREE_HOST_SIZE_MAX;
+      slab_statistics[i].first_encode_window = IREE_HOST_SIZE_MAX;
     }
   }
-  for (iree_host_size_t region_index = 0;
-       region_index < region_count && iree_status_is_ok(status);
-       ++region_index) {
-    id4_pipeline_parameter_window_t* window = NULL;
-    status = id4_pipeline_parameter_window_create_for_region(
-        options->plan, region_index, host_allocator, &window);
-    if (iree_status_is_ok(status)) {
-      status = id4_pipeline_parameter_window_region_statistics(
-          options->plan, window, region_index,
+  for (iree_host_size_t window_index = 0;
+       window_index < options->window_count && iree_status_is_ok(status);
+       ++window_index) {
+    if (options->source_kind ==
+        ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT) {
+      status = id4_pipeline_parameter_window_entry_statistics(
+          options->plan, options->windows[window_index], window_index,
           options->encoder_staging_chunk_byte_capacity, &statistics,
           parameter_slab_count, slab_statistics, host_allocator,
-          &region_statistics[region_index]);
+          &window_statistics[window_index]);
+    } else {
+      id4_pipeline_parameter_window_resource_statistics_t resources;
+      status = id4_pipeline_parameter_window_query_resource_statistics(
+          options->plan, options->windows[window_index], options->source_kind,
+          options->encoder_staging_chunk_byte_capacity, host_allocator,
+          &resources);
+      if (iree_status_is_ok(status)) {
+        window_statistics[window_index].target_byte_length =
+            resources.target_byte_length;
+        window_statistics[window_index].source_transfer_byte_length =
+            resources.source_transfer_byte_length;
+        window_statistics[window_index].load_group_count =
+            resources.load_group_count;
+        window_statistics[window_index].encode_load_step_count =
+            resources.encode_load_step_count;
+      }
     }
-    id4_pipeline_parameter_window_release(window);
     if (!iree_status_is_ok(status)) break;
-    const id4_pipeline_parameter_region_window_statistics_t* region =
-        &region_statistics[region_index];
+    const id4_pipeline_parameter_window_entry_statistics_t* window =
+        &window_statistics[window_index];
     status = id4_pipeline_parameter_window_statistics_add_device_size(
-        region->target_byte_length, IREE_SV("total target"),
+        window->target_byte_length, IREE_SV("total target"),
         &statistics.total_target_byte_length);
     if (iree_status_is_ok(status)) {
       status = id4_pipeline_parameter_window_statistics_add_device_size(
-          region->source_transfer_byte_length, IREE_SV("total source transfer"),
+          window->source_transfer_byte_length, IREE_SV("total source transfer"),
           &statistics.total_source_transfer_byte_length);
     }
     if (iree_status_is_ok(status)) {
       status = id4_pipeline_parameter_window_statistics_add_host_size(
-          region->load_group_count, IREE_SV("total load group"),
+          window->load_group_count, IREE_SV("total load group"),
           &statistics.total_load_group_count);
     }
     if (iree_status_is_ok(status)) {
       status = id4_pipeline_parameter_window_statistics_add_host_size(
-          region->encode_load_step_count, IREE_SV("total encoded load step"),
+          window->encode_load_step_count, IREE_SV("total encoded load step"),
           &statistics.total_encode_load_step_count);
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && slab_statistics) {
     status = id4_pipeline_parameter_window_finalize_slab_statistics(
         parameter_slab_count, slab_statistics,
         &statistics.encoder_staging_byte_length);
   }
 
   for (iree_host_size_t window_offset = 0;
-       window_offset < region_count && iree_status_is_ok(status);
+       window_offset < options->window_count && iree_status_is_ok(status);
        ++window_offset) {
-    id4_pipeline_parameter_region_window_statistics_t concurrent;
+    id4_pipeline_parameter_window_entry_statistics_t concurrent;
     memset(&concurrent, 0, sizeof(concurrent));
-    const iree_host_size_t window_limit = iree_min(
-        region_count, window_offset + statistics.concurrent_window_count);
-    for (iree_host_size_t region_index = window_offset;
-         region_index < window_limit && iree_status_is_ok(status);
-         ++region_index) {
-      const id4_pipeline_parameter_region_window_statistics_t* region =
-          &region_statistics[region_index];
+    const iree_host_size_t window_limit =
+        iree_min(options->window_count,
+                 window_offset + statistics.concurrent_window_count);
+    for (iree_host_size_t window_index = window_offset;
+         window_index < window_limit && iree_status_is_ok(status);
+         ++window_index) {
+      const id4_pipeline_parameter_window_entry_statistics_t* window =
+          &window_statistics[window_index];
       status = id4_pipeline_parameter_window_statistics_add_device_size(
-          region->target_byte_length, IREE_SV("concurrent target"),
+          window->target_byte_length, IREE_SV("concurrent target"),
           &concurrent.target_byte_length);
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_window_statistics_add_device_size(
-            region->source_transfer_byte_length,
+            window->source_transfer_byte_length,
             IREE_SV("concurrent source transfer"),
             &concurrent.source_transfer_byte_length);
       }
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_window_statistics_add_host_size(
-            region->load_group_count, IREE_SV("concurrent load group"),
+            window->load_group_count, IREE_SV("concurrent load group"),
             &concurrent.load_group_count);
       }
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_window_statistics_add_host_size(
-            region->encode_load_step_count,
+            window->encode_load_step_count,
             IREE_SV("concurrent encoded load step"),
             &concurrent.encode_load_step_count);
       }
     }
     iree_device_size_t active_staging_byte_length = 0;
-    const iree_host_size_t prefetched_region_limit = iree_min(
-        region_count, window_offset + statistics.concurrent_window_count);
     for (iree_host_size_t slab_index = 0;
-         slab_index < parameter_slab_count && iree_status_is_ok(status);
+         slab_index < parameter_slab_count && slab_statistics &&
+         iree_status_is_ok(status);
          ++slab_index) {
       const id4_pipeline_parameter_slab_window_statistics_t* slab =
           &slab_statistics[slab_index];
-      if (slab->first_encode_region >= prefetched_region_limit) continue;
+      if (slab->first_encode_window >= window_limit) continue;
       status = id4_pipeline_parameter_window_statistics_add_device_size(
           slab->staging_byte_length, IREE_SV("active encoder staging"),
           &active_staging_byte_length);
@@ -610,6 +655,6 @@ iree_status_t id4_pipeline_parameter_window_query_statistics(
     *out_statistics = statistics;
   }
   iree_allocator_free(host_allocator, slab_statistics);
-  iree_allocator_free(host_allocator, region_statistics);
+  iree_allocator_free(host_allocator, window_statistics);
   return status;
 }

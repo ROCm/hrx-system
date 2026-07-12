@@ -486,16 +486,34 @@ static ParameterWindowSchedulePtr MakeParameterWindowSchedule(
 
 static id4_pipeline_parameter_window_statistics_t QueryWindowStatistics(
     const id4_pipeline_plan_t* plan, iree_host_size_t concurrent_window_count) {
-  id4_pipeline_parameter_window_statistics_options_t options;
+  const iree_host_size_t window_count = id4_pipeline_plan_region_count(plan);
+  id4_pipeline_parameter_window_t** windows = nullptr;
+  IREE_CHECK_OK(iree_allocator_malloc_array(
+      iree_allocator_system(), window_count, sizeof(windows[0]),
+      reinterpret_cast<void**>(&windows)));
+  std::memset(windows, 0, window_count * sizeof(windows[0]));
+  for (iree_host_size_t i = 0; i < window_count; ++i) {
+    IREE_CHECK_OK(id4_pipeline_parameter_window_create_for_region(
+        plan, i, iree_allocator_system(), &windows[i]));
+  }
+
+  id4_pipeline_parameter_window_sequence_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.plan = plan;
+  options.source_kind = ID4_PIPELINE_PARAMETER_WINDOW_SOURCE_KIND_CHECKPOINT;
+  options.window_count = window_count;
+  options.windows = windows;
   options.concurrent_window_count = concurrent_window_count;
   options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   id4_pipeline_parameter_window_statistics_t statistics;
-  IREE_CHECK_OK(id4_pipeline_parameter_window_query_statistics(
+  IREE_CHECK_OK(id4_pipeline_parameter_window_query_sequence_statistics(
       &options, iree_allocator_system(), &statistics));
+  for (iree_host_size_t i = 0; i < window_count; ++i) {
+    id4_pipeline_parameter_window_release(windows[i]);
+  }
+  iree_allocator_free(iree_allocator_system(), windows);
   return statistics;
 }
 

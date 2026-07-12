@@ -126,6 +126,12 @@ id4_pipeline_parameter_residency_plan_segment_at(
     const id4_pipeline_parameter_residency_plan_t* residency_plan,
     iree_host_size_t index);
 
+// Queries exact live parameter resources for the issue prefetch distance.
+iree_status_t id4_pipeline_parameter_residency_plan_query_live_statistics(
+    const id4_pipeline_parameter_residency_plan_t* residency_plan,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
+    id4_pipeline_parameter_window_statistics_t* out_statistics);
+
 // Appends deterministic JSON describing the residency plan and its segments.
 iree_status_t id4_pipeline_parameter_residency_plan_format_json(
     const id4_pipeline_parameter_residency_plan_t* residency_plan,

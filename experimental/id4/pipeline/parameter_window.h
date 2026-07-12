@@ -16,7 +16,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Opaque compact parameter materialization plan for a contiguous region window.
+// Opaque compact parameter materialization plan for a selected tensor set.
 typedef struct id4_pipeline_parameter_window_t id4_pipeline_parameter_window_t;
 
 // Opaque compact parameter loading schedule derived from a window.

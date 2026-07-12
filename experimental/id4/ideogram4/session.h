@@ -11,6 +11,7 @@
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/kernel_cache.h"
 #include "experimental/id4/pipeline/kernel_library.h"
+#include "experimental/id4/pipeline/parameter_window.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
@@ -308,6 +309,10 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
   // Stage-bundle masks materialized for each generation phase.
   id4_ideogram4_generation_resident_stage_mask_t
       phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+  // Source representation used to populate deferred parameter windows.
+  id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind;
+  // Maximum compact target bytes retained by one deferred stage segment.
+  iree_device_size_t maximum_parameter_window_byte_length;
   // Future execution segments whose compact parameter windows may be live.
   iree_host_size_t parameter_load_prefetch_segment_distance;
 } id4_ideogram4_generation_resource_statistics_options_t;
@@ -330,7 +335,7 @@ typedef struct id4_ideogram4_generation_resource_statistics_t {
   iree_device_size_t resident_stage_constant_byte_length;
   // Resident prepared-stage parameter plus constant slab bytes.
   iree_device_size_t resident_stage_bundle_byte_length;
-  // Largest phase-concurrent parameter slab live set.
+  // Largest phase-concurrent parameter-target and encoder-staging live set.
   iree_device_size_t phase_concurrent_parameter_peak_byte_length;
   // Largest phase-concurrent constant slab live set.
   iree_device_size_t phase_concurrent_constant_peak_byte_length;
@@ -339,7 +344,7 @@ typedef struct id4_ideogram4_generation_resource_statistics_t {
   // Largest phase-concurrent total live set excluding external parameter
   // storage.
   iree_device_size_t phase_concurrent_total_peak_byte_length;
-  // Largest stage-serial parameter slab live set.
+  // Largest stage-serial parameter-target and encoder-staging live set.
   iree_device_size_t stage_serial_parameter_peak_byte_length;
   // Largest stage-serial constant slab live set.
   iree_device_size_t stage_serial_constant_peak_byte_length;
@@ -359,6 +364,10 @@ typedef struct id4_ideogram4_generation_residency_select_options_t {
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Candidate coarse stage bundles the selector may retain.
   id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask;
+  // Source representation used to populate deferred parameter windows.
+  id4_pipeline_parameter_window_source_kind_t parameter_window_source_kind;
+  // Maximum compact target bytes retained by one deferred stage segment.
+  iree_device_size_t maximum_parameter_window_byte_length;
   // Future execution segments whose compact parameter windows may be live.
   iree_host_size_t parameter_load_prefetch_segment_distance;
   // Maximum logical live bytes allowed by the selected policy.
@@ -614,9 +623,12 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
     const id4_ideogram4_generation_residency_select_options_t* options,
     id4_ideogram4_generation_residency_selection_t* out_selection);
 
-// Appends an inspectable generation-plan JSON object to |builder|.
+// Appends an inspectable generation-plan JSON object and exact selected
+// resource plan to |builder|.
 iree_status_t id4_ideogram4_generation_plan_format_json(
     const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_resource_statistics_options_t*
+        resource_options,
     iree_string_builder_t* builder);
 
 // Prepares reusable generation state for |plan|.

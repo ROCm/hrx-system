@@ -14,47 +14,53 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Options for querying compact parameter materialization resource usage.
-typedef struct id4_pipeline_parameter_window_statistics_options_t {
+// Options for querying an explicit ordered compact-window sequence.
+typedef struct id4_pipeline_parameter_window_sequence_statistics_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Plan whose independently materialized region windows are measured.
+  // Plan owning every window in |windows|.
   const id4_pipeline_plan_t* plan;
-  // Maximum number of adjacent region windows live due to prefetch.
+  // Source representation used to populate the windows.
+  id4_pipeline_parameter_window_source_kind_t source_kind;
+  // Number of ordered windows in |windows|.
+  iree_host_size_t window_count;
+  // Borrowed ordered windows whose live ranges are measured.
+  const id4_pipeline_parameter_window_t* const* windows;
+  // Maximum number of adjacent windows live due to prefetch.
   iree_host_size_t concurrent_window_count;
   // Maximum provider source bytes packed into one encoder staging chunk.
   iree_device_size_t encoder_staging_chunk_byte_capacity;
-} id4_pipeline_parameter_window_statistics_options_t;
+} id4_pipeline_parameter_window_sequence_statistics_options_t;
 
 // Exact resource and transfer statistics for compact parameter windows.
 typedef struct id4_pipeline_parameter_window_statistics_t {
   // Maximum number of adjacent independently allocated windows considered.
   iree_host_size_t concurrent_window_count;
-  // Number of independently materialized single-region windows in the plan.
+  // Number of independently materialized ordered windows in the sequence.
   iree_host_size_t window_count;
-  // Full target bytes across all resident parameter slabs.
+  // Full target bytes across all parameter slabs in the source plan.
   iree_device_size_t full_slab_target_byte_length;
   // Largest simultaneously live compact target allocation set.
   iree_device_size_t peak_target_byte_length;
-  // Stage-owned encoder staging bytes shared by all compact region windows.
+  // Stage-owned encoder staging bytes shared by all compact windows.
   iree_device_size_t encoder_staging_byte_length;
   // Largest simultaneously live target plus staging allocation set.
   iree_device_size_t peak_live_byte_length;
   // Largest source transfer volume represented by one concurrent window set.
   iree_device_size_t peak_source_transfer_byte_length;
-  // Sum of compact target allocation bytes across all region windows.
+  // Sum of compact target allocation bytes across all ordered windows.
   iree_device_size_t total_target_byte_length;
-  // Sum of provider source transfer bytes across all region windows.
+  // Sum of provider source transfer bytes across all ordered windows.
   iree_device_size_t total_source_transfer_byte_length;
   // Maximum load-group count represented by one concurrent window set.
   iree_host_size_t peak_load_group_count;
-  // Sum of load groups submitted across all region windows.
+  // Sum of load groups submitted across all ordered windows.
   iree_host_size_t total_load_group_count;
   // Maximum encoded load-step count in one concurrent window set.
   iree_host_size_t peak_encode_load_step_count;
-  // Sum of encoded load steps submitted across all region windows.
+  // Sum of encoded load steps submitted across all ordered windows.
   iree_host_size_t total_encode_load_step_count;
   // Target payload byte length of the largest single load group.
   iree_device_size_t largest_load_group_target_byte_length;
@@ -91,10 +97,10 @@ iree_status_t id4_pipeline_parameter_window_query_resource_statistics(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_resource_statistics_t* out_statistics);
 
-// Queries exact compact-window allocations and transfer volumes using the same
-// packing and encoder-staging calculations as warm issue.
-iree_status_t id4_pipeline_parameter_window_query_statistics(
-    const id4_pipeline_parameter_window_statistics_options_t* options,
+// Queries exact allocations and transfer volumes for an ordered window
+// sequence using the same persistent encoder-staging lifetime as warm issue.
+iree_status_t id4_pipeline_parameter_window_query_sequence_statistics(
+    const id4_pipeline_parameter_window_sequence_statistics_options_t* options,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_window_statistics_t* out_statistics);
 

@@ -47,6 +47,7 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_residency",
         "//experimental/id4/pipeline:parameter_window",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",

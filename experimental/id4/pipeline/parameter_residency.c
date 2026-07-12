@@ -78,6 +78,10 @@ struct id4_pipeline_parameter_residency_plan_t {
   iree_allocator_t host_allocator;
   // Source plan retained for segment tensor names and later lowering.
   id4_pipeline_plan_t* plan;
+  // Source representation used to populate compact parameter windows.
+  id4_pipeline_parameter_window_source_kind_t source_kind;
+  // Encoder staging chunk capacity used by checkpoint window schedules.
+  iree_device_size_t encoder_staging_chunk_byte_capacity;
   // Aggregate fixed-plan statistics.
   id4_pipeline_parameter_residency_statistics_t statistics;
   // Ordered segments packed after this header.
@@ -669,6 +673,9 @@ static iree_status_t id4_pipeline_parameter_residency_bake(
   residency_plan->host_allocator = state->host_allocator;
   residency_plan->plan = (id4_pipeline_plan_t*)state->plan;
   id4_pipeline_plan_retain(residency_plan->plan);
+  residency_plan->source_kind = state->source_kind;
+  residency_plan->encoder_staging_chunk_byte_capacity =
+      state->encoder_staging_chunk_byte_capacity;
   residency_plan->statistics = state->statistics;
   uint8_t* allocation_bytes = (uint8_t*)residency_plan;
   residency_plan->segments =
@@ -882,6 +889,54 @@ id4_pipeline_parameter_residency_plan_segment_at(
     return NULL;
   }
   return &residency_plan->segments[index];
+}
+
+iree_status_t id4_pipeline_parameter_residency_plan_query_live_statistics(
+    const id4_pipeline_parameter_residency_plan_t* residency_plan,
+    iree_host_size_t parameter_load_prefetch_segment_distance,
+    id4_pipeline_parameter_window_statistics_t* out_statistics) {
+  if (!residency_plan || !out_statistics) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter residency plan and live statistics output are required");
+  }
+  iree_host_size_t concurrent_window_count = 0;
+  if (!iree_host_size_checked_add(parameter_load_prefetch_segment_distance, 1,
+                                  &concurrent_window_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter residency prefetch segment distance overflows");
+  }
+
+  const iree_host_size_t segment_count =
+      residency_plan->statistics.segment_count;
+  const id4_pipeline_parameter_window_t** windows = NULL;
+  iree_status_t status = iree_ok_status();
+  if (segment_count != 0) {
+    status = iree_allocator_malloc_array(residency_plan->host_allocator,
+                                         segment_count, sizeof(windows[0]),
+                                         (void**)&windows);
+  }
+  for (iree_host_size_t i = 0; i < segment_count && iree_status_is_ok(status);
+       ++i) {
+    windows[i] = residency_plan->segments[i].window;
+  }
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_parameter_window_sequence_statistics_options_t options;
+    memset(&options, 0, sizeof(options));
+    options.structure_size = sizeof(options);
+    options.plan = residency_plan->plan;
+    options.source_kind = residency_plan->source_kind;
+    options.window_count = segment_count;
+    options.windows = windows;
+    options.concurrent_window_count = concurrent_window_count;
+    options.encoder_staging_chunk_byte_capacity =
+        residency_plan->encoder_staging_chunk_byte_capacity;
+    status = id4_pipeline_parameter_window_query_sequence_statistics(
+        &options, residency_plan->host_allocator, out_statistics);
+  }
+  iree_allocator_free(residency_plan->host_allocator, windows);
+  return status;
 }
 
 static iree_status_t id4_pipeline_parameter_residency_append_json_string(
