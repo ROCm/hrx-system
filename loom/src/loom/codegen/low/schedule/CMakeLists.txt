@@ -72,6 +72,8 @@ loom_cc_library(
     "json.c"
     "pressure.c"
     "pressure.h"
+    "pressure_alias.c"
+    "pressure_alias.h"
     "ready_policy.c"
     "ready_policy.h"
     "run.c"
