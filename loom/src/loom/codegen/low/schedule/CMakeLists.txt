@@ -68,6 +68,8 @@ loom_cc_library(
     "graph.c"
     "graph.h"
     "json.c"
+    "pressure.c"
+    "pressure.h"
     "ready_policy.c"
     "ready_policy.h"
     "run.c"
