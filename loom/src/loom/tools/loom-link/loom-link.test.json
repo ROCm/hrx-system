@@ -21,6 +21,22 @@
       }
     },
     {
+      "name": "links archive with many symbols",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/archive_many_symbols.loom",
+          "--mode=archive"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "func.def @symbol_00() {",
+          "func.def @symbol_64() {"
+        ]
+      }
+    },
+    {
       "name": "links text corpus into harness",
       "steps": [
         {
