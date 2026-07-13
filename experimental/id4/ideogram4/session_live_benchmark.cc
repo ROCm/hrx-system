@@ -1943,7 +1943,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " program_streaming_rhs_encode[dispatches=%" PRIhsz ",read=%" PRIu64
       "MiB,write=%" PRIu64 "MiB,max_write=%" PRIu64
       "MiB]"
-      " allocator_device[enabled=%d,before_live=%" PRIu64
+      " direct_allocator_device[enabled=%d,before_live=%" PRIu64
       "MiB,before_peak=%" PRIu64 "MiB,warm_live=%" PRIu64
       "MiB,warm_peak=%" PRIu64 "MiB,after_live=%" PRIu64
       "MiB,after_peak=%" PRIu64 "MiB]",

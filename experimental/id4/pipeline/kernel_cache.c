@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/time.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
 #include "loomc/context.h"
@@ -451,8 +452,8 @@ static iree_status_t id4_pipeline_kernel_artifact_initialize_from_loomc(
 
 static iree_status_t id4_pipeline_kernel_cache_emit_event(
     id4_pipeline_diagnostics_sink_t* sink, iree_string_view_t key,
-    iree_string_view_t message,
-    const id4_pipeline_kernel_diagnostic_t* kernel) {
+    iree_string_view_t message, const id4_pipeline_kernel_diagnostic_t* kernel,
+    const id4_pipeline_timing_diagnostic_t* timing) {
   return id4_pipeline_diagnostics_emit(
       sink, &(id4_pipeline_diagnostic_event_t){
                 // This event describes kernel JIT or HAL preparation work.
@@ -467,6 +468,8 @@ static iree_status_t id4_pipeline_kernel_cache_emit_event(
                 .parameter_slab = NULL,
                 // Kernel-specific payload for the event.
                 .kernel = kernel,
+                // Optional host-observed cache operation timing.
+                .timing = timing,
             });
 }
 
@@ -511,7 +514,8 @@ static iree_status_t id4_pipeline_kernel_cache_emit_loom_diagnostics(
     IREE_RETURN_IF_ERROR(id4_pipeline_kernel_cache_emit_event(
         options->diagnostics_sink,
         iree_string_view_from_loomc(diagnostic->code),
-        iree_string_view_from_loomc(diagnostic->message), &kernel));
+        iree_string_view_from_loomc(diagnostic->message), &kernel,
+        /*timing=*/NULL));
   }
   return iree_ok_status();
 }
@@ -626,7 +630,7 @@ static iree_status_t id4_pipeline_kernel_cache_make_dispatch_config(
 static iree_status_t id4_pipeline_kernel_cache_emit_cache_hit(
     id4_pipeline_kernel_cache_t* kernel_cache,
     const id4_pipeline_kernel_cache_prepare_options_t* options,
-    const id4_pipeline_kernel_cache_entry_t* entry) {
+    const id4_pipeline_kernel_cache_entry_t* entry, iree_time_t start_time_ns) {
   const id4_pipeline_kernel_artifact_t* primary_artifact =
       id4_pipeline_kernel_executable_artifact_at(
           entry->executable, entry->executable->primary_artifact_index);
@@ -661,9 +665,18 @@ static iree_status_t id4_pipeline_kernel_cache_emit_cache_hit(
       // HAL caching mode selected for executable preparation.
       .caching_mode = options->caching_mode,
   };
+  const iree_time_t end_time_ns = iree_time_now();
+  const id4_pipeline_timing_diagnostic_t timing = {
+      // Start of cache lookup and retained-executable acquisition.
+      .start_time_ns = start_time_ns,
+      // End of retained-executable acquisition.
+      .end_time_ns = end_time_ns,
+      // Elapsed cache-hit duration.
+      .duration_ns = end_time_ns - start_time_ns,
+  };
   return id4_pipeline_kernel_cache_emit_event(
       options->diagnostics_sink, IREE_SV("kernel_cache.prepare.cache_hit"),
-      IREE_SV("reused prepared HAL executable"), &kernel);
+      IREE_SV("reused prepared HAL executable"), &kernel, &timing);
 }
 
 static iree_status_t id4_pipeline_kernel_executable_create(
@@ -976,13 +989,14 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   *out_executable = NULL;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_kernel_cache_validate_prepare_options(options));
+  const iree_time_t prepare_start_time_ns = iree_time_now();
 
   id4_pipeline_kernel_cache_entry_t* cache_entry =
       id4_pipeline_kernel_cache_lookup(kernel_cache, options);
   if (cache_entry) {
     id4_pipeline_kernel_executable_retain(cache_entry->executable);
     iree_status_t status = id4_pipeline_kernel_cache_emit_cache_hit(
-        kernel_cache, options, cache_entry);
+        kernel_cache, options, cache_entry, prepare_start_time_ns);
     if (iree_status_is_ok(status)) {
       *out_executable = cache_entry->executable;
     } else {
@@ -1357,7 +1371,8 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
     };
     status = id4_pipeline_kernel_cache_emit_event(
         options->diagnostics_sink, IREE_SV("kernel_cache.hal.infer_format"),
-        IREE_SV("inferred HAL executable format"), &kernel);
+        IREE_SV("inferred HAL executable format"), &kernel,
+        /*timing=*/NULL);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_executable_params_t executable_params = {
@@ -1414,9 +1429,18 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         // HAL caching mode selected for executable preparation.
         .caching_mode = options->caching_mode,
     };
+    const iree_time_t prepare_end_time_ns = iree_time_now();
+    const id4_pipeline_timing_diagnostic_t timing = {
+        // Start of the uncached Loom and HAL preparation operation.
+        .start_time_ns = prepare_start_time_ns,
+        // End of the uncached Loom and HAL preparation operation.
+        .end_time_ns = prepare_end_time_ns,
+        // Elapsed uncached preparation duration.
+        .duration_ns = prepare_end_time_ns - prepare_start_time_ns,
+    };
     status = id4_pipeline_kernel_cache_emit_event(
         options->diagnostics_sink, IREE_SV("kernel_cache.prepare"),
-        IREE_SV("prepared HAL executable"), &kernel);
+        IREE_SV("prepared HAL executable"), &kernel, &timing);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_cache_store_entry(kernel_cache, options,
