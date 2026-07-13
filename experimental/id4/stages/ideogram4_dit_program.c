@@ -3086,17 +3086,54 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_modulated_layernorm(
       bindings);
 }
 
+static iree_status_t id4_ideogram4_dit_program_layout_is_token_major(
+    id4_pipeline_program_matrix_layout_t layout, uint32_t* out_is_token_major) {
+  switch (layout) {
+    case ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR:
+      *out_is_token_major = 1;
+      return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR:
+      *out_is_token_major = 0;
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported modulated layernorm matrix layout");
+  }
+}
+
 static iree_status_t
-id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16_input_token_major(
+id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t hidden_size,
+    uint32_t token_count, uint32_t token_offset, uint32_t dispatch_token_count,
+    uint32_t hidden_size, id4_pipeline_program_matrix_layout_t input_layout,
+    id4_pipeline_program_matrix_layout_t output_layout,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t scale,
     id4_pipeline_program_tensor_t output) {
+  if (token_offset > token_count ||
+      dispatch_token_count > token_count - token_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 DiT BF16 modulated layernorm dispatch token range overflow");
+  }
+  uint32_t input_token_major = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layout_is_token_major(
+      input_layout, &input_token_major));
+  uint32_t output_token_major = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layout_is_token_major(
+      output_layout, &output_token_major));
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
       {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.token_count"),
        token_count},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.token_offset"),
+       token_offset},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count"),
+       dispatch_token_count},
       {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.hidden_size"),
        hidden_size},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.input_token_major"),
+       input_token_major},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_bf16.output_token_major"),
+       output_token_major},
   };
   char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
                     [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
@@ -3112,50 +3149,7 @@ id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16_input_token_major(
   };
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/modulated_layernorm_bf16"),
-      IREE_SV("id4_ideogram4_modulated_layernorm_bf16_input_token_major"),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
-}
-
-static iree_status_t
-id4_ideogram4_dit_program_dispatch_modulated_layernorm_image_bf16_input_token_major(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t token_offset, uint32_t dispatch_token_count,
-    uint32_t hidden_size, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output) {
-  if (token_offset > token_count ||
-      dispatch_token_count > token_count - token_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Ideogram4 DiT BF16 token-major image layernorm dispatch token range "
-        "overflow");
-  }
-  const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.token_count"),
-       token_count},
-      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.token_offset"),
-       token_offset},
-      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16."
-               "dispatch_token_count"),
-       dispatch_token_count},
-      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.hidden_size"),
-       hidden_size},
-  };
-  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
-                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
-  id4_pipeline_kernel_config_binding_t
-      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
-      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
-      config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(input),
-      id4_pipeline_program_read(scale),
-      id4_pipeline_program_write(output),
-  };
-  return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, IREE_SV("ideogram4/modulated_layernorm_image_bf16"),
-      IREE_SV("id4_ideogram4_modulated_layernorm_image_bf16_input_token_major"),
+      IREE_SV("id4_ideogram4_modulated_layernorm_bf16"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -4900,9 +4894,12 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
               hidden, final_scale, final_norm));
     } else {
       IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16_input_token_major(
-              builder, final_norm_dispatch_name, total_token_count, hidden_size,
-              hidden, final_scale, final_norm));
+          id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
+              builder, final_norm_dispatch_name, total_token_count, 0,
+              total_token_count, hidden_size,
+              ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+              ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_COLUMN_MAJOR, hidden,
+              final_scale, final_norm));
     }
   }
   if (use_packed_final_projection) {
@@ -4910,10 +4907,12 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
         builder, final_norm_packed_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         final_norm_packed_shape, &final_norm_packed));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_modulated_layernorm_image_bf16_input_token_major(
+        id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
             builder, final_norm_packed_dispatch_name, total_token_count,
-            text_token_count, image_token_count, hidden_size, hidden,
-            final_scale, final_norm_packed));
+            text_token_count, image_token_count, hidden_size,
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR,
+            ID4_PIPELINE_PROGRAM_MATRIX_LAYOUT_ROW_MAJOR, hidden, final_scale,
+            final_norm_packed));
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_final_norm_name));

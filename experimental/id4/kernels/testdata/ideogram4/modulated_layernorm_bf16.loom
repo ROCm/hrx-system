@@ -3,7 +3,6 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 check.case public @id4_ideogram4_modulated_layernorm_bf16_small_case {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xf32>
   %scale = check.generate.fill value(0.0) : tensor<4xbf16>
@@ -29,7 +28,7 @@ check.case public @id4_ideogram4_modulated_layernorm_bf16_input_token_major_smal
   %scale = check.generate.fill value(0.0) : tensor<4xbf16>
   %output = check.generate.fill value(0.0) : tensor<4x1xbf16>
   %expected = check.generate.iota offset(-1.34375) step(0.89453125) : tensor<4x1xbf16>
-  func.call @id4_ideogram4_modulated_layernorm_bf16_input_token_major(%input, %scale, %output) : (tensor<1x4xf32>, tensor<4xbf16>, tensor<4x1xbf16>)
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<1x4xf32>, tensor<4xbf16>, tensor<4x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.004) rtol(0.0) nan(same) : tensor<4x1xbf16>
   check.return
 }
@@ -39,8 +38,48 @@ check.case public @id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideo
   %scale = check.generate.fill value(0.0) : tensor<4608xbf16>
   %output = check.generate.fill value(1.0) : tensor<4608x2xbf16>
   %expected = check.generate.fill value(0.0) : tensor<4608x2xbf16>
-  func.call @id4_ideogram4_modulated_layernorm_bf16_input_token_major(%input, %scale, %output) : (tensor<2x4608xf32>, tensor<4608xbf16>, tensor<4608x2xbf16>)
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<2x4608xf32>, tensor<4608xbf16>, tensor<4608x2xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x2xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_modulated_layernorm_image_bf16_small_case {
+  %input = check.generate.fill value(2.0) : tensor<4x3xf32>
+  %scale = check.generate.fill value(0.0) : tensor<4xbf16>
+  %output = check.generate.fill value(1.0) : tensor<2x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<4x3xf32>, tensor<4xbf16>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape_case {
+  %input = check.generate.fill value(2.0) : tensor<4608x4547xf32>
+  %scale = check.generate.fill value(0.0) : tensor<4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<4608x4547xf32>, tensor<4608xbf16>, tensor<4096x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small_case {
+  %input = check.generate.fill value(2.0) : tensor<3x4xf32>
+  %scale = check.generate.fill value(0.0) : tensor<4xbf16>
+  %output = check.generate.fill value(1.0) : tensor<2x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<3x4xf32>, tensor<4xbf16>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_case {
+  %input = check.generate.fill value(2.0) : tensor<4547x4608xf32>
+  %scale = check.generate.fill value(0.0) : tensor<4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  func.call @id4_ideogram4_modulated_layernorm_bf16(%input, %scale, %output) : (tensor<4547x4608xf32>, tensor<4608xbf16>, tensor<4096x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
   check.return
 }
 
@@ -51,3 +90,11 @@ check.benchmark<@id4_ideogram4_modulated_layernorm_bf16_ideogram_shape_case> @id
 check.benchmark<@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small_case> @id4_ideogram4_modulated_layernorm_bf16_input_token_major_small
 
 check.benchmark<@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_case> @id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape
+
+check.benchmark<@id4_ideogram4_modulated_layernorm_image_bf16_small_case> @id4_ideogram4_modulated_layernorm_image_bf16_small
+
+check.benchmark<@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape_case> @id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape
+
+check.benchmark<@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small_case> @id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small
+
+check.benchmark<@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_case> @id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape

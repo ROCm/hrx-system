@@ -671,21 +671,6 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    ideogram4_modulated_layernorm_image_bf16_test_module
-  SRCS
-    "testdata/ideogram4/modulated_layernorm_image_bf16.loom"
-  LIBRARIES
-    "ideogram4/modulated_layernorm_image_bf16.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "ideogram4_modulated_layernorm_image_bf16_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
     ideogram4_modulated_layernorm_f32_test_module
   SRCS
     "testdata/ideogram4/modulated_layernorm_f32.loom"
@@ -2017,7 +2002,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom"
     "ideogram4/modulated_layernorm_bf16.loom"
     "ideogram4/modulated_layernorm_f32.loom"
-    "ideogram4/modulated_layernorm_image_bf16.loom"
     "ideogram4/modulated_rmsnorm_f32.loom"
     "ideogram4/prelude_image_bf16_f32.loom"
     "ideogram4/prelude_image_fp8_f32.loom"
@@ -2151,7 +2135,6 @@ iree_c_embed_data(
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom"
     "ideogram4/modulated_layernorm_bf16.loom"
     "ideogram4/modulated_layernorm_f32.loom"
-    "ideogram4/modulated_layernorm_image_bf16.loom"
     "ideogram4/modulated_rmsnorm_f32.loom"
     "ideogram4/prelude_image_bf16_f32.loom"
     "ideogram4/prelude_image_fp8_f32.loom"
@@ -9691,7 +9674,11 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=1"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9707,7 +9694,11 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9723,7 +9714,11 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=1"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9739,7 +9734,11 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9750,14 +9749,16 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=3"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9768,14 +9769,16 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_ideogram_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=4547"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=451"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=4096"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9786,14 +9789,16 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=3"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -9804,14 +9809,16 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--benchmark=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=4547"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=451"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=4096"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -23136,7 +23143,11 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_layernorm_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=1"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23156,7 +23167,11 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_layernorm_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23176,7 +23191,11 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=1"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23196,7 +23215,11 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
     "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23212,13 +23235,15 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_small_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=3"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23234,13 +23259,15 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_ideogram_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=4547"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=451"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=4096"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=0"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23256,13 +23283,15 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=3"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=2"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -23278,13 +23307,15 @@ iree_native_test(
   NAME
     "ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_image_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_modulated_layernorm_bf16_test_module.loom}}"
     "--case=@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096"
-    "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=4547"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.token_offset=451"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count=4096"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.input_token_major=1"
+    "--config=id4.ideogram4.modulated_layernorm_bf16.output_token_major=1"
   SRC
     loom::tools::iree-test-loom
   LABELS

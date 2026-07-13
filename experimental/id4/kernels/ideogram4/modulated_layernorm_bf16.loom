@@ -1,19 +1,36 @@
 config.decl @id4.ideogram4.modulated_layernorm_bf16.token_count : %value: index where [range(%value, 1, 131072)]
 
+config.decl @id4.ideogram4.modulated_layernorm_bf16.token_offset : %value: index where [range(%value, 0, 131071)]
+
+config.decl @id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.modulated_layernorm_bf16.hidden_size : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.ideogram4.modulated_layernorm_bf16.input_token_major : %value: index where [range(%value, 0, 1)]
+
+config.decl @id4.ideogram4.modulated_layernorm_bf16.output_token_major : %value: index where [range(%value, 0, 1)]
 
 kernel.def export("id4_ideogram4_modulated_layernorm_bf16") @id4_ideogram4_modulated_layernorm_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.token_count : index
-  kernel.launch.config workgroups(%token_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %dispatch_token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count : index
+  kernel.launch.config workgroups(%dispatch_token_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %token = kernel.workgroup.id<x> : index
+  %dispatch_token = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.token_count : index
+  %token_offset = config.get @id4.ideogram4.modulated_layernorm_bf16.token_offset : index
+  %dispatch_token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.dispatch_token_count : index
   %hidden_size = config.get @id4.ideogram4.modulated_layernorm_bf16.hidden_size : index
+  %input_token_major = config.get @id4.ideogram4.modulated_layernorm_bf16.input_token_major : index
+  %output_token_major = config.get @id4.ideogram4.modulated_layernorm_bf16.output_token_major : index
+  %input_is_token_major = index.cmp eq, %input_token_major, %one : index
+  %output_is_token_major = index.cmp eq, %output_token_major, %one : index
+  %input_token = index.add %token_offset, %dispatch_token : index
   %zero_f32 = scalar.constant 0.0 : f32
   %one_f32 = scalar.constant 1.0 : f32
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
@@ -23,18 +40,32 @@ kernel.def export("id4_ideogram4_modulated_layernorm_bf16") @id4_ideogram4_modul
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
+  %input_token_major_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %input_hidden_major_view = buffer.view %input_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xbf16, #dense>
+  %output_token_major_view = buffer.view %output_global[%base] : buffer -> view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  %output_hidden_major_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%dispatch_token_count]xbf16, #dense>
   %lane_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+    %value = scf.if %input_is_token_major -> (f32) {
+      %loaded = view.load %input_token_major_view[%input_token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      %loaded = view.load %input_hidden_major_view[%hidden, %input_token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    }
     %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
     scf.yield %next : f32
   }
   %sum = kernel.workgroup.reduce<addf> %lane_sum : f32
   %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %hidden_size_f32 : f32
   %lane_square_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+    %value = scf.if %input_is_token_major -> (f32) {
+      %loaded = view.load %input_token_major_view[%input_token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      %loaded = view.load %input_hidden_major_view[%hidden, %input_token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    }
     %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %mean : f32
     %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %delta : f32
     %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
@@ -45,7 +76,13 @@ kernel.def export("id4_ideogram4_modulated_layernorm_bf16") @id4_ideogram4_modul
   %variance_epsilon = scalar.addf<nnan|ninf|nsz> %variance, %epsilon : f32
   %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %variance_epsilon : f32
   scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x] {
-    %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+    %value = scf.if %input_is_token_major -> (f32) {
+      %loaded = view.load %input_token_major_view[%input_token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      %loaded = view.load %input_hidden_major_view[%hidden, %input_token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    }
     %scale_value_bf16 = view.load %scale_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
     %scale_value_f32 = scalar.extf %scale_value_bf16 : bf16 to f32
     %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %mean : f32
@@ -57,67 +94,11 @@ kernel.def export("id4_ideogram4_modulated_layernorm_bf16") @id4_ideogram4_modul
     %modulation = scalar.extf %modulation_bf16 : bf16 to f32
     %output_f32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %modulation : f32
     %output_value = scalar.fptrunc %output_f32 : f32 to bf16
-    view.store %output_value, %output_view[%hidden, %token] : bf16, view<[%hidden_size]x[%token_count]xbf16, #dense>
-  }
-  kernel.return
-}
-
-kernel.def export("id4_ideogram4_modulated_layernorm_bf16_input_token_major") @id4_ideogram4_modulated_layernorm_bf16_input_token_major() {
-  %unit = index.constant 1 : index
-  %workgroup_size_x = index.constant 256 : index
-  %token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.token_count : index
-  kernel.launch.config workgroups(%token_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
-} launch(%input: buffer, %scale: buffer, %output: buffer) {
-  %base = index.constant 0 : offset
-  %workgroup_size_x = index.constant 256 : index
-  %token = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
-  %token_count = config.get @id4.ideogram4.modulated_layernorm_bf16.token_count : index
-  %hidden_size = config.get @id4.ideogram4.modulated_layernorm_bf16.hidden_size : index
-  %zero_f32 = scalar.constant 0.0 : f32
-  %one_f32 = scalar.constant 1.0 : f32
-  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  %hidden_size_i32 = index.cast %hidden_size : index to i32
-  %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
-  %input_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input, %scale, %output : buffer, buffer, buffer
-  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
-  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
-  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
-  %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xbf16, #dense>
-  %lane_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %value = view.load %input_view[%token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
-    scf.yield %next : f32
-  }
-  %sum = kernel.workgroup.reduce<addf> %lane_sum : f32
-  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %hidden_size_f32 : f32
-  %lane_square_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %value = view.load %input_view[%token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
-    %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %mean : f32
-    %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %delta : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
-    scf.yield %next : f32
-  }
-  %square_sum = kernel.workgroup.reduce<addf> %lane_square_sum : f32
-  %variance = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
-  %variance_epsilon = scalar.addf<nnan|ninf|nsz> %variance, %epsilon : f32
-  %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %variance_epsilon : f32
-  scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x] {
-    %value = view.load %input_view[%token, %hidden] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
-    %scale_value_bf16 = view.load %scale_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
-    %scale_value_f32 = scalar.extf %scale_value_bf16 : bf16 to f32
-    %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %mean : f32
-    %normalized_f32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %row_scale : f32
-    %normalized_bf16 = scalar.fptrunc %normalized_f32 : f32 to bf16
-    %normalized = scalar.extf %normalized_bf16 : bf16 to f32
-    %modulation_f32 = scalar.addf<reassoc|nnan|ninf|nsz> %one_f32, %scale_value_f32 : f32
-    %modulation_bf16 = scalar.fptrunc %modulation_f32 : f32 to bf16
-    %modulation = scalar.extf %modulation_bf16 : bf16 to f32
-    %output_f32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %modulation : f32
-    %output_value = scalar.fptrunc %output_f32 : f32 to bf16
-    view.store %output_value, %output_view[%hidden, %token] : bf16, view<[%hidden_size]x[%token_count]xbf16, #dense>
+    scf.if %output_is_token_major {
+      view.store %output_value, %output_token_major_view[%dispatch_token, %hidden] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+    } else {
+      view.store %output_value, %output_hidden_major_view[%hidden, %dispatch_token] : bf16, view<[%hidden_size]x[%dispatch_token_count]xbf16, #dense>
+    }
   }
   kernel.return
 }
