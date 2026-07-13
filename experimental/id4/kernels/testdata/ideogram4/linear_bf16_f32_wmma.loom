@@ -28,7 +28,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_layout_case {
   %input = check.generate.iota offset(0.0) step(0.00390625) : tensor<16x16xbf16>
   %weight = check.generate.iota offset(-0.5) step(0.001953125) : tensor<32x16xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x16xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_layout_expected.npy") : tensor<32x16xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_layout_expected.npy") : tensor<32x16xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<16x16xbf16>, tensor<32x16xbf16>, tensor<32x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.001) rtol(0.001) nan(same) : tensor<32x16xf32>
   check.return
@@ -38,7 +38,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_layout_k32_case {
   %input = check.generate.iota offset(0.0) step(0.001953125) : tensor<16x32xbf16>
   %weight = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<32x32xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x16xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_layout_k32_expected.npy") : tensor<32x16xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_layout_k32_expected.npy") : tensor<32x16xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<16x32xbf16>, tensor<32x32xbf16>, tensor<32x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.005) rtol(0.005) nan(same) : tensor<32x16xf32>
   check.return
@@ -48,7 +48,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_layout_k4608_case {
   %input = check.generate.iota offset(0.0) step(7.62939453125e-06) : tensor<16x4608xbf16>
   %weight = check.generate.iota offset(-0.25) step(3.814697265625e-06) : tensor<32x4608xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x16xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_layout_k4608_expected.npy") : tensor<32x16xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_layout_k4608_expected.npy") : tensor<32x16xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<16x4608xbf16>, tensor<32x4608xbf16>, tensor<32x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<32x16xf32>
   check.return
@@ -58,7 +58,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_stride515_k32_case {
   %input = check.generate.iota offset(0.0) step(6.103515625e-05) : tensor<515x32xbf16>
   %weight = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<32x32xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x515xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_stride515_k32_expected.npy") : tensor<32x515xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_stride515_k32_expected.npy") : tensor<32x515xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<515x32xbf16>, tensor<32x32xbf16>, tensor<32x515xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<32x515xf32>
   check.return
@@ -68,7 +68,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_c
   %input = check.generate.iota offset(0.0) step(1.0) : tensor<515x16xbf16>
   %weight = check.generate.fill value(1.0) : tensor<32x16xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x515xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_expected.npy") : tensor<32x515xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_stride515_k16_token_ramp_expected.npy") : tensor<32x515xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<515x16xbf16>, tensor<32x16xbf16>, tensor<32x515xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x515xf32>
   check.return
@@ -78,7 +78,7 @@ check.case public @id4_ideogram4_linear_bf16_f32_wmma_stride515_k4608_case {
   %input = check.generate.iota offset(0.0) step(2.384185791015625e-07) : tensor<515x4608xbf16>
   %weight = check.generate.iota offset(-0.25) step(3.814697265625e-06) : tensor<32x4608xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x515xf32>
-  %expected = check.file.read.npy path("testdata/ideogram4_linear_bf16_f32_wmma_stride515_k4608_expected.npy") : tensor<32x515xf32>
+  %expected = check.file.read.npy path("ideogram4/testdata/ideogram4_linear_bf16_f32_wmma_stride515_k4608_expected.npy") : tensor<32x515xf32>
   func.call @id4_ideogram4_linear_bf16_f32_wmma(%input, %weight, %output) : (tensor<515x4608xbf16>, tensor<32x4608xbf16>, tensor<32x515xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<32x515xf32>
   check.return

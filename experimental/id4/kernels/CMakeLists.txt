@@ -5506,14 +5506,17 @@ iree_native_test(
     "--benchmark=@id4_vae_group_norm_silu_f32_small"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.vae.group_norm.width=2"
+    "--config=id4.vae.group_norm.width=1"
     "--config=id4.vae.group_norm.height=1"
-    "--config=id4.vae.group_norm.channel_count=2"
+    "--config=id4.vae.group_norm.channel_count=4"
     "--config=id4.vae.group_norm.group_count=1"
-    "--config=id4.vae.group_norm.channels_per_group=2"
+    "--config=id4.vae.group_norm.channels_per_group=4"
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=4"
     "--config=id4.vae.group_norm.output_element_count=4"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
+    "--config=id4.vae.group_norm.output_channel_tile_count=1"
+    "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -18246,14 +18249,17 @@ iree_native_test(
     "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_f32_small_case"
     "--device=amdgpu://0"
-    "--config=id4.vae.group_norm.width=2"
+    "--config=id4.vae.group_norm.width=1"
     "--config=id4.vae.group_norm.height=1"
-    "--config=id4.vae.group_norm.channel_count=2"
+    "--config=id4.vae.group_norm.channel_count=4"
     "--config=id4.vae.group_norm.group_count=1"
-    "--config=id4.vae.group_norm.channels_per_group=2"
+    "--config=id4.vae.group_norm.channels_per_group=4"
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=4"
     "--config=id4.vae.group_norm.output_element_count=4"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
+    "--config=id4.vae.group_norm.output_channel_tile_count=1"
+    "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
     loom::tools::iree-test-loom
   LABELS

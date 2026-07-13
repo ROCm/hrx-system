@@ -9,7 +9,7 @@ check.case public @id4_vae_flux2_affine_pixel_shuffle_f32_small_case {
   %latent_mean = check.generate.fill value(10.0) : tensor<4xf32>
   %latent_std = check.generate.fill value(2.0) : tensor<4xf32>
   %internal_latent = check.generate.fill value(0.0) : tensor<2x2x1x1xf32>
-  %expected = check.file.read.npy path("testdata/flux2_affine_pixel_shuffle_f32_small_expected.npy") : tensor<2x2x1x1xf32>
+  %expected = check.file.read.npy path("vae/testdata/flux2_affine_pixel_shuffle_f32_small_expected.npy") : tensor<2x2x1x1xf32>
   func.call @id4_vae_flux2_affine_pixel_shuffle_f32(%public_latent, %latent_mean, %latent_std, %internal_latent) : (tensor<1x1x4x1xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2x2x1x1xf32>)
   check.expect.close actual(%internal_latent) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xf32>
   check.return

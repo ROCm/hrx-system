@@ -7,7 +7,7 @@
 check.case public @id4_vae_pack_conv3x3_weight_f32_small_case {
   %source = check.generate.iota offset(0.0) step(1.0) : tensor<2x2x3x3xf32>
   %target = check.generate.fill value(0.0) : tensor<2x3x3x2xf32>
-  %expected = check.file.read.npy path("testdata/vae_pack_conv3x3_weight_f32_small_expected.npy") : tensor<2x3x3x2xf32>
+  %expected = check.file.read.npy path("vae/testdata/vae_pack_conv3x3_weight_f32_small_expected.npy") : tensor<2x3x3x2xf32>
   func.call @id4_vae_pack_conv3x3_weight_f32(%source, %target) : (tensor<2x2x3x3xf32>, tensor<2x3x3x2xf32>)
   check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3x3x2xf32>
   check.return
