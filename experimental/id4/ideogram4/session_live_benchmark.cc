@@ -197,6 +197,24 @@ struct GenerationBenchmarkTimingStatistics {
   iree_duration_t total_ns;
 };
 
+struct GenerationAllocatorSnapshot {
+  // Whether allocator statistics are enabled in this build.
+  bool enabled;
+  // Device-local bytes live when the snapshot was captured.
+  iree_device_size_t device_live_byte_length;
+  // Maximum device-local bytes live since allocator creation.
+  iree_device_size_t device_peak_byte_length;
+};
+
+struct GenerationAllocatorBenchmarkStatistics {
+  // Allocator state immediately before any benchmark warmup or iteration.
+  GenerationAllocatorSnapshot before_iterations;
+  // Allocator state after the complete warm generation, when applicable.
+  GenerationAllocatorSnapshot after_warmup;
+  // Allocator state after all measured iterations have completed.
+  GenerationAllocatorSnapshot after_iterations;
+};
+
 enum class GenerationIssueMode {
   kFull,
   kPhases,
@@ -857,6 +875,21 @@ static double AverageRegionDistance(iree_host_size_t distance_sum,
                                     iree_host_size_t count) {
   if (count == 0) return 0.0;
   return static_cast<double>(distance_sum) / static_cast<double>(count);
+}
+
+static GenerationAllocatorSnapshot QueryGenerationAllocatorSnapshot(
+    iree_hal_device_t* device) {
+  GenerationAllocatorSnapshot snapshot = {};
+#if IREE_STATISTICS_ENABLE
+  iree_hal_allocator_statistics_t statistics;
+  iree_hal_allocator_query_statistics(iree_hal_device_allocator(device),
+                                      &statistics);
+  snapshot.enabled = true;
+  snapshot.device_live_byte_length =
+      statistics.device_bytes_allocated - statistics.device_bytes_freed;
+  snapshot.device_peak_byte_length = statistics.device_bytes_peak;
+#endif  // IREE_STATISTICS_ENABLE
+  return snapshot;
 }
 
 static void AddPhaseTiming(
@@ -1817,6 +1850,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
     const GenerationBenchmarkPlanStatistics& statistics,
     const id4_ideogram4_generation_resource_statistics_t& resource_statistics,
     const id4::test::StageDiagnostics& diagnostics,
+    const GenerationAllocatorBenchmarkStatistics& allocator_statistics,
     const GenerationBenchmarkTimingStatistics& timing,
     uint64_t iteration_count) {
   const iree_string_view_t parameter_format =
@@ -1907,7 +1941,12 @@ static iree_status_t SetGenerationBenchmarkLabel(
       ",dispatches=%" PRIhsz
       "]"
       " program_streaming_rhs_encode[dispatches=%" PRIhsz ",read=%" PRIu64
-      "MiB,write=%" PRIu64 "MiB,max_write=%" PRIu64 "MiB]",
+      "MiB,write=%" PRIu64 "MiB,max_write=%" PRIu64
+      "MiB]"
+      " allocator_device[enabled=%d,before_live=%" PRIu64
+      "MiB,before_peak=%" PRIu64 "MiB,warm_live=%" PRIu64
+      "MiB,warm_peak=%" PRIu64 "MiB,after_live=%" PRIu64
+      "MiB,after_peak=%" PRIu64 "MiB]",
       static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
@@ -2015,7 +2054,14 @@ static iree_status_t SetGenerationBenchmarkLabel(
       statistics.streaming_rhs_encode.dispatch_count,
       CeilMiB(statistics.streaming_rhs_encode.read_byte_length),
       CeilMiB(statistics.streaming_rhs_encode.write_byte_length),
-      CeilMiB(statistics.streaming_rhs_encode.max_write_byte_length));
+      CeilMiB(statistics.streaming_rhs_encode.max_write_byte_length),
+      allocator_statistics.before_iterations.enabled ? 1 : 0,
+      CeilMiB(allocator_statistics.before_iterations.device_live_byte_length),
+      CeilMiB(allocator_statistics.before_iterations.device_peak_byte_length),
+      CeilMiB(allocator_statistics.after_warmup.device_live_byte_length),
+      CeilMiB(allocator_statistics.after_warmup.device_peak_byte_length),
+      CeilMiB(allocator_statistics.after_iterations.device_live_byte_length),
+      CeilMiB(allocator_statistics.after_iterations.device_peak_byte_length));
   if (iree_status_is_ok(status)) {
     status = AppendGenerationBenchmarkPhaseStageMasksLabel(&label_builder,
                                                            residency);
@@ -2074,6 +2120,11 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, 0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
       completion_semaphore.out()));
+
+  GenerationAllocatorBenchmarkStatistics allocator_statistics = {};
+  allocator_statistics.before_iterations =
+      QueryGenerationAllocatorSnapshot(device);
+  allocator_statistics.after_warmup = allocator_statistics.before_iterations;
 
   uint64_t prepare_value = 0;
   uint64_t completion_value = 0;
@@ -2212,11 +2263,13 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
+  allocator_statistics.after_iterations =
+      QueryGenerationAllocatorSnapshot(device);
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, last_residency, IREE_SV("end_to_end"),
       prompt_label, last_summary, last_statistics, last_resource_statistics,
-      diagnostics, timing_total, iteration_count));
+      diagnostics, allocator_statistics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -2292,6 +2345,10 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   IREE_RETURN_IF_ERROR(
       WaitForSemaphore(prepare_semaphore.get(), prepare_value));
 
+  GenerationAllocatorBenchmarkStatistics allocator_statistics = {};
+  allocator_statistics.before_iterations =
+      QueryGenerationAllocatorSnapshot(device);
+
   uint64_t iteration_count = 0;
   GenerationBenchmarkTimingStatistics timing_total;
   std::memset(&timing_total, 0, sizeof(timing_total));
@@ -2307,6 +2364,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       context, residency, bundle.get(), request, &diagnostics_sink,
       prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
       &completion_value);
+  allocator_statistics.after_warmup = QueryGenerationAllocatorSnapshot(device);
   diagnostics = {};
   if (iree_status_is_ok(status) && !capture_execution_profile) {
     status = iree_hal_begin_device_group_profiling_from_flags(
@@ -2361,11 +2419,13 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
+  allocator_statistics.after_iterations =
+      QueryGenerationAllocatorSnapshot(device);
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, residency, IREE_SV("prepared_issue"),
       prompt_label, summary, statistics, resource_statistics, diagnostics,
-      timing_total, iteration_count));
+      allocator_statistics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * summary.qwen_token_count));
