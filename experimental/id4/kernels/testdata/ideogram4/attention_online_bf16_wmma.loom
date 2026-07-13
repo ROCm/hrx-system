@@ -3,26 +3,25 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_small_case {
-  %query = check.generate.fill value(1.0) : tensor<16x512xbf16>
-  %key = check.generate.fill value(1.0) : tensor<16x512xbf16>
-  %value = check.generate.fill value(2.0) : tensor<16x512xbf16>
-  %output = check.generate.fill value(0.0) : tensor<16x512xbf16>
-  %expected = check.generate.fill value(2.0) : tensor<16x512xbf16>
-  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x512xbf16>
+  %query = check.generate.fill value(1.0) : tensor<64x512xbf16>
+  %key = check.generate.fill value(1.0) : tensor<64x512xbf16>
+  %value = check.generate.fill value(2.0) : tensor<64x512xbf16>
+  %output = check.generate.fill value(0.0) : tensor<64x512xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<64x512xbf16>
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<64x512xbf16>, tensor<64x512xbf16>, tensor<64x512xbf16>, tensor<64x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x512xbf16>
   check.return
 }
 
 check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_case {
-  %query = check.generate.fill value(1.0) : tensor<32x512xbf16>
-  %key = check.generate.fill value(1.0) : tensor<32x512xbf16>
-  %value = check.generate.fill value(2.0) : tensor<32x512xbf16>
-  %output = check.generate.fill value(0.0) : tensor<32x512xbf16>
-  %expected = check.generate.fill value(2.0) : tensor<32x512xbf16>
-  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<32x512xbf16>, tensor<32x512xbf16>, tensor<32x512xbf16>, tensor<32x512xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x512xbf16>
+  %query = check.generate.fill value(1.0) : tensor<64x512xbf16>
+  %key = check.generate.fill value(1.0) : tensor<64x512xbf16>
+  %value = check.generate.fill value(2.0) : tensor<64x512xbf16>
+  %output = check.generate.fill value(0.0) : tensor<64x512xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<64x512xbf16>
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<64x512xbf16>, tensor<64x512xbf16>, tensor<64x512xbf16>, tensor<64x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x512xbf16>
   check.return
 }
 
