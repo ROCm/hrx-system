@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.ideogram4.linear_bias_bf16_wmma.token_count : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
 
@@ -6,7 +6,7 @@ config.decl @id4.ideogram4.linear_bias_bf16_wmma.input_size : %value: index wher
 
 config.decl @id4.ideogram4.linear_bias_bf16_wmma.output_size : %value: index where [range(%value, 64, 131072), mul(%value, 64)]
 
-kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_bf16_bf16_wmma") @id4_ideogram4_linear_bias_bf16_bf16_wmma() {
+kernel.def export("id4_ideogram4_linear_bias_bf16_bf16_wmma") @id4_ideogram4_linear_bias_bf16_bf16_wmma() {
   %unit = index.constant 1 : index
   %thirty_two = index.constant 32 : index
   %sixty_four = index.constant 64 : index
@@ -17,6 +17,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_bf16_bf16_wmma
   %output_tile_count = index.div %output_size, %sixty_four : index
   kernel.launch.config workgroups(%token_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %token_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.matrix.linear_bias_bf16_bf16.m32n64>(%input, %weight, %bias, %output, %token_tile, %output_tile, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_bias_bf16_bf16.m32n64> target(@gfx1100) priority(20) @id4_ideogram4_linear_bias_bf16_bf16_wmma_gfx1100(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %token_tile: index, %output_tile: index, %lane: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
@@ -25,9 +33,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_bf16_bf16_wmma
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
   %sixty_four = index.constant 64 : index
-  %token_tile = kernel.workgroup.id<x> : index
-  %output_tile = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %token_count = config.get @id4.ideogram4.linear_bias_bf16_wmma.token_count : index
   %input_size = config.get @id4.ideogram4.linear_bias_bf16_wmma.input_size : index
   %output_size = config.get @id4.ideogram4.linear_bias_bf16_wmma.output_size : index
@@ -134,5 +139,5 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bias_bf16_bf16_wmma
     %rounded13 = scalar.fptrunc %biased13 : f32 to bf16
     view.store %rounded13, %output_view[%token1, %column3] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
   }
-  kernel.return
+  func.return
 }
