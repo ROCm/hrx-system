@@ -1511,6 +1511,38 @@ loom_link_module(
 
 loom_link_module(
   NAME
+    vae_conv3x3_bias_bf16_wmma_m32n32_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_bf16_wmma_m32n32.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_packed_bf16.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n32.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
+    vae_conv3x3_bias_bf16_wmma_m32n64_test_module
+  SRCS
+    "testdata/vae/conv3x3_bias_bf16_wmma_m32n64.loom"
+  LIBRARIES
+    "vae/conv3x3_bias_packed_bf16.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n64.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
     vae_conv3x3_bias_packed_f32_test_module
   SRCS
     "testdata/vae/conv3x3_bias_packed_f32.loom"
@@ -2013,6 +2045,8 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_bf16.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n32.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n64.loom"
     "vae/conv3x3_bias_f32.loom"
     "vae/conv3x3_bias_packed_bf16.loom"
     "vae/conv3x3_bias_packed_block_f32.loom"
@@ -2143,6 +2177,8 @@ iree_c_embed_data(
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_bf16.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n32.loom"
+    "vae/conv3x3_bias_bf16_wmma_m32n64.loom"
     "vae/conv3x3_bias_f32.loom"
     "vae/conv3x3_bias_packed_bf16.loom"
     "vae/conv3x3_bias_packed_block_f32.loom"
@@ -3838,7 +3874,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_small_same_padding_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3860,7 +3896,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_padding_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3882,7 +3918,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3904,7 +3940,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -3926,7 +3962,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3948,7 +3984,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3968,7 +4004,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -3988,7 +4024,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4032,7 +4068,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4052,7 +4088,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4072,7 +4108,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4092,7 +4128,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4112,7 +4148,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4132,7 +4168,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4152,7 +4188,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4172,7 +4208,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4192,7 +4228,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4212,7 +4248,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4232,7 +4268,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_256x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_256x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4252,7 +4288,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4272,7 +4308,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_256x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_256x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4292,7 +4328,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4312,7 +4348,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4332,7 +4368,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4352,7 +4388,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4372,7 +4408,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4392,7 +4428,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_matches_scalar_medium_same_padding_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_matches_scalar_medium_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -4414,7 +4450,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_16x16_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_16x16_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4434,7 +4470,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_32x32_512x512_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_32x32_512x512_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4454,7 +4490,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_64x64_256x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_64x64_256x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4474,7 +4510,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_128x128_128x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_128x128_128x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4494,7 +4530,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_512x512_256x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_512x512_256x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4514,7 +4550,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4534,7 +4570,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -4554,7 +4590,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -16254,7 +16290,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_small_same_padding_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -16280,7 +16316,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_padding_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=8"
@@ -16306,7 +16342,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=8"
@@ -16332,7 +16368,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=8"
@@ -16358,7 +16394,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16384,7 +16420,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16408,7 +16444,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16432,7 +16468,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16484,7 +16520,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16508,7 +16544,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -16532,7 +16568,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=16"
@@ -16556,7 +16592,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=32"
@@ -16580,7 +16616,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -16604,7 +16640,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=16"
@@ -16628,7 +16664,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=32"
@@ -16652,7 +16688,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -16676,7 +16712,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -16700,7 +16736,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -16724,7 +16760,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_256x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_256x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -16748,7 +16784,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -16772,7 +16808,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_256x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_256x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16796,7 +16832,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16820,7 +16856,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16844,7 +16880,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -16868,7 +16904,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=16"
@@ -16892,7 +16928,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=32"
@@ -16916,7 +16952,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_matches_scalar_medium_same_padding_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_matches_scalar_medium_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=8"
@@ -16942,7 +16978,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_16x16_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_16x16_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=16"
@@ -16966,7 +17002,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_32x32_512x512_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_32x32_512x512_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=32"
@@ -16990,7 +17026,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_64x64_256x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_64x64_256x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -17014,7 +17050,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_128x128_128x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_128_decode_128x128_128x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=128"
@@ -17038,7 +17074,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_512x512_256x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_512x512_256x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -17062,7 +17098,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_512x512_256x256_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=512"
@@ -17086,7 +17122,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n32_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_flux2_full_decode_1024x1024_128x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"
@@ -17110,7 +17146,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_packed_bf16_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_conv3x3_bias_bf16_wmma_m32n64_test_module.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_full_decode_1024x1024_128x128_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=1024"

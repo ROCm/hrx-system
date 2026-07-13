@@ -1928,14 +1928,14 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
   if (use_wmma_oc64) {
-    dispatch_options.kernel =
-        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
-                                     IREE_SV("id4_vae_conv3x3_bias_bf16_"
-                                             "wmma_oc64"));
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_bf16_wmma_m32n64"),
+        IREE_SV("id4_vae_conv3x3_bias_bf16_"
+                "wmma_oc64"));
   } else if (use_wmma) {
-    dispatch_options.kernel =
-        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
-                                     IREE_SV("id4_vae_conv3x3_bias_bf16_wmma"));
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_bf16_wmma_m32n32"),
+        IREE_SV("id4_vae_conv3x3_bias_bf16_wmma"));
   } else {
     dispatch_options.kernel =
         id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
@@ -2047,13 +2047,13 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
   dispatch_options.name = dispatch_name;
   if (use_wmma_oc32) {
     dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-        IREE_SV("vae/conv3x3_bias_packed_bf16"),
+        IREE_SV("vae/conv3x3_bias_bf16_wmma_m32n32"),
         IREE_SV("id4_vae_conv3x3_bias_add_bf16_wmma"));
   } else if (use_wmma_oc64) {
-    dispatch_options.kernel =
-        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
-                                     IREE_SV("id4_vae_conv3x3_bias_add_bf16_"
-                                             "wmma_oc64"));
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_bf16_wmma_m32n64"),
+        IREE_SV("id4_vae_conv3x3_bias_add_bf16_"
+                "wmma_oc64"));
   } else {
     dispatch_options.kernel = id4_pipeline_make_kernel_ref(
         IREE_SV("vae/conv3x3_bias_packed_bf16"),

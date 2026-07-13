@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.qwen3_vl.attention_online_wmma.token_count : %value: index where [range(%value, 1, 4096)]
 
@@ -12,7 +12,7 @@ config.decl @id4.qwen3_vl.attention_online_wmma.key_value_head_count : %value: i
 
 config.decl @id4.qwen3_vl.attention_online_wmma.head_size : %value: index where [range(%value, 16, 256), mul(%value, 16)]
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_attention_online_bf16_bf16_wmma") @id4_qwen3_vl_attention_online_bf16_bf16_wmma() {
+kernel.def export("id4_qwen3_vl_attention_online_bf16_bf16_wmma") @id4_qwen3_vl_attention_online_bf16_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
@@ -21,6 +21,14 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_attention_online_bf16_bf16_
   %query_tile_count = index.div %dispatch_token_count, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %packed_value: buffer, %attention_mask: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.qwen3_vl.attention_online_bf16_bf16.m16n16>(%query, %key, %packed_value, %attention_mask, %output, %query_tile, %query_head, %lane) : (buffer, buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.qwen3_vl.attention_online_bf16_bf16.m16n16> target(@gfx1100) priority(20) @id4_qwen3_vl_attention_online_bf16_bf16_wmma_gfx1100(%query: buffer, %key: buffer, %packed_value: buffer, %attention_mask: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index) {
   %base = index.constant 0 : offset
   %probability_scratch_bytes = index.constant 512 : offset
   %accumulator_scratch_bytes = index.constant 8192 : offset
@@ -35,9 +43,6 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_attention_online_bf16_bf16_
   %eight = index.constant 8 : index
   %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
-  %query_tile = kernel.workgroup.id<x> : index
-  %query_head = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %lane_column = index.rem %lane, %sixteen : index
   %lane_group = index.div %lane, %sixteen : index
   %lane_group_even = index.cmp eq, %lane_group, %zero : index
@@ -294,5 +299,5 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_attention_online_bf16_bf16_
     %output_value = vector.divf<nnan|ninf|nsz|arcp> %result, %selected_final_sum : vector<8xf32>
     vector.fragment.store<result> %output_value, %output_view[%query_origin, %output_channel] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
   }
-  kernel.return
+  func.return
 }

@@ -83,21 +83,26 @@ func.template<id4.attention.scaled_qk_bf16_f32.m16n16> target(@gfx1100) priority
   func.return
 }
 
-kernel.def target(@gfx1100) export("id4_attention_softmax_all_heads_f32_bf16") @id4_attention_softmax_all_heads_f32_bf16() {
+kernel.def export("id4_attention_softmax_all_heads_f32_bf16") @id4_attention_softmax_all_heads_f32_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
   kernel.launch.config workgroups(%query_block_token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%scores: buffer, %probabilities: buffer) {
+  %local_query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.attention.softmax_all_heads_f32_bf16.wg256>(%scores, %probabilities, %local_query_token, %query_head, %lane) : (buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.attention.softmax_all_heads_f32_bf16.wg256> target(@gfx1100) priority(20) @id4_attention_softmax_all_heads_f32_bf16_gfx1100(%scores: buffer, %probabilities: buffer, %local_query_token: index, %query_head: index, %lane: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %two_bytes = index.constant 2 : offset
   %four_bytes = index.constant 4 : offset
   %workgroup_size_x = index.constant 256 : index
-  %local_query_token = kernel.workgroup.id<x> : index
-  %query_head = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %valid_token_count = config.get @id4.attention.materialized_wmma.valid_token_count : index
   %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
   %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
@@ -164,7 +169,7 @@ kernel.def target(@gfx1100) export("id4_attention_softmax_all_heads_f32_bf16") @
       view.store %probability_bf16, %probabilities_view[%local_query_token, %key_token] : bf16, view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense>
     }
   }
-  kernel.return
+  func.return
 }
 
 kernel.def export("id4_attention_pv_all_heads_bf16_bf16_wmma") @id4_attention_pv_all_heads_bf16_bf16_wmma() {

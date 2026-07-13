@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.vae.spatial_attention_wmma.token_count : %value: index where [range(%value, 16, 268435456), mul(%value, 16)]
 
@@ -6,7 +6,7 @@ config.decl @id4.vae.spatial_attention_wmma.channel_count : %value: index where 
 
 config.decl @id4.vae.spatial_attention_wmma.channel_tile_count : %value: index where [range(%value, 1, 32)]
 
-kernel.def target(@id4_gfx1100) export("id4_vae_spatial_attention_online_bf16_wmma") @id4_vae_spatial_attention_online_bf16_wmma() {
+kernel.def export("id4_vae_spatial_attention_online_bf16_wmma") @id4_vae_spatial_attention_online_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
@@ -14,6 +14,13 @@ kernel.def target(@id4_gfx1100) export("id4_vae_spatial_attention_online_bf16_wm
   %query_tile_count = index.div %token_count, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %packed_value: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.vae.spatial_attention_online_bf16.m16n16>(%query, %key, %packed_value, %output, %query_tile, %lane) : (buffer, buffer, buffer, buffer, index, index)
+  kernel.return
+}
+
+func.template<id4.vae.spatial_attention_online_bf16.m16n16> target(@gfx1100) priority(20) @id4_vae_spatial_attention_online_bf16_wmma_gfx1100(%query: buffer, %key: buffer, %packed_value: buffer, %output: buffer, %query_tile: index, %lane: index) {
   %base = index.constant 0 : offset
   %probability_scratch_bytes = index.constant 512 : offset
   %accumulator_scratch_bytes = index.constant 32768 : offset
@@ -24,8 +31,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_spatial_attention_online_bf16_wm
   %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
-  %query_tile = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
   %lane_column = index.rem %lane, %sixteen : index
   %lane_group = index.div %lane, %sixteen : index
   %lane_group_even = index.cmp eq, %lane_group, %zero : index
@@ -153,5 +158,5 @@ kernel.def target(@id4_gfx1100) export("id4_vae_spatial_attention_online_bf16_wm
     %output_value = vector.divf<nnan|ninf|nsz|arcp> %result, %selected_final_sum : vector<8xf32>
     vector.fragment.store<result> %output_value, %output_view[%query_origin, %channel] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%channel_count]xbf16, #dense>
   }
-  kernel.return
+  func.return
 }

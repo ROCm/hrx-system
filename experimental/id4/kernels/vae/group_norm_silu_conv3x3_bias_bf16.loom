@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.vae.conv3x3_bias.width : %value: index where [range(%value, 1, 65536)]
 
@@ -22,7 +22,7 @@ config.decl @id4.vae.group_norm_silu_conv3x3.add_shortcut : %value: index where 
 
 config.decl @id4.vae.group_norm_silu_conv3x3.add_shortcut_bias : %value: index where [range(%value, 0, 1)]
 
-kernel.def target(@id4_gfx1100) export("id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128") @id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128() {
+kernel.def export("id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128") @id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128() {
   %unit = index.constant 1 : index
   %pixel_tile_size = index.constant 16 : index
   %output_channel_tile_size = index.constant 128 : index
@@ -40,6 +40,14 @@ kernel.def target(@id4_gfx1100) export("id4_vae_group_norm_silu_conv3x3_bias_bf1
   %workgroups_y = index.assume %workgroups_y0 [range(%workgroups_y0, 1, 64)] : index
   kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %norm_weight: buffer, %norm_bias: buffer, %stats: buffer, %weight: buffer, %bias: buffer, %shortcut: buffer, %shortcut_bias: buffer, %output: buffer) {
+  %pixel_tile = kernel.workgroup.id<x> : index
+  %output_channel_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.vae.group_norm_silu_conv3x3_bias_bf16.m16n128>(%input, %norm_weight, %norm_bias, %stats, %weight, %bias, %shortcut, %shortcut_bias, %output, %pixel_tile, %output_channel_tile, %lane) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.vae.group_norm_silu_conv3x3_bias_bf16.m16n128> target(@gfx1100) priority(20) @id4_vae_group_norm_silu_conv3x3_bias_bf16_wmma_oc128_gfx1100(%input: buffer, %norm_weight: buffer, %norm_bias: buffer, %stats: buffer, %weight: buffer, %bias: buffer, %shortcut: buffer, %shortcut_bias: buffer, %output: buffer, %pixel_tile: index, %output_channel_tile: index, %lane: index) {
   %base = index.constant 0 : offset
   %lhs_scratch_bytes = index.constant 512 : offset
   %zero = index.constant 0 : index
@@ -61,9 +69,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_group_norm_silu_conv3x3_bias_bf1
   %one_hundred_twelve = index.constant 112 : index
   %one_hundred_twenty_eight = index.constant 128 : index
   %kernel_center = index.constant 1 : index
-  %pixel_tile = kernel.workgroup.id<x> : index
-  %output_channel_tile = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 32 : index
   %width = config.get @id4.vae.conv3x3_bias.width : index
   %height = config.get @id4.vae.conv3x3_bias.height : index
@@ -524,5 +529,5 @@ kernel.def target(@id4_gfx1100) export("id4_vae_group_norm_silu_conv3x3_bias_bf1
       view.store %rounded13, %output_flat_view[%output_element13] : bf16, view<[%output_storage_element_count]xbf16, #dense>
     }
   }
-  kernel.return
+  func.return
 }
