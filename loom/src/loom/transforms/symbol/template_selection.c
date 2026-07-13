@@ -901,6 +901,32 @@ static iree_status_t loom_template_selection_evaluate_predicates(
   return iree_ok_status();
 }
 
+static bool loom_template_selection_apply_has_ancestor(
+    const loom_op_t* apply_op, loom_op_kind_t ancestor_kind) {
+  for (const loom_op_t* ancestor = apply_op->parent_op; ancestor;
+       ancestor = ancestor->parent_op) {
+    if (ancestor->kind == ancestor_kind) return true;
+  }
+  return false;
+}
+
+static bool loom_template_selection_provider_context_matches(
+    const loom_op_t* apply_op, const loom_func_provider_summary_t* provider) {
+  for (uint16_t i = 0; i < provider->required_caller_ancestor_count; ++i) {
+    if (!loom_template_selection_apply_has_ancestor(
+            apply_op, provider->required_caller_ancestors[i])) {
+      return false;
+    }
+  }
+  for (uint16_t i = 0; i < provider->forbidden_caller_ancestor_count; ++i) {
+    if (loom_template_selection_apply_has_ancestor(
+            apply_op, provider->forbidden_caller_ancestors[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_template_selection_classify_provider(
     loom_template_selection_state_t* state,
     const loom_symbol_liveness_contributor_context_t* context,
@@ -911,6 +937,9 @@ static iree_status_t loom_template_selection_classify_provider(
   IREE_RETURN_IF_ERROR(loom_template_selection_types_match(
       state, apply_op, provider, &types_match));
   if (!types_match) return iree_ok_status();
+  if (!loom_template_selection_provider_context_matches(apply_op, provider)) {
+    return iree_ok_status();
+  }
 
   if (provider->predicate_count > 0) {
     return loom_template_selection_evaluate_predicates(

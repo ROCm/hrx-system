@@ -81,6 +81,25 @@ func.def @subgroup_collective_requires_kernel_def(%value: f32) {
 
 // ====
 
+func.template<demo.workgroup_reduce> @workgroup_reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.template<demo.isolated_workgroup_reduce> @isolated_workgroup_reduce_provider() -> (f32) {
+  %result = test.isolated_region -> (f32) {
+    %value = test.constant 1.0 : f32
+    // ERROR@+1: STRUCTURE/029 "kernel.workgroup.reduce" "required" "kernel.def" "test.isolated_region"
+    %sum = kernel.workgroup.reduce<addf> %value : f32
+    test.yield %sum : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
 test.target<low_core> @test_target
 
 kernel.def @subgroup_shuffle_requires_i32_offset() {
