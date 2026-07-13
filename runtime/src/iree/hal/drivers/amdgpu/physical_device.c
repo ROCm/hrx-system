@@ -876,6 +876,11 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
   IREE_RETURN_IF_ERROR(
       iree_hsa_agent_get_info(IREE_LIBHSA(libhsa), device_agent,
                               HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size));
+  uint32_t maximum_waves_per_compute_unit = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
+      &maximum_waves_per_compute_unit));
   const uint32_t group_segment_max_size =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_GROUP_SEGMENT_MAX_SIZE_DEFAULT;
 
@@ -895,8 +900,17 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
         "%" PRIhsz " (expected 32 or 64)",
         wavefront_size, device_ordinal);
   }
+  if (maximum_waves_per_compute_unit == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HSA reported 0 maximum waves per compute unit for device agent "
+        "ordinal %" PRIhsz,
+        device_ordinal);
+  }
   out_physical_device->compute_unit_count = compute_unit_count;
   out_physical_device->wavefront_size = wavefront_size;
+  out_physical_device->maximum_waves_per_compute_unit =
+      maximum_waves_per_compute_unit;
   out_physical_device->group_segment_max_size = group_segment_max_size;
   iree_hal_amdgpu_device_buffer_transfer_context_initialize(
       &out_physical_device->device_kernels, compute_unit_count, wavefront_size,

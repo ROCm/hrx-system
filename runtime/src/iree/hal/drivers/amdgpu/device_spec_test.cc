@@ -28,6 +28,7 @@ static void CreateDeviceSpecForProcessor(
       /*.queue_count=*/2,
       /*.compute_unit_count=*/40,
       /*.wavefront_size=*/wavefront_size,
+      /*.maximum_waves_per_compute_unit=*/64,
       /*.maximum_workgroup_local_memory_size=*/64 * 1024,
       /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_UUID |
           IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_PCI_ADDRESS,
@@ -84,6 +85,8 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   EXPECT_EQ(dispatch->subgroup.maximum_size, 64);
   EXPECT_EQ(dispatch->subgroup.supported_size_mask, 1ull << 32);
   EXPECT_EQ(dispatch->execution.unit_count, 40);
+  EXPECT_EQ(dispatch->execution.maximum_resident_invocation_count, 2048);
+  EXPECT_EQ(dispatch->execution.maximum_resident_subgroup_count, 64);
   EXPECT_EQ(dispatch->execution.maximum_workgroup_local_memory_size, 64 * 1024);
   EXPECT_EQ(dispatch->execution.maximum_workgroup_local_memory_size_optin,
             64 * 1024);
