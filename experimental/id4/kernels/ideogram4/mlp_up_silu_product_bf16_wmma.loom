@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.ideogram4.mlp_up_silu_product_wmma.token_count : %value: index where [range(%value, 16, 131072)]
 
@@ -8,7 +8,7 @@ config.decl @id4.ideogram4.mlp_up_silu_product_wmma.input_size : %value: index w
 
 config.decl @id4.ideogram4.mlp_up_silu_product_wmma.intermediate_size : %value: index where [range(%value, 32, 65536), mul(%value, 32)]
 
-kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_wmma") @id4_ideogram4_mlp_up_silu_product_bf16_wmma() {
+kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_wmma") @id4_ideogram4_mlp_up_silu_product_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
@@ -19,6 +19,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
   %row_tile_count = index.div %intermediate_size, %thirty_two : index
   kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %up_weight: buffer, %gate: buffer, %output: buffer) {
+  %token_pair = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.matrix.linear_silu_gate_product_bf16_bf16.m32n32>(%input_bf16, %up_weight, %gate, %output, %token_pair, %row_pair, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_silu_gate_product_bf16_bf16.m32n32> target(@gfx1100) priority(20) @id4_ideogram4_mlp_up_silu_product_bf16_wmma_gfx1100(%input_bf16: buffer, %up_weight: buffer, %gate: buffer, %output: buffer, %token_pair: index, %row_pair: index, %lane: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -26,9 +34,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
   %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
-  %token_pair = kernel.workgroup.id<x> : index
-  %row_pair = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %token_count = config.get @id4.ideogram4.mlp_up_silu_product_wmma.token_count : index
   %input_size = config.get @id4.ideogram4.mlp_up_silu_product_wmma.input_size : index
   %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_wmma.intermediate_size : index
@@ -125,5 +130,5 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
     %rounded11 = scalar.fptrunc %value11 : f32 to bf16
     view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
   }
-  kernel.return
+  func.return
 }
