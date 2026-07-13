@@ -45,6 +45,8 @@ class SourceLoweringStressTest : public ::testing::Test {
 };
 
 TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
+  static constexpr uint32_t kScales[] = {1, 2, 4};
+  static constexpr uint64_t kSeedCountPerScale = 32;
   loom_low_source_workload_pipeline_counters_t aggregate = {};
   const loom_low_source_workload_pipeline_options_t pipeline_options = {
       /*.pass_registry=*/loom_pass_builtin_registry(),
@@ -53,25 +55,29 @@ TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
       /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
   };
 
-  for (uint64_t seed = 0; seed < 16; ++seed) {
-    SCOPED_TRACE(::testing::Message() << "seed=" << seed);
-    loom_module_t* module_raw = nullptr;
-    loom_low_source_workload_config_t workload_config =
-        loom_low_source_workload_config_make(1);
-    IREE_ASSERT_OK(loom_low_source_workload_generate_seeded_module(
-        seed, &workload_config, &context_, &block_pool_, &module_raw));
-    ModulePtr module(module_raw);
+  for (uint32_t scale : kScales) {
+    for (uint64_t seed = 0; seed < kSeedCountPerScale; ++seed) {
+      SCOPED_TRACE(::testing::Message()
+                   << "scale=" << scale << " seed=" << seed);
+      loom_module_t* module_raw = nullptr;
+      loom_low_source_workload_config_t workload_config =
+          loom_low_source_workload_config_make(scale);
+      IREE_ASSERT_OK(loom_low_source_workload_generate_seeded_module(
+          seed, &workload_config, &context_, &block_pool_, &module_raw));
+      ModulePtr module(module_raw);
 
-    loom_low_source_workload_pipeline_counters_t counters = {};
-    IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
-        module.get(), &pipeline_options, &block_pool_, &counters));
-    EXPECT_EQ(counters.lower_error_count, 0u);
-    loom_low_source_workload_counts_accumulate(&aggregate.source_counts,
-                                               &counters.source_counts);
-    aggregate.low_descriptor_op_count += counters.low_descriptor_op_count;
-    aggregate.schedule_node_count += counters.schedule_node_count;
-    aggregate.allocation_assignment_count +=
-        counters.allocation_assignment_count;
+      loom_low_source_workload_pipeline_counters_t counters = {};
+      IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
+          module.get(), &pipeline_options, &block_pool_, &counters));
+      EXPECT_EQ(counters.lower_error_count, 0u);
+      loom_low_source_workload_counts_accumulate(&aggregate.source_counts,
+                                                 &counters.source_counts);
+      aggregate.low_descriptor_op_count += counters.low_descriptor_op_count;
+      aggregate.schedule_node_count += counters.schedule_node_count;
+      aggregate.allocation_assignment_count +=
+          counters.allocation_assignment_count;
+      aggregate.allocation_check_count += counters.allocation_check_count;
+    }
   }
 
   EXPECT_GT(aggregate.source_counts.scalar_integer_op_count, 0u);
@@ -98,6 +104,8 @@ TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
   EXPECT_GT(aggregate.low_descriptor_op_count, 0u);
   EXPECT_GT(aggregate.schedule_node_count, 0u);
   EXPECT_GT(aggregate.allocation_assignment_count, 0u);
+  EXPECT_EQ(aggregate.allocation_check_count,
+            IREE_ARRAYSIZE(kScales) * kSeedCountPerScale);
 }
 
 }  // namespace

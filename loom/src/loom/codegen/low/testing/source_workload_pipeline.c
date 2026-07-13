@@ -14,6 +14,7 @@
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pipeline.h"
+#include "loom/codegen/low/testing/allocation_checker.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
@@ -292,6 +293,26 @@ iree_status_t loom_low_source_workload_run_pipeline(
       status = loom_low_emission_frame_build(
           module, lowered_funcs[i], &frame_options, &frame_arena, &frame);
       if (iree_status_is_ok(status)) {
+        loom_low_allocation_check_result_t check_result = {0};
+        status = loom_low_allocation_check_frame(&frame, &frame_arena,
+                                                 &check_result);
+        if (iree_status_is_ok(status) && check_result.violation_count != 0) {
+          const iree_string_view_t violation_name =
+              loom_low_allocation_check_violation_kind_name(
+                  check_result.first_violation.kind);
+          status = iree_make_status(
+              IREE_STATUS_INTERNAL,
+              "independent allocation check found %" PRIu32
+              " violation%s; first=%.*s primary=%" PRIu32 " secondary=%" PRIu32,
+              check_result.violation_count,
+              check_result.violation_count == 1 ? "" : "s",
+              (int)violation_name.size, violation_name.data,
+              check_result.first_violation.primary_index,
+              check_result.first_violation.secondary_index);
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        ++out_counters->allocation_check_count;
         out_counters->schedule_node_count +=
             frame.schedule.scheduled_node_count;
         out_counters->schedule_dependency_count +=

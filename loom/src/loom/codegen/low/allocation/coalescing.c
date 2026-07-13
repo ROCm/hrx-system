@@ -80,6 +80,65 @@ static bool loom_low_allocation_coalescing_unit_ranges_overlap(
   return true;
 }
 
+// Returns true when any unit in |unit_offset, unit_count| remains semantically
+// live across |program_point| in the scheduled allocation order.
+static bool loom_low_allocation_coalescing_value_units_live_at_point(
+    const loom_low_allocation_coalescing_context_t* context,
+    loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
+    uint32_t unit_count, uint32_t program_point) {
+  const loom_liveness_interval_t* interval =
+      loom_liveness_interval_for_value_ordinal(context->liveness,
+                                               value_ordinal);
+  if (interval == NULL || unit_count == 0) {
+    return false;
+  }
+  IREE_ASSERT_LE(unit_offset, interval->unit_count);
+  IREE_ASSERT_LE(unit_count, interval->unit_count - unit_offset);
+
+  bool value_live_at_point = false;
+  const loom_liveness_segment_range_t segments =
+      loom_liveness_segment_range_for_value_ordinal(context->liveness,
+                                                    value_ordinal);
+  if (segments.count == 0) {
+    value_live_at_point = interval->start_point <= program_point &&
+                          program_point < interval->end_point;
+  } else {
+    IREE_ASSERT_LE((uint64_t)segments.start + segments.count,
+                   context->liveness->segment_count);
+    for (uint32_t i = 0; i < segments.count; ++i) {
+      const loom_liveness_segment_t* segment =
+          &context->liveness->segments[segments.start + i];
+      if (segment->start_point <= program_point &&
+          program_point < segment->end_point) {
+        value_live_at_point = true;
+        break;
+      }
+      if (segment->start_point > program_point) {
+        break;
+      }
+    }
+  }
+  if (!value_live_at_point) {
+    return false;
+  }
+
+  const loom_low_allocation_unit_liveness_t* unit_liveness =
+      context->search_context->unit_liveness;
+  const uint32_t end_point_start =
+      loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+          unit_liveness, context->liveness, value_ordinal);
+  IREE_ASSERT_NE(end_point_start, UINT32_MAX);
+  IREE_ASSERT_LE((uint64_t)end_point_start + unit_offset + unit_count,
+                 unit_liveness->end_point_count);
+  for (uint32_t i = 0; i < unit_count; ++i) {
+    if (unit_liveness->end_points[end_point_start + unit_offset + i] >
+        program_point) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool
 loom_low_allocation_coalescing_edge_destination_range_has_distinct_source(
     const loom_low_allocation_coalescing_context_t* context,
@@ -308,27 +367,41 @@ loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
   return NULL;
 }
 
-static iree_status_t
-loom_low_allocation_coalescing_copy_source_used_after_tied_consume(
-    loom_low_allocation_coalescing_context_t* context,
+static bool loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+    const loom_low_allocation_coalescing_context_t* context,
     const loom_low_placement_relation_t* tied_relation,
     const loom_low_placement_relation_t* copy_relation,
-    loom_value_id_t* out_copy_source_id, bool* out_used_after) {
+    loom_value_id_t* out_copy_source_id) {
   *out_copy_source_id = LOOM_VALUE_ID_INVALID;
-  *out_used_after = false;
   if (!copy_relation) {
-    return iree_ok_status();
+    return false;
   }
   *out_copy_source_id = loom_low_placement_value_id(
       context->placement, copy_relation->source_ordinal);
 
-  loom_consumption_region_query_t* query = NULL;
-  IREE_RETURN_IF_ERROR(context->consumption_query(
-      context->user_data, tied_relation->op->parent_block->parent_region,
-      &query));
-  loom_consumption_use_t use = {0};
-  return loom_consumption_find_use_after(
-      query, tied_relation->op, *out_copy_source_id, &use, out_used_after);
+  uint32_t overlap_offset = 0;
+  if (!loom_low_allocation_coalescing_unit_ranges_overlap(
+          copy_relation->result_unit_offset, copy_relation->unit_count,
+          tied_relation->source_unit_offset, tied_relation->unit_count,
+          &overlap_offset)) {
+    return false;
+  }
+  const uint64_t copy_end =
+      (uint64_t)copy_relation->result_unit_offset + copy_relation->unit_count;
+  const uint64_t tied_end =
+      (uint64_t)tied_relation->source_unit_offset + tied_relation->unit_count;
+  const uint32_t overlap_count =
+      (uint32_t)((copy_end < tied_end ? copy_end : tied_end) - overlap_offset);
+  const uint32_t source_unit_offset =
+      copy_relation->source_unit_offset +
+      (overlap_offset - copy_relation->result_unit_offset);
+  const loom_liveness_interval_t* tied_result_interval =
+      loom_liveness_interval_for_value_ordinal(context->liveness,
+                                               tied_relation->result_ordinal);
+  IREE_ASSERT_ARGUMENT(tied_result_interval);
+  return loom_low_allocation_coalescing_value_units_live_at_point(
+      context, copy_relation->source_ordinal, source_unit_offset, overlap_count,
+      tied_result_interval->start_point);
 }
 
 static bool loom_low_allocation_coalescing_storage_alias_relation(
@@ -433,40 +506,33 @@ static bool loom_low_allocation_coalescing_exact_storage_alias_relation(
          relation->unit_count == source_interval->unit_count;
 }
 
-static iree_status_t
-loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
-    loom_low_allocation_coalescing_context_t* context,
-    const loom_op_t* anchor_op, loom_value_ordinal_t alias_ordinal,
-    loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
-    uint16_t* ignored_value_count, loom_consumption_region_query_t** query) {
+static void loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
+    loom_low_allocation_coalescing_context_t* context, uint32_t clobber_point,
+    loom_value_ordinal_t alias_ordinal, loom_value_id_t* ignored_value_ids,
+    uint16_t ignored_value_capacity, uint16_t* ignored_value_count) {
   const loom_value_id_t alias_id =
       loom_low_placement_value_id(context->placement, alias_ordinal);
   if (loom_low_allocation_coalescing_value_id_is_listed(
           ignored_value_ids, *ignored_value_count, alias_id)) {
-    return iree_ok_status();
+    return;
   }
-  if (*query == NULL) {
-    IREE_RETURN_IF_ERROR(context->consumption_query(
-        context->user_data, anchor_op->parent_block->parent_region, query));
-  }
-  loom_consumption_use_t use = {0};
-  bool used_after = false;
-  IREE_RETURN_IF_ERROR(loom_consumption_find_use_after(
-      *query, anchor_op, alias_id, &use, &used_after));
-  if (!used_after) {
+  const loom_liveness_interval_t* alias_interval =
+      loom_liveness_interval_for_value_ordinal(context->liveness,
+                                               alias_ordinal);
+  if (alias_interval != NULL &&
+      !loom_low_allocation_coalescing_value_units_live_at_point(
+          context, alias_ordinal, 0, alias_interval->unit_count,
+          clobber_point)) {
     loom_low_allocation_coalescing_try_append_unique_value_id(
         ignored_value_ids, ignored_value_capacity, ignored_value_count,
         alias_id);
   }
-  return iree_ok_status();
 }
 
-static iree_status_t
-loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
-    loom_low_allocation_coalescing_context_t* context,
-    const loom_op_t* anchor_op, loom_value_id_t* ignored_value_ids,
-    uint16_t ignored_value_capacity, uint16_t* ignored_value_count) {
-  loom_consumption_region_query_t* query = NULL;
+static void loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
+    loom_low_allocation_coalescing_context_t* context, uint32_t clobber_point,
+    loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
+    uint16_t* ignored_value_count) {
   for (uint16_t i = 0; i < *ignored_value_count; ++i) {
     loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
     if (!loom_low_allocation_coalescing_value_ordinal_for_value(
@@ -484,10 +550,9 @@ loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
               context, relation)) {
         continue;
       }
-      IREE_RETURN_IF_ERROR(
-          loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
-              context, anchor_op, relation->source_ordinal, ignored_value_ids,
-              ignored_value_capacity, ignored_value_count, &query));
+      loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
+          context, clobber_point, relation->source_ordinal, ignored_value_ids,
+          ignored_value_capacity, ignored_value_count);
     }
 
     const loom_low_placement_relation_range_t source_range =
@@ -503,13 +568,11 @@ loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
               context, relation)) {
         continue;
       }
-      IREE_RETURN_IF_ERROR(
-          loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
-              context, anchor_op, relation->result_ordinal, ignored_value_ids,
-              ignored_value_capacity, ignored_value_count, &query));
+      loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
+          context, clobber_point, relation->result_ordinal, ignored_value_ids,
+          ignored_value_capacity, ignored_value_count);
     }
   }
-  return iree_ok_status();
 }
 
 static iree_status_t
@@ -522,7 +585,10 @@ loom_low_allocation_coalescing_collect_tied_storage_aliases(
   const loom_low_placement_relation_range_t range =
       loom_low_placement_relation_range_for_value_ordinal(context->placement,
                                                           tied_operand_ordinal);
-  loom_consumption_region_query_t* query = NULL;
+  const loom_liveness_interval_t* tied_result_interval =
+      loom_liveness_interval_for_value_ordinal(context->liveness,
+                                               tied_relation->result_ordinal);
+  IREE_ASSERT_ARGUMENT(tied_result_interval);
   for (uint32_t i = 0; i < range.count; ++i) {
     const loom_low_placement_relation_t* relation =
         &context->placement->relations[range.start + i];
@@ -531,16 +597,13 @@ loom_low_allocation_coalescing_collect_tied_storage_aliases(
     }
     const loom_value_id_t source_value_id = loom_low_placement_value_id(
         context->placement, relation->source_ordinal);
-    if (query == NULL) {
-      IREE_RETURN_IF_ERROR(context->consumption_query(
-          context->user_data, tied_relation->op->parent_block->parent_region,
-          &query));
-    }
-    loom_consumption_use_t use = {0};
-    bool used_after = false;
-    IREE_RETURN_IF_ERROR(loom_consumption_find_use_after(
-        query, tied_relation->op, source_value_id, &use, &used_after));
-    if (!used_after) {
+    const loom_liveness_interval_t* source_interval =
+        loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                 relation->source_ordinal);
+    if (source_interval != NULL &&
+        !loom_low_allocation_coalescing_value_units_live_at_point(
+            context, relation->source_ordinal, 0, source_interval->unit_count,
+            tied_result_interval->start_point)) {
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_coalescing_append_unique_value_id(
               ignored_value_ids, ignored_value_capacity, ignored_value_count,
@@ -794,19 +857,18 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
       continue;
     }
     loom_value_id_t copy_source_id = LOOM_VALUE_ID_INVALID;
-    bool used_after = false;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_copy_source_used_after_tied_consume(
-            context, tied_relation, copy_relation, &copy_source_id,
-            &used_after));
-    if (used_after) {
+    if (loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+            context, tied_relation, copy_relation, &copy_source_id)) {
       *out_requires_materialized_storage = true;
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
-            context, tied_relation->op, ignored_value_ids,
-            ignored_value_capacity, ignored_value_count));
+    const loom_liveness_interval_t* tied_result_interval =
+        loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                 tied_relation->result_ordinal);
+    IREE_ASSERT_ARGUMENT(tied_result_interval);
+    loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
+        context, tied_result_interval->start_point, ignored_value_ids,
+        ignored_value_capacity, ignored_value_count);
   }
   return iree_ok_status();
 }
@@ -1435,18 +1497,15 @@ iree_status_t loom_low_allocation_coalescing_assign_tied_interval(
       loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
           context, relation->source_ordinal);
   loom_value_id_t copy_source_id = LOOM_VALUE_ID_INVALID;
-  bool copy_source_used_after = false;
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_copy_source_used_after_tied_consume(
-          context, relation, tied_operand_copy_relation, &copy_source_id,
-          &copy_source_used_after));
-  if (copy_source_id != LOOM_VALUE_ID_INVALID && !copy_source_used_after) {
+  const bool copy_source_live =
+      loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
+          context, relation, tied_operand_copy_relation, &copy_source_id);
+  if (copy_source_id != LOOM_VALUE_ID_INVALID && !copy_source_live) {
     ignored_value_ids[ignored_value_count++] = copy_source_id;
   }
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
-          context, relation->op, ignored_value_ids, ignored_value_capacity,
-          &ignored_value_count));
+  loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
+      context, interval->start_point, ignored_value_ids, ignored_value_capacity,
+      &ignored_value_count);
 
   loom_value_id_t inline_storage_lease_ignored_value_ids[16];
   loom_value_id_t* storage_lease_ignored_value_ids =

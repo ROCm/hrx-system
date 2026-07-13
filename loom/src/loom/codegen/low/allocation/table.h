@@ -364,6 +364,10 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t coalesced_copy_count;
   // Number of low.copy ops that must remain materialized.
   iree_host_size_t materialized_copy_count;
+  // Resolved whole-function target-owned location ranges.
+  const loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
+  // Number of records in |reserved_ranges|.
+  iree_host_size_t reserved_range_count;
 } loom_low_allocation_table_t;
 
 // Active allocation-owned lease over the module value-ordinal scratch map.
