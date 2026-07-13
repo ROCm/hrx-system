@@ -248,6 +248,24 @@ static iree_status_t id4_vae_program_validate_model_config(
             IREE_STATUS_INVALID_ARGUMENT,
             "Flux2 VAE implementation requires even spatial scale factors");
       }
+      if (model.latent_affine.channel_count != model.latent_channel_count ||
+          !model.latent_affine.scales || !model.latent_affine.offsets) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Flux2 VAE implementation requires one latent affine scale and "
+            "offset per public latent channel");
+      }
+      for (iree_host_size_t i = 0; i < model.latent_affine.channel_count; ++i) {
+        if (!isfinite(model.latent_affine.scales[i]) ||
+            model.latent_affine.scales[i] == 0.0f ||
+            !isfinite(model.latent_affine.offsets[i])) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "Flux2 VAE latent affine entry %" PRIhsz
+              " must have a finite nonzero scale and finite offset",
+              i);
+        }
+      }
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -4676,16 +4694,18 @@ iree_status_t id4_vae_program_author_decode_from_tensor(
   id4_vae_model_config_t decoder_model = options->model;
   id4_vae_decode_tiling_plan_t decoder_tiling_plan = tiling_plan;
   if (options->model.implementation == ID4_VAE_IMPLEMENTATION_FLUX2) {
-    id4_pipeline_program_tensor_t latent_mean =
+    id4_pipeline_program_tensor_t latent_offset =
         id4_pipeline_program_tensor_invalid();
     IREE_RETURN_IF_ERROR(id4_vae_program_constant_tensor(
-        builder, IREE_SV("vae.flux2.latent_mean"), id4_vae_flux2_latent_mean,
-        IREE_ARRAYSIZE(id4_vae_flux2_latent_mean), &latent_mean));
-    id4_pipeline_program_tensor_t latent_std =
+        builder, IREE_SV("vae.flux2.latent_offset"),
+        options->model.latent_affine.offsets,
+        options->model.latent_affine.channel_count, &latent_offset));
+    id4_pipeline_program_tensor_t latent_scale =
         id4_pipeline_program_tensor_invalid();
     IREE_RETURN_IF_ERROR(id4_vae_program_constant_tensor(
-        builder, IREE_SV("vae.flux2.latent_std"), id4_vae_flux2_latent_std,
-        IREE_ARRAYSIZE(id4_vae_flux2_latent_std), &latent_std));
+        builder, IREE_SV("vae.flux2.latent_scale"),
+        options->model.latent_affine.scales,
+        options->model.latent_affine.channel_count, &latent_scale));
 
     const uint32_t internal_width = tiling_plan.latent_width * 2u;
     const uint32_t internal_height = tiling_plan.latent_height * 2u;
@@ -4710,8 +4730,8 @@ iree_status_t id4_vae_program_author_decode_from_tensor(
         tiling_plan, &affine_config_list));
     id4_pipeline_program_dispatch_binding_t affine_bindings[] = {
         id4_pipeline_program_read(latent),
-        id4_pipeline_program_read(latent_mean),
-        id4_pipeline_program_read(latent_std),
+        id4_pipeline_program_read(latent_offset),
+        id4_pipeline_program_read(latent_scale),
         id4_pipeline_program_write(internal_latent),
     };
     id4_pipeline_program_dispatch_loom_options_t affine_dispatch_options;
@@ -5098,6 +5118,13 @@ const id4_vae_model_config_t* id4_vae_program_flux2_model_config(void) {
           ID4_VAE_CAPABILITY_DECODE | ID4_VAE_CAPABILITY_SPATIAL_TILING,
       // Flux2 AutoEncoderKL implementation.
       .implementation = ID4_VAE_IMPLEMENTATION_FLUX2,
+      // Flux2 diffusion-latent normalization used by the standalone model.
+      .latent_affine =
+          {
+              .channel_count = IREE_ARRAYSIZE(id4_vae_flux2_latent_mean),
+              .scales = id4_vae_flux2_latent_std,
+              .offsets = id4_vae_flux2_latent_mean,
+          },
   };
   return &model;
 }

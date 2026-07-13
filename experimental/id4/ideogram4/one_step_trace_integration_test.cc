@@ -430,7 +430,7 @@ static iree_status_t CreateDecodeStage(
   options.kernel_cache = context.kernel_cache.get();
   options.parameter_scope = parameter_scope;
   options.model = *id4_ideogram4_decode_program_ideogram4_model_config();
-  options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
+  options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
   return id4_ideogram4_decode_stage_create(&options, iree_allocator_system(),
                                            out_stage);
 }
@@ -552,7 +552,7 @@ static iree_status_t PlanDecodeStage(
   decode_options.request.diffusion_latent_shape = diffusion_latent_shape;
   decode_options.request.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   decode_options.request.vae_attention_implementation =
-      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
+      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));

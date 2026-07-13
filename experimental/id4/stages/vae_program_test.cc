@@ -328,6 +328,19 @@ TEST(VaeProgram, AuthorsFlux2TiledDecodeBoundaryContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(VaeProgram, RejectsFlux2ModelWithoutLatentAffine) {
+  ProgramBuilderScope builder_scope;
+  id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
+  model.latent_affine = {};
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(4, 4, 128, 1), 4, 4, 0.0f);
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_vae_program_author_decode(&options, builder_scope.builder()));
+}
+
 TEST(VaeProgram, RejectsLatentShapeWithWrongChannelCount) {
   ProgramBuilderScope builder_scope;
   id4_vae_model_config_t model = MakeSmallModelConfig();

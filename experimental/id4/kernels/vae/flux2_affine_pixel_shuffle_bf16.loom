@@ -1,10 +1,17 @@
 config.decl @id4.vae.flux2_affine_pixel_shuffle.public_width : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.public_height : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.public_channel_count : %value: index where [range(%value, 4, 4096)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.batch_count : %value: index where [range(%value, 1, 1024)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_width : %value: index where [range(%value, 2, 131072)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_height : %value: index where [range(%value, 2, 131072)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_channel_count : %value: index where [range(%value, 1, 1024)]
+
 config.decl @id4.vae.flux2_affine_pixel_shuffle.output_element_count : %value: index where [range(%value, 1, 268435456)]
 
 kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affine_pixel_shuffle_bf16() {
@@ -15,7 +22,7 @@ kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affi
   %rounded = index.add %element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
   kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
-} launch(%public_latent: buffer, %latent_mean: buffer, %latent_std: buffer, %internal_latent: buffer) {
+} launch(%public_latent: buffer, %latent_offset: buffer, %latent_scale: buffer, %internal_latent: buffer) {
   %base = index.constant 0 : offset
   %unit = index.constant 1 : index
   %two = index.constant 2 : index
@@ -34,17 +41,15 @@ kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affi
   %output_element_count = config.get @id4.vae.flux2_affine_pixel_shuffle.output_element_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %output_element_count : index
-
-  %public_noalias, %mean_noalias, %std_noalias, %internal_noalias = buffer.assume.noalias %public_latent, %latent_mean, %latent_std, %internal_latent : buffer, buffer, buffer, buffer
+  %public_noalias, %offset_noalias, %scale_noalias, %internal_noalias = buffer.assume.noalias %public_latent, %latent_offset, %latent_scale, %internal_latent : buffer, buffer, buffer, buffer
   %public_global = buffer.assume.memory_space<global> %public_noalias : buffer
-  %mean_global = buffer.assume.memory_space<global> %mean_noalias : buffer
-  %std_global = buffer.assume.memory_space<global> %std_noalias : buffer
+  %offset_global = buffer.assume.memory_space<global> %offset_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %internal_global = buffer.assume.memory_space<global> %internal_noalias : buffer
   %public_view = buffer.view %public_global[%base] : buffer -> view<[%public_width]x[%public_height]x[%public_channel_count]x[%batch_count]xf32, #dense>
-  %mean_view = buffer.view %mean_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
-  %std_view = buffer.view %std_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
+  %offset_view = buffer.view %offset_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
+  %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
   %internal_view = buffer.view %internal_global[%base] : buffer -> view<[%internal_width]x[%internal_height]x[%internal_channel_count]x[%batch_count]xbf16, #dense>
-
   scf.if %in_bounds {
     %internal_x = index.rem %element_index, %internal_width : index
     %internal_row = index.div %element_index, %internal_width : index
@@ -61,10 +66,10 @@ kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affi
     %public_channel_xy = index.add %patch_x, %public_channel_y_offset : index
     %public_channel = index.add %public_channel_base, %public_channel_xy : index
     %value = view.load %public_view[%public_x, %public_y, %public_channel, %batch] : view<[%public_width]x[%public_height]x[%public_channel_count]x[%batch_count]xf32, #dense> -> f32
-    %mean = view.load %mean_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
-    %std = view.load %std_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
-    %scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %std : f32
-    %output_f32 = scalar.addf<reassoc|nnan|ninf|nsz|contract> %scaled, %mean : f32
+    %offset = view.load %offset_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
+    %scale = view.load %scale_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
+    %scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %scale : f32
+    %output_f32 = scalar.addf<reassoc|nnan|ninf|nsz|contract> %scaled, %offset : f32
     %output = scalar.fptrunc %output_f32 : f32 to bf16
     view.store %output, %internal_view[%internal_x, %internal_y, %internal_channel, %batch] : bf16, view<[%internal_width]x[%internal_height]x[%internal_channel_count]x[%batch_count]xbf16, #dense>
   }

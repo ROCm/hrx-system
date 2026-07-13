@@ -77,6 +77,18 @@ typedef enum id4_vae_attention_implementation_e {
   ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED = 2,
 } id4_vae_attention_implementation_t;
 
+// Per-channel affine mapping from diffusion latents to VAE input latents.
+// Decoder input channel C is `latent[C] * scales[C] + offsets[C]`.
+typedef struct id4_vae_latent_affine_config_t {
+  // Number of entries in |scales| and |offsets|.
+  iree_host_size_t channel_count;
+  // Borrowed public-channel-order multiplicative scales retained through
+  // authoring.
+  const float* scales;
+  // Borrowed public-channel-order additive offsets retained through authoring.
+  const float* offsets;
+} id4_vae_latent_affine_config_t;
+
 // Static VAE model and implementation capabilities.
 typedef struct id4_vae_model_config_t {
   // Latent-to-image scale factor along the width axis.
@@ -103,6 +115,8 @@ typedef struct id4_vae_model_config_t {
   id4_vae_capability_flags_t capabilities;
   // Concrete VAE implementation selected by this model.
   id4_vae_implementation_t implementation;
+  // Mapping from the owning model's diffusion latent convention to this VAE.
+  id4_vae_latent_affine_config_t latent_affine;
 } id4_vae_model_config_t;
 
 // User or model policy for resolving VAE tiling.
