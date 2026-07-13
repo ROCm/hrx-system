@@ -1,11 +1,11 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.ideogram4.linear_wmma.token_count : %value: index where [range(%value, 16, 131072)]
 config.decl @id4.ideogram4.linear_wmma.dispatch_token_count : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
 config.decl @id4.ideogram4.linear_wmma.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
 config.decl @id4.ideogram4.linear_wmma.output_size : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
 
-kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bf16_bf16_wmma") @id4_ideogram4_linear_bf16_bf16_wmma() {
+kernel.def export("id4_ideogram4_linear_bf16_bf16_wmma") @id4_ideogram4_linear_bf16_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
@@ -16,13 +16,18 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bf16_bf16_wmma") @i
   %row_tile_count = index.div %output_size, %thirty_two : index
   kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %output: buffer) {
+  %token_pair = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  func.apply<id4.matrix.linear_bf16_bf16.m32n32>(%input_bf16, %weight, %output, %token_pair, %row_pair) : (buffer, buffer, buffer, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_bf16_bf16.m32n32> target(@gfx1100) priority(20) @id4_ideogram4_linear_bf16_bf16_wmma_gfx1100(%input_bf16: buffer, %weight: buffer, %output: buffer, %token_pair: index, %row_pair: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
-  %token_pair = kernel.workgroup.id<x> : index
-  %row_pair = kernel.workgroup.id<y> : index
   %token_count = config.get @id4.ideogram4.linear_wmma.token_count : index
   %input_size = config.get @id4.ideogram4.linear_wmma.input_size : index
   %output_size = config.get @id4.ideogram4.linear_wmma.output_size : index
@@ -76,5 +81,5 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bf16_bf16_wmma") @i
   vector.fragment.store<result> %result01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
-  kernel.return
+  func.return
 }
