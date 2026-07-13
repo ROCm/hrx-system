@@ -22,11 +22,11 @@ kernel.def export("id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32") @id4_qwen3_vl_lin
 } launch(%input_bf16: buffer, %weight: buffer, %output: buffer) {
   %token_triple = kernel.workgroup.id<x> : index
   %row_pair = kernel.workgroup.id<y> : index
-  func.apply<id4.qwen3_vl.linear.m48n32>(%input_bf16, %weight, %output, %token_triple, %row_pair) : (buffer, buffer, buffer, index, index)
+  func.apply<id4.matrix.linear_bf16_bf16.m48n32>(%input_bf16, %weight, %output, %token_triple, %row_pair) : (buffer, buffer, buffer, index, index)
   kernel.return
 }
 
-func.template<id4.qwen3_vl.linear.m48n32> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_gfx1100(%input_bf16: buffer, %weight: buffer, %output: buffer, %token_triple: index, %row_pair: index) {
+func.template<id4.matrix.linear_bf16_bf16.m48n32> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_gfx1100(%input_bf16: buffer, %weight: buffer, %output: buffer, %token_triple: index, %row_pair: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index

@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.qwen3_vl.linear_wmma.dispatch_token_count : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 
@@ -8,7 +8,7 @@ config.decl @id4.qwen3_vl.linear_wmma.output_size : %value: index where [range(%
 
 config.decl @id4.qwen3_vl.linear_wmma.rhs_storage : %value: index where [range(%value, 0, 1)]
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64") @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64() {
+kernel.def export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64") @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
@@ -20,6 +20,13 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   %row_quad_count = index.div %output_size, %sixty_four : index
   kernel.launch.config workgroups(%token_pair_count, %row_quad_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %output: buffer) {
+  %token_pair = kernel.workgroup.id<x> : index
+  %row_quad = kernel.workgroup.id<y> : index
+  func.apply<id4.matrix.linear_bf16_bf16.m32n64>(%input_bf16, %weight, %output, %token_pair, %row_quad) : (buffer, buffer, buffer, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_bf16_bf16.m32n64> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_gfx1100(%input_bf16: buffer, %weight: buffer, %output: buffer, %token_pair: index, %row_quad: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -27,8 +34,6 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   %thirty_two = index.constant 32 : index
   %sixty_four = index.constant 64 : index
   %two_fifty_six = index.constant 256 : index
-  %token_pair = kernel.workgroup.id<x> : index
-  %row_quad = kernel.workgroup.id<y> : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_wmma.input_size : index
   %output_size = config.get @id4.qwen3_vl.linear_wmma.output_size : index
@@ -116,10 +121,10 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   vector.fragment.store<result> %result11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result12, %output_view[%token_origin1, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result13, %output_view[%token_origin1, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
-  kernel.return
+  func.return
 }
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output") @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output() {
+kernel.def export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output") @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
@@ -131,6 +136,13 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   %row_quad_count = index.div %output_size, %sixty_four : index
   kernel.launch.config workgroups(%token_pair_count, %row_quad_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %output: buffer) {
+  %token_pair = kernel.workgroup.id<x> : index
+  %row_quad = kernel.workgroup.id<y> : index
+  func.apply<id4.matrix.linear_bf16_bf16.m32n64.transpose_output>(%input_bf16, %weight, %output, %token_pair, %row_quad) : (buffer, buffer, buffer, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_bf16_bf16.m32n64.transpose_output> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_gfx1100(%input_bf16: buffer, %weight: buffer, %output: buffer, %token_pair: index, %row_quad: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -138,8 +150,6 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   %thirty_two = index.constant 32 : index
   %sixty_four = index.constant 64 : index
   %two_fifty_six = index.constant 256 : index
-  %token_pair = kernel.workgroup.id<x> : index
-  %row_quad = kernel.workgroup.id<y> : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_wmma.input_size : index
   %output_size = config.get @id4.qwen3_vl.linear_wmma.output_size : index
@@ -228,5 +238,5 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n6
   vector.fragment.store<result> %result11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, %output_layout>
   vector.fragment.store<result> %result12, %output_view[%token_origin1, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, %output_layout>
   vector.fragment.store<result> %result13, %output_view[%token_origin1, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, %output_layout>
-  kernel.return
+  func.return
 }
