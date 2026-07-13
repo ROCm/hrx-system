@@ -65,9 +65,12 @@ gated by compiler-report, ISA, correctness, and ABABA equivalence checks before
 it replaces a measured provider.
 
 A current-source confirmation at revision
-`ade5d01a410f4992ebe8a3ba967bd5b4f4d72838` measured 89.788 seconds, or
-0.960x PyTorch and 0.086% above the canonical ID4 row. Its generation plan is
-byte-identical to the canonical long-1024 plan. The sanitized
+`3b98db8291e73ac69c76bc2fe198d876a240a7e3` measured 90.046 seconds, or
+0.963x PyTorch and 0.374% above the canonical ID4 row. Its generation plan
+changes six scalar leaves from the canonical long-1024 plan, all of them the
+module identity for two VAE dispatches moved to the final target-neutral
+provider. Shapes, layouts, launches, dispatches, operation order, and memory
+are unchanged. The sanitized
 [confirmation record](evidence/current_head_long_1024_confirmation.json)
 retains the binary, benchmark, request, and plan hashes.
 
@@ -98,7 +101,10 @@ The checked [warm-serving scorecard](evidence/warm_serving_scorecard.json)
 contains the exact machine-readable timing, memory, token-capacity, plan, and
 stage-profile values used below. It is compact derived evidence; raw benchmark
 outputs, full HAL profiles, tensor captures, and compiler bundles remain
-external.
+external. The companion
+[performance scorecard](evidence/performance_scorecard.json) records the
+profile Pareto, exact-shape kernel anchors, hardware calibration, evidence
+classes, and hashes of its raw inputs.
 
 ## Scaling
 
@@ -169,6 +175,15 @@ than a collapsed scene, random noise, or a different prompt interpretation.
 Tensor taps remain the stronger evidence for individual operations because
 image similarity alone cannot localize a dtype, layout, scale, or reduction
 error.
+
+The checked [correctness scorecard](evidence/correctness_scorecard.json)
+retains the oracle revisions and precision policy, two Qwen token lengths,
+first-block DiT taps, selected sampler-trajectory steps, exact-latent VAE
+decode, final-image metrics, and hashes of the raw comparisons. It makes the
+scope of the claim explicit: operation-local agreement is tight, while
+iterative numeric drift reaches 0.919409 cosine similarity in the 128x128
+step-20 latent. The final images establish structural parity, not pixel
+identity.
 
 Correctness is gated at several scopes:
 
@@ -359,6 +374,11 @@ Several early shapes were useful only because they exposed the wrong contract:
 - False barriers serialized independent writes. Program barriers now represent
   real visibility and lifetime epochs, while independent dispatches remain
   eligible for concurrent execution.
+- An artificial 16-token attention fixture sat outside the model's declared
+  minimum configuration and selected a globally slower 16 KiB LDS accumulator
+  schedule. Keeping reduced fixtures inside the production domain restored the
+  512-byte register-carried recurrence; smaller compiler stress shapes remain
+  valuable as standalone compiler cases rather than product schedule inputs.
 - Obvious fusion was not assumed to be faster. Register pressure, duplicate
   arithmetic, and lost reuse can reverse the win; compiler reports and ABABA
   measurements decide which schedule remains active.
@@ -371,11 +391,14 @@ using materially less VRAM. It also demonstrates where the abstraction stops
 being the differentiator: at 1024, two highly optimized kernel families own
 almost the entire request.
 
-The immediate performance frontier is narrow. Recovering the demonstrated
-spill-free online-attention schedule is the highest-confidence request-level
-gain. Matrix work then compares exact FP8 decode, WMMA, wait, load, and store
-schedules against the rocBLAS code objects at the same shapes. Minor kernels
-are below the threshold where local improvements can change the headline.
+The immediate performance frontier is narrow. The production online-attention
+provider is again register-carried, spill-free, and structurally accepted; the
+historical 12.440 ms row remains a projected opportunity rather than a missing
+correctness contract. Matrix work is next: exact FP8 decode, WMMA, wait, load,
+and store schedules remain 8.6-9.8% behind the narrower rocBLAS BF16 GEMMs at
+the same shapes even though the complete ID4 FP8 consumers beat PyTorch's
+expand-scale-GEMM paths. Minor kernels are below the threshold where local
+improvements can change the headline.
 
 The larger result is the method. Model math, dynamic shape policy, target
 specialization, parameter representation, memory lifetime, diagnostics, and

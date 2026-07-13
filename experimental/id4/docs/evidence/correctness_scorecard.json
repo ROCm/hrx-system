@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "kind": "id4_fp8_correctness_scorecard",
+  "oracle": {
+    "implementation": "ideogram-oss/ideogram4",
+    "source_revision": "990fe1c4e950bb9e9dc90e01c0ad98ba434f83c2",
+    "checkpoint": "ideogram-ai/ideogram-4-fp8",
+    "checkpoint_revision": "ee79a7237b519f1402ceacf952f30c8a31ec5073",
+    "execution": "eager",
+    "torch_compile": false,
+    "conditioned_and_unconditioned_branches": "sequential",
+    "attention_api": "torch.nn.functional.scaled_dot_product_attention",
+    "software": {
+      "pytorch": "2.9.1+rocm7.11.0a20251218",
+      "hip": "7.2.53150-91f21d083a",
+      "transformers": "5.13.0",
+      "triton": "3.5.1+rocm7.11.0a20251218",
+      "safetensors": "0.8.0"
+    }
+  },
+  "precision_policy": {
+    "qwen_and_dit_weights": "per-output-row scaled FP8 E4M3",
+    "weight_scales": "f32",
+    "qwen_and_dit_compute": "bf16",
+    "matrix_accumulation": "f32",
+    "vae_parameters": "bf16",
+    "latents_and_velocities": "f32"
+  },
+  "qwen": {
+    "long_269_tokens": {
+      "token_ids": {
+        "element_count": 269,
+        "exact_mismatch_count": 0
+      },
+      "embeddings": {
+        "element_count": 1101824,
+        "exact_mismatch_count": 0
+      },
+      "layer_0": {
+        "mean_abs": 0.003232329921666221,
+        "normalized_rmse": 0.02570803417239859,
+        "max_abs": 0.125,
+        "cosine_similarity": 0.9996695047843511
+      },
+      "layer_18": {
+        "mean_abs": 0.0543120632977675,
+        "normalized_rmse": 0.06038526195302228,
+        "max_abs": 768.0,
+        "cosine_similarity": 0.9999622820346306
+      },
+      "layer_35": {
+        "mean_abs": 0.7330557782632268,
+        "normalized_rmse": 0.09937140090658571,
+        "max_abs": 576.0,
+        "cosine_similarity": 0.9952548582107154
+      },
+      "selected_condition": {
+        "mean_abs": 0.15871416421573664,
+        "normalized_rmse": 0.06483478467495499,
+        "max_abs": 768.0,
+        "cosine_similarity": 0.9991340904199386
+      }
+    },
+    "alternate_133_tokens": {
+      "token_ids": {
+        "element_count": 133,
+        "exact_mismatch_count": 0
+      },
+      "embeddings": {
+        "element_count": 544768,
+        "exact_mismatch_count": 0
+      },
+      "layer_0": {
+        "normalized_rmse": 0.026565801444012296,
+        "cosine_similarity": 0.9996470744519613
+      },
+      "layer_18": {
+        "normalized_rmse": 0.060436367673902675,
+        "cosine_similarity": 0.9999793435671327
+      },
+      "layer_35": {
+        "normalized_rmse": 0.09684244432749659,
+        "cosine_similarity": 0.9957072611674627
+      },
+      "selected_condition": {
+        "normalized_rmse": 0.06256990617881979,
+        "cosine_similarity": 0.9995447496289858
+      }
+    }
+  },
+  "conditioned_dit_step_1_layer_0": {
+    "request": {
+      "width": 128,
+      "height": 128,
+      "text_token_count": 269,
+      "image_token_count": 64,
+      "seed": 20260625,
+      "sampler": "V4_DEFAULT_20"
+    },
+    "tap_count": 12,
+    "nonfinite_value_count": 0,
+    "taps": [
+      {
+        "name": "adaln_modulation",
+        "normalized_rmse": 0.00003719805290033391,
+        "cosine_similarity": 0.9999999993081911
+      },
+      {
+        "name": "attention_input",
+        "normalized_rmse": 0.00013338848959660167,
+        "cosine_similarity": 0.9999999911038737
+      },
+      {
+        "name": "qkv_projection_output",
+        "normalized_rmse": 0.00033969074910389726,
+        "cosine_similarity": 0.9999999423062771
+      },
+      {
+        "name": "attention_context",
+        "normalized_rmse": 0.001032546303554289,
+        "cosine_similarity": 0.9999994669239686
+      },
+      {
+        "name": "attention_output",
+        "normalized_rmse": 0.0011740708509663275,
+        "cosine_similarity": 0.9999993108162928
+      },
+      {
+        "name": "post_attention_hidden",
+        "normalized_rmse": 0.0004990378651141258,
+        "cosine_similarity": 0.9999998754806247
+      },
+      {
+        "name": "ffn_input",
+        "normalized_rmse": 0.0011461535798430013,
+        "cosine_similarity": 0.9999993431807466
+      },
+      {
+        "name": "ffn_w1_projection_output",
+        "normalized_rmse": 0.0014233108571379005,
+        "cosine_similarity": 0.9999989870955837
+      },
+      {
+        "name": "ffn_w3_projection_output",
+        "normalized_rmse": 0.0015991484917223715,
+        "cosine_similarity": 0.9999987213619191
+      },
+      {
+        "name": "ffn_hidden",
+        "normalized_rmse": 0.0015935522110493562,
+        "cosine_similarity": 0.9999987318610785
+      },
+      {
+        "name": "ffn_output",
+        "normalized_rmse": 0.0018593200293061057,
+        "cosine_similarity": 0.9999982714761915
+      },
+      {
+        "name": "layer_hidden",
+        "normalized_rmse": 0.0011472384113089685,
+        "cosine_similarity": 0.9999993448673445
+      }
+    ]
+  },
+  "sampler_trajectory": {
+    "request_sha256": "35f497d29bb732af1fdfc47162e9e9ba40110bf733ee7cb9c98db15c68e1a33a",
+    "width": 128,
+    "height": 128,
+    "text_token_count": 269,
+    "image_token_count": 64,
+    "step_count": 20,
+    "seed": 20260625,
+    "sampler": "V4_DEFAULT_20",
+    "next_latent": [
+      {
+        "step": 1,
+        "guidance": 7.0,
+        "normalized_rmse": 0.010361610807163269,
+        "cosine_similarity": 0.9999463923028982
+      },
+      {
+        "step": 2,
+        "guidance": 7.0,
+        "normalized_rmse": 0.025264654959752237,
+        "cosine_similarity": 0.9996813766844546
+      },
+      {
+        "step": 5,
+        "guidance": 7.0,
+        "normalized_rmse": 0.1758344885777853,
+        "cosine_similarity": 0.9844705289872145
+      },
+      {
+        "step": 10,
+        "guidance": 7.0,
+        "normalized_rmse": 0.3401998882824783,
+        "cosine_similarity": 0.9419919487398858
+      },
+      {
+        "step": 15,
+        "guidance": 7.0,
+        "normalized_rmse": 0.39479424963102683,
+        "cosine_similarity": 0.9217642033263711
+      },
+      {
+        "step": 18,
+        "guidance": 7.0,
+        "normalized_rmse": 0.4003798441825464,
+        "cosine_similarity": 0.9195054188606234
+      },
+      {
+        "step": 19,
+        "guidance": 3.0,
+        "normalized_rmse": 0.40053487482541517,
+        "cosine_similarity": 0.9194399476981329
+      },
+      {
+        "step": 20,
+        "guidance": 3.0,
+        "normalized_rmse": 0.40058944542724323,
+        "cosine_similarity": 0.9194090399338308
+      }
+    ]
+  },
+  "vae_exact_reference_latent": {
+    "shape": [
+      128,
+      128,
+      3,
+      1
+    ],
+    "element_count": 49152,
+    "nonfinite_value_count": 0,
+    "mean_abs": 0.0017239044221544948,
+    "normalized_rmse": 0.004429170313230594,
+    "p99_abs": 0.0078125,
+    "max_abs": 0.01953125,
+    "cosine_similarity": 0.9999901970456075,
+    "pearson_correlation": 0.9999904468183626
+  },
+  "final_images": [
+    {
+      "label": "long_1024",
+      "shape": [
+        1024,
+        1024,
+        3
+      ],
+      "mean_abs_255": 18.649818738301594,
+      "psnr_db": 18.78143937843483,
+      "ssim_luma": 0.7498037663407093,
+      "ssim_rgb_mean": 0.7435292239196521
+    },
+    {
+      "label": "long_128",
+      "shape": [
+        128,
+        128,
+        3
+      ],
+      "mean_abs_255": 27.333231608072918,
+      "psnr_db": 15.925649817198993,
+      "ssim_luma": 0.5785918792468345,
+      "ssim_rgb_mean": 0.5761644013354136
+    },
+    {
+      "label": "alternate_128",
+      "shape": [
+        128,
+        128,
+        3
+      ],
+      "mean_abs_255": 21.368306477864582,
+      "psnr_db": 15.776509112591715,
+      "ssim_luma": 0.6203402270001293,
+      "ssim_rgb_mean": 0.6381824482626769
+    }
+  ],
+  "interpretation": {
+    "operation_scope": "Tokenization and embeddings are exact; representative first-block DiT taps remain above 0.999998 cosine similarity under the production precision policy.",
+    "trajectory_scope": "Iterative BF16 and FP8 numeric drift accumulates to 0.919409 cosine similarity in the 128x128 step-20 latent.",
+    "image_scope": "Final-image metrics establish deterministic structural parity for these requests, not pixel identity or a population-level image-quality claim."
+  },
+  "raw_artifacts": {
+    "qwen_long_capture_manifest_sha256": "d86d855e784b88fa9df7784f513650c71d346f7f8a79ffa77158f16927b69aef",
+    "qwen_long_oracle_manifest_sha256": "e9cc95845d1500d13938c90d49a6f96a24afc5bc95d05389a5aceaf9af13fbbf",
+    "qwen_alternate_capture_manifest_sha256": "35db6879c68cdb2d870c98e3b10d133fa63b22f290248da76bdb67ff8ef57f05",
+    "qwen_alternate_oracle_manifest_sha256": "961a97069bf89d8a5e7f5bcb5bb95f470036cf1b465dfa6fb53ddc330848c85e",
+    "dit_step_1_comparison_sha256": "bad38e39ee5912380324eba34e6c1b2f34c0159b72b5aafd5846c3280450ae38",
+    "sampler_trajectory_comparison_sha256": "f7c9f90133ac432265782ce89cbb40405b58c7f05f12a2b665bbfde0a7a624be",
+    "vae_exact_latent_comparison_sha256": "06d8d207e412672ef0df04eaa9cabbc0e91c2dd02e04f480a81c429f01a20c61",
+    "long_1024_image_comparison_sha256": "2f00755aa1f63993e1c09fb8403db7dc9b417045c78ea113121e45152db38c5b",
+    "long_1024_oracle_manifest_sha256": "ce1e56e4e8abc443791da70b747567d5d449c5edf71ee6da3f6382c004f51ba7",
+    "long_128_image_comparison_sha256": "2ff64c5c3b67a33608177ad2c19b4490c51ea0045960707121b3e55c94fe7aac",
+    "long_128_oracle_manifest_sha256": "5168e3885f6f3c98d0e76cf1b4babce99e16596d6b81615922471891404a0879",
+    "alternate_128_image_comparison_sha256": "6eec96fb14c552295ab58c510a5e5c45838adc64af14f9690d0c68529e3ce414",
+    "alternate_128_oracle_manifest_sha256": "961a97069bf89d8a5e7f5bcb5bb95f470036cf1b465dfa6fb53ddc330848c85e"
+  }
+}

@@ -242,6 +242,13 @@ Every active family carries:
 - compiler-report visibility for instruction mix, register pressure, LDS,
   private memory, spills, occupancy, memory requests, and wait behavior.
 
+Reduced cases preserve the operation's semantic edge conditions while staying
+inside the configuration domain declared by the product. A smaller shape that
+violates a model minimum can still expose valuable compiler behavior, but it
+belongs in a standalone compiler packet; allowing it to participate in
+production provider selection can optimize the shipped schedule for a state
+the model never reaches.
+
 The layout is chosen from the consumer backward. A producer writing the
 consumer's compact or transposed format removes an intermediate write, global
 barrier, reread, and rewrite. Obvious pointwise initialization is fused into

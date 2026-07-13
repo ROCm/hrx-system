@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "kind": "id4_fp8_performance_scorecard",
+  "evidence_classes": {
+    "measured": "Direct request or kernel execution.",
+    "derived": "Arithmetic over measured values.",
+    "projected": "A demonstrated same-shape kernel result substituted into a measured request.",
+    "theoretical": "A calibrated rate applied to measured request work.",
+    "contextual": "Scale information that is not accepted as a performance bound."
+  },
+  "environment": {
+    "device": "AMD Radeon Pro W7900",
+    "architecture": "gfx1100",
+    "id4_revision": "7a387df86d1dc76a3c1a707689462e0fd86849ae",
+    "official_source_revision": "990fe1c4e950bb9e9dc90e01c0ad98ba434f83c2",
+    "checkpoint_revision": "ee79a7237b519f1402ceacf952f30c8a31ec5073",
+    "sampler": "V4_DEFAULT_20",
+    "seed": 20260625,
+    "measurement_contract": "One complete same-request warm generation followed by three measured generations against one loaded session and prepared all-stage bundle."
+  },
+  "measured_request": {
+    "classification": "measured",
+    "width": 1024,
+    "height": 1024,
+    "step_count": 20,
+    "qwen_token_count": 269,
+    "image_token_count": 4096,
+    "id4_statistic": "mean of three generations",
+    "id4_seconds": 89.71042513847351,
+    "pytorch_statistic": "median of three generations",
+    "pytorch_seconds": 93.49386040819809,
+    "id4_over_pytorch": 0.9595327944187357,
+    "id4_combined_peak_bytes": 27252490240,
+    "pytorch_allocated_peak_bytes": 35603217408,
+    "pytorch_reserved_peak_bytes": 38935724032
+  },
+  "profile_pareto": {
+    "classification": "measured attribution",
+    "dispatch_count": 24803,
+    "summed_dispatch_seconds": 90.39081126,
+    "families": [
+      {
+        "name": "compact_fp8_dit_contractions",
+        "call_count": 6800,
+        "seconds": 56.995893800000005,
+        "fraction": 0.6305496433266551
+      },
+      {
+        "name": "online_dit_attention",
+        "call_count": 1360,
+        "seconds": 27.924672060000002,
+        "fraction": 0.30893264116943825
+      },
+      {
+        "name": "qkv_normalization_and_rotary",
+        "call_count": 1360,
+        "seconds": 2.0173576,
+        "fraction": 0.022318171193278433
+      },
+      {
+        "name": "normalization_modulation_residual_and_swiglu",
+        "call_count": 6800,
+        "seconds": 2.3233894,
+        "fraction": 0.025703822851163554
+      },
+      {
+        "name": "qwen_conditioning",
+        "call_count": 557,
+        "seconds": 0.17516508,
+        "fraction": 0.0019378637890100955
+      },
+      {
+        "name": "vae_decode",
+        "call_count": 85,
+        "seconds": 0.43197984,
+        "fraction": 0.004779023818665083
+      }
+    ]
+  },
+  "exact_kernel_anchors": [
+    {
+      "name": "unconditional_qkv",
+      "classification": "measured",
+      "shape": "M4096xN13824xK4608",
+      "p50_ms": 8.562002,
+      "p90_ms": 8.669444,
+      "tflops": 60.94819020878527,
+      "resources": {
+        "vgpr": 256,
+        "sgpr": 22,
+        "local_memory_bytes": 8192,
+        "private_memory_bytes": 0,
+        "spill_count": 0,
+        "occupancy_percent": 25,
+        "code_bytes": 13296
+      },
+      "oracles": {
+        "rocblas_bf16_gemm_ms": 7.884642216176291,
+        "official_complete_fp8_path_ms": 8.859005277205526,
+        "id4_over_rocblas_gemm": 1.0859087534034235,
+        "id4_over_official_complete_path": 0.9664744214601924
+      }
+    },
+    {
+      "name": "unconditional_mlp_down",
+      "classification": "measured",
+      "shape": "M4096xN4608xK12288",
+      "p50_ms": 7.806799,
+      "p90_ms": 7.918678,
+      "tflops": 59.416986138364784,
+      "resources": {
+        "vgpr": 256,
+        "sgpr": 22,
+        "local_memory_bytes": 8192,
+        "private_memory_bytes": 0,
+        "spill_count": 0,
+        "occupancy_percent": 25,
+        "code_bytes": 13296
+      },
+      "oracles": {
+        "rocblas_bf16_gemm_ms": 7.113245372058972,
+        "official_complete_fp8_path_ms": 7.973950736029634,
+        "id4_over_rocblas_gemm": 1.0975017156958096,
+        "id4_over_official_complete_path": 0.9790377766852292
+      }
+    },
+    {
+      "name": "unconditional_attention",
+      "classification": "measured",
+      "shape": "Q4096xKV4096xH18xD256",
+      "p50_ms": 16.663331,
+      "p90_ms": 17.143037,
+      "resources": {
+        "vgpr": 256,
+        "sgpr": 25,
+        "local_memory_bytes": 512,
+        "private_memory_bytes": 0,
+        "spill_count": 0,
+        "occupancy_percent": 25,
+        "code_bytes": 18496
+      },
+      "oracles": {
+        "official_efficient_attention_ms": 21.806866507352865,
+        "id4_over_official": 0.7641322972459815
+      }
+    },
+    {
+      "name": "conditioned_attention",
+      "classification": "measured",
+      "shape": "Q4368xKV4365xH18xD256",
+      "p50_ms": 16.34072,
+      "p90_ms": 16.621055,
+      "resources": {
+        "vgpr": 256,
+        "sgpr": 28,
+        "local_memory_bytes": 512,
+        "private_memory_bytes": 0,
+        "spill_count": 0,
+        "occupancy_percent": 25,
+        "code_bytes": 18732
+      },
+      "oracles": {
+        "official_efficient_attention_ms": 26.64327483088239,
+        "id4_over_official": 0.6133149961377634
+      }
+    }
+  ],
+  "hardware_calibration": {
+    "classification": "measured",
+    "streaming_read_gbytes_per_second": 720.0927520058801,
+    "streaming_write_gbytes_per_second": 654.7590650069916,
+    "copy_logical_gbytes_per_second": 291.49512151265344,
+    "copy_aggregate_gbytes_per_second": 582.9902430253069,
+    "f32_exp_values_per_second": 2246747968931.345,
+    "best_exact_shape_rocblas_bf16_tflops": 66.18417325181674,
+    "compact_fp8_qkv_tflops": 60.94819020878527,
+    "compact_fp8_mlp_down_tflops": 59.416986138364784
+  },
+  "optimization_envelope": [
+    {
+      "classification": "measured",
+      "request_seconds": 89.71042513847351,
+      "id4_over_pytorch": 0.9595327944187357,
+      "interpretation": "Accepted warm-serving result."
+    },
+    {
+      "classification": "projected",
+      "request_seconds": 82.6329006521729,
+      "id4_over_pytorch": 0.8838323745687067,
+      "interpretation": "Substitutes a demonstrated same-shape 12.440 ms attention schedule into the measured request."
+    },
+    {
+      "classification": "theoretical",
+      "request_seconds": 70.54004427329687,
+      "id4_over_pytorch": 0.7544885189820604,
+      "interpretation": "Also applies the best exact-shape rocBLAS rate to every DiT contraction."
+    },
+    {
+      "classification": "contextual",
+      "request_seconds": 70.12039530614857,
+      "id4_over_pytorch": 0.75,
+      "interpretation": "Aspirational threshold, not a result or accepted lower bound."
+    }
+  ],
+  "raw_artifacts": {
+    "warm_serving_scorecard_sha256": "087adcb436d6d2e7261624f6fc46b6a7fbc60ee11bd566d905f9aac4b37d7e5f",
+    "performance_analysis_sha256": "23b216ca40db4c1e7694760585a02ecdae9ad83dd945af50b0dd9798499dbcbb",
+    "long_1024_benchmark_sha256": "abc31ac023fa8446cff69bbe9ad4e0310ebeade5018a2a05a2b850c08b504be6",
+    "long_1024_profile_sha256": "9f7603b98ff142d1d127537752a68913de8f0ba770ae1e82ce1a2e9234e678ca",
+    "hot_kernel_analysis_sha256": "2bbc1037dbce0098620c1158ea7c3d9b8da3a64faf3b80fbb80b5504f5051ef4",
+    "kernel_ceiling_analysis_sha256": "4a7abbc12e269a273899c4365ad30b8aee1f268e672c094349fb27c06d63e92b",
+    "official_hot_path_sha256": "2ad95a9ef58cba1e1ddc67f3e736f1e6ef0eef388bbefc14f8eea14c39674ed1",
+    "official_key_averages_sha256": "f4ad017a2f622a16e86b946f1cab45308181f4a6a6698c211737621ee8ef708e",
+    "blit_calibration_sha256": "95bf941270151bfad5afac88921f2d65e07d8d2aca1794913ebbb631f2e6b64b",
+    "read_calibration_sha256": "ee1a0df8daae733b1dcb8be896b8e65cab3a026a3493205c138d4102264cf4ac",
+    "exp_calibration_sha256": "d7e28c5ab12dccd27fe0835ea03fcd29c46ecc9380d1b3be25961a483b04b0d8",
+    "bf16_wmma_m128_sha256": "dda8d2eb062cf859a0b875c8307c813527b1bb00763d6f687d2b04732e957a6e",
+    "bf16_wmma_m64_sha256": "3b5f903ddbc642d26e985ae5c58fc05721aa7b99e9837e5f0e5e7e4d2a57a550",
+    "bf16_wmma_m32_sha256": "eea8b0b67536cc67b2c73d019f0334c3bd3e0acad3084d19d95baa0b06babc3d"
+  }
+}

@@ -1,22 +1,38 @@
 {
   "schema_version": 1,
   "kind": "id4_current_head_long_1024_confirmation",
-  "source_revision": "ade5d01a410f4992ebe8a3ba967bd5b4f4d72838",
-  "binary_sha256": "f176f61dd308213f0f411805c9a7c9e9a652df808b20a7ae021b3d8aa091fb64",
-  "benchmark_sha256": "6942a04c1ff3c91f7e08cbd72935da826554da4912b598fb8d24d16e24977140",
+  "source_revision": "3b98db8291e73ac69c76bc2fe198d876a240a7e3",
+  "binary_sha256": "307650ff3bb5d72ddedce72375b45dff241a3dd7e2f36218482708f5ed13fdbf",
+  "benchmark_sha256": "f7c2a5bac0b962a9a8e213cc68f0db30e7a36ab78ef11d19297fb048b5274a0f",
   "request": "../requests/long_1024.json",
   "request_sha256": "aed305894bb2b69214671bc8762b41d03150c40896e77f652d0fcca08a772c41",
-  "plan_sha256": "bf4de5b9f83f996c2f2f29a41c0788c432b4b0866dd9c095b774ab6937fc1016",
+  "plan_sha256": "0d09a2e10fcd771f000c20b487e7caac9dec06d1ce4efb46a4c265b951554069",
   "canonical_plan_sha256": "bf4de5b9f83f996c2f2f29a41c0788c432b4b0866dd9c095b774ab6937fc1016",
+  "plan_equivalence": {
+    "classification": "module_identity_only",
+    "changed_scalar_leaf_count": 6,
+    "changed_fields": [
+      "stages.decode.kernels[8].module_path",
+      "stages.decode.kernels[8].specialization_key",
+      "stages.decode.kernels[26].module_path",
+      "stages.decode.kernels[26].specialization_key",
+      "stages.decode.program.dispatches[9].module_path",
+      "stages.decode.program.dispatches[56].module_path"
+    ],
+    "canonical_module_path": "vae/conv3x3_bias_packed_bf16",
+    "current_module_path": "vae/conv3x3_bias_bf16_wmma_m32n64",
+    "semantic_plan_changes": 0,
+    "shape_layout_launch_dispatch_or_memory_changes": 0
+  },
   "measurement": {
     "statistic": "mean",
     "warmup_generations": 1,
     "measured_generations": 3,
-    "id4_seconds": 89.78798389434814,
+    "id4_seconds": 90.04637257258098,
     "official_pytorch_seconds": 93.49386040819809,
-    "id4_over_pytorch": 0.960362354301449,
+    "id4_over_pytorch": 0.9631260510522804,
     "canonical_id4_seconds": 89.71042513847351,
-    "drift_percent": 0.08645456283917774
+    "drift_percent": 0.3744798150147055
   },
   "policy": {
     "qwen_token_count": 269,
