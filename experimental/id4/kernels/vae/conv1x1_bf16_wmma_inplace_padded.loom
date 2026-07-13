@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.vae.conv1x1_inplace.pixel_count : %value: index where [range(%value, 16, 16777216), mul(%value, 16)]
 
@@ -6,7 +6,7 @@ config.decl @id4.vae.conv1x1_inplace.input_channel_count : %value: index where [
 
 config.decl @id4.vae.conv1x1_inplace.output_channel_count : %value: index where [range(%value, 128, 128)]
 
-kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128") @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128() {
+kernel.def export("id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128") @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
@@ -14,6 +14,12 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded
   %workgroup_count = index.div %pixel_count, %sixteen : index
   kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%thirty_two, %unit, %unit) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %pixel_tile = kernel.workgroup.id<x> : index
+  func.apply<id4.vae.conv1x1_bf16_bf16.inplace_padded.m16n128>(%input, %weight, %output, %pixel_tile) : (buffer, buffer, buffer, index)
+  kernel.return
+}
+
+func.template<id4.vae.conv1x1_bf16_bf16.inplace_padded.m16n128> target(@gfx1100) priority(20) @id4_vae_conv1x1_bf16_wmma_inplace_padded_oc128_gfx1100(%input: buffer, %weight: buffer, %output: buffer, %pixel_tile: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
@@ -25,7 +31,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded
   %ninety_six = index.constant 96 : index
   %one_hundred_twelve = index.constant 112 : index
   %one_hundred_twenty_eight = index.constant 128 : index
-  %pixel_tile = kernel.workgroup.id<x> : index
   %pixel_count = config.get @id4.vae.conv1x1_inplace.pixel_count : index
   %input_channel_count = config.get @id4.vae.conv1x1_inplace.input_channel_count : index
   %output_channel_count = config.get @id4.vae.conv1x1_inplace.output_channel_count : index
@@ -82,5 +87,5 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bf16_wmma_inplace_padded
   vector.fragment.store<result> %result5, %output_view[%pixel_origin, %eighty] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
   vector.fragment.store<result> %result6, %output_view[%pixel_origin, %ninety_six] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
   vector.fragment.store<result> %result7, %output_view[%pixel_origin, %one_hundred_twelve] shape [%m, %n] : vector<8xf32>, view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
-  kernel.return
+  func.return
 }
