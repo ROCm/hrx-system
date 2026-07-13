@@ -4,6 +4,10 @@ config.decl @id4.attention.materialized_wmma.valid_token_count : %value: index w
 
 config.decl @id4.attention.materialized_wmma.padded_token_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
 
+config.decl @id4.attention.materialized_wmma.query_block_offset : %value: index where [range(%value, 0, 131071), mul(%value, 16)]
+
+config.decl @id4.attention.materialized_wmma.query_block_token_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
 config.decl @id4.attention.materialized_wmma.attention_head_count : %value: index where [range(%value, 1, 1024)]
 
 config.decl @id4.attention.materialized_wmma.head_size : %value: index where [range(%value, 16, 1024), mul(%value, 16)]
@@ -12,10 +16,12 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
-  %tile_count = index.div %padded_token_count, %sixteen : index
-  kernel.launch.config workgroups(%tile_count, %tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %query_tile_count = index.div %query_block_token_count, %sixteen : index
+  %key_tile_count = index.div %padded_token_count, %sixteen : index
+  kernel.launch.config workgroups(%query_tile_count, %key_tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %scores: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
@@ -25,15 +31,18 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
   %query_tile = kernel.workgroup.id<x> : index
   %key_tile = kernel.workgroup.id<y> : index
   %query_head = kernel.workgroup.id<z> : index
+  %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
   %head_size = config.get @id4.attention.materialized_wmma.head_size : index
   %hidden_size = index.mul %attention_head_count, %head_size : index
   %head_base = index.mul %query_head, %head_size : index
   %head_tile_count = index.div %head_size, %sixteen : index
-  %query_origin = index.mul %query_tile, %sixteen : index
+  %local_query_origin = index.mul %query_tile, %sixteen : index
+  %query_origin = index.add %query_block_offset, %local_query_origin : index
   %key_origin = index.mul %key_tile, %sixteen : index
-  %score_head_elements = index.mul %padded_token_count, %padded_token_count : index
+  %score_head_elements = index.mul %query_block_token_count, %padded_token_count : index
   %score_head_base = index.mul %query_head, %score_head_elements : index
   %scores_offset = index.scale %score_head_base, %four_bytes : index, offset -> offset
   %m = index.constant 16 : index
@@ -54,7 +63,7 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
   %scores_aligned = buffer.assume.alignment %scores_global {minimum_alignment = 16} : buffer
   %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   %key_transposed_view = buffer.view %key_aligned[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xbf16, %key_transposed_layout>
-  %scores_view = buffer.view %scores_aligned[%scores_offset] : buffer -> view<[%padded_token_count]x[%padded_token_count]xf32, #dense>
+  %scores_view = buffer.view %scores_aligned[%scores_offset] : buffer -> view<[%query_block_token_count]x[%padded_token_count]xf32, #dense>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %raw_scores = scf.for %head_tile = [%zero to %head_tile_count step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %head_tile_offset = index.mul %head_tile, %sixteen : index
@@ -65,29 +74,31 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
     scf.yield %next : vector<8xf32>
   }
   %scaled_scores = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %attention_scale_vector : vector<8xf32>
-  vector.fragment.store<result> %scaled_scores, %scores_view[%query_origin, %key_origin] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%padded_token_count]xf32, #dense>
+  vector.fragment.store<result> %scaled_scores, %scores_view[%local_query_origin, %key_origin] shape [%m, %n] : vector<8xf32>, view<[%query_block_token_count]x[%padded_token_count]xf32, #dense>
   kernel.return
 }
 
 kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16") @id4_attention_softmax_all_heads_f32_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
-  kernel.launch.config workgroups(%padded_token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%query_block_token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%scores: buffer, %probabilities: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %two_bytes = index.constant 2 : offset
   %four_bytes = index.constant 4 : offset
   %workgroup_size_x = index.constant 256 : index
-  %query_token = kernel.workgroup.id<x> : index
+  %local_query_token = kernel.workgroup.id<x> : index
   %query_head = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
   %valid_token_count = config.get @id4.attention.materialized_wmma.valid_token_count : index
+  %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
-  %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
-  %score_head_elements = index.mul %padded_token_count, %padded_token_count : index
+  %query_token = index.add %query_block_offset, %local_query_token : index
+  %score_head_elements = index.mul %query_block_token_count, %padded_token_count : index
   %score_head_base = index.mul %query_head, %score_head_elements : index
   %scores_offset = index.scale %score_head_base, %four_bytes : index, offset -> offset
   %probabilities_offset = index.scale %score_head_base, %two_bytes : index, offset -> offset
@@ -97,14 +108,14 @@ kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16
   %scores_noalias, %probabilities_noalias = buffer.assume.noalias %scores, %probabilities : buffer, buffer
   %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
   %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
-  %scores_view = buffer.view %scores_global[%scores_offset] : buffer -> view<[%padded_token_count]x[%padded_token_count]xf32, #dense>
-  %probabilities_view = buffer.view %probabilities_global[%probabilities_offset] : buffer -> view<[%padded_token_count]x[%padded_token_count]xbf16, #dense>
+  %scores_view = buffer.view %scores_global[%scores_offset] : buffer -> view<[%query_block_token_count]x[%padded_token_count]xf32, #dense>
+  %probabilities_view = buffer.view %probabilities_global[%probabilities_offset] : buffer -> view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense>
   %query_valid = index.cmp ult, %query_token, %valid_token_count : index
   scf.if %query_valid {
     %lane_max = scf.for %key_token = [%lane to %padded_token_count step %workgroup_size_x](%current_max = %negative_large : f32) -> (f32) {
       %key_valid = index.cmp ult, %key_token, %valid_token_count : index
       %score = scf.if %key_valid -> (f32) {
-        %loaded = view.load %scores_view[%query_token, %key_token] : view<[%padded_token_count]x[%padded_token_count]xf32, #dense> -> f32
+        %loaded = view.load %scores_view[%local_query_token, %key_token] : view<[%query_block_token_count]x[%padded_token_count]xf32, #dense> -> f32
         scf.yield %loaded : f32
       } else {
         scf.yield %negative_large : f32
@@ -116,7 +127,7 @@ kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16
     %lane_sum = scf.for %key_token = [%lane to %padded_token_count step %workgroup_size_x](%current_sum = %zero_f32 : f32) -> (f32) {
       %key_valid = index.cmp ult, %key_token, %valid_token_count : index
       %weight = scf.if %key_valid -> (f32) {
-        %score = view.load %scores_view[%query_token, %key_token] : view<[%padded_token_count]x[%padded_token_count]xf32, #dense> -> f32
+        %score = view.load %scores_view[%local_query_token, %key_token] : view<[%query_block_token_count]x[%padded_token_count]xf32, #dense> -> f32
         %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
         %exp = scalar.expf<afn> %centered : f32
         scf.yield %exp : f32
@@ -131,7 +142,7 @@ kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16
     scf.for %key_token = [%lane to %padded_token_count step %workgroup_size_x] {
       %key_valid = index.cmp ult, %key_token, %valid_token_count : index
       %probability = scf.if %key_valid -> (f32) {
-        %score = view.load %scores_view[%query_token, %key_token] : view<[%padded_token_count]x[%padded_token_count]xf32, #dense> -> f32
+        %score = view.load %scores_view[%local_query_token, %key_token] : view<[%query_block_token_count]x[%padded_token_count]xf32, #dense> -> f32
         %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
         %weight = scalar.expf<afn> %centered : f32
         %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight, %inverse_sum : f32
@@ -140,12 +151,12 @@ kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16
         scf.yield %zero_f32 : f32
       }
       %probability_bf16 = scalar.fptrunc %probability : f32 to bf16
-      view.store %probability_bf16, %probabilities_view[%query_token, %key_token] : bf16, view<[%padded_token_count]x[%padded_token_count]xbf16, #dense>
+      view.store %probability_bf16, %probabilities_view[%local_query_token, %key_token] : bf16, view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense>
     }
   } else {
     scf.for %key_token = [%lane to %padded_token_count step %workgroup_size_x] {
       %probability_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
-      view.store %probability_bf16, %probabilities_view[%query_token, %key_token] : bf16, view<[%padded_token_count]x[%padded_token_count]xbf16, #dense>
+      view.store %probability_bf16, %probabilities_view[%local_query_token, %key_token] : bf16, view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense>
     }
   }
   kernel.return
@@ -155,10 +166,10 @@ kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmm
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
-  %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
   %head_size = config.get @id4.attention.materialized_wmma.head_size : index
-  %query_tile_count = index.div %padded_token_count, %sixteen : index
+  %query_tile_count = index.div %query_block_token_count, %sixteen : index
   %channel_tile_count = index.div %head_size, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %channel_tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%probabilities: buffer, %value: buffer, %output: buffer) {
@@ -170,16 +181,19 @@ kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmm
   %query_tile = kernel.workgroup.id<x> : index
   %channel_tile = kernel.workgroup.id<y> : index
   %query_head = kernel.workgroup.id<z> : index
+  %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
+  %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
   %attention_head_count = config.get @id4.attention.materialized_wmma.attention_head_count : index
   %head_size = config.get @id4.attention.materialized_wmma.head_size : index
   %hidden_size = index.mul %attention_head_count, %head_size : index
   %head_base = index.mul %query_head, %head_size : index
-  %query_origin = index.mul %query_tile, %sixteen : index
+  %local_query_origin = index.mul %query_tile, %sixteen : index
+  %query_origin = index.add %query_block_offset, %local_query_origin : index
   %head_channel_offset = index.mul %channel_tile, %sixteen : index
   %channel_origin = index.add %head_base, %head_channel_offset : index
   %key_tile_count = index.div %padded_token_count, %sixteen : index
-  %probability_head_elements = index.mul %padded_token_count, %padded_token_count : index
+  %probability_head_elements = index.mul %query_block_token_count, %padded_token_count : index
   %probability_head_base = index.mul %query_head, %probability_head_elements : index
   %probabilities_offset = index.scale %probability_head_base, %two_bytes : index, offset -> offset
   %m = index.constant 16 : index
@@ -194,13 +208,13 @@ kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmm
   %probabilities_aligned = buffer.assume.alignment %probabilities_global {minimum_alignment = 16} : buffer
   %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
-  %probabilities_view = buffer.view %probabilities_aligned[%probabilities_offset] : buffer -> view<[%padded_token_count]x[%padded_token_count]xbf16, #dense>
+  %probabilities_view = buffer.view %probabilities_aligned[%probabilities_offset] : buffer -> view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense>
   %value_view = buffer.view %value_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = scf.for %key_tile = [%zero to %key_tile_count step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %key_origin = index.mul %key_tile, %sixteen : index
-    %lhs = vector.fragment.load<lhs> %probabilities_view[%query_origin, %key_origin] shape [%m, %k] : view<[%padded_token_count]x[%padded_token_count]xbf16, #dense> -> vector<16xbf16>
+    %lhs = vector.fragment.load<lhs> %probabilities_view[%local_query_origin, %key_origin] shape [%m, %k] : view<[%query_block_token_count]x[%padded_token_count]xbf16, #dense> -> vector<16xbf16>
     %rhs = vector.fragment.load<rhs> %value_view[%key_origin, %channel_origin] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>

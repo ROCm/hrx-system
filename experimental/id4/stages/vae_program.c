@@ -1124,6 +1124,13 @@ static iree_status_t id4_vae_program_build_materialized_attention_wmma_configs(
       token_count));
   IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
       out_config_list,
+      IREE_SV("id4.attention.materialized_wmma.query_block_offset"), 0));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.attention.materialized_wmma.query_block_token_count"),
+      token_count));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
       IREE_SV("id4.attention.materialized_wmma.attention_head_count"),
       attention_head_count));
   return id4_vae_program_config_list_add_u64(

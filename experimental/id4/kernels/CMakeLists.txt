@@ -161,21 +161,6 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    ideogram4_attention_blocked_bf16_wmma_test_module
-  SRCS
-    "testdata/ideogram4/attention_blocked_bf16_wmma.loom"
-  LIBRARIES
-    "ideogram4/attention_blocked_bf16_wmma.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "ideogram4_attention_blocked_bf16_wmma_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
     ideogram4_attention_online_bf16_wmma_test_module
   SRCS
     "testdata/ideogram4/attention_online_bf16_wmma.loom"
@@ -1997,7 +1982,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "elementwise/add_f32.loom"
     "elementwise/cast.loom"
     "ideogram4/adaln_split_f32.loom"
-    "ideogram4/attention_blocked_bf16_wmma.loom"
     "ideogram4/attention_online_bf16_wmma.loom"
     "ideogram4/attention_query_block8_rounded_bf16.loom"
     "ideogram4/attention_query_block8_rounded_f32.loom"
@@ -2132,7 +2116,6 @@ iree_c_embed_data(
     "elementwise/add_f32.loom"
     "elementwise/cast.loom"
     "ideogram4/adaln_split_f32.loom"
-    "ideogram4/attention_blocked_bf16_wmma.loom"
     "ideogram4/attention_online_bf16_wmma.loom"
     "ideogram4/attention_query_block8_rounded_bf16.loom"
     "ideogram4/attention_query_block8_rounded_f32.loom"
@@ -2272,6 +2255,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -2290,6 +2275,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -2308,6 +2295,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -2888,6 +2877,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -2898,18 +2889,18 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_plan_test"
+    "attention_qk_scores_all_heads_bf16_f32_wmma_query_window_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--benchmark=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_query_window"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
+    "--config=id4.attention.materialized_wmma.valid_token_count=32"
+    "--config=id4.attention.materialized_wmma.padded_token_count=32"
+    "--config=id4.attention.materialized_wmma.query_block_offset=16"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
+    "--config=id4.attention.materialized_wmma.attention_head_count=2"
+    "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -2918,38 +2909,18 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_plan_test"
+    "attention_qk_scores_all_heads_bf16_f32_wmma_blocked_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--benchmark=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_blocked_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=32"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=32"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_plan_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -3046,6 +3017,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -3056,38 +3029,18 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_softmax_f32_bf16_small_plan_test"
+    "attention_softmax_all_heads_f32_bf16_blocked_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_softmax_f32_bf16_small"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--benchmark=@id4_attention_softmax_all_heads_f32_bf16_blocked_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_plan_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -3104,6 +3057,8 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -3114,38 +3069,18 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_plan_test"
+    "attention_pv_all_heads_bf16_bf16_wmma_blocked_ideogram4_1024_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_small"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--benchmark=@id4_attention_pv_all_heads_bf16_bf16_wmma_blocked_ideogram4_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_plan_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -14253,6 +14188,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -14275,6 +14212,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -14297,6 +14236,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=16"
     "--config=id4.attention.materialized_wmma.padded_token_count=16"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
     "--config=id4.attention.materialized_wmma.attention_head_count=2"
     "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
@@ -15021,6 +14962,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -15036,17 +14979,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_hal_test"
+    "attention_qk_scores_all_heads_bf16_f32_wmma_query_window_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_small_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--case=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_query_window_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
+    "--config=id4.attention.materialized_wmma.valid_token_count=32"
+    "--config=id4.attention.materialized_wmma.padded_token_count=32"
+    "--config=id4.attention.materialized_wmma.query_block_offset=16"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=16"
+    "--config=id4.attention.materialized_wmma.attention_head_count=2"
+    "--config=id4.attention.materialized_wmma.head_size=16"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -15060,41 +15003,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_hal_test"
+    "attention_qk_scores_all_heads_bf16_f32_wmma_blocked_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_offset_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--case=@id4_attention_qk_scores_all_heads_bf16_f32_wmma_blocked_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=32"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=32"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_hal_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma_zero_1024_shape_case"
-    "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -15211,6 +15130,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -15226,41 +15147,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_softmax_f32_bf16_small_hal_test"
+    "attention_softmax_all_heads_f32_bf16_blocked_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_softmax_f32_bf16_small_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--case=@id4_attention_softmax_all_heads_f32_bf16_blocked_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_hal_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_case"
-    "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -15281,6 +15178,8 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.attention.materialized_wmma.valid_token_count=4096"
     "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=4096"
     "--config=id4.attention.materialized_wmma.attention_head_count=18"
     "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
@@ -15296,41 +15195,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_hal_test"
+    "attention_pv_all_heads_bf16_bf16_wmma_blocked_ideogram4_1024_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_small_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/attention_materialized_bf16_wmma_test_module.loom}}"
+    "--case=@id4_attention_pv_all_heads_bf16_bf16_wmma_blocked_ideogram4_1024_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=16"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=2"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=16"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_hal_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_blocked_bf16_wmma_test_module.loom}}"
-    "--case=@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_case"
-    "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0"
-    "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512"
-    "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18"
-    "--config=id4.ideogram4.attention_blocked_wmma.head_size=256"
+    "--config=id4.attention.materialized_wmma.valid_token_count=4096"
+    "--config=id4.attention.materialized_wmma.padded_token_count=4096"
+    "--config=id4.attention.materialized_wmma.query_block_offset=0"
+    "--config=id4.attention.materialized_wmma.query_block_token_count=512"
+    "--config=id4.attention.materialized_wmma.attention_head_count=18"
+    "--config=id4.attention.materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
   LABELS

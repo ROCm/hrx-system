@@ -754,7 +754,7 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
         builder, probabilities_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         attention_block_shape, &attention_probabilities));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_blocked_qk_scores_bf16_f32_wmma(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_qk_scores_bf16_f32_wmma(
             builder, qk_scores_dispatch_name, total_token_count,
             bf16_token_capacity, query_block_offset, query_block_token_count,
             attention_head_count, head_size, rotated_query, rotated_key,
@@ -762,7 +762,7 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_barrier(builder, after_qk_scores_name));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_blocked_softmax_f32_bf16(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_softmax_f32_bf16(
             builder, softmax_dispatch_name, total_token_count,
             bf16_token_capacity, query_block_offset, query_block_token_count,
             attention_head_count, head_size, attention_scores,
@@ -770,7 +770,7 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_barrier(builder, after_softmax_name));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_blocked_pv_bf16_bf16_wmma(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_pv_bf16_bf16_wmma(
             builder, pv_dispatch_name, total_token_count, bf16_token_capacity,
             query_block_offset, query_block_token_count, attention_head_count,
             head_size, attention_probabilities, value, attention_context));
@@ -1497,10 +1497,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         builder, attention_probabilities_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         attention_matrix_shape, &attention_probabilities));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_qk_scores_all_heads_bf16_f32_wmma(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_qk_scores_bf16_f32_wmma(
             builder, qk_scores_dispatch_name, total_token_count,
-            bf16_token_capacity, attention_head_count, head_size, rotated_query,
-            rotated_key, attention_scores));
+            bf16_token_capacity, 0, bf16_token_capacity, attention_head_count,
+            head_size, rotated_query, rotated_key, attention_scores));
 
     char after_attention_qk_scores_name_buffer
         [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -1514,10 +1514,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
         builder, after_attention_qk_scores_name));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_softmax_all_heads_f32_bf16(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_softmax_f32_bf16(
             builder, softmax_dispatch_name, total_token_count,
-            bf16_token_capacity, attention_head_count, head_size,
-            attention_scores, attention_probabilities));
+            bf16_token_capacity, 0, bf16_token_capacity, attention_head_count,
+            head_size, attention_scores, attention_probabilities));
 
     char after_attention_softmax_name_buffer
         [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -1530,10 +1530,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
         builder, after_attention_softmax_name));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_attention_pv_all_heads_bf16_bf16_wmma(
+        id4_ideogram4_dit_program_dispatch_materialized_attention_pv_bf16_bf16_wmma(
             builder, pv_dispatch_name, total_token_count, bf16_token_capacity,
-            attention_head_count, head_size, attention_probabilities, value,
-            attention_context));
+            0, bf16_token_capacity, attention_head_count, head_size,
+            attention_probabilities, value, attention_context));
   } else if (blocked_wmma_attention) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
