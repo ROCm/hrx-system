@@ -1,5 +1,3 @@
-amdgpu.target<gfx1100> @id4_gfx1100
-
 config.decl @id4.vae.compact_channels.pixel_count : %value: index where [range(%value, 16, 16777216), mul(%value, 16)]
 
 config.decl @id4.vae.compact_channels.input_channel_stride : %value: index where [range(%value, 128, 4096), mul(%value, 8)]
@@ -8,7 +6,7 @@ config.decl @id4.vae.compact_channels.output_channel_count : %value: index where
 
 config.decl @id4.vae.compact_channels.output_element_count : %value: index where [range(%value, 2048, 268435456), mul(%value, 2048)]
 
-kernel.def target(@id4_gfx1100) export("id4_vae_compact_channels_bf16_v8") @id4_vae_compact_channels_bf16_v8() {
+kernel.def export("id4_vae_compact_channels_bf16_v8") @id4_vae_compact_channels_bf16_v8() {
   %unit = index.constant 1 : index
   %eight = index.constant 8 : index
   %two_hundred_fifty_six = index.constant 256 : index
