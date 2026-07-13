@@ -700,6 +700,13 @@ iree_status_t id4_ideogram4_generation_execution_result(
     const id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_result_t* out_result);
 
+// Returns the lowered Qwen inputs retained by |execution|.
+//
+// |out_inputs| receives a borrowed object valid until |execution| is released.
+iree_status_t id4_ideogram4_generation_execution_qwen_inputs(
+    const id4_ideogram4_generation_execution_t* execution,
+    const id4_ideogram4_qwen_inputs_t** out_inputs);
+
 // Finds a captured diagnostic tap retained by |execution|.
 //
 // |out_layout| receives a borrowed tensor layout valid until |execution| is

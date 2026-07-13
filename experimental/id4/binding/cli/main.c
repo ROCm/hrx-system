@@ -136,8 +136,8 @@ IREE_FLAG(string, diagnostic_region_per_dispatch_stages, "",
 IREE_FLAG(string, dump_result_summary, "",
           "Path to write final latent and decoded image F32 summary JSON.");
 IREE_FLAG(string, dump_result_tensors, "",
-          "Directory to write final latent, decoded image, and diagnostic tap "
-          "tensors as id4tensor-v1 files.");
+          "Directory to write lowered generation inputs, final outputs, and "
+          "diagnostic tap tensors as id4tensor-v1 files.");
 IREE_FLAG_LIST(
     string, diagnostic_tap,
     "Stage-qualified diagnostic tap to capture as <stage>:<tap>. Repeat to "
@@ -1083,7 +1083,13 @@ static float id4_cli_load_f32(const uint8_t* bytes) {
   return value;
 }
 
-static iree_status_t id4_cli_load_tensor_element_as_f32(
+static int32_t id4_cli_load_i32(const uint8_t* bytes) {
+  int32_t value = 0;
+  memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+static iree_status_t id4_cli_load_floating_tensor_element(
     id4_pipeline_tensor_dtype_t dtype, const uint8_t* bytes,
     iree_host_size_t index, float* out_value) {
   const iree_device_size_t dtype_byte_length =
@@ -1115,6 +1121,63 @@ static iree_status_t id4_cli_load_tensor_element_as_f32(
   }
 }
 
+static iree_status_t id4_cli_append_tensor_summary_prefix_json(
+    iree_string_builder_t* builder, iree_string_view_t key,
+    const id4_pipeline_tensor_layout_t* layout, iree_host_size_t byte_length,
+    iree_host_size_t element_count) {
+  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, key));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":{"));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "\"dtype\":"));
+  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(
+      builder, id4_pipeline_tensor_dtype_format(layout->dtype)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"shape\":"));
+  IREE_RETURN_IF_ERROR(id4_cli_append_shape_json(builder, layout->shape));
+  return iree_string_builder_append_format(
+      builder, ",\"byte_length\":%" PRIhsz ",\"element_count\":%" PRIhsz,
+      byte_length, element_count);
+}
+
+static iree_status_t id4_cli_append_i32_tensor_summary_json(
+    iree_string_builder_t* builder, iree_string_view_t key,
+    const id4_pipeline_tensor_layout_t* layout, iree_const_byte_span_t bytes,
+    iree_host_size_t element_count) {
+  int32_t minimum = 0;
+  int32_t maximum = 0;
+  long double sum = 0.0;
+  for (iree_host_size_t i = 0; i < element_count; ++i) {
+    const int32_t value = id4_cli_load_i32(bytes.data + i * sizeof(value));
+    if (i == 0) {
+      minimum = value;
+      maximum = value;
+    } else {
+      if (value < minimum) minimum = value;
+      if (value > maximum) maximum = value;
+    }
+    sum += (long double)value;
+  }
+
+  IREE_RETURN_IF_ERROR(id4_cli_append_tensor_summary_prefix_json(
+      builder, key, layout, bytes.data_length, element_count));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder,
+                                        ",\"finite_count\":%" PRIhsz
+                                        ",\"nan_count\":0,\"infinity_count\":0,"
+                                        "\"first_nonfinite_index\":null",
+                                        element_count));
+  if (element_count == 0) {
+    return iree_string_builder_append_cstring(
+        builder,
+        ",\"finite_min\":null,\"finite_max\":null,\"finite_mean\":null}");
+  }
+  return iree_string_builder_append_format(
+      builder,
+      ",\"finite_min\":%" PRId32 ",\"finite_max\":%" PRId32
+      ",\"finite_mean\":%.17g}",
+      minimum, maximum, (double)(sum / (long double)element_count));
+}
+
 static iree_status_t id4_cli_append_tensor_summary_json(
     iree_string_builder_t* builder, iree_string_view_t key,
     const id4_pipeline_tensor_layout_t* layout, iree_const_byte_span_t bytes) {
@@ -1137,6 +1200,10 @@ static iree_status_t id4_cli_append_tensor_summary_json(
   }
   const iree_host_size_t element_count =
       bytes.data_length / (iree_host_size_t)dtype_byte_length;
+  if (layout->dtype == ID4_PIPELINE_TENSOR_DTYPE_I32) {
+    return id4_cli_append_i32_tensor_summary_json(builder, key, layout, bytes,
+                                                  element_count);
+  }
   iree_host_size_t finite_count = 0;
   iree_host_size_t nan_count = 0;
   iree_host_size_t infinity_count = 0;
@@ -1146,7 +1213,7 @@ static iree_status_t id4_cli_append_tensor_summary_json(
   double finite_sum = 0.0;
   for (iree_host_size_t i = 0; i < element_count; ++i) {
     float value = 0.0f;
-    IREE_RETURN_IF_ERROR(id4_cli_load_tensor_element_as_f32(
+    IREE_RETURN_IF_ERROR(id4_cli_load_floating_tensor_element(
         layout->dtype, bytes.data, i, &value));
     if (isfinite(value)) {
       if (finite_count == 0) {
@@ -1170,22 +1237,13 @@ static iree_status_t id4_cli_append_tensor_summary_json(
     }
   }
 
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, key));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":{"));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, "\"dtype\":"));
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(
-      builder, id4_pipeline_tensor_dtype_format(layout->dtype)));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ",\"shape\":"));
-  IREE_RETURN_IF_ERROR(id4_cli_append_shape_json(builder, layout->shape));
+  IREE_RETURN_IF_ERROR(id4_cli_append_tensor_summary_prefix_json(
+      builder, key, layout, bytes.data_length, element_count));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
-      ",\"byte_length\":%" PRIhsz ",\"element_count\":%" PRIhsz
       ",\"finite_count\":%" PRIhsz ",\"nan_count\":%" PRIhsz
       ",\"infinity_count\":%" PRIhsz,
-      bytes.data_length, element_count, finite_count, nan_count,
-      infinity_count));
+      finite_count, nan_count, infinity_count));
   if (first_nonfinite_index == IREE_HOST_SIZE_MAX) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
         builder, ",\"first_nonfinite_index\":null"));
@@ -2624,8 +2682,23 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
           id4_cli_convert_program_shape(summary.diffusion_latent_shape);
       id4_pipeline_tensor_shape_t image_shape =
           id4_cli_convert_program_shape(summary.decoded_image_shape);
+      const id4_ideogram4_qwen_inputs_t* qwen_inputs = NULL;
+      status = id4_ideogram4_generation_execution_qwen_inputs(execution,
+                                                              &qwen_inputs);
+      id4_pipeline_tensor_shape_t qwen_token_ids_shape = {0};
+      qwen_token_ids_shape.rank = 1;
+      qwen_token_ids_shape.dims[0] = qwen_inputs ? qwen_inputs->token_count : 0;
+      iree_host_size_t qwen_token_ids_byte_length = 0;
+      if (iree_status_is_ok(status) &&
+          !iree_host_size_checked_mul(qwen_inputs->token_count,
+                                      sizeof(qwen_inputs->token_ids[0]),
+                                      &qwen_token_ids_byte_length)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "Qwen token ID byte length overflow");
+      }
       iree_host_size_t result_summary_tensor_count = 0;
-      if (!iree_host_size_checked_add(4, diagnostic_taps.request_count,
+      if (iree_status_is_ok(status) &&
+          !iree_host_size_checked_add(5, diagnostic_taps.request_count,
                                       &result_summary_tensor_count)) {
         status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "result summary tensor count overflow");
@@ -2690,6 +2763,19 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
             .bytes = iree_make_const_byte_span(decoded_image_bytes.data,
                                                decoded_image_bytes.length),
         };
+        result_summary_tensors[4] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("qwen_token_ids"),
+            .layout =
+                {
+                    .name = IREE_SV("qwen_token_ids"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_I32,
+                    .shape = qwen_token_ids_shape,
+                    .byte_length = qwen_token_ids_byte_length,
+                    .alignment = 0,
+                },
+            .bytes = iree_make_const_byte_span(qwen_inputs->token_ids,
+                                               qwen_token_ids_byte_length),
+        };
       }
       for (iree_host_size_t i = 0;
            i < diagnostic_taps.request_count && iree_status_is_ok(status);
@@ -2700,7 +2786,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
             execution, diagnostic_taps.requests[i].stage_key,
             diagnostic_taps.requests[i].tap_name, &tap_layout, &tap_binding);
         if (iree_status_is_ok(status)) {
-          result_summary_tensors[4 + i] = (id4_cli_result_tensor_summary_t){
+          result_summary_tensors[5 + i] = (id4_cli_result_tensor_summary_t){
               .key = diagnostic_taps.requests[i].summary_key,
               .layout = *tap_layout,
               .bytes = iree_make_const_byte_span(

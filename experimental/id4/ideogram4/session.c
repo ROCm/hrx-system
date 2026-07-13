@@ -1632,6 +1632,18 @@ iree_status_t id4_ideogram4_generation_execution_result(
   return iree_ok_status();
 }
 
+iree_status_t id4_ideogram4_generation_execution_qwen_inputs(
+    const id4_ideogram4_generation_execution_t* execution,
+    const id4_ideogram4_qwen_inputs_t** out_inputs) {
+  if (!execution || !out_inputs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation execution and Qwen input output are required");
+  }
+  *out_inputs = &execution->qwen_inputs;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_ideogram4_generation_find_diagnostic_tap_plan(
     const id4_pipeline_plan_t* plan, iree_string_view_t tap_name,
     const id4_pipeline_diagnostic_tap_plan_t** out_tap) {
