@@ -14,6 +14,8 @@ config.decl @id4.vae.group_norm.group_element_count : %value: index where [range
 
 config.decl @id4.vae.group_norm.output_element_count : %value: index where [range(%value, 1, 268435456)]
 
+config.decl @id4.vae.group_norm.output_channel_tile_width : %value: index where [range(%value, 4, 16), mul(%value, 4)]
+
 config.decl @id4.vae.group_norm.output_channel_tile_count : %value: index where [range(%value, 1, 1024)]
 
 config.decl @id4.vae.group_norm.output_tile_element_count : %value: index where [range(%value, 1, 67108864)]
@@ -276,7 +278,7 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc4_f32") @id4_vae_group_norm_sil
   kernel.return
 }
 
-kernel.def export("id4_vae_group_norm_silu_ic4_oc4_2d_f32") @id4_vae_group_norm_silu_ic4_oc4_2d_f32() {
+kernel.def export("id4_vae_group_norm_silu_ic4_2d_f32") @id4_vae_group_norm_silu_ic4_2d_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %width = config.get @id4.vae.group_norm.width : index
@@ -297,8 +299,6 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc4_2d_f32") @id4_vae_group_norm_
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
   %pixel_workgroup = kernel.workgroup.id<x> : index
   %channel_tile = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
@@ -311,10 +311,12 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc4_2d_f32") @id4_vae_group_norm_
   %batch_count0 = config.get @id4.vae.group_norm.batch_count : index
   %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
   %output_element_count = config.get @id4.vae.group_norm.output_element_count : index
+  %output_channel_tile_width = config.get @id4.vae.group_norm.output_channel_tile_width : index
   %pixel_count = index.mul %width, %height : index
   %pixel_element_count = index.mul %pixel_count, %batch_count : index
   %pixel_element_index = index.madd %pixel_workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %pixel_element_index, %pixel_element_count : index
+  %tile_width_minus_one = index.sub %output_channel_tile_width, %unit : index
   %input_noalias, %weight_noalias, %bias_noalias, %stats_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %stats, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -331,8 +333,8 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc4_2d_f32") @id4_vae_group_norm_
     %row = index.div %pixel_element_index, %width : index
     %y = index.rem %row, %height : index
     %batch = index.div %row, %height : index
-    %channel = index.mul %channel_tile, %four : index
-    %last_valid_channel = index.sub %channel_count, %three : index
+    %channel = index.mul %channel_tile, %output_channel_tile_width : index
+    %last_valid_channel = index.sub %channel_count, %tile_width_minus_one : index
     %channel_base = index.assume %channel [ge(%channel, 0), lt(%channel, %last_valid_channel)] : index
     %group = index.div %channel_base, %channels_per_group : index
     %input_x_row_base = index.mul %x, %height : index
@@ -341,21 +343,21 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc4_2d_f32") @id4_vae_group_norm_
     %input_channel_element_base = index.add %input_pixel_element_base, %channel_base : index
     %input_batch_element_base = index.mul %input_channel_element_base, %batch_count : index
     %input_element0 = index.add %input_batch_element_base, %batch : index
-    %last_valid_input_element = index.sub %output_element_count, %three : index
+    %last_valid_input_element = index.sub %output_element_count, %tile_width_minus_one : index
     %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %last_valid_input_element)] : index
-    %input_values = vector.load %input_flat_view[%input_element] : view<[%output_element_count]xf32, #dense> -> vector<4xf32>
-    %weight_values = vector.load %weight_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<4xf32>
-    %bias_values = vector.load %bias_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<4xf32>
+    %input_values = vector.load %input_flat_view[%input_element] : view<[%output_element_count]xf32, #dense> -> vector<[%output_channel_tile_width]xf32>
+    %weight_values = vector.load %weight_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<[%output_channel_tile_width]xf32>
+    %bias_values = vector.load %bias_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<[%output_channel_tile_width]xf32>
     %mean = view.load %stats_view[%batch, %group, %zero] : view<[%batch_count]x[%group_count]x2xf32, #dense> -> f32
     %rstd = view.load %stats_view[%batch, %group, %unit] : view<[%batch_count]x[%group_count]x2xf32, #dense> -> f32
-    %mean_values = vector.splat %mean : vector<4xf32>
-    %rstd_values = vector.splat %rstd : vector<4xf32>
-    %delta = vector.subf<reassoc|nnan|ninf|nsz> %input_values, %mean_values : vector<4xf32>
-    %normalized = vector.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %rstd_values : vector<4xf32>
-    %weighted = vector.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_values : vector<4xf32>
-    %biased = vector.addf<reassoc|nnan|ninf|nsz> %weighted, %bias_values : vector<4xf32>
-    %output_value = vector.siluf %biased : vector<4xf32>
-    vector.store %output_value, %output_flat_view[%input_element] : vector<4xf32>, view<[%output_element_count]xf32, #dense>
+    %mean_values = vector.splat %mean : vector<[%output_channel_tile_width]xf32>
+    %rstd_values = vector.splat %rstd : vector<[%output_channel_tile_width]xf32>
+    %delta = vector.subf<reassoc|nnan|ninf|nsz> %input_values, %mean_values : vector<[%output_channel_tile_width]xf32>
+    %normalized = vector.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %rstd_values : vector<[%output_channel_tile_width]xf32>
+    %weighted = vector.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_values : vector<[%output_channel_tile_width]xf32>
+    %biased = vector.addf<reassoc|nnan|ninf|nsz> %weighted, %bias_values : vector<[%output_channel_tile_width]xf32>
+    %output_value = vector.siluf %biased : vector<[%output_channel_tile_width]xf32>
+    vector.store %output_value, %output_flat_view[%input_element] : vector<[%output_channel_tile_width]xf32>, view<[%output_element_count]xf32, #dense>
   }
   kernel.return
 }

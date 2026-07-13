@@ -1646,21 +1646,6 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    vae_group_norm_oc8_f32_test_module
-  SRCS
-    "testdata/vae/group_norm_oc8_f32.loom"
-  LIBRARIES
-    "vae/group_norm_oc8_f32.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "vae_group_norm_oc8_f32_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
     vae_im2col3x3_bf16_test_module
   SRCS
     "testdata/vae/im2col3x3_bf16.loom"
@@ -1670,21 +1655,6 @@ loom_link_module(
     "archive"
   OUTPUT
     "vae_im2col3x3_bf16_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
-    vae_group_norm_oc16_f32_test_module
-  SRCS
-    "testdata/vae/group_norm_oc16_f32.loom"
-  LIBRARIES
-    "vae/group_norm_oc16_f32.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "vae_group_norm_oc16_f32_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -2070,8 +2040,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/group_norm_apply_bf16.loom"
     "vae/group_norm_bf16.loom"
     "vae/group_norm_f32.loom"
-    "vae/group_norm_oc16_f32.loom"
-    "vae/group_norm_oc8_f32.loom"
     "vae/group_norm_silu_conv3x3_bias_bf16.loom"
     "vae/im2col3x3_bf16.loom"
     "vae/pack_conv3x3_weight_f32.loom"
@@ -2203,8 +2171,6 @@ iree_c_embed_data(
     "vae/group_norm_apply_bf16.loom"
     "vae/group_norm_bf16.loom"
     "vae/group_norm_f32.loom"
-    "vae/group_norm_oc16_f32.loom"
-    "vae/group_norm_oc8_f32.loom"
     "vae/group_norm_silu_conv3x3_bias_bf16.loom"
     "vae/im2col3x3_bf16.loom"
     "vae/pack_conv3x3_weight_f32.loom"
@@ -5591,6 +5557,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=4"
     "--config=id4.vae.group_norm.output_element_count=4"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -5603,7 +5570,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5615,6 +5582,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=8"
     "--config=id4.vae.group_norm.output_element_count=8"
+    "--config=id4.vae.group_norm.output_channel_tile_width=8"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -5627,7 +5595,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -5639,6 +5607,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=16"
     "--config=id4.vae.group_norm.output_element_count=16"
+    "--config=id4.vae.group_norm.output_channel_tile_width=16"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -5731,6 +5700,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=262144"
     "--config=id4.vae.group_norm.output_element_count=8388608"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
     "--config=id4.vae.group_norm.output_channel_tile_count=128"
     "--config=id4.vae.group_norm.output_tile_element_count=2097152"
   SRC
@@ -5743,7 +5713,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel"
     "--dry-run"
     "--output-format=jsonl"
@@ -5755,6 +5725,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=131072"
     "--config=id4.vae.group_norm.output_element_count=4194304"
+    "--config=id4.vae.group_norm.output_channel_tile_width=8"
     "--config=id4.vae.group_norm.output_channel_tile_count=32"
     "--config=id4.vae.group_norm.output_tile_element_count=524288"
   SRC
@@ -5767,7 +5738,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--benchmark=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5779,6 +5750,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=262144"
     "--config=id4.vae.group_norm.output_element_count=8388608"
+    "--config=id4.vae.group_norm.output_channel_tile_width=16"
     "--config=id4.vae.group_norm.output_channel_tile_count=32"
     "--config=id4.vae.group_norm.output_tile_element_count=524288"
   SRC
@@ -18252,6 +18224,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=4"
     "--config=id4.vae.group_norm.output_element_count=4"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -18269,7 +18242,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -18280,6 +18253,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=8"
     "--config=id4.vae.group_norm.output_element_count=8"
+    "--config=id4.vae.group_norm.output_channel_tile_width=8"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -18297,7 +18271,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=1"
@@ -18308,6 +18282,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=16"
     "--config=id4.vae.group_norm.output_element_count=16"
+    "--config=id4.vae.group_norm.output_channel_tile_width=16"
     "--config=id4.vae.group_norm.output_channel_tile_count=1"
     "--config=id4.vae.group_norm.output_tile_element_count=1"
   SRC
@@ -18416,6 +18391,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=262144"
     "--config=id4.vae.group_norm.output_element_count=8388608"
+    "--config=id4.vae.group_norm.output_channel_tile_width=4"
     "--config=id4.vae.group_norm.output_channel_tile_count=128"
     "--config=id4.vae.group_norm.output_tile_element_count=2097152"
   SRC
@@ -18433,7 +18409,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc8_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc8_2d_f32_256_channel_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -18444,6 +18420,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=131072"
     "--config=id4.vae.group_norm.output_element_count=4194304"
+    "--config=id4.vae.group_norm.output_channel_tile_width=8"
     "--config=id4.vae.group_norm.output_channel_tile_count=32"
     "--config=id4.vae.group_norm.output_tile_element_count=524288"
   SRC
@@ -18461,7 +18438,7 @@ iree_native_test(
   NAME
     "vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_oc16_f32_test_module.loom}}"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/vae_group_norm_f32_test_module.loom}}"
     "--case=@id4_vae_group_norm_silu_ic4_oc16_2d_f32_flux2_mid_block_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.group_norm.width=128"
@@ -18472,6 +18449,7 @@ iree_native_test(
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=262144"
     "--config=id4.vae.group_norm.output_element_count=8388608"
+    "--config=id4.vae.group_norm.output_channel_tile_width=16"
     "--config=id4.vae.group_norm.output_channel_tile_count=32"
     "--config=id4.vae.group_norm.output_tile_element_count=524288"
   SRC

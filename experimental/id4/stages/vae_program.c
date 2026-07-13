@@ -2313,7 +2313,7 @@ static iree_status_t id4_vae_program_author_group_norm(
       id4_pipeline_program_read(bias),    id4_pipeline_program_read(stats),
       id4_pipeline_program_write(output),
   };
-  iree_string_view_t apply_module_path = IREE_SV("vae/group_norm_f32");
+  const iree_string_view_t apply_module_path = IREE_SV("vae/group_norm_f32");
   iree_string_view_t apply_function_name =
       iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
           ? IREE_SV("id4_vae_group_norm_silu_f32")
@@ -2327,15 +2327,11 @@ static iree_status_t id4_vae_program_author_group_norm(
   if (iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU) &&
       batch_count == 1 && channel_count >= 4 && channel_count % 4 == 0 &&
       channels_per_group % 4 == 0) {
-    apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_oc4_2d_f32");
+    apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_2d_f32");
     apply_output_channel_tile_width = 4;
     if (channels_per_group >= 16 && channels_per_group % 16 == 0) {
-      apply_module_path = IREE_SV("vae/group_norm_oc16_f32");
-      apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_oc16_2d_f32");
       apply_output_channel_tile_width = 16;
     } else if (channels_per_group >= 8 && channels_per_group % 8 == 0) {
-      apply_module_path = IREE_SV("vae/group_norm_oc8_f32");
-      apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_oc8_2d_f32");
       apply_output_channel_tile_width = 8;
     }
     IREE_RETURN_IF_ERROR(id4_vae_program_add_group_norm_apply_tile_configs(
