@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.qwen3_vl.linear_residual_wmma.token_count : %value: index where [range(%value, 1, 65536)]
 
@@ -10,7 +10,7 @@ config.decl @id4.qwen3_vl.linear_residual_wmma.output_size : %value: index where
 
 config.decl @id4.qwen3_vl.linear_residual_wmma.rhs_storage : %value: index where [range(%value, 0, 1)]
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32") @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32() {
+kernel.def export("id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32") @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32() {
   %unit = index.constant 1 : index
   %thirty_two = index.constant 32 : index
   %workgroup_size_x = index.constant 32 : index
@@ -20,6 +20,14 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_residual_bf16_bf16_w
   %row_tile_count = index.div %output_size, %thirty_two : index
   kernel.launch.config workgroups(%token_pair_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %residual: buffer, %output: buffer) {
+  %token_pair = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  func.apply<id4.matrix.linear_residual_bf16_bf16.m32n32>(%input_bf16, %weight, %residual, %output, %token_pair, %row_pair, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_residual_bf16_bf16.m32n32> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_gfx1100(%input_bf16: buffer, %weight: buffer, %residual: buffer, %output: buffer, %token_pair: index, %row_pair: index, %lane: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -28,9 +36,6 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_residual_bf16_bf16_w
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
   %two_fifty_six = index.constant 256 : index
-  %token_pair = kernel.workgroup.id<x> : index
-  %row_pair = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
   %lane_column = index.rem %lane, %sixteen : index
   %lane_group = index.div %lane, %sixteen : index
   %token_count = config.get @id4.qwen3_vl.linear_residual_wmma.token_count : index
@@ -156,5 +161,5 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_residual_bf16_bf16_w
     %output11_bf16 = scalar.fptrunc %output11 : f32 to bf16
     view.store %output11_bf16, %output_view[%token1, %column1] : bf16, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
   }
-  kernel.return
+  func.return
 }
