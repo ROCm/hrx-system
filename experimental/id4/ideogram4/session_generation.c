@@ -6,9 +6,7 @@
 
 #include "experimental/id4/ideogram4/session_generation.h"
 
-#include <float.h>
 #include <inttypes.h>
-#include <math.h>
 
 #include "experimental/id4/stages/ideogram4_decode.h"
 
@@ -252,21 +250,16 @@ iree_status_t id4_ideogram4_validate_generation_request(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 generation request metadata is required");
   }
-  if (request->generation.denoise_step_count == 0) {
+  if (id4_ideogram4_sampler_preset_step_count(
+          request->generation.sampler_preset) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation step count is zero");
+                            "Ideogram 4 generation sampler preset is invalid");
   }
   if (request->generation.latent_width == 0 ||
       request->generation.latent_height == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation latent dimensions must be "
                             "nonzero");
-  }
-  if (!isfinite(request->generation.guidance_scale) ||
-      request->generation.guidance_scale <= 0.0f ||
-      request->generation.guidance_scale > FLT_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation guidance scale is invalid");
   }
   id4_pipeline_program_shape_t latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(request);

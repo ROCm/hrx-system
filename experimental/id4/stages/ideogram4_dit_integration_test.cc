@@ -568,6 +568,7 @@ static iree_status_t PytorchOraclePathForTap(
     iree_string_view_t target_suffix;
   } TapPathAlias;
   static const TapPathAlias kTapPathAliases[] = {
+      {IREE_SV(".attention.qkv_projection.output"), IREE_SV(".attention.qkv")},
       {IREE_SV(".ffn.input"), IREE_SV(".mlp_input")},
       {IREE_SV(".ffn.output"), IREE_SV(".mlp_output")},
       {IREE_SV("final.projected"), IREE_SV("final.raw_output")},
@@ -1524,6 +1525,13 @@ TEST(Ideogram4DitStageIntegration,
       id4::test::Ideogram4DitBranch::kUnconditioned,
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       IREE_SV("ideogram4_dit_fp8_compact_rhs_materialized_unconditioned"));
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueFp8CompactRhsStreamingFixture) {
+  RunFp8CompactRhsFixture(id4::test::Ideogram4DitBranch::kConditioned,
+                          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
+                          IREE_SV("ideogram4_dit_fp8_compact_rhs_streaming"));
 }
 
 TEST(Ideogram4DitStageIntegration, PrepareAndIssueBlockedWmmaAttentionFixture) {

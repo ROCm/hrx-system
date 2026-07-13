@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_ID4_IDEOGRAM4_REQUEST_H_
 #define EXPERIMENTAL_ID4_IDEOGRAM4_REQUEST_H_
 
+#include "experimental/id4/ideogram4/sampling.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
 
@@ -23,18 +24,16 @@ typedef enum id4_ideogram4_request_flag_bits_e {
   ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION = 1u << 0,
 } id4_ideogram4_request_flag_bits_t;
 
-// Full-generation dimensions and sampling parameters parsed from JSON.
+// Full-generation dimensions and sampler selection parsed from JSON.
 typedef struct id4_ideogram4_request_generation_t {
   // Diffusion latent tensor width in latent-token positions.
   uint32_t latent_width;
   // Diffusion latent tensor height in latent-token positions.
   uint32_t latent_height;
-  // Number of denoise steps in the host-controlled sampler loop.
-  uint32_t denoise_step_count;
+  // Advertised sampler preset controlling the complete denoise policy.
+  id4_ideogram4_sampler_preset_t sampler_preset;
   // Request seed used by the deterministic noise producer.
   uint64_t seed;
-  // Text guidance scale consumed by classifier-free guidance.
-  float guidance_scale;
 } id4_ideogram4_request_generation_t;
 
 // Parsed high-level Ideogram 4 generation request.
@@ -63,35 +62,6 @@ typedef struct id4_ideogram4_qwen_inputs_t {
   // Rank-1 F32 token weighting tensor with token_count elements.
   float* token_weights;
 } id4_ideogram4_qwen_inputs_t;
-
-// Number of F32 denoise coefficients consumed by the sampler stage.
-#define ID4_IDEOGRAM4_DENOISE_SCALING_COUNT 3
-
-// Number of F32 sigma values consumed by one Euler sampler step.
-#define ID4_IDEOGRAM4_DENOISE_SIGMA_COUNT 2
-
-// Number of F32 guidance values consumed by the sampler stage.
-#define ID4_IDEOGRAM4_GUIDANCE_VALUE_COUNT 3
-
-// Host-side scalar tensors lowered for one denoise step.
-typedef struct id4_ideogram4_denoise_step_t {
-  // DiT timestep scalar consumed by timestep embedding.
-  float timestep;
-  // Sampler denoise coefficient vector in `{c_skip, c_out, c_in}` order.
-  float scalings[ID4_IDEOGRAM4_DENOISE_SCALING_COUNT];
-  // Euler sigma vector in `{sigma, next_sigma}` order.
-  float sigmas[ID4_IDEOGRAM4_DENOISE_SIGMA_COUNT];
-  // Sampler guidance vector; element 0 is the text CFG scale.
-  float guidance[ID4_IDEOGRAM4_GUIDANCE_VALUE_COUNT];
-} id4_ideogram4_denoise_step_t;
-
-// Host-side denoise schedule lowered from generation metadata.
-typedef struct id4_ideogram4_denoise_schedule_t {
-  // Number of denoise steps in |steps|.
-  uint32_t step_count;
-  // Heap-allocated step table with |step_count| entries.
-  id4_ideogram4_denoise_step_t* steps;
-} id4_ideogram4_denoise_schedule_t;
 
 // Host-side request metadata tensors for one DiT branch.
 typedef struct id4_ideogram4_dit_branch_inputs_t {
@@ -183,12 +153,6 @@ iree_status_t id4_ideogram4_request_count_qwen_tokens(
     const id4_ideogram4_qwen_lowering_options_t* options,
     iree_allocator_t host_allocator, uint32_t* out_token_count);
 
-// Lowers generation metadata into the scalar tensors used by each denoise step.
-iree_status_t id4_ideogram4_request_generation_lower_denoise_schedule(
-    const id4_ideogram4_request_generation_t* generation,
-    iree_allocator_t host_allocator,
-    id4_ideogram4_denoise_schedule_t* out_schedule);
-
 // Lowers generation metadata into the host-side DiT branch metadata tensors.
 iree_status_t id4_ideogram4_request_lower_dit_inputs(
     const id4_ideogram4_dit_lowering_options_t* options,
@@ -201,11 +165,6 @@ void id4_ideogram4_qwen_inputs_deinitialize(id4_ideogram4_qwen_inputs_t* inputs,
 // Releases storage owned by |inputs|.
 void id4_ideogram4_dit_inputs_deinitialize(id4_ideogram4_dit_inputs_t* inputs,
                                            iree_allocator_t host_allocator);
-
-// Releases storage owned by |schedule|.
-void id4_ideogram4_denoise_schedule_deinitialize(
-    id4_ideogram4_denoise_schedule_t* schedule,
-    iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

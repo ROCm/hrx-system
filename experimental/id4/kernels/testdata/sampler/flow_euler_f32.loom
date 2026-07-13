@@ -1,0 +1,61 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+check.case public @id4_sampler_flow_euler_f32_small_case {
+  %conditioned = check.generate.iota offset(1.0) step(1.0) : tensor<257xf32>
+  %unconditioned = check.generate.iota offset(0.0) step(1.0) : tensor<257xf32>
+  %x = check.generate.fill value(10.0) : tensor<257xf32>
+  %step = check.generate.iota offset(0.0) step(0.25) : tensor<3xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<257xf32>
+  %expected = check.generate.iota offset(10.125) step(0.25) : tensor<257xf32>
+  func.call @id4_sampler_flow_euler_f32(%conditioned, %unconditioned, %x, %step, %x_next) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<257xf32>)
+  check.expect.close actual(%x_next) expected(%expected) atol(1.0000000000000001e-05) rtol(9.9999999999999995e-07) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_flow_euler_f32_in_place_case {
+  %conditioned = check.generate.iota offset(1.0) step(1.0) : tensor<257xf32>
+  %unconditioned = check.generate.iota offset(0.0) step(1.0) : tensor<257xf32>
+  %x = check.generate.fill value(10.0) : tensor<257xf32>
+  %step = check.generate.iota offset(0.0) step(0.25) : tensor<3xf32>
+  %expected = check.generate.iota offset(10.125) step(0.25) : tensor<257xf32>
+  func.call @id4_sampler_flow_euler_f32(%conditioned, %unconditioned, %x, %step, %x) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<257xf32>)
+  check.expect.close actual(%x) expected(%expected) atol(1.0000000000000001e-05) rtol(9.9999999999999995e-07) nan(same) : tensor<257xf32>
+  check.return
+}
+
+// Distinguishes the reference gw*pos + (1-gw)*neg evaluation order from the
+// algebraically equivalent neg + gw*(pos-neg) form.
+check.case public @id4_sampler_flow_euler_f32_reference_order_case {
+  %conditioned = check.generate.fill value(-80.283690000000007) : tensor<257xf32>
+  %unconditioned = check.generate.fill value(-29.475866) : tensor<257xf32>
+  %x = check.generate.fill value(0.0) : tensor<257xf32>
+  %step = check.generate.iota offset(0.0) step(1.0) : tensor<3xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<257xf32>
+  %expected = check.generate.fill value(-131.09152) : tensor<257xf32>
+  func.call @id4_sampler_flow_euler_f32(%conditioned, %unconditioned, %x, %step, %x_next) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<257xf32>)
+  check.expect.close actual(%x_next) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_flow_euler_f32_full_latent_case {
+  %conditioned = check.generate.iota offset(1.0) step(1.0) : tensor<524288xf32>
+  %unconditioned = check.generate.iota offset(0.0) step(1.0) : tensor<524288xf32>
+  %x = check.generate.fill value(10.0) : tensor<524288xf32>
+  %step = check.generate.iota offset(0.0) step(0.25) : tensor<3xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<524288xf32>
+  %expected = check.generate.iota offset(10.125) step(0.25) : tensor<524288xf32>
+  func.call @id4_sampler_flow_euler_f32(%conditioned, %unconditioned, %x, %step, %x_next) : (tensor<524288xf32>, tensor<524288xf32>, tensor<524288xf32>, tensor<3xf32>, tensor<524288xf32>)
+  check.expect.close actual(%x_next) expected(%expected) atol(0.125) rtol(9.9999999999999995e-07) nan(same) : tensor<524288xf32>
+  check.return
+}
+
+check.benchmark<@id4_sampler_flow_euler_f32_small_case> @id4_sampler_flow_euler_f32_small
+
+check.benchmark<@id4_sampler_flow_euler_f32_in_place_case> @id4_sampler_flow_euler_f32_in_place
+
+check.benchmark<@id4_sampler_flow_euler_f32_reference_order_case> @id4_sampler_flow_euler_f32_reference_order
+
+check.benchmark<@id4_sampler_flow_euler_f32_full_latent_case> @id4_sampler_flow_euler_f32_full_latent

@@ -11,6 +11,16 @@ check.case public @id4_sampler_noise_f32_small_case {
   check.return
 }
 
+check.case public @id4_sampler_noise_f32_determinism_case {
+  %seed = check.generate.iota offset(20260625) step(-20260625) : tensor<2xi32>
+  %latent0 = check.generate.fill value(0.0) : tensor<16xf32>
+  %latent1 = check.generate.fill value(1.0) : tensor<16xf32>
+  func.call @id4_sampler_noise_f32(%seed, %latent0) : (tensor<2xi32>, tensor<16xf32>)
+  func.call @id4_sampler_noise_f32(%seed, %latent1) : (tensor<2xi32>, tensor<16xf32>)
+  check.expect.close actual(%latent0) expected(%latent1) atol(0.0) rtol(0.0) nan(same) : tensor<16xf32>
+  check.return
+}
+
 check.case public @id4_sampler_noise_f32_full_latent_case {
   %seed = check.generate.iota offset(0) step(1) : tensor<2xi32>
   %latent = check.generate.fill value(0.0) : tensor<524288xf32>
@@ -19,5 +29,7 @@ check.case public @id4_sampler_noise_f32_full_latent_case {
 }
 
 check.benchmark<@id4_sampler_noise_f32_small_case> @id4_sampler_noise_f32_small
+
+check.benchmark<@id4_sampler_noise_f32_determinism_case> @id4_sampler_noise_f32_determinism
 
 check.benchmark<@id4_sampler_noise_f32_full_latent_case> @id4_sampler_noise_f32_full_latent

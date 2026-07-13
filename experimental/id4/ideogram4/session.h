@@ -562,9 +562,7 @@ typedef struct id4_ideogram4_generation_result_t {
   iree_hal_buffer_binding_t conditioned_velocity_binding;
   // Unconditioned DiT velocity binding retained by the execution handle.
   iree_hal_buffer_binding_t unconditioned_velocity_binding;
-  // CFG denoised latent binding retained by the execution handle.
-  iree_hal_buffer_binding_t denoised_latent_binding;
-  // Final Euler latent binding retained by the execution handle.
+  // Final flow-matching latent binding retained by the execution handle.
   iree_hal_buffer_binding_t final_latent_binding;
   // Final decoded RGB image binding owned by the execution handle.
   iree_hal_buffer_binding_t decoded_image_binding;

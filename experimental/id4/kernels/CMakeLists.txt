@@ -1331,30 +1331,15 @@ loom_link_module(
 
 loom_link_module(
   NAME
-    sampler_cfg_denoise_f32_test_module
+    sampler_flow_euler_f32_test_module
   SRCS
-    "testdata/sampler/cfg_denoise_f32.loom"
+    "testdata/sampler/flow_euler_f32.loom"
   LIBRARIES
-    "sampler/cfg_denoise_f32.loom"
+    "sampler/flow_euler_f32.loom"
   MODE
     "archive"
   OUTPUT
-    "sampler_cfg_denoise_f32_test_module.loom"
-  OUTPUT_FORMAT
-    "text"
-)
-
-loom_link_module(
-  NAME
-    sampler_euler_step_f32_test_module
-  SRCS
-    "testdata/sampler/euler_step_f32.loom"
-  LIBRARIES
-    "sampler/euler_step_f32.loom"
-  MODE
-    "archive"
-  OUTPUT
-    "sampler_euler_step_f32_test_module.loom"
+    "sampler_flow_euler_f32_test_module.loom"
   OUTPUT_FORMAT
     "text"
 )
@@ -2020,8 +2005,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/selected_hidden_pack.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "sampler/cfg_denoise_f32.loom"
-    "sampler/euler_step_f32.loom"
+    "sampler/flow_euler_f32.loom"
     "sampler/noise_f32.loom"
     "tensor/transpose_bf16.loom"
     "vae/compact_channels_bf16.loom"
@@ -2151,8 +2135,7 @@ iree_c_embed_data(
     "qwen3_vl/selected_hidden_pack.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "sampler/cfg_denoise_f32.loom"
-    "sampler/euler_step_f32.loom"
+    "sampler/flow_euler_f32.loom"
     "sampler/noise_f32.loom"
     "tensor/transpose_bf16.loom"
     "vae/compact_channels_bf16.loom"
@@ -2909,6 +2892,26 @@ iree_native_test(
     "--config=id4.ideogram4.attention_online_wmma.query_block_offset=0"
     "--config=id4.ideogram4.attention_online_wmma.query_block_token_count=32"
     "--config=id4.ideogram4.attention_online_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_online_wmma.head_size=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_attention_online_bf16_bf16_wmma_dynamic_384_shape_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_dynamic_384_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_online_wmma.valid_token_count=333"
+    "--config=id4.ideogram4.attention_online_wmma.padded_token_count=384"
+    "--config=id4.ideogram4.attention_online_wmma.query_block_offset=0"
+    "--config=id4.ideogram4.attention_online_wmma.query_block_token_count=336"
+    "--config=id4.ideogram4.attention_online_wmma.attention_head_count=18"
     "--config=id4.ideogram4.attention_online_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
@@ -10333,6 +10336,51 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_timestep_embedding_f32_input_range_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_timestep_embedding_f32_input_range"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_timestep_embedding_f32_upper_range_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_timestep_embedding_f32_upper_range"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_timestep_embedding_f32_compute_dtype_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_timestep_embedding_f32_compute_dtype"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_timestep_embedding_f32_ideogram_shape_plan_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
@@ -10420,13 +10468,13 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "sampler_cfg_denoise_f32_small_plan_test"
+    "sampler_flow_euler_f32_small_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
-    "--benchmark=@id4_sampler_cfg_denoise_f32_small"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--benchmark=@id4_sampler_flow_euler_f32_small"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.sampler.element_count=257"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -10435,13 +10483,13 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "sampler_cfg_denoise_f32_full_latent_plan_test"
+    "sampler_flow_euler_f32_in_place_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
-    "--benchmark=@id4_sampler_cfg_denoise_f32_full_latent"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--benchmark=@id4_sampler_flow_euler_f32_in_place"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.sampler.element_count=524288"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -10450,13 +10498,13 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "sampler_euler_step_f32_small_plan_test"
+    "sampler_flow_euler_f32_reference_order_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--benchmark=@id4_sampler_euler_step_f32_small"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--benchmark=@id4_sampler_flow_euler_f32_reference_order"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.sampler.euler_step.element_count=257"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -10465,28 +10513,13 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "sampler_euler_step_f32_in_place_plan_test"
+    "sampler_flow_euler_f32_full_latent_plan_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--benchmark=@id4_sampler_euler_step_f32_in_place"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--benchmark=@id4_sampler_flow_euler_f32_full_latent"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.sampler.euler_step.element_count=257"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "sampler_euler_step_f32_full_latent_plan_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--benchmark=@id4_sampler_euler_step_f32_full_latent"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.sampler.euler_step.element_count=524288"
+    "--config=id4.sampler.flow_euler.element_count=524288"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -10502,6 +10535,29 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.sampler.noise.element_count=8"
+    "--config=id4.sampler.noise.generator_thread_count=256"
+    "--config=id4.sampler.noise.width=1"
+    "--config=id4.sampler.noise.height=1"
+    "--config=id4.sampler.noise.channel_count=8"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "sampler_noise_f32_determinism_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
+    "--benchmark=@id4_sampler_noise_f32_determinism"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.noise.element_count=16"
+    "--config=id4.sampler.noise.generator_thread_count=256"
+    "--config=id4.sampler.noise.width=1"
+    "--config=id4.sampler.noise.height=1"
+    "--config=id4.sampler.noise.channel_count=16"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -10517,6 +10573,10 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.sampler.noise.element_count=524288"
+    "--config=id4.sampler.noise.generator_thread_count=98304"
+    "--config=id4.sampler.noise.width=64"
+    "--config=id4.sampler.noise.height=64"
+    "--config=id4.sampler.noise.channel_count=128"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -15040,6 +15100,30 @@ iree_native_test(
     "--config=id4.ideogram4.attention_online_wmma.query_block_offset=0"
     "--config=id4.ideogram4.attention_online_wmma.query_block_token_count=32"
     "--config=id4.ideogram4.attention_online_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_online_wmma.head_size=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_attention_online_bf16_bf16_wmma_dynamic_384_shape_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_attention_online_bf16_wmma_test_module.loom}}"
+    "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_dynamic_384_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_online_wmma.valid_token_count=333"
+    "--config=id4.ideogram4.attention_online_wmma.padded_token_count=384"
+    "--config=id4.ideogram4.attention_online_wmma.query_block_offset=0"
+    "--config=id4.ideogram4.attention_online_wmma.query_block_token_count=336"
+    "--config=id4.ideogram4.attention_online_wmma.attention_head_count=18"
     "--config=id4.ideogram4.attention_online_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
@@ -23969,6 +24053,63 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_timestep_embedding_f32_input_range_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--case=@id4_ideogram4_timestep_embedding_f32_input_range_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_timestep_embedding_f32_upper_range_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--case=@id4_ideogram4_timestep_embedding_f32_upper_range_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_timestep_embedding_f32_compute_dtype_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
+    "--case=@id4_ideogram4_timestep_embedding_f32_compute_dtype_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.timestep_embedding.embedding_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_timestep_embedding_f32_ideogram_shape_hal_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_timestep_embedding_f32_test_module.loom}}"
@@ -24076,12 +24217,12 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "sampler_cfg_denoise_f32_small_hal_test"
+    "sampler_flow_euler_f32_small_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
-    "--case=@id4_sampler_cfg_denoise_f32_small_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--case=@id4_sampler_flow_euler_f32_small_case"
     "--device=amdgpu://0"
-    "--config=id4.sampler.element_count=257"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -24095,12 +24236,12 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "sampler_cfg_denoise_f32_full_latent_hal_test"
+    "sampler_flow_euler_f32_in_place_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_cfg_denoise_f32_test_module.loom}}"
-    "--case=@id4_sampler_cfg_denoise_f32_full_latent_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--case=@id4_sampler_flow_euler_f32_in_place_case"
     "--device=amdgpu://0"
-    "--config=id4.sampler.element_count=524288"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -24114,12 +24255,12 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "sampler_euler_step_f32_small_hal_test"
+    "sampler_flow_euler_f32_reference_order_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--case=@id4_sampler_euler_step_f32_small_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--case=@id4_sampler_flow_euler_f32_reference_order_case"
     "--device=amdgpu://0"
-    "--config=id4.sampler.euler_step.element_count=257"
+    "--config=id4.sampler.flow_euler.element_count=257"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -24133,31 +24274,12 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "sampler_euler_step_f32_in_place_hal_test"
+    "sampler_flow_euler_f32_full_latent_hal_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--case=@id4_sampler_euler_step_f32_in_place_case"
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_flow_euler_f32_test_module.loom}}"
+    "--case=@id4_sampler_flow_euler_f32_full_latent_case"
     "--device=amdgpu://0"
-    "--config=id4.sampler.euler_step.element_count=257"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "sampler_euler_step_f32_full_latent_hal_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_euler_step_f32_test_module.loom}}"
-    "--case=@id4_sampler_euler_step_f32_full_latent_case"
-    "--device=amdgpu://0"
-    "--config=id4.sampler.euler_step.element_count=524288"
+    "--config=id4.sampler.flow_euler.element_count=524288"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -24177,6 +24299,33 @@ iree_native_test(
     "--case=@id4_sampler_noise_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.noise.element_count=8"
+    "--config=id4.sampler.noise.generator_thread_count=256"
+    "--config=id4.sampler.noise.width=1"
+    "--config=id4.sampler.noise.height=1"
+    "--config=id4.sampler.noise.channel_count=8"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "sampler_noise_f32_determinism_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/sampler_noise_f32_test_module.loom}}"
+    "--case=@id4_sampler_noise_f32_determinism_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.noise.element_count=16"
+    "--config=id4.sampler.noise.generator_thread_count=256"
+    "--config=id4.sampler.noise.width=1"
+    "--config=id4.sampler.noise.height=1"
+    "--config=id4.sampler.noise.channel_count=16"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -24196,6 +24345,10 @@ iree_native_test(
     "--case=@id4_sampler_noise_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.noise.element_count=524288"
+    "--config=id4.sampler.noise.generator_thread_count=98304"
+    "--config=id4.sampler.noise.width=64"
+    "--config=id4.sampler.noise.height=64"
+    "--config=id4.sampler.noise.channel_count=128"
   SRC
     loom::tools::iree-test-loom
   LABELS

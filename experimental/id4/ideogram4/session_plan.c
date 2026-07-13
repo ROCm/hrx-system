@@ -450,8 +450,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
         &plan->summary.unconditioned_dit_token_capacity);
   }
   if (iree_status_is_ok(status)) {
-    plan->summary.denoise_step_count =
-        options->request->generation.denoise_step_count;
+    plan->summary.denoise_step_count = id4_ideogram4_sampler_preset_step_count(
+        options->request->generation.sampler_preset);
     plan->summary.decoded_image_shape =
         id4_ideogram4_generation_decoded_image_shape(
             session->decode_model, plan->summary.diffusion_latent_shape);

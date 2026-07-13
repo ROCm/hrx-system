@@ -25,7 +25,7 @@ DEFAULT_ID4_BINARY = Path("bazel-bin/experimental/id4/binding/cli/id4")
 DEFAULT_GENERATION_RESIDENCY = "memory_budgeted"
 DEFAULT_GENERATION_RESIDENCY_BUDGET = 32 * 1024 * 1024 * 1024
 DEFAULT_GENERATION_ISSUE_MODE = "stage_serial"
-DEFAULT_PARAMETER_LOAD_PREFETCH_REGION_DISTANCE = 2
+DEFAULT_PARAMETER_LOAD_PREFETCH_SEGMENT_DISTANCE = 2
 DEFAULT_GENERATION_RESIDENT_STAGE_BUNDLES = (
     "qwen,dit_conditioned,dit_unconditioned,decode"
 )
@@ -227,28 +227,38 @@ PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (
     "target_byte_length",
 )
 
-PLAN_PARAMETER_WINDOW_STATISTIC_FIELDS = (
-    "concurrent_window_count",
-    "window_count",
+PLAN_PARAMETER_RESIDENCY_LIVE_STATISTIC_FIELDS = (
+    "concurrent_segment_count",
+    "segment_count",
     "full_slab_target_byte_length",
     "peak_target_byte_length",
     "encoder_staging_byte_length",
     "peak_live_byte_length",
     "peak_source_transfer_byte_length",
-    "total_target_byte_length",
+    "total_target_traffic_byte_length",
     "total_source_transfer_byte_length",
     "peak_load_group_count",
     "total_load_group_count",
     "peak_encode_load_step_count",
     "total_encode_load_step_count",
-    "largest_load_group_target_byte_length",
-    "largest_request_target_byte_length",
 )
 
-PLAN_PARAMETER_WINDOW_OPTIONAL_INTEGER_FIELDS = (
-    "largest_load_group_index",
-    "largest_request_index",
-    "largest_request_load_group_index",
+PLAN_PARAMETER_RESIDENCY_SEGMENT_PLAN_FIELDS = (
+    "semantic_region_count",
+    "segment_count",
+    "maximum_target_byte_length",
+    "resident_target_byte_length",
+    "peak_segment_target_byte_length",
+    "peak_encoder_staging_byte_length",
+    "peak_segment_live_byte_length",
+    "unique_target_byte_length",
+    "unique_source_transfer_byte_length",
+    "total_target_byte_length",
+    "total_source_transfer_byte_length",
+    "duplicated_target_byte_length",
+    "duplicated_source_transfer_byte_length",
+    "total_load_group_count",
+    "total_encode_load_step_count",
 )
 
 PROFILE_TOP_ROW_COUNT = 20
@@ -270,7 +280,6 @@ PROFILE_QUEUE_RE = re.compile(
 RESULT_SUMMARY_REQUIRED_TENSORS = (
     "conditioned_velocity",
     "unconditioned_velocity",
-    "denoised_latent",
     "final_latent",
     "decoded_image",
 )
@@ -292,13 +301,17 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--parameters", action="append", required=True)
     parser.add_argument(
+        "--generation_parameter_source",
+        default="checkpoint",
+        choices=("checkpoint", "execution_layout"),
+    )
+    parser.add_argument(
         "--request_json_file", help="Path to a full request JSON object to run."
     )
     parser.add_argument("--latent_width", type=int, default=8)
     parser.add_argument("--latent_height", type=int, default=8)
-    parser.add_argument("--denoise_steps", type=int, default=20)
+    parser.add_argument("--sampler", default="V4_DEFAULT_20")
     parser.add_argument("--seed", type=int, default=20260625)
-    parser.add_argument("--guidance_scale", type=float, default=3.5)
     parser.add_argument(
         "--dit_parameter_format",
         default="fp8_e4m3",
@@ -314,16 +327,17 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dit_weight_execution_format",
-        default="bf16_resident",
+        default="fp8_compact_rhs",
         choices=(
             "bf16_resident",
-            "fp8_direct",
-            "fp8_direct_feed_forward_bf16_resident",
+            "fp8_compact_rhs",
+            "fp8_compact_rhs_feed_forward_bf16_resident",
+            "streaming_compact_rhs",
         ),
     )
     parser.add_argument(
         "--qwen_weight_execution_strategy",
-        default="hybrid_compact_rhs",
+        default="compact_rhs",
         choices=(
             "row_major",
             "compact_rhs",
@@ -343,7 +357,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dit_feed_forward_implementation",
-        default="fused_product",
+        default="pytorch_parity",
         choices=("fused_product", "pytorch_parity"),
     )
     parser.add_argument(
@@ -369,11 +383,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         choices=("full", "phases", "stage_serial"),
     )
     parser.add_argument(
-        "--parameter_load_prefetch_region_distance",
+        "--parameter_load_prefetch_segment_distance",
         type=non_negative_integer,
-        default=DEFAULT_PARAMETER_LOAD_PREFETCH_REGION_DISTANCE,
+        default=DEFAULT_PARAMETER_LOAD_PREFETCH_SEGMENT_DISTANCE,
         help=(
-            "Number of plan regions ahead of execution to prefetch parameter "
+            "Number of plan segments ahead of execution to prefetch parameter "
             "load groups."
         ),
     )
@@ -417,9 +431,8 @@ def validate_request_payload(request: dict[str, Any]) -> None:
     for field_name in (
         "latent_width",
         "latent_height",
-        "denoise_steps",
+        "sampler",
         "seed",
-        "guidance_scale",
     ):
         if field_name not in generation:
             raise SmokeTestError(
@@ -441,9 +454,8 @@ def load_request(args: argparse.Namespace) -> dict[str, Any]:
         "generation": {
             "latent_width": args.latent_width,
             "latent_height": args.latent_height,
-            "denoise_steps": args.denoise_steps,
+            "sampler": args.sampler,
             "seed": args.seed,
-            "guidance_scale": args.guidance_scale,
         },
     }
     validate_request_payload(request)
@@ -493,20 +505,6 @@ def _copy_integer_fields(
         field_name: _require_int(value.get(field_name), f"{context}.{field_name}")
         for field_name in field_names
     }
-
-
-def _copy_optional_integer_fields(
-    value: dict[str, Any], field_names: tuple[str, ...], context: str
-) -> dict[str, int | None]:
-    fields: dict[str, int | None] = {}
-    for field_name in field_names:
-        field_value = value.get(field_name)
-        fields[field_name] = (
-            None
-            if field_value is None
-            else _require_int(field_value, f"{context}.{field_name}")
-        )
-    return fields
 
 
 def _summarize_shape(value: Any, context: str) -> dict[str, Any]:
@@ -605,30 +603,42 @@ def _summarize_generation_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS,
                 load_kind_context,
             )
-        stage_summaries[stage_key]["parameter_window_statistics"] = []
-        for window_index, window in enumerate(
-            _require_list(
-                stage_object.get("parameter_window_statistics"),
-                f"{stage_context}.parameter_window_statistics",
-            )
-        ):
-            window_context = (
-                f"{stage_context}.parameter_window_statistics[{window_index}]"
-            )
-            window_object = _require_object(window, window_context)
-            window_summary: dict[str, int | None] = _copy_integer_fields(
-                window_object, PLAN_PARAMETER_WINDOW_STATISTIC_FIELDS, window_context
-            )
-            window_summary.update(
-                _copy_optional_integer_fields(
-                    window_object,
-                    PLAN_PARAMETER_WINDOW_OPTIONAL_INTEGER_FIELDS,
-                    window_context,
-                )
-            )
-            stage_summaries[stage_key]["parameter_window_statistics"].append(
-                window_summary
-            )
+        parameter_residency = stage_object.get("parameter_residency")
+        if parameter_residency is None:
+            stage_summaries[stage_key]["parameter_residency"] = None
+        else:
+            residency_context = f"{stage_context}.parameter_residency"
+            residency_object = _require_object(parameter_residency, residency_context)
+            live_context = f"{residency_context}.live_statistics"
+            segment_context = f"{residency_context}.segment_plan"
+            stage_summaries[stage_key]["parameter_residency"] = {
+                "source_kind": _require_string(
+                    residency_object.get("source_kind"),
+                    f"{residency_context}.source_kind",
+                ),
+                "maximum_target_byte_length": _require_int(
+                    residency_object.get("maximum_target_byte_length"),
+                    f"{residency_context}.maximum_target_byte_length",
+                ),
+                "parameter_load_prefetch_segment_distance": _require_int(
+                    residency_object.get("parameter_load_prefetch_segment_distance"),
+                    f"{residency_context}.parameter_load_prefetch_segment_distance",
+                ),
+                "live_statistics": _copy_integer_fields(
+                    _require_object(
+                        residency_object.get("live_statistics"), live_context
+                    ),
+                    PLAN_PARAMETER_RESIDENCY_LIVE_STATISTIC_FIELDS,
+                    live_context,
+                ),
+                "segment_plan": _copy_integer_fields(
+                    _require_object(
+                        residency_object.get("segment_plan"), segment_context
+                    ),
+                    PLAN_PARAMETER_RESIDENCY_SEGMENT_PLAN_FIELDS,
+                    segment_context,
+                ),
+            }
 
     return {
         "summary": plan_summary,
@@ -823,6 +833,7 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--tokenizer={args.tokenizer}",
         f"--prompt_json_file={artifact_dir / 'request.json'}",
         f"--output={artifact_dir / 'image.ppm'}",
+        f"--generation_parameter_source={args.generation_parameter_source}",
         f"--dit_parameter_format={args.dit_parameter_format}",
         f"--dit_activation_format={args.dit_activation_format}",
         f"--dit_weight_execution_format={args.dit_weight_execution_format}",
@@ -832,8 +843,8 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--generation_residency={args.generation_residency}",
         f"--generation_issue_mode={args.generation_issue_mode}",
-        "--parameter_load_prefetch_region_distance="
-        f"{args.parameter_load_prefetch_region_distance}",
+        "--parameter_load_prefetch_segment_distance="
+        f"{args.parameter_load_prefetch_segment_distance}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",

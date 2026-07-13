@@ -103,9 +103,31 @@ static iree_status_t id4_sampler_program_validate_noise_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "sampler program builder is required");
   }
-  return id4_sampler_program_request_element_count(
+  IREE_RETURN_IF_ERROR(id4_sampler_program_request_element_count(
       options->request.latent_shape, ID4_SAMPLER_NOISE_MAX_ELEMENT_COUNT,
-      IREE_SV("sampler noise"), out_element_count);
+      IREE_SV("sampler noise"), out_element_count));
+  const id4_pipeline_program_shape_t latent_shape =
+      options->request.latent_shape;
+  if (latent_shape.rank != 4 || latent_shape.dims[0] == 0 ||
+      latent_shape.dims[1] == 0 || latent_shape.dims[2] < 4 ||
+      latent_shape.dims[2] % 4 != 0 || latent_shape.dims[3] != 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "sampler noise latent shape must be nonempty "
+        "[width, height, patch channels, 1] with channels divisible by 4");
+  }
+  if (options->request.generator_thread_count == 0 ||
+      options->request.generator_thread_count >
+          iree_align_uint64(*out_element_count, 256) ||
+      options->request.generator_thread_count % 256 != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "sampler noise generator thread count %" PRIu64
+        " must be a nonzero multiple of 256 no larger than the rounded "
+        "element count",
+        options->request.generator_thread_count);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_sampler_program_import_tensor(
@@ -124,28 +146,6 @@ static iree_status_t id4_sampler_program_import_tensor(
   return id4_pipeline_program_import_tensor(builder, &options, out_tensor);
 }
 
-static iree_status_t id4_sampler_program_acquire_tensor(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    id4_pipeline_program_shape_t shape,
-    id4_pipeline_program_tensor_t* out_tensor) {
-  id4_pipeline_program_acquire_tensor_options_t options;
-  memset(&options, 0, sizeof(options));
-  options.structure_size = sizeof(options);
-  options.name = name;
-  options.dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32;
-  options.shape = shape;
-  return id4_pipeline_program_acquire_tensor(builder, &options, out_tensor);
-}
-
-static iree_status_t id4_sampler_program_barrier(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
-  id4_pipeline_program_barrier_options_t options;
-  memset(&options, 0, sizeof(options));
-  options.structure_size = sizeof(options);
-  options.name = name;
-  return id4_pipeline_program_barrier(builder, &options);
-}
-
 iree_status_t id4_sampler_program_author_denoise_step(
     const id4_sampler_denoise_program_options_t* options,
     id4_pipeline_program_builder_t* builder) {
@@ -153,8 +153,6 @@ iree_status_t id4_sampler_program_author_denoise_step(
   IREE_RETURN_IF_ERROR(id4_sampler_program_validate_denoise_options(
       options, builder, &element_count));
 
-  const iree_string_view_t guided_pred_name = IREE_SV("guided_pred");
-  const iree_string_view_t denoised_name = IREE_SV("denoised");
   const iree_string_view_t x_next_name = IREE_SV("x_next");
 
   id4_pipeline_program_tensor_t cond_out =
@@ -174,33 +172,11 @@ iree_status_t id4_sampler_program_author_denoise_step(
       builder, IREE_SV("x_t"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       options->request.latent_shape, &x_t));
-  id4_pipeline_program_tensor_t scalings =
-      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_tensor_t step = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, IREE_SV("scalings"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      builder, IREE_SV("step"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
-      id4_pipeline_program_make_shape_rank1(3), &scalings));
-  id4_pipeline_program_tensor_t sigmas = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, IREE_SV("sigmas"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
-      id4_pipeline_program_make_shape_rank1(2), &sigmas));
-  id4_pipeline_program_tensor_t guidance =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, IREE_SV("guidance"), ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
-      id4_pipeline_program_make_shape_rank1(3), &guidance));
-
-  id4_pipeline_program_tensor_t guided_pred =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_sampler_program_acquire_tensor(
-      builder, guided_pred_name, options->request.latent_shape, &guided_pred));
-  id4_pipeline_program_tensor_t denoised =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, denoised_name, ID4_PIPELINE_PROGRAM_DTYPE_F32, 0,
-      options->request.latent_shape, &denoised));
+      id4_pipeline_program_make_shape_rank1(3), &step));
   id4_pipeline_program_tensor_t x_next = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
       builder, x_next_name, ID4_PIPELINE_PROGRAM_DTYPE_F32, 0,
@@ -211,76 +187,33 @@ iree_status_t id4_sampler_program_author_denoise_step(
   IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
       element_count, element_count_buffer, IREE_ARRAYSIZE(element_count_buffer),
       &element_count_string));
-  id4_pipeline_kernel_config_binding_t denoise_config_bindings[] = {
+  id4_pipeline_kernel_config_binding_t config_bindings[] = {
       id4_pipeline_make_kernel_config_binding(
-          IREE_SV("id4.sampler.element_count"), element_count_string),
+          IREE_SV("id4.sampler.flow_euler.element_count"),
+          element_count_string),
   };
-  id4_pipeline_program_dispatch_binding_t denoise_bindings[] = {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(cond_out),
       id4_pipeline_program_read(uncond_out),
       id4_pipeline_program_read(x_t),
-      id4_pipeline_program_read(scalings),
-      id4_pipeline_program_read(guidance),
-      id4_pipeline_program_write(guided_pred),
-      id4_pipeline_program_write(denoised),
+      id4_pipeline_program_read(step),
+      id4_pipeline_program_write(x_next),
   };
 
   id4_pipeline_program_dispatch_loom_options_t dispatch_options;
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
-  dispatch_options.name = IREE_SV("sampler.denoise_step.cfg_denoise");
-  dispatch_options.kernel =
-      id4_pipeline_make_kernel_ref(IREE_SV("sampler/cfg_denoise_f32"),
-                                   IREE_SV("id4_sampler_cfg_denoise_f32"));
-  dispatch_options.config_binding_count =
-      IREE_ARRAYSIZE(denoise_config_bindings);
-  dispatch_options.config_bindings = denoise_config_bindings;
-  dispatch_options.binding_count = IREE_ARRAYSIZE(denoise_bindings);
-  dispatch_options.bindings = denoise_bindings;
-  IREE_RETURN_IF_ERROR(
-      id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
-
-  IREE_RETURN_IF_ERROR(id4_sampler_program_barrier(
-      builder, IREE_SV("sampler.denoise_step.after_cfg_denoise")));
-
-  id4_pipeline_kernel_config_binding_t euler_config_bindings[] = {
-      id4_pipeline_make_kernel_config_binding(
-          IREE_SV("id4.sampler.euler_step.element_count"),
-          element_count_string),
-  };
-  id4_pipeline_program_dispatch_binding_t euler_bindings[] = {
-      id4_pipeline_program_read(x_t),
-      id4_pipeline_program_read(denoised),
-      id4_pipeline_program_read(sigmas),
-      id4_pipeline_program_write(x_next),
-  };
-
-  memset(&dispatch_options, 0, sizeof(dispatch_options));
-  dispatch_options.structure_size = sizeof(dispatch_options);
-  dispatch_options.name = IREE_SV("sampler.denoise_step.euler_step");
+  dispatch_options.name = IREE_SV("sampler.denoise_step.flow_euler");
   dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("sampler/euler_step_f32"), IREE_SV("id4_sampler_euler_step_f32"));
-  dispatch_options.config_binding_count = IREE_ARRAYSIZE(euler_config_bindings);
-  dispatch_options.config_bindings = euler_config_bindings;
-  dispatch_options.binding_count = IREE_ARRAYSIZE(euler_bindings);
-  dispatch_options.bindings = euler_bindings;
+      IREE_SV("sampler/flow_euler_f32"), IREE_SV("id4_sampler_flow_euler_f32"));
+  dispatch_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
+  dispatch_options.config_bindings = config_bindings;
+  dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
+  dispatch_options.bindings = bindings;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
-
-  id4_pipeline_program_tap_options_t tap_options;
-  memset(&tap_options, 0, sizeof(tap_options));
-  tap_options.structure_size = sizeof(tap_options);
-  tap_options.name = guided_pred_name;
-  tap_options.tensor = guided_pred;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_tap(builder, &tap_options));
 
   id4_pipeline_program_export_options_t export_options;
-  memset(&export_options, 0, sizeof(export_options));
-  export_options.structure_size = sizeof(export_options);
-  export_options.name = denoised_name;
-  export_options.tensor = denoised;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_export(builder, &export_options));
-
   memset(&export_options, 0, sizeof(export_options));
   export_options.structure_size = sizeof(export_options);
   export_options.name = x_next_name;
@@ -310,9 +243,39 @@ iree_status_t id4_sampler_program_author_noise(
   IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
       element_count, element_count_buffer, IREE_ARRAYSIZE(element_count_buffer),
       &element_count_string));
+  char generator_thread_count_buffer[ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY];
+  iree_string_view_t generator_thread_count_string = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
+      options->request.generator_thread_count, generator_thread_count_buffer,
+      IREE_ARRAYSIZE(generator_thread_count_buffer),
+      &generator_thread_count_string));
+  char width_buffer[ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY];
+  iree_string_view_t width_string = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
+      options->request.latent_shape.dims[0], width_buffer,
+      IREE_ARRAYSIZE(width_buffer), &width_string));
+  char height_buffer[ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY];
+  iree_string_view_t height_string = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
+      options->request.latent_shape.dims[1], height_buffer,
+      IREE_ARRAYSIZE(height_buffer), &height_string));
+  char channel_count_buffer[ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY];
+  iree_string_view_t channel_count_string = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
+      options->request.latent_shape.dims[2], channel_count_buffer,
+      IREE_ARRAYSIZE(channel_count_buffer), &channel_count_string));
   id4_pipeline_kernel_config_binding_t config_bindings[] = {
       id4_pipeline_make_kernel_config_binding(
           IREE_SV("id4.sampler.noise.element_count"), element_count_string),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.sampler.noise.generator_thread_count"),
+          generator_thread_count_string),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.sampler.noise.width"), width_string),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.sampler.noise.height"), height_string),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.sampler.noise.channel_count"), channel_count_string),
   };
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(seed),

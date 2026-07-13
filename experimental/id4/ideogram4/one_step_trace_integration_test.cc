@@ -38,10 +38,11 @@ IREE_FLAG(string, id4_capture_dir, "",
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving planned stage JSON files.");
 IREE_FLAG(int32_t, id4_step_count, 1,
-          "Number of Euler denoise steps to run. Values greater than one run "
-          "a smoke path without one-step fixture comparisons.");
-IREE_FLAG(string, id4_reference_mode, "none",
-          "Reference comparison mode: none or bf16_fixture.");
+          "Number of leading denoise steps from the selected sampler to run.");
+IREE_FLAG(int32_t, id4_start_step, 1,
+          "One-based chronological denoise step to execute first.");
+IREE_FLAG(string, id4_sampler, "V4_DEFAULT_20",
+          "Advertised sampler preset supplying the denoise schedule.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -56,11 +57,6 @@ constexpr uint8_t kOutputSentinel = 0xA5;
 using ParameterProviderRef =
     id4::test::OwningRef<iree_io_parameter_provider_t,
                          iree_io_parameter_provider_release>;
-
-enum class ReferenceMode {
-  kNone,
-  kBf16Fixture,
-};
 
 class RetainedHalFiles {
  public:
@@ -126,6 +122,14 @@ static std::string JoinPath(iree_string_view_t directory,
   return path;
 }
 
+static std::string StepCaptureName(iree_string_view_t prefix,
+                                   uint32_t step_ordinal) {
+  std::string name(prefix.data, prefix.size);
+  name.append("_step_");
+  name.append(std::to_string(step_ordinal + 1));
+  return name;
+}
+
 static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan,
                                               iree_string_view_t file_name) {
   iree_string_view_t output_dir =
@@ -153,22 +157,6 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
-}
-
-static iree_status_t ParseReferenceMode(ReferenceMode* out_mode) {
-  const iree_string_view_t value =
-      iree_make_cstring_view(FLAG_id4_reference_mode);
-  if (iree_string_view_equal(value, IREE_SV("none"))) {
-    *out_mode = ReferenceMode::kNone;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("bf16_fixture"))) {
-    *out_mode = ReferenceMode::kBf16Fixture;
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "unsupported --id4_reference_mode `%.*s`",
-                          static_cast<int>(value.size), value.data);
 }
 
 static iree_string_view_t Fp8ParameterScopeForRequest(
@@ -344,43 +332,6 @@ static iree_status_t ReplaceBoundaryBinding(
   return iree_ok_status();
 }
 
-static iree_status_t CompareBoundaryWithFixture(
-    iree_hal_device_t* device, const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& binding_set,
-    iree_string_view_t boundary_name,
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t fixture_stage, iree_string_view_t fixture_name,
-    iree_hal_semaphore_list_t wait_list) {
-  iree_hal_buffer_binding_t binding = {};
-  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(plan, binding_set,
-                                                      boundary_name, &binding));
-  const id4::test::FixtureTensor* expected_tensor = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
-                                         fixture_stage, fixture_name,
-                                         &expected_tensor));
-  return id4::test::CompareF32BindingWithFixtureTensor(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, wait_list,
-      *expected_tensor);
-}
-
-static iree_status_t CompareDiagnosticTapWithFixture(
-    iree_hal_device_t* device, const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& binding_set, iree_string_view_t tap_name,
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t fixture_stage, iree_string_view_t fixture_name,
-    iree_hal_semaphore_list_t wait_list) {
-  iree_hal_buffer_binding_t binding = {};
-  IREE_RETURN_IF_ERROR(id4::test::FindDiagnosticTapBinding(plan, binding_set,
-                                                           tap_name, &binding));
-  const id4::test::FixtureTensor* expected_tensor = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
-                                         fixture_stage, fixture_name,
-                                         &expected_tensor));
-  return id4::test::CompareF32BindingWithFixtureTensor(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, wait_list,
-      *expected_tensor);
-}
-
 static iree_status_t ConfigureDitRequestFromFixture(
     const id4::test::FixtureTensorSet& fixture_tensors,
     iree_string_view_t fixture_stage,
@@ -541,6 +492,7 @@ static iree_status_t CreateDitParameterProviderFromFlags(
 
 static iree_status_t PlanDitStage(
     id4_pipeline_stage_t* stage, id4_ideogram4_dit_request_config_t request,
+    id4_ideogram4_dit_weight_execution_format_t weight_execution_format,
     iree_string_view_list_t diagnostic_tap_names,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_pipeline_plan_t** out_plan) {
@@ -550,10 +502,9 @@ static iree_status_t PlanDitStage(
   dit_options.request = request;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  dit_options.weight_execution_format =
-      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
+  dit_options.weight_execution_format = weight_execution_format;
   dit_options.attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   dit_options.feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
 
@@ -580,16 +531,10 @@ static iree_status_t PlanSamplerStage(
   sampler_options.structure_size = sizeof(sampler_options);
   sampler_options.request.latent_shape = latent_shape;
 
-  const iree_string_view_t diagnostic_tap_names[] = {IREE_SV("guided_pred")};
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &sampler_options;
-  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
-  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
-      IREE_ARRAYSIZE(diagnostic_tap_names),
-      diagnostic_tap_names,
-  };
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = diagnostics_sink;
@@ -607,7 +552,7 @@ static iree_status_t PlanDecodeStage(
   decode_options.request.diffusion_latent_shape = diffusion_latent_shape;
   decode_options.request.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   decode_options.request.vae_attention_implementation =
-      ID4_VAE_ATTENTION_IMPLEMENTATION_MATERIALIZED;
+      ID4_VAE_ATTENTION_IMPLEMENTATION_ONLINE;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -621,7 +566,7 @@ static iree_status_t PlanDecodeStage(
 
 static iree_status_t PrepareStage(
     id4_pipeline_stage_t* stage, const id4_pipeline_plan_t* plan,
-    iree_io_parameter_provider_t* parameter_provider,
+    id4_pipeline_stage_parameter_policy_t parameter_policy,
     id4_pipeline_kernel_library_t* kernel_library,
     iree_hal_semaphore_list_t wait_list, iree_hal_semaphore_list_t signal_list,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
@@ -629,10 +574,7 @@ static iree_status_t PrepareStage(
   id4_pipeline_stage_prepare_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.parameter_policy = id4_pipeline_stage_parameters(
-      id4_pipeline_checkpoint_parameter_source(parameter_provider),
-      ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
-      /*maximum_parameter_window_byte_length=*/0);
+  options.parameter_policy = parameter_policy;
   options.kernel_library = kernel_library;
   options.wait_semaphore_list = wait_list;
   options.signal_semaphore_list = signal_list;
@@ -749,27 +691,6 @@ static iree_status_t MaybeWriteDecodedImage(
   return id4_tooling_write_f32_rgb_ppm(&options);
 }
 
-static iree_status_t LoadFixtureF32Vector(
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t stage, iree_string_view_t name,
-    iree_host_size_t element_count, std::vector<float>* out_values) {
-  const id4::test::FixtureTensor* tensor = nullptr;
-  IREE_RETURN_IF_ERROR(
-      FindFixtureInputTensor(fixture_tensors, stage, name, &tensor));
-  if (tensor->dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
-      tensor->payload.size() != element_count * sizeof(float)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "fixture tensor `%.*s/%.*s` is not the expected f32 vector",
-        static_cast<int>(stage.size), stage.data, static_cast<int>(name.size),
-        name.data);
-  }
-  out_values->assign(element_count, 0.0f);
-  std::memcpy(out_values->data(), tensor->payload.data(),
-              tensor->payload.size());
-  return iree_ok_status();
-}
-
 static iree_status_t LoadFixtureBytes(
     const id4::test::FixtureTensorSet& fixture_tensors,
     iree_string_view_t stage, iree_string_view_t name,
@@ -779,6 +700,25 @@ static iree_status_t LoadFixtureBytes(
       FindFixtureInputTensor(fixture_tensors, stage, name, &tensor));
   *out_bytes = tensor->payload;
   return iree_ok_status();
+}
+
+static iree_status_t CompareBoundaryWithExpectedFixture(
+    iree_hal_device_t* device, const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& boundary_bindings,
+    iree_string_view_t boundary_name,
+    const id4::test::FixtureTensorSet& fixture_tensors,
+    iree_string_view_t fixture_stage, iree_string_view_t fixture_name,
+    iree_hal_semaphore_list_t wait_list) {
+  const id4::test::FixtureTensor* expected_tensor = nullptr;
+  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
+                                         fixture_stage, fixture_name,
+                                         &expected_tensor));
+  iree_hal_buffer_binding_t binding = {};
+  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(plan, boundary_bindings,
+                                                      boundary_name, &binding));
+  return id4::test::CompareF32BindingWithFixtureTensor(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, wait_list,
+      *expected_tensor);
 }
 
 TEST(Ideogram4OneStepTraceIntegration,
@@ -792,20 +732,36 @@ TEST(Ideogram4OneStepTraceIntegration,
   const int32_t step_count = FLAG_id4_step_count;
   ASSERT_GT(step_count, 0) << "--id4_step_count must be positive";
   const uint32_t denoise_step_count = static_cast<uint32_t>(step_count);
+  const int32_t start_step = FLAG_id4_start_step;
+  ASSERT_GT(start_step, 0) << "--id4_start_step must be positive";
+  const uint32_t start_step_ordinal = static_cast<uint32_t>(start_step - 1);
+  id4_ideogram4_sampler_preset_t sampler_preset = {};
+  IREE_ASSERT_OK(id4_ideogram4_sampler_preset_parse(
+      iree_make_cstring_view(FLAG_id4_sampler), &sampler_preset));
+  const uint32_t sampler_step_count =
+      id4_ideogram4_sampler_preset_step_count(sampler_preset);
+  ASSERT_LE(static_cast<uint64_t>(start_step_ordinal) + denoise_step_count,
+            sampler_step_count);
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_ASSERT_OK(ParseDitParameterFormat(&dit_parameter_format));
-  ReferenceMode reference_mode = ReferenceMode::kNone;
-  IREE_ASSERT_OK(ParseReferenceMode(&reference_mode));
-  const bool capture_one_step_trace = step_count == 1;
-  const bool compare_one_step_fixture =
-      reference_mode == ReferenceMode::kBf16Fixture;
-  if (compare_one_step_fixture) {
-    ASSERT_TRUE(capture_one_step_trace)
-        << "bf16_fixture reference mode requires --id4_step_count=1";
-    ASSERT_EQ(dit_parameter_format, ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16)
-        << "bf16_fixture reference mode requires --dit_parameter_format=bf16";
+  id4_ideogram4_dit_weight_execution_format_t dit_weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
+  switch (dit_parameter_format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      dit_weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
+      break;
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
+      dit_weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_COMPACT_RHS;
+      break;
+    default:
+      FAIL() << "unsupported DiT parameter format "
+             << static_cast<uint32_t>(dit_parameter_format);
   }
+  const bool capture_one_step_trace = step_count == 1;
+  const bool capture_requested = !iree_string_view_is_empty(capture_directory);
 
   id4::test::FixtureTensorSet fixture_tensors;
   IREE_ASSERT_OK(
@@ -880,6 +836,9 @@ TEST(Ideogram4OneStepTraceIntegration,
       IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
       IREE_SV("ideogram4.cond.prelude.llm_cond_proj"),
       IREE_SV("ideogram4.cond.prelude.hidden"),
+      IREE_SV("ideogram4.cond.prelude.timestep_embedding"),
+      IREE_SV("ideogram4.cond.prelude.t_embedding.mlp_in"),
+      IREE_SV("ideogram4.cond.prelude.t_embedding.mlp_out"),
       IREE_SV("ideogram4.cond.prelude.adaln_input"),
       IREE_SV("ideogram4.cond.layers.0.adaln_modulation"),
       IREE_SV("ideogram4.cond.layers.0.attention_input"),
@@ -906,7 +865,7 @@ TEST(Ideogram4OneStepTraceIntegration,
       IREE_SV("ideogram4.cond.output.velocity"),
   };
   iree_string_view_list_t cond_dit_capture_taps = {};
-  if (!iree_string_view_is_empty(capture_directory)) {
+  if (capture_one_step_trace && capture_requested) {
     cond_dit_capture_taps = (iree_string_view_list_t){
         IREE_ARRAYSIZE(cond_dit_capture_tap_names),
         cond_dit_capture_tap_names,
@@ -915,16 +874,16 @@ TEST(Ideogram4OneStepTraceIntegration,
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       cond_plan;
-  IREE_ASSERT_OK(PlanDitStage(cond_stage.get(), cond_request,
-                              cond_dit_capture_taps, &diagnostics_sink,
-                              cond_plan.out()));
+  IREE_ASSERT_OK(
+      PlanDitStage(cond_stage.get(), cond_request, dit_weight_execution_format,
+                   cond_dit_capture_taps, &diagnostics_sink, cond_plan.out()));
   IREE_ASSERT_OK(
       WritePlanJsonIfRequested(cond_plan.get(), IREE_SV("cond.json")));
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       uncond_plan;
-  IREE_ASSERT_OK(PlanDitStage(uncond_stage.get(), uncond_request,
-                              iree_string_view_list_empty(), &diagnostics_sink,
-                              uncond_plan.out()));
+  IREE_ASSERT_OK(PlanDitStage(
+      uncond_stage.get(), uncond_request, dit_weight_execution_format,
+      iree_string_view_list_empty(), &diagnostics_sink, uncond_plan.out()));
   IREE_ASSERT_OK(
       WritePlanJsonIfRequested(uncond_plan.get(), IREE_SV("uncond.json")));
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
@@ -940,6 +899,24 @@ TEST(Ideogram4OneStepTraceIntegration,
                                  &diagnostics_sink, decode_plan.out()));
   IREE_ASSERT_OK(
       WritePlanJsonIfRequested(decode_plan.get(), IREE_SV("decode.json")));
+
+  iree_host_size_t decoded_boundary_index = 0;
+  IREE_ASSERT_OK(FindBoundaryBindingIndex(decode_plan.get(),
+                                          IREE_SV("media.image.decoded"),
+                                          &decoded_boundary_index));
+  const id4_pipeline_boundary_tensor_plan_t* decoded_boundary_plan =
+      id4_pipeline_plan_boundary_tensor_at(decode_plan.get(),
+                                           decoded_boundary_index);
+  ASSERT_NE(decoded_boundary_plan, nullptr);
+  ASSERT_GE(decoded_boundary_plan->layout.shape.rank, 2u);
+  ASSERT_LE(decoded_boundary_plan->layout.shape.dims[0], UINT32_MAX);
+  ASSERT_LE(decoded_boundary_plan->layout.shape.dims[1], UINT32_MAX);
+  ScopedDenoiseSchedule denoise_schedule;
+  IREE_ASSERT_OK(id4_ideogram4_sampler_preset_lower_schedule(
+      sampler_preset,
+      static_cast<uint32_t>(decoded_boundary_plan->layout.shape.dims[0]),
+      static_cast<uint32_t>(decoded_boundary_plan->layout.shape.dims[1]),
+      iree_allocator_system(), &denoise_schedule.value));
 
   id4::test::BufferBindingSet cond_boundaries;
   IREE_ASSERT_OK(id4::test::AllocateBoundaryBindings(
@@ -1028,26 +1005,6 @@ TEST(Ideogram4OneStepTraceIntegration,
       context.device.get(), sampler_plan.get(), sampler_boundaries,
       IREE_SV("x_t"), fixture_tensors, IREE_SV("sampler.step.1"),
       IREE_SV("x_t"), update_semaphore.get(), &update_value, &upload_files));
-  IREE_ASSERT_OK(UpdateBoundaryFromFixture(
-      context.device.get(), sampler_plan.get(), sampler_boundaries,
-      IREE_SV("scalings"), fixture_tensors, IREE_SV("sampler.step.1"),
-      IREE_SV("scalings"), update_semaphore.get(), &update_value,
-      &upload_files));
-  IREE_ASSERT_OK(UpdateBoundaryFromFixture(
-      context.device.get(), sampler_plan.get(), sampler_boundaries,
-      IREE_SV("guidance"), fixture_tensors, IREE_SV("sampler.step.1"),
-      IREE_SV("guidance"), update_semaphore.get(), &update_value,
-      &upload_files));
-  std::vector<float> guidance_values;
-  IREE_ASSERT_OK(
-      LoadFixtureF32Vector(fixture_tensors, IREE_SV("sampler.step.1"),
-                           IREE_SV("guidance"), 3, &guidance_values));
-  id4_ideogram4_request_generation_t schedule_generation = {};
-  schedule_generation.denoise_step_count = denoise_step_count;
-  schedule_generation.guidance_scale = guidance_values[0];
-  ScopedDenoiseSchedule denoise_schedule;
-  IREE_ASSERT_OK(id4_ideogram4_request_generation_lower_denoise_schedule(
-      &schedule_generation, iree_allocator_system(), &denoise_schedule.value));
   std::vector<uint8_t> current_x_bytes;
   IREE_ASSERT_OK(LoadFixtureBytes(fixture_tensors, cond_input_stage,
                                   IREE_SV("x"), &current_x_bytes));
@@ -1117,25 +1074,38 @@ TEST(Ideogram4OneStepTraceIntegration,
   id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
       cond_bundle;
   IREE_ASSERT_OK(PrepareStage(
-      cond_stage.get(), cond_plan.get(), cond_provider.get(),
+      cond_stage.get(), cond_plan.get(),
+      id4_pipeline_stage_parameters(
+          id4_pipeline_checkpoint_parameter_source(cond_provider.get()),
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+          /*maximum_parameter_window_byte_length=*/0),
       kernel_library.get(), iree_hal_semaphore_list_empty(),
       cond_prepare_signal.list(), &diagnostics_sink, cond_bundle.out()));
   id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
       uncond_bundle;
   IREE_ASSERT_OK(PrepareStage(
-      uncond_stage.get(), uncond_plan.get(), uncond_provider.get(),
+      uncond_stage.get(), uncond_plan.get(),
+      id4_pipeline_stage_parameters(
+          id4_pipeline_checkpoint_parameter_source(uncond_provider.get()),
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+          /*maximum_parameter_window_byte_length=*/0),
       kernel_library.get(), iree_hal_semaphore_list_empty(),
       uncond_prepare_signal.list(), &diagnostics_sink, uncond_bundle.out()));
   id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
       sampler_bundle;
   IREE_ASSERT_OK(PrepareStage(
-      sampler_stage.get(), sampler_plan.get(), nullptr, kernel_library.get(),
+      sampler_stage.get(), sampler_plan.get(),
+      id4_pipeline_stage_no_parameters(), kernel_library.get(),
       iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
       &diagnostics_sink, sampler_bundle.out()));
   id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
       decode_bundle;
   IREE_ASSERT_OK(PrepareStage(
-      decode_stage.get(), decode_plan.get(), vae_provider.get(),
+      decode_stage.get(), decode_plan.get(),
+      id4_pipeline_stage_parameters(
+          id4_pipeline_checkpoint_parameter_source(vae_provider.get()),
+          ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+          /*maximum_parameter_window_byte_length=*/0),
       kernel_library.get(), iree_hal_semaphore_list_empty(),
       decode_prepare_signal.list(), &diagnostics_sink, decode_bundle.out()));
 
@@ -1167,24 +1137,21 @@ TEST(Ideogram4OneStepTraceIntegration,
   id4::test::SemaphoreListStorage sampler_signal;
   sampler_signal.semaphore = sampler_done.get();
 
-  iree_hal_buffer_binding_t denoised = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      sampler_plan.get(), sampler_boundaries, IREE_SV("denoised"), &denoised));
   iree_hal_buffer_binding_t x_next = {};
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
       sampler_plan.get(), sampler_boundaries, IREE_SV("x_next"), &x_next));
 
   for (uint32_t step_ordinal = 0; step_ordinal < denoise_step_count;
        ++step_ordinal) {
+    const uint32_t schedule_step_ordinal = start_step_ordinal + step_ordinal;
     const id4_ideogram4_denoise_step_t& step =
-        denoise_schedule.value.steps[step_ordinal];
-    if (!compare_one_step_fixture) {
-      fprintf(stderr,
-              "[ ID4       ] denoise step %u/%u sigma=%g next_sigma=%g "
-              "timestep=%g\n",
-              step_ordinal + 1, denoise_step_count, (double)step.sigmas[0],
-              (double)step.sigmas[1], (double)step.timestep);
-    }
+        denoise_schedule.value.steps[schedule_step_ordinal];
+    fprintf(stderr,
+            "[ ID4       ] denoise step %u/%u flow_time=%g "
+            "next_flow_time=%g guidance=%g\n",
+            schedule_step_ordinal + 1, sampler_step_count,
+            (double)step.flow_time, (double)step.next_flow_time,
+            (double)step.guidance_scale);
 
     if (step_ordinal > 0) {
       IREE_ASSERT_OK(QueueUpdateBoundary(
@@ -1202,23 +1169,20 @@ TEST(Ideogram4OneStepTraceIntegration,
     }
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), cond_plan.get(),
                                        cond_boundaries, IREE_SV("timestep"),
-                                       &step.timestep, sizeof(step.timestep),
+                                       &step.flow_time, sizeof(step.flow_time),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), uncond_plan.get(),
                                        uncond_boundaries, IREE_SV("timestep"),
-                                       &step.timestep, sizeof(step.timestep),
+                                       &step.flow_time, sizeof(step.flow_time),
                                        update_semaphore.get(), &update_value));
+    const float step_values[] = {
+        step.flow_time,
+        step.next_flow_time,
+        step.guidance_scale,
+    };
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
-                                       sampler_boundaries, IREE_SV("scalings"),
-                                       step.scalings, sizeof(step.scalings),
-                                       update_semaphore.get(), &update_value));
-    IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
-                                       sampler_boundaries, IREE_SV("sigmas"),
-                                       step.sigmas, sizeof(step.sigmas),
-                                       update_semaphore.get(), &update_value));
-    IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
-                                       sampler_boundaries, IREE_SV("guidance"),
-                                       step.guidance, sizeof(step.guidance),
+                                       sampler_boundaries, IREE_SV("step"),
+                                       step_values, sizeof(step_values),
                                        update_semaphore.get(), &update_value));
 
     id4::test::FixedSemaphoreListStorage cond_wait;
@@ -1228,11 +1192,22 @@ TEST(Ideogram4OneStepTraceIntegration,
     IREE_ASSERT_OK(IssueStage(cond_stage.get(), cond_bundle.get(),
                               cond_boundaries, cond_taps, cond_wait.list(),
                               cond_signal.list(), &diagnostics_sink));
-    if (capture_one_step_trace) {
+    if (capture_requested) {
+      const std::string capture_name =
+          StepCaptureName(IREE_SV("cond"), schedule_step_ordinal);
+      const iree_string_view_t capture_name_view = iree_make_string_view(
+          capture_name.data(),
+          static_cast<iree_host_size_t>(capture_name.size()));
       IREE_ASSERT_OK(CaptureStageIfRequested(
-          capture_directory, IREE_SV("cond"), IREE_SV("ideogram4.cond.dit"),
+          capture_directory, capture_name_view, capture_name_view,
           context.device.get(), cond_plan.get(), cond_boundaries, cond_taps,
           cond_signal.list()));
+    }
+    if (step_ordinal == 0) {
+      IREE_ASSERT_OK(CompareBoundaryWithExpectedFixture(
+          context.device.get(), cond_plan.get(), cond_boundaries,
+          IREE_SV("velocity"), fixture_tensors, IREE_SV("graph.debug"),
+          IREE_SV("ideogram4.cond.output.velocity"), cond_signal.list()));
     }
 
     id4::test::FixedSemaphoreListStorage uncond_wait;
@@ -1242,29 +1217,22 @@ TEST(Ideogram4OneStepTraceIntegration,
     IREE_ASSERT_OK(IssueStage(
         uncond_stage.get(), uncond_bundle.get(), uncond_boundaries, uncond_taps,
         uncond_wait.list(), uncond_signal.list(), &diagnostics_sink));
-    if (capture_one_step_trace) {
+    if (capture_requested) {
+      const std::string capture_name =
+          StepCaptureName(IREE_SV("uncond"), schedule_step_ordinal);
+      const iree_string_view_t capture_name_view = iree_make_string_view(
+          capture_name.data(),
+          static_cast<iree_host_size_t>(capture_name.size()));
       IREE_ASSERT_OK(CaptureStageIfRequested(
-          capture_directory, IREE_SV("uncond"), IREE_SV("ideogram4.uncond.dit"),
+          capture_directory, capture_name_view, capture_name_view,
           context.device.get(), uncond_plan.get(), uncond_boundaries,
           uncond_taps, uncond_signal.list()));
     }
-
-    id4::test::SemaphoreListStorage cond_read_wait;
-    cond_read_wait.semaphore = cond_done.get();
-    cond_read_wait.payload_value = static_cast<uint64_t>(step_ordinal + 1);
-    id4::test::SemaphoreListStorage uncond_read_wait;
-    uncond_read_wait.semaphore = uncond_done.get();
-    uncond_read_wait.payload_value = static_cast<uint64_t>(step_ordinal + 1);
-    if (compare_one_step_fixture) {
-      IREE_ASSERT_OK(CompareBoundaryWithFixture(
-          context.device.get(), cond_plan.get(), cond_boundaries,
-          IREE_SV("velocity"), fixture_tensors, IREE_SV("graph.debug"),
-          IREE_SV("ideogram4.cond.output.velocity"), cond_read_wait.list()));
-      IREE_ASSERT_OK(CompareBoundaryWithFixture(
+    if (step_ordinal == 0) {
+      IREE_ASSERT_OK(CompareBoundaryWithExpectedFixture(
           context.device.get(), uncond_plan.get(), uncond_boundaries,
           IREE_SV("velocity"), fixture_tensors, IREE_SV("graph.debug"),
-          IREE_SV("ideogram4.uncond.output.velocity"),
-          uncond_read_wait.list()));
+          IREE_SV("ideogram4.uncond.output.velocity"), uncond_signal.list()));
     }
 
     id4::test::FixedSemaphoreListStorage sampler_wait;
@@ -1278,23 +1246,26 @@ TEST(Ideogram4OneStepTraceIntegration,
                               sampler_boundaries, sampler_taps,
                               sampler_wait.list(), sampler_signal.list(),
                               &diagnostics_sink));
+    if (capture_requested) {
+      const std::string capture_name =
+          StepCaptureName(IREE_SV("sampler"), schedule_step_ordinal);
+      const iree_string_view_t capture_name_view = iree_make_string_view(
+          capture_name.data(),
+          static_cast<iree_host_size_t>(capture_name.size()));
+      IREE_ASSERT_OK(CaptureStageIfRequested(
+          capture_directory, capture_name_view, capture_name_view,
+          context.device.get(), sampler_plan.get(), sampler_boundaries,
+          sampler_taps, sampler_signal.list()));
+    }
 
     id4::test::SemaphoreListStorage sampler_read_wait;
     sampler_read_wait.semaphore = sampler_done.get();
     sampler_read_wait.payload_value = static_cast<uint64_t>(step_ordinal + 1);
-    if (compare_one_step_fixture) {
-      IREE_ASSERT_OK(CompareDiagnosticTapWithFixture(
-          context.device.get(), sampler_plan.get(), sampler_taps,
-          IREE_SV("guided_pred"), fixture_tensors, IREE_SV("sampler.step.1"),
-          IREE_SV("guided_pred"), sampler_read_wait.list()));
-      IREE_ASSERT_OK(CompareBoundaryWithFixture(
+    if (step_ordinal == 0) {
+      IREE_ASSERT_OK(CompareBoundaryWithExpectedFixture(
           context.device.get(), sampler_plan.get(), sampler_boundaries,
-          IREE_SV("denoised"), fixture_tensors, IREE_SV("sampler.step.1"),
-          IREE_SV("denoised"), sampler_read_wait.list()));
-      IREE_ASSERT_OK(CompareBoundaryWithFixture(
-          context.device.get(), sampler_plan.get(), sampler_boundaries,
-          IREE_SV("denoised"), fixture_tensors, IREE_SV("sampler.final"),
-          IREE_SV("latent"), sampler_read_wait.list()));
+          IREE_SV("x_next"), fixture_tensors, IREE_SV("sampler.step.1"),
+          IREE_SV("x_next"), sampler_read_wait.list()));
     }
     if (step_ordinal + 1 < step_count) {
       std::vector<uint8_t> next_x_bytes;

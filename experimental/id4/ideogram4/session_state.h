@@ -296,8 +296,6 @@ struct id4_ideogram4_generation_execution_t {
   // Unconditioned DiT velocity binding retained from the unconditioned DiT
   // stage.
   iree_hal_buffer_binding_t unconditioned_velocity_binding;
-  // CFG denoised latent binding retained from the sampler stage.
-  iree_hal_buffer_binding_t denoised_latent_binding;
   // Final diffusion latent binding retained from the sampler stage.
   iree_hal_buffer_binding_t final_latent_binding;
   // Final decoded image binding retained from the decode stage.

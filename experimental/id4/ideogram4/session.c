@@ -85,7 +85,8 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_request(session, options->request));
-  if (options->request->generation.denoise_step_count !=
+  if (id4_ideogram4_sampler_preset_step_count(
+          options->request->generation.sampler_preset) !=
       bundle->summary.denoise_step_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -170,7 +171,8 @@ static iree_status_t id4_ideogram4_validate_generation_begin_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_request(session, options->request));
-  if (options->request->generation.denoise_step_count !=
+  if (id4_ideogram4_sampler_preset_step_count(
+          options->request->generation.sampler_preset) !=
       bundle->summary.denoise_step_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -394,21 +396,20 @@ static iree_status_t id4_ideogram4_generation_upload_denoise_step(
     const id4_ideogram4_denoise_step_t* step) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
       execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
-      IREE_SV("timestep"), &step->timestep, sizeof(step->timestep),
+      IREE_SV("timestep"), &step->flow_time, sizeof(step->flow_time),
       iree_hal_semaphore_list_empty()));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
       execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
-      IREE_SV("timestep"), &step->timestep, sizeof(step->timestep),
+      IREE_SV("timestep"), &step->flow_time, sizeof(step->flow_time),
       iree_hal_semaphore_list_empty()));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, IREE_SV("scalings"),
-      step->scalings, sizeof(step->scalings), iree_hal_semaphore_list_empty()));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, IREE_SV("sigmas"),
-      step->sigmas, sizeof(step->sigmas), iree_hal_semaphore_list_empty()));
+  const float step_values[] = {
+      step->flow_time,
+      step->next_flow_time,
+      step->guidance_scale,
+  };
   return id4_ideogram4_generation_upload_boundary_tensor(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, IREE_SV("guidance"),
-      step->guidance, sizeof(step->guidance), iree_hal_semaphore_list_empty());
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, IREE_SV("step"),
+      step_values, sizeof(step_values), iree_hal_semaphore_list_empty());
 }
 
 static iree_hal_semaphore_list_t id4_ideogram4_generation_make_wait_list(
@@ -685,11 +686,6 @@ static iree_status_t id4_ideogram4_generation_find_outputs(
       execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].plan,
       &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
            .boundary_bindings,
-      IREE_SV("denoised"), &execution->denoised_latent_binding));
-  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
-      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].plan,
-      &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
-           .boundary_bindings,
       IREE_SV("x_next"), &execution->final_latent_binding));
   return id4_pipeline_find_boundary_binding(
       execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].plan,
@@ -744,9 +740,11 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
                                                     &execution->dit_inputs);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_request_generation_lower_denoise_schedule(
-        &request->generation, execution->host_allocator,
-        &execution->denoise_schedule);
+    status = id4_ideogram4_sampler_preset_lower_schedule(
+        request->generation.sampler_preset,
+        (uint32_t)bundle->summary.decoded_image_shape.dims[0],
+        (uint32_t)bundle->summary.decoded_image_shape.dims[1],
+        execution->host_allocator, &execution->denoise_schedule);
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_execution_create_semaphores(execution);
@@ -1629,7 +1627,6 @@ iree_status_t id4_ideogram4_generation_execution_result(
       execution->conditioned_velocity_binding;
   out_result->unconditioned_velocity_binding =
       execution->unconditioned_velocity_binding;
-  out_result->denoised_latent_binding = execution->denoised_latent_binding;
   out_result->final_latent_binding = execution->final_latent_binding;
   out_result->decoded_image_binding = execution->decoded_image_binding;
   return iree_ok_status();

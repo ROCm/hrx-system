@@ -373,23 +373,6 @@ static iree_status_t id4_ideogram4_request_parse_required_u64(
   return iree_json_parse_uint64(value, out_value);
 }
 
-static iree_status_t id4_ideogram4_request_parse_required_f32_positive(
-    iree_string_view_t object, iree_string_view_t key, float* out_value) {
-  iree_string_view_t value = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_request_lookup_required(object, key, &value));
-  double raw_value = 0.0;
-  IREE_RETURN_IF_ERROR(iree_json_parse_double(value, &raw_value));
-  if (!isfinite(raw_value) || raw_value <= 0.0 || raw_value > FLT_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 request field `%.*s` value %g is not a positive f32",
-        (int)key.size, key.data, raw_value);
-  }
-  *out_value = (float)raw_value;
-  return iree_ok_status();
-}
-
 static iree_status_t id4_ideogram4_request_validate_generation(
     const id4_ideogram4_request_generation_t* generation) {
   if (generation->latent_width == 0) {
@@ -402,16 +385,10 @@ static iree_status_t id4_ideogram4_request_validate_generation(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 request generation latent height is zero");
   }
-  if (generation->denoise_step_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 request generation denoise step count is zero");
-  }
-  if (!isfinite(generation->guidance_scale) ||
-      generation->guidance_scale <= 0.0f) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 request generation guidance scale is not positive");
+  if (id4_ideogram4_sampler_preset_step_count(generation->sampler_preset) ==
+      0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 request sampler preset is invalid");
   }
   return iree_ok_status();
 }
@@ -420,17 +397,39 @@ static iree_status_t id4_ideogram4_request_parse_generation(
     iree_string_view_t generation,
     id4_ideogram4_request_generation_t* out_generation) {
   memset(out_generation, 0, sizeof(*out_generation));
+  static const iree_string_view_t allowed_keys[] = {
+      IREE_SVL("latent_width"),
+      IREE_SVL("latent_height"),
+      IREE_SVL("sampler"),
+      IREE_SVL("seed"),
+  };
+  IREE_RETURN_IF_ERROR(iree_json_validate_object_keys(
+      generation, allowed_keys, IREE_ARRAYSIZE(allowed_keys)));
+  iree_host_size_t member_count = 0;
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_object(
+      generation, id4_ideogram4_request_count_member, &member_count));
+  if (member_count != IREE_ARRAYSIZE(allowed_keys)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation metadata must contain exactly "
+        "`latent_width`, `latent_height`, `sampler`, and `seed` members");
+  }
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
       generation, IREE_SV("latent_width"), &out_generation->latent_width));
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
       generation, IREE_SV("latent_height"), &out_generation->latent_height));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
-      generation, IREE_SV("denoise_steps"),
-      &out_generation->denoise_step_count));
+  char sampler_name_buffer[64];
+  iree_host_size_t sampler_name_length = 0;
+  IREE_RETURN_IF_ERROR(iree_json_lookup_string(
+      generation, IREE_SV("sampler"),
+      iree_make_mutable_string_view(sampler_name_buffer,
+                                    IREE_ARRAYSIZE(sampler_name_buffer)),
+      &sampler_name_length));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_sampler_preset_parse(
+      iree_make_string_view(sampler_name_buffer, sampler_name_length),
+      &out_generation->sampler_preset));
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u64(
       generation, IREE_SV("seed"), &out_generation->seed));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_f32_positive(
-      generation, IREE_SV("guidance_scale"), &out_generation->guidance_scale));
   return id4_ideogram4_request_validate_generation(out_generation);
 }
 
@@ -1017,81 +1016,4 @@ void id4_ideogram4_dit_inputs_deinitialize(id4_ideogram4_dit_inputs_t* inputs,
   id4_ideogram4_dit_branch_inputs_deinitialize(&inputs->conditioned,
                                                host_allocator);
   memset(inputs, 0, sizeof(*inputs));
-}
-
-static iree_status_t id4_ideogram4_request_validate_denoise_generation(
-    const id4_ideogram4_request_generation_t* generation) {
-  if (!generation) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation metadata is required");
-  }
-  if (generation->denoise_step_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 denoise step count is zero");
-  }
-  if (!isfinite(generation->guidance_scale) ||
-      generation->guidance_scale <= 0.0f ||
-      generation->guidance_scale > FLT_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 guidance scale is invalid");
-  }
-  return iree_ok_status();
-}
-
-static float id4_ideogram4_request_denoise_step_sigma(uint32_t step_ordinal,
-                                                      uint32_t step_count) {
-  if (step_ordinal == step_count) return 0.0f;
-  if (step_count == 1) return 1.0f;
-  const float max_timestep = 999.0f;
-  const float timestep_delta = max_timestep / (float)(step_count - 1);
-  const float scheduler_t = max_timestep - timestep_delta * (float)step_ordinal;
-  return (scheduler_t + 1.0f) / 1000.0f;
-}
-
-static void id4_ideogram4_request_initialize_denoise_step(
-    const id4_ideogram4_request_generation_t* generation, uint32_t step_ordinal,
-    id4_ideogram4_denoise_step_t* out_step) {
-  memset(out_step, 0, sizeof(*out_step));
-  const float sigma = id4_ideogram4_request_denoise_step_sigma(
-      step_ordinal, generation->denoise_step_count);
-  const float next_sigma = id4_ideogram4_request_denoise_step_sigma(
-      step_ordinal + 1, generation->denoise_step_count);
-  out_step->timestep = 1000.0f - sigma * 1000.0f;
-  out_step->scalings[0] = 1.0f;
-  out_step->scalings[1] = -sigma;
-  out_step->scalings[2] = 1.0f;
-  out_step->sigmas[0] = sigma;
-  out_step->sigmas[1] = next_sigma;
-  out_step->guidance[0] = generation->guidance_scale;
-}
-
-iree_status_t id4_ideogram4_request_generation_lower_denoise_schedule(
-    const id4_ideogram4_request_generation_t* generation,
-    iree_allocator_t host_allocator,
-    id4_ideogram4_denoise_schedule_t* out_schedule) {
-  IREE_ASSERT_ARGUMENT(out_schedule);
-  memset(out_schedule, 0, sizeof(*out_schedule));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_request_validate_denoise_generation(generation));
-
-  id4_ideogram4_denoise_step_t* steps = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, generation->denoise_step_count, sizeof(steps[0]),
-      (void**)&steps);
-  if (iree_status_is_ok(status)) {
-    for (uint32_t i = 0; i < generation->denoise_step_count; ++i) {
-      id4_ideogram4_request_initialize_denoise_step(generation, i, &steps[i]);
-    }
-    out_schedule->step_count = generation->denoise_step_count;
-    out_schedule->steps = steps;
-  }
-  return status;
-}
-
-void id4_ideogram4_denoise_schedule_deinitialize(
-    id4_ideogram4_denoise_schedule_t* schedule,
-    iree_allocator_t host_allocator) {
-  if (!schedule) return;
-  iree_allocator_free(host_allocator, schedule->steps);
-  memset(schedule, 0, sizeof(*schedule));
 }

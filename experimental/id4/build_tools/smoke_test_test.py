@@ -137,28 +137,44 @@ def minimal_generation_plan() -> dict:
                         },
                     },
                 },
-                "parameter_window_statistics": [
-                    {
-                        "concurrent_window_count": 1,
-                        "window_count": 1,
+                "parameter_residency": {
+                    "source_kind": "execution_layout",
+                    "maximum_target_byte_length": 2048,
+                    "parameter_load_prefetch_segment_distance": 0,
+                    "live_statistics": {
+                        "concurrent_segment_count": 1,
+                        "segment_count": 1,
                         "full_slab_target_byte_length": 1024,
                         "peak_target_byte_length": 1024,
                         "encoder_staging_byte_length": 0,
                         "peak_live_byte_length": 1024,
                         "peak_source_transfer_byte_length": 1024,
-                        "total_target_byte_length": 1024,
+                        "total_target_traffic_byte_length": 1024,
                         "total_source_transfer_byte_length": 1024,
                         "peak_load_group_count": 1,
                         "total_load_group_count": 1,
                         "peak_encode_load_step_count": 0,
                         "total_encode_load_step_count": 0,
-                        "largest_load_group_target_byte_length": 1024,
-                        "largest_load_group_index": 0,
-                        "largest_request_target_byte_length": 1024,
-                        "largest_request_index": 0,
-                        "largest_request_load_group_index": 0,
-                    }
-                ],
+                    },
+                    "segment_plan": {
+                        "semantic_region_count": 1,
+                        "segment_count": 1,
+                        "maximum_target_byte_length": 2048,
+                        "resident_target_byte_length": 1024,
+                        "peak_segment_target_byte_length": 1024,
+                        "peak_encoder_staging_byte_length": 0,
+                        "peak_segment_live_byte_length": 1024,
+                        "unique_target_byte_length": 1024,
+                        "unique_source_transfer_byte_length": 1024,
+                        "total_target_byte_length": 1024,
+                        "total_source_transfer_byte_length": 1024,
+                        "duplicated_target_byte_length": 0,
+                        "duplicated_source_transfer_byte_length": 0,
+                        "total_load_group_count": 1,
+                        "total_encode_load_step_count": 0,
+                        "segments": [],
+                    },
+                },
             }
         },
     }
@@ -192,7 +208,6 @@ def minimal_result_summary() -> dict:
     return {
         "conditioned_velocity": minimal_result_tensor(latent_shape),
         "unconditioned_velocity": minimal_result_tensor(latent_shape),
-        "denoised_latent": minimal_result_tensor(latent_shape),
         "final_latent": minimal_result_tensor(latent_shape),
         "decoded_image": minimal_result_tensor(image_shape),
     }
@@ -221,9 +236,8 @@ class Id4SmokeTestTest(unittest.TestCase):
             {
                 "latent_width": 8,
                 "latent_height": 8,
-                "denoise_steps": 20,
+                "sampler": "V4_DEFAULT_20",
                 "seed": 20260625,
-                "guidance_scale": 3.5,
             },
         )
 
@@ -255,9 +269,8 @@ class Id4SmokeTestTest(unittest.TestCase):
                         "generation": {
                             "latent_width": 1,
                             "latent_height": 1,
-                            "denoise_steps": 1,
+                            "sampler": "V4_DEFAULT_20",
                             "seed": 1,
-                            "guidance_scale": 1.0,
                         }
                     }
                 ),
@@ -300,14 +313,15 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dump_diagnostics=artifacts/diagnostics", command)
         self.assertIn("--dump_result_summary=artifacts/result_summary.json", command)
         self.assertIn("--profile_output=artifacts/profile.txt", command)
-        self.assertIn("--dit_weight_execution_format=bf16_resident", command)
-        self.assertIn("--qwen_weight_execution_strategy=hybrid_compact_rhs", command)
+        self.assertIn("--generation_parameter_source=checkpoint", command)
+        self.assertIn("--dit_weight_execution_format=fp8_compact_rhs", command)
+        self.assertIn("--qwen_weight_execution_strategy=compact_rhs", command)
         self.assertIn("--qwen_attention_implementation=auto", command)
         self.assertIn("--dit_attention_implementation=online_wmma", command)
-        self.assertIn("--dit_feed_forward_implementation=fused_product", command)
+        self.assertIn("--dit_feed_forward_implementation=pytorch_parity", command)
         self.assertIn("--generation_residency=memory_budgeted", command)
         self.assertIn("--generation_issue_mode=stage_serial", command)
-        self.assertIn("--parameter_load_prefetch_region_distance=2", command)
+        self.assertIn("--parameter_load_prefetch_segment_distance=2", command)
         self.assertIn("--generation_residency_budget=34359738368", command)
         self.assertIn(
             "--generation_resident_stage_bundles="
@@ -332,7 +346,8 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--parameters=qwen=qwen.safetensors",
                 "--qwen_weight_execution_strategy=compact_rhs",
                 "--qwen_attention_implementation=materialized",
-                "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
+                "--generation_parameter_source=execution_layout",
+                "--dit_weight_execution_format=fp8_compact_rhs_feed_forward_bf16_resident",
                 "--dit_attention_implementation=blocked_wmma",
                 "--dit_feed_forward_implementation=fused_product",
             ]
@@ -341,9 +356,10 @@ class Id4SmokeTestTest(unittest.TestCase):
         command = self.smoke_test.build_id4_command(args, Path("artifacts"))
 
         self.assertIn(
-            "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
+            "--dit_weight_execution_format=fp8_compact_rhs_feed_forward_bf16_resident",
             command,
         )
+        self.assertIn("--generation_parameter_source=execution_layout", command)
         self.assertIn("--qwen_weight_execution_strategy=compact_rhs", command)
         self.assertIn("--qwen_attention_implementation=materialized", command)
         self.assertIn("--dit_attention_implementation=blocked_wmma", command)
@@ -467,13 +483,13 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--device=amdgpu",
                 "--tokenizer=tokenizer.json",
                 "--parameters=qwen=qwen.safetensors",
-                "--parameter_load_prefetch_region_distance=2",
+                "--parameter_load_prefetch_segment_distance=2",
             ]
         )
 
         command = self.smoke_test.build_id4_command(args, Path("artifacts"))
 
-        self.assertIn("--parameter_load_prefetch_region_distance=2", command)
+        self.assertIn("--parameter_load_prefetch_segment_distance=2", command)
 
     def test_parameter_prefetch_distance_must_be_non_negative(self):
         with self.assertRaises(SystemExit):
@@ -483,7 +499,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--device=amdgpu",
                     "--tokenizer=tokenizer.json",
                     "--parameters=qwen=qwen.safetensors",
-                    "--parameter_load_prefetch_region_distance=-1",
+                    "--parameter_load_prefetch_segment_distance=-1",
                 ]
             )
 
@@ -609,8 +625,8 @@ class Id4SmokeTestTest(unittest.TestCase):
                 1024,
             )
             self.assertEqual(
-                metrics["stages"]["qwen"]["parameter_window_statistics"][0][
-                    "largest_request_target_byte_length"
+                metrics["stages"]["qwen"]["parameter_residency"]["live_statistics"][
+                    "peak_live_byte_length"
                 ],
                 1024,
             )
@@ -720,9 +736,8 @@ class Id4SmokeTestTest(unittest.TestCase):
             "generation": {
                 "latent_width": 1,
                 "latent_height": 1,
-                "denoise_steps": 1,
+                "sampler": "V4_DEFAULT_20",
                 "seed": 1,
-                "guidance_scale": 1.0,
             }
         }
         metrics = self.smoke_test.ImageMetrics(
@@ -798,7 +813,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--parameters=qwen=qwen.safetensors",
                     "--latent_width=1",
                     "--latent_height=1",
-                    "--denoise_steps=1",
+                    "--sampler=V4_DEFAULT_20",
                 ]
             )
 

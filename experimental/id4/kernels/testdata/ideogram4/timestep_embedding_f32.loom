@@ -3,13 +3,47 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 check.case public @id4_ideogram4_timestep_embedding_f32_zero_case {
   %timestep = check.generate.fill value(0.0) : tensor<1xf32>
   %output = check.generate.fill value(-1.0) : tensor<2xf32>
   %expected = check.generate.iota offset(0.0) step(1.0) : tensor<2xf32>
   func.call @id4_ideogram4_timestep_embedding_f32(%timestep, %output) : (tensor<1xf32>, tensor<2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// The official scalar embedding maps the [0, 1] flow time to [0, 10000]
+// before applying the sinusoid. This input maps to pi/4, making both halves
+// equal and exposing any missing or incorrect input-range scale.
+check.case public @id4_ideogram4_timestep_embedding_f32_input_range_case {
+  %timestep = check.generate.fill value(7.8539816339744827e-05) : tensor<1xf32>
+  %output = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.fill value(0.7071067811865476) : tensor<2xf32>
+  func.call @id4_ideogram4_timestep_embedding_f32(%timestep, %output) : (tensor<1xf32>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// The upper end of the official input range requires accurate argument
+// reduction before evaluating the sinusoid.
+check.case public @id4_ideogram4_timestep_embedding_f32_upper_range_case {
+  %timestep = check.generate.fill value(1.0) : tensor<1xf32>
+  %output = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(-0.30561438888825216) step(-0.64654097937076272) : tensor<2xf32>
+  func.call @id4_ideogram4_timestep_embedding_f32(%timestep, %output) : (tensor<1xf32>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// Scheduler times cross the BF16 transformer boundary before embedding. This
+// real schedule value is deliberately not representable in BF16 and catches a
+// misplaced or missing compute-dtype conversion.
+check.case public @id4_ideogram4_timestep_embedding_f32_compute_dtype_case {
+  %timestep = check.generate.fill value(0.1835918575525284) : tensor<1xf32>
+  %output = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.94815850257873536) step(-0.63036066293716432) : tensor<2xf32>
+  func.call @id4_ideogram4_timestep_embedding_f32(%timestep, %output) : (tensor<1xf32>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>
   check.return
 }
 
@@ -21,4 +55,11 @@ check.case public @id4_ideogram4_timestep_embedding_f32_ideogram_shape_case {
 }
 
 check.benchmark<@id4_ideogram4_timestep_embedding_f32_zero_case> @id4_ideogram4_timestep_embedding_f32_zero
+
+check.benchmark<@id4_ideogram4_timestep_embedding_f32_input_range_case> @id4_ideogram4_timestep_embedding_f32_input_range
+
+check.benchmark<@id4_ideogram4_timestep_embedding_f32_upper_range_case> @id4_ideogram4_timestep_embedding_f32_upper_range
+
+check.benchmark<@id4_ideogram4_timestep_embedding_f32_compute_dtype_case> @id4_ideogram4_timestep_embedding_f32_compute_dtype
+
 check.benchmark<@id4_ideogram4_timestep_embedding_f32_ideogram_shape_case> @id4_ideogram4_timestep_embedding_f32_ideogram_shape

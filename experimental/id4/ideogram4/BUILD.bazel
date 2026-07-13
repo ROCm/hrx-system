@@ -15,14 +15,35 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "sampling",
+    srcs = ["sampling.c"],
+    hdrs = ["sampling.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "request",
     srcs = ["request.c"],
     hdrs = ["request.h"],
     deps = [
+        ":sampling",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sampling_test",
+    srcs = ["sampling_test.cc"],
+    deps = [
+        ":sampling",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -51,27 +51,6 @@ struct ScopedRequest {
   id4_ideogram4_request_t value = {};
 };
 
-struct ScopedSemaphoreList {
-  explicit ScopedSemaphoreList(iree_hal_device_t* device) {
-    IREE_CHECK_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                            0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                            &semaphore));
-  }
-
-  ~ScopedSemaphoreList() { iree_hal_semaphore_release(semaphore); }
-
-  iree_hal_semaphore_list_t list() {
-    return (iree_hal_semaphore_list_t){
-        /*.count=*/1,
-        /*.semaphores=*/&semaphore,
-        /*.payload_values=*/&payload_value,
-    };
-  }
-
-  iree_hal_semaphore_t* semaphore = nullptr;
-  uint64_t payload_value = 1;
-};
-
 struct SessionDeleter {
   void operator()(id4_ideogram4_session_t* session) const {
     id4_ideogram4_session_release(session);
@@ -131,23 +110,20 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
 static iree_string_view_t ShortFullRequestJson() {
   return IREE_SV(
       "{\"prompt\":\"a city\",\"generation\":{\"latent_width\":8,"
-      "\"latent_height\":8,\"denoise_steps\":2,\"seed\":1,"
-      "\"guidance_scale\":3.5}}");
+      "\"latent_height\":8,\"sampler\":\"V4_DEFAULT_20\",\"seed\":1}}");
 }
 
 static iree_string_view_t ManyStepFullRequestJson() {
   return IREE_SV(
       "{\"prompt\":\"a city\",\"generation\":{\"latent_width\":8,"
-      "\"latent_height\":8,\"denoise_steps\":12,\"seed\":1,"
-      "\"guidance_scale\":3.5}}");
+      "\"latent_height\":8,\"sampler\":\"V4_QUALITY_48\",\"seed\":1}}");
 }
 
 static iree_string_view_t LongFullRequestJson() {
   return IREE_SV(
       "{\"prompt\":\"three people walking through a reflective city street "
       "with umbrellas and neon signs\",\"generation\":{\"latent_width\":8,"
-      "\"latent_height\":8,\"denoise_steps\":2,\"seed\":1,"
-      "\"guidance_scale\":3.5}}");
+      "\"latent_height\":8,\"sampler\":\"V4_DEFAULT_20\",\"seed\":1}}");
 }
 
 static iree_string_view_t WideLongFullRequestJson() {
@@ -155,8 +131,7 @@ static iree_string_view_t WideLongFullRequestJson() {
       "{\"prompt\":\"three people walking through a reflective city street "
       "with umbrellas, neon signs, storefront windows, wet pavement, careful "
       "hands, and realistic faces\",\"generation\":{\"latent_width\":16,"
-      "\"latent_height\":8,\"denoise_steps\":3,\"seed\":2,"
-      "\"guidance_scale\":3.5}}");
+      "\"latent_height\":8,\"sampler\":\"V4_TURBO_12\",\"seed\":2}}");
 }
 
 static id4_pipeline_tensor_shape_t TensorShape(
@@ -394,21 +369,6 @@ static bool GenerationResidencyPhaseStageMasksAreEmpty(
   return true;
 }
 
-static iree_host_size_t GenerationPhaseIndex(
-    id4_ideogram4_generation_phase_mask_t phase_mask) {
-  switch (phase_mask) {
-    case ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING:
-      return 0;
-    case ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE:
-      return 1;
-    case ID4_IDEOGRAM4_GENERATION_PHASE_DECODE:
-      return 2;
-    default:
-      ADD_FAILURE() << "unsupported generation phase mask " << phase_mask;
-      return 0;
-  }
-}
-
 static void ExpectBoundaryLayout(const id4_pipeline_plan_t* plan,
                                  iree_string_view_t name,
                                  id4_pipeline_tensor_dtype_t dtype,
@@ -553,7 +513,7 @@ static void ExpectGenerationStageBoundaryContract(
 class SessionTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    device_group_ = id4::test::CreateLocalSyncDeviceGroup();
+    device_group_ = id4::test::CreateGpuPlanningDeviceGroup();
     iree_hal_device_t* device =
         iree_hal_device_group_device_at(device_group_, /*index=*/0);
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
@@ -813,7 +773,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
                                                        &long_summary));
   EXPECT_GT(short_summary.qwen_token_count, 0u);
   EXPECT_GT(long_summary.qwen_token_count, short_summary.qwen_token_count);
-  EXPECT_EQ(long_summary.denoise_step_count, 2u);
+  EXPECT_EQ(long_summary.denoise_step_count, 20u);
   EXPECT_EQ(long_summary.diffusion_latent_shape.rank, 4u);
   EXPECT_EQ(long_summary.diffusion_latent_shape.dims[2], 128u);
   EXPECT_EQ(long_summary.decoded_image_shape.rank, 4u);
@@ -902,7 +862,7 @@ TEST_F(SessionTest, PlansGenerationBoundaryShapesFromDynamicLatentShape) {
   id4_ideogram4_generation_plan_summary_t summary;
   IREE_ASSERT_OK(id4_ideogram4_generation_plan_summary(plan.get(), &summary));
   EXPECT_GT(summary.qwen_token_count, 0u);
-  EXPECT_EQ(summary.denoise_step_count, 3u);
+  EXPECT_EQ(summary.denoise_step_count, 12u);
   EXPECT_EQ(summary.diffusion_latent_shape.rank, 4u);
   EXPECT_EQ(summary.diffusion_latent_shape.dims[0], 16u);
   EXPECT_EQ(summary.diffusion_latent_shape.dims[1], 8u);
@@ -1236,262 +1196,6 @@ TEST_F(SessionTest, RejectsMissingGenerationMetadata) {
                         id4_ideogram4_session_plan_generation(
                             session.get(), &plan_options, &plan));
   EXPECT_EQ(plan, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationRequiresFinalSignal) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationRequiresResidencyMode) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentStageMask) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
-  prepare_options.resident_stage_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationPhaseStageBundlesRejectResidentStageMask) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES;
-  prepare_options.resident_stage_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationSelectedStageBundlesRequireStageMask) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationPhaseAwareStageBundlesRequireStageMask) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationPhaseAwareStageBundlesRejectOverlap) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ManyStepFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
-  prepare_options.resident_stage_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
-  prepare_options.phase_stage_masks[GenerationPhaseIndex(
-      ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE)] =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest,
-       PrepareGenerationSelectedStageBundlesRejectUnknownStageMask) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
-  prepare_options.resident_stage_mask = 1u << 12;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
-}
-
-TEST_F(SessionTest, PrepareGenerationRequiresParameterSources) {
-  TokenizerPtr tokenizer = LoadTokenizer();
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      ShortFullRequestJson(), iree_allocator_system(), &request.value));
-  SessionPtr session = CreateLoadedSession();
-  GenerationPlanPtr plan =
-      PlanGeneration(session.get(), tokenizer.get(), &request.value);
-
-  iree_hal_device_t* device =
-      iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  ScopedSemaphoreList signal_list(device);
-
-  id4_ideogram4_generation_prepare_options_t prepare_options;
-  std::memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
-  prepare_options.signal_semaphore_list = signal_list.list();
-
-  id4_ideogram4_generation_bundle_t* bundle = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
-                                               &prepare_options, &bundle));
-  EXPECT_EQ(bundle, nullptr);
 }
 
 }  // namespace

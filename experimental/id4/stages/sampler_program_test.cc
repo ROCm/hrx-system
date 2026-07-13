@@ -82,6 +82,8 @@ static id4_sampler_noise_program_options_t MakeNoiseProgramOptions(
       {
           // Latent tensor shape.
           /*.latent_shape=*/latent_shape,
+          // Logical reference generator thread count.
+          /*.generator_thread_count=*/256,
       },
   };
   return options;
@@ -141,27 +143,6 @@ static bool ProgramExportsTensorWithShape(
   return false;
 }
 
-static bool ProgramTapsTensorWithShape(
-    const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
-    id4_pipeline_program_shape_t expected_shape) {
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_program_operation_count(program); ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (!operation || operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_TAP) {
-      continue;
-    }
-    const id4_pipeline_program_tensor_record_t* tensor =
-        id4_pipeline_program_tensor_at(program,
-                                       operation->payload.tap.tensor.ordinal);
-    if (!tensor) continue;
-    if (tensor->dtype != dtype) continue;
-    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
-    return true;
-  }
-  return false;
-}
-
 TEST(SamplerProgram, AuthorsDenoiseStepBoundaryContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 128, 1);
@@ -171,9 +152,6 @@ TEST(SamplerProgram, AuthorsDenoiseStepBoundaryContract) {
 
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
-  EXPECT_TRUE(ProgramTapsTensorWithShape(
-      program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
-
   id4_pipeline_program_release(program);
 }
 
@@ -197,6 +175,15 @@ TEST(SamplerProgram, RejectsScalarLatentShape) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_sampler_program_author_denoise_step(
                             &options, builder_scope.builder()));
+}
+
+TEST(SamplerProgram, RejectsNonPatchLatentShape) {
+  ProgramBuilderScope builder_scope;
+  id4_sampler_noise_program_options_t options = MakeNoiseProgramOptions(
+      id4_pipeline_program_make_shape_rank4(1, 1, 6, 1));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_sampler_program_author_noise(&options, builder_scope.builder()));
 }
 
 TEST(SamplerProgram, RejectsElementCountAboveKernelRange) {

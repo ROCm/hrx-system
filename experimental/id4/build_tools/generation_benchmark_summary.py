@@ -305,65 +305,48 @@ def _sum_parameter_load_kind_statistics(
     return totals
 
 
-def _max_parameter_window_blockers(
+def _max_parameter_residency_pressure(
     stages: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    largest_load_group_byte_length = 0
-    largest_load_group_stage = None
-    largest_load_group_index = None
-    largest_request_byte_length = 0
-    largest_request_stage = None
-    largest_request_index = None
-    largest_request_load_group_index = None
+    peak_target_byte_length = 0
+    peak_target_stage = None
+    peak_live_byte_length = 0
+    peak_live_stage = None
     for stage_name, stage in stages.items():
-        window_statistics = _require_list(
-            stage.get("parameter_window_statistics"),
-            f"stages.{stage_name}.parameter_window_statistics",
+        residency_value = stage.get("parameter_residency")
+        if residency_value is None:
+            continue
+        residency_context = f"stages.{stage_name}.parameter_residency"
+        residency = _require_object(residency_value, residency_context)
+        segment_plan = _require_object(
+            residency.get("segment_plan"), f"{residency_context}.segment_plan"
         )
-        for window_index, window_value in enumerate(window_statistics):
-            context = f"stages.{stage_name}.parameter_window_statistics[{window_index}]"
-            window = _require_object(window_value, context)
-            load_group_byte_length = int(
-                _require_number(
-                    window.get("largest_load_group_target_byte_length"),
-                    f"{context}.largest_load_group_target_byte_length",
-                )
+        stage_target_byte_length = int(
+            _require_number(
+                segment_plan.get("peak_segment_target_byte_length"),
+                f"{residency_context}.segment_plan.peak_segment_target_byte_length",
             )
-            if load_group_byte_length > largest_load_group_byte_length:
-                largest_load_group_byte_length = load_group_byte_length
-                largest_load_group_stage = stage_name
-                largest_load_group_index = window.get("largest_load_group_index")
-            request_byte_length = int(
-                _require_number(
-                    window.get("largest_request_target_byte_length"),
-                    f"{context}.largest_request_target_byte_length",
-                )
+        )
+        if stage_target_byte_length > peak_target_byte_length:
+            peak_target_byte_length = stage_target_byte_length
+            peak_target_stage = stage_name
+        stage_live_byte_length = int(
+            _require_number(
+                segment_plan.get("peak_segment_live_byte_length"),
+                f"{residency_context}.segment_plan.peak_segment_live_byte_length",
             )
-            if request_byte_length > largest_request_byte_length:
-                largest_request_byte_length = request_byte_length
-                largest_request_stage = stage_name
-                largest_request_index = window.get("largest_request_index")
-                largest_request_load_group_index = window.get(
-                    "largest_request_load_group_index"
-                )
-    row = {
-        "parameter_window_largest_load_group_byte_length": (
-            largest_load_group_byte_length
-        ),
-        "parameter_window_largest_load_group_mib": _ceil_mib(
-            largest_load_group_byte_length
-        ),
-        "parameter_window_largest_load_group_stage": largest_load_group_stage,
-        "parameter_window_largest_load_group_index": largest_load_group_index,
-        "parameter_window_largest_request_byte_length": largest_request_byte_length,
-        "parameter_window_largest_request_mib": _ceil_mib(largest_request_byte_length),
-        "parameter_window_largest_request_stage": largest_request_stage,
-        "parameter_window_largest_request_index": largest_request_index,
-        "parameter_window_largest_request_load_group_index": (
-            largest_request_load_group_index
-        ),
+        )
+        if stage_live_byte_length > peak_live_byte_length:
+            peak_live_byte_length = stage_live_byte_length
+            peak_live_stage = stage_name
+    return {
+        "parameter_residency_peak_target_byte_length": peak_target_byte_length,
+        "parameter_residency_peak_target_mib": _ceil_mib(peak_target_byte_length),
+        "parameter_residency_peak_target_stage": peak_target_stage,
+        "parameter_residency_peak_live_byte_length": peak_live_byte_length,
+        "parameter_residency_peak_live_mib": _ceil_mib(peak_live_byte_length),
+        "parameter_residency_peak_live_stage": peak_live_stage,
     }
-    return row
 
 
 def _derive_parameter_storage_metrics(
@@ -614,8 +597,8 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "generation_residency": _label_token(label, "residency", f"{context}.label"),
         "generation_issue_mode": _label_token(label, "issue", f"{context}.label"),
-        "parameter_load_prefetch_region_distance": _label_unsigned(
-            label, "prefetch_regions", f"{context}.label"
+        "parameter_load_prefetch_segment_distance": _label_unsigned(
+            label, "prefetch_segments", f"{context}.label"
         ),
         "generation_resident_stage_mask": _label_hex(
             label, "resident_stage_mask", f"{context}.label"
@@ -1119,7 +1102,7 @@ def summarize_generation_benchmark(
         residency = plan_metrics["residency"]
         stages = plan_metrics["stages"]
         load_kind_statistics = _sum_parameter_load_kind_statistics(stages)
-        parameter_window_blockers = _max_parameter_window_blockers(stages)
+        parameter_residency_pressure = _max_parameter_residency_pressure(stages)
         stage_serving_memory = {
             stage_name: _derive_stage_serving_memory_metrics(stage_name, stage)
             for stage_name, stage in stages.items()
@@ -1211,7 +1194,7 @@ def summarize_generation_benchmark(
             "stage_serving_memory": stage_serving_memory,
         }
         row.update(load_kind_statistics)
-        row.update(parameter_window_blockers)
+        row.update(parameter_residency_pressure)
         row.update(_derive_serving_memory_metrics(row))
         if label_metrics is not None:
             _validate_label_plan_join(row, label_metrics, context)
@@ -1276,10 +1259,10 @@ _MARKDOWN_COLUMNS = (
     ("program rhs read MiB", "program_streaming_rhs_encode_read_mib"),
     ("program rhs write MiB", "program_streaming_rhs_encode_write_mib"),
     ("program rhs max MiB", "program_streaming_rhs_encode_max_write_mib"),
-    ("max group MiB", "parameter_window_largest_load_group_mib"),
-    ("max group stage", "parameter_window_largest_load_group_stage"),
-    ("max request MiB", "parameter_window_largest_request_mib"),
-    ("max request stage", "parameter_window_largest_request_stage"),
+    ("peak segment target MiB", "parameter_residency_peak_target_mib"),
+    ("peak segment target stage", "parameter_residency_peak_target_stage"),
+    ("peak segment live MiB", "parameter_residency_peak_live_mib"),
+    ("peak segment live stage", "parameter_residency_peak_live_stage"),
     ("dispatches", "runtime_dispatch_count"),
 )
 
@@ -1288,8 +1271,8 @@ _MARKDOWN_TEXT_COLUMNS = frozenset(
         "bucket",
         "generation_residency",
         "generation_phase_stage_masks",
-        "parameter_window_largest_load_group_stage",
-        "parameter_window_largest_request_stage",
+        "parameter_residency_peak_target_stage",
+        "parameter_residency_peak_live_stage",
     )
 )
 

@@ -1,0 +1,46 @@
+config.decl @id4.sampler.flow_euler.element_count : %value: index where [range(%value, 1, 1048576)]
+
+kernel.def export("id4_sampler_flow_euler_f32") @id4_sampler_flow_euler_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %element_count = config.get @id4.sampler.flow_euler.element_count : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%conditioned_velocity: buffer, %unconditioned_velocity: buffer, %x: buffer, %step: buffer, %x_next: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %one_f32 = scalar.constant 1.0 : f32
+  %step_value_count = index.constant 3 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element_count = config.get @id4.sampler.flow_euler.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %conditioned_view = buffer.view %conditioned_velocity[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %unconditioned_view = buffer.view %unconditioned_velocity[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %x_view = buffer.view %x[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %step_view = buffer.view %step[%base] : buffer -> view<[%step_value_count]xf32, #dense>
+  %x_next_view = buffer.view %x_next[%base] : buffer -> view<[%element_count]xf32, #dense>
+  scf.if %in_bounds {
+    %conditioned = view.load %conditioned_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    %unconditioned = view.load %unconditioned_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    %x_value = view.load %x_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    %flow_time = view.load %step_view[%zero] : view<[%step_value_count]xf32, #dense> -> f32
+    %next_flow_time = view.load %step_view[%one] : view<[%step_value_count]xf32, #dense> -> f32
+    %guidance_scale = view.load %step_view[%two] : view<[%step_value_count]xf32, #dense> -> f32
+    %conditioned_scaled = scalar.mulf %guidance_scale, %conditioned : f32
+    %unconditioned_scale = scalar.subf %one_f32, %guidance_scale : f32
+    %unconditioned_scaled = scalar.mulf %unconditioned_scale, %unconditioned : f32
+    %guided_velocity = scalar.addf %conditioned_scaled, %unconditioned_scaled : f32
+    %flow_delta = scalar.subf %next_flow_time, %flow_time : f32
+    %scaled_velocity = scalar.mulf %guided_velocity, %flow_delta : f32
+    %next_value = scalar.addf %x_value, %scaled_velocity : f32
+    view.store %next_value, %x_next_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}

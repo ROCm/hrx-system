@@ -22,14 +22,16 @@ extern "C" {
 
 // Dynamic request dimensions used when authoring one denoise step.
 typedef struct id4_sampler_denoise_request_config_t {
-  // Latent tensor shape shared by cond_out, uncond_out, x_t, and denoised.
+  // Latent tensor shape shared by both velocities and the latent state.
   id4_pipeline_program_shape_t latent_shape;
 } id4_sampler_denoise_request_config_t;
 
 // Dynamic request dimensions used when authoring initial latent noise.
 typedef struct id4_sampler_noise_request_config_t {
-  // Latent tensor shape produced by the deterministic noise kernel.
+  // Public [width, height, patch channels, batch] latent tensor shape.
   id4_pipeline_program_shape_t latent_shape;
+  // Logical generator threads used by the reference distribution mapping.
+  uint64_t generator_thread_count;
 } id4_sampler_noise_request_config_t;
 
 // Options for authoring one sampler denoise-step semantic program.

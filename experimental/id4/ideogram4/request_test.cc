@@ -54,15 +54,6 @@ struct ScopedQwenInputs {
   id4_ideogram4_qwen_inputs_t value = {};
 };
 
-struct ScopedDenoiseSchedule {
-  ~ScopedDenoiseSchedule() {
-    id4_ideogram4_denoise_schedule_deinitialize(&value,
-                                                iree_allocator_system());
-  }
-
-  id4_ideogram4_denoise_schedule_t value = {};
-};
-
 struct ScopedDitInputs {
   ~ScopedDitInputs() {
     id4_ideogram4_dit_inputs_deinitialize(&value, iree_allocator_system());
@@ -139,8 +130,7 @@ TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
       IREE_SV("{\"prompt\":{\"high_level_description\":\"hello\","
               "\"style_description\":{\"medium\":\"photo\"}},"
               "\"generation\":{\"latent_width\":8,\"latent_height\":16,"
-              "\"denoise_steps\":20,\"seed\":20260625,"
-              "\"guidance_scale\":3.5}}"),
+              "\"sampler\":\"V4_DEFAULT_20\",\"seed\":20260625}}"),
       iree_allocator_system(), &request.value));
   EXPECT_TRUE(iree_all_bits_set(request.value.flags,
                                 ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION));
@@ -155,18 +145,17 @@ TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
               "<|im_start|>assistant\n")));
   EXPECT_EQ(request.value.generation.latent_width, 8u);
   EXPECT_EQ(request.value.generation.latent_height, 16u);
-  EXPECT_EQ(request.value.generation.denoise_step_count, 20u);
+  EXPECT_EQ(request.value.generation.sampler_preset,
+            ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20);
   EXPECT_EQ(request.value.generation.seed, 20260625u);
-  EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
 }
 
 TEST(Ideogram4RequestTest, InitializesTextGenerationRequest) {
   id4_ideogram4_request_generation_t generation = {};
   generation.latent_width = 8;
   generation.latent_height = 16;
-  generation.denoise_step_count = 20;
+  generation.sampler_preset = ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20;
   generation.seed = 20260625;
-  generation.guidance_scale = 3.5f;
 
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_initialize_text(
@@ -182,17 +171,16 @@ TEST(Ideogram4RequestTest, InitializesTextGenerationRequest) {
                                      "<|im_start|>assistant\n")));
   EXPECT_EQ(request.value.generation.latent_width, 8u);
   EXPECT_EQ(request.value.generation.latent_height, 16u);
-  EXPECT_EQ(request.value.generation.denoise_step_count, 20u);
+  EXPECT_EQ(request.value.generation.sampler_preset,
+            ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20);
   EXPECT_EQ(request.value.generation.seed, 20260625u);
-  EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
 }
 
 TEST(Ideogram4RequestTest, RejectsInvalidTextGenerationRequest) {
   id4_ideogram4_request_generation_t generation = {};
   generation.latent_width = 8;
   generation.latent_height = 8;
-  generation.denoise_step_count = 1;
-  generation.guidance_scale = 3.5f;
+  generation.sampler_preset = ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20;
 
   id4_ideogram4_request_t request = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -214,8 +202,7 @@ TEST(Ideogram4RequestTest, CanonicalizesPromptPayloadJson) {
               "\"style_description\":{\"medium\":\"photo\","
               "\"tags\":[\"city\",\"walk\"]}},\"generation\":{"
               "\"latent_width\":8,\"latent_height\":8,"
-              "\"denoise_steps\":20,\"seed\":20260625,"
-              "\"guidance_scale\":3.5}}"),
+              "\"sampler\":\"V4_DEFAULT_20\",\"seed\":20260625}}"),
       iree_allocator_system(), &compact_request.value));
 
   ScopedRequest pretty_request;
@@ -231,9 +218,8 @@ TEST(Ideogram4RequestTest, CanonicalizesPromptPayloadJson) {
               "  \"generation\": {\n"
               "    \"latent_width\": 8,\n"
               "    \"latent_height\": 8,\n"
-              "    \"denoise_steps\": 20,\n"
+              "    \"sampler\": \"V4_DEFAULT_20\",\n"
               "    \"seed\": 20260625,\n"
-              "    \"guidance_scale\": 3.5,\n"
               "  },\n"
               "}"),
       iree_allocator_system(), &pretty_request.value));
@@ -266,28 +252,29 @@ TEST(Ideogram4RequestTest, RejectsMalformedFullGenerationJson) {
       IREE_STATUS_INVALID_ARGUMENT,
       id4_ideogram4_request_parse_json(
           IREE_SV("{\"generation\":{\"latent_width\":8,\"latent_height\":8,"
-                  "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"),
+                  "\"sampler\":\"V4_DEFAULT_20\",\"seed\":1}}"),
           iree_allocator_system(), &request));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_ideogram4_request_parse_json(
           IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
-                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1},"
+                  "\"latent_height\":8,\"sampler\":\"V4_DEFAULT_20\","
+                  "\"seed\":1},"
                   "\"extra\":true}"),
           iree_allocator_system(), &request));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_ideogram4_request_parse_json(
           IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":0,"
-                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1,"
-                  "\"guidance_scale\":3.5}}"),
+                  "\"latent_height\":8,\"sampler\":\"V4_DEFAULT_20\","
+                  "\"seed\":1}}"),
           iree_allocator_system(), &request));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_ideogram4_request_parse_json(
           IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
-                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1,"
-                  "\"guidance_scale\":0.0}}"),
+                  "\"latent_height\":8,\"sampler\":\"UNKNOWN\","
+                  "\"seed\":1}}"),
           iree_allocator_system(), &request));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -386,87 +373,12 @@ TEST(Ideogram4RequestTest, RejectsTokenIdOutsideModelVocab) {
                             &options, iree_allocator_system(), &inputs.value));
 }
 
-TEST(Ideogram4RequestTest, LowersSingleStepDenoiseSchedule) {
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
-              "\"latent_height\":8,\"denoise_steps\":1,\"seed\":1,"
-              "\"guidance_scale\":3.5}}"),
-      iree_allocator_system(), &request.value));
-
-  ScopedDenoiseSchedule schedule;
-  IREE_ASSERT_OK(id4_ideogram4_request_generation_lower_denoise_schedule(
-      &request.value.generation, iree_allocator_system(), &schedule.value));
-  ASSERT_EQ(schedule.value.step_count, 1u);
-  ASSERT_NE(schedule.value.steps, nullptr);
-  const id4_ideogram4_denoise_step_t& step = schedule.value.steps[0];
-  EXPECT_FLOAT_EQ(step.timestep, 0.0f);
-  EXPECT_FLOAT_EQ(step.scalings[0], 1.0f);
-  EXPECT_FLOAT_EQ(step.scalings[1], -1.0f);
-  EXPECT_FLOAT_EQ(step.scalings[2], 1.0f);
-  EXPECT_FLOAT_EQ(step.sigmas[0], 1.0f);
-  EXPECT_FLOAT_EQ(step.sigmas[1], 0.0f);
-  EXPECT_FLOAT_EQ(step.guidance[0], 3.5f);
-  EXPECT_FLOAT_EQ(step.guidance[1], 0.0f);
-  EXPECT_FLOAT_EQ(step.guidance[2], 0.0f);
-}
-
-TEST(Ideogram4RequestTest, LowersMultiStepDenoiseSchedule) {
-  ScopedRequest request;
-  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
-              "\"latent_height\":8,\"denoise_steps\":3,\"seed\":1,"
-              "\"guidance_scale\":7.0}}"),
-      iree_allocator_system(), &request.value));
-
-  ScopedDenoiseSchedule schedule;
-  IREE_ASSERT_OK(id4_ideogram4_request_generation_lower_denoise_schedule(
-      &request.value.generation, iree_allocator_system(), &schedule.value));
-  ASSERT_EQ(schedule.value.step_count, 3u);
-  ASSERT_NE(schedule.value.steps, nullptr);
-
-  const float expected_sigmas[4] = {1.0f, 0.5005f, 0.001f, 0.0f};
-  const float expected_timesteps[3] = {0.0f, 499.5f, 999.0f};
-  for (uint32_t i = 0; i < schedule.value.step_count; ++i) {
-    const id4_ideogram4_denoise_step_t& step = schedule.value.steps[i];
-    EXPECT_NEAR(step.timestep, expected_timesteps[i], 1e-4f);
-    EXPECT_FLOAT_EQ(step.scalings[0], 1.0f);
-    EXPECT_NEAR(step.scalings[1], -expected_sigmas[i], 1e-6f);
-    EXPECT_FLOAT_EQ(step.scalings[2], 1.0f);
-    EXPECT_NEAR(step.sigmas[0], expected_sigmas[i], 1e-6f);
-    EXPECT_NEAR(step.sigmas[1], expected_sigmas[i + 1], 1e-6f);
-    EXPECT_FLOAT_EQ(step.guidance[0], 7.0f);
-    EXPECT_FLOAT_EQ(step.guidance[1], 0.0f);
-    EXPECT_FLOAT_EQ(step.guidance[2], 0.0f);
-  }
-}
-
-TEST(Ideogram4RequestTest, RejectsInvalidDenoiseScheduleMetadata) {
-  id4_ideogram4_request_generation_t generation = {};
-  generation.denoise_step_count = 0;
-  generation.guidance_scale = 1.0f;
-
-  ScopedDenoiseSchedule schedule;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_request_generation_lower_denoise_schedule(
-          &generation, iree_allocator_system(), &schedule.value));
-
-  generation.denoise_step_count = 1;
-  generation.guidance_scale = 0.0f;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_request_generation_lower_denoise_schedule(
-          &generation, iree_allocator_system(), &schedule.value));
-}
-
 TEST(Ideogram4RequestTest, LowersDitMetadataInputs) {
   id4_ideogram4_request_generation_t generation = {};
   generation.latent_width = 3;
   generation.latent_height = 2;
-  generation.denoise_step_count = 4;
+  generation.sampler_preset = ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20;
   generation.seed = 1;
-  generation.guidance_scale = 5.0f;
 
   id4_ideogram4_dit_lowering_options_t options = {};
   options.structure_size = sizeof(options);
@@ -574,8 +486,7 @@ TEST(Ideogram4RequestTest, RejectsInvalidDitMetadataLowering) {
   id4_ideogram4_request_generation_t generation = {};
   generation.latent_width = 1;
   generation.latent_height = 1;
-  generation.denoise_step_count = 1;
-  generation.guidance_scale = 1.0f;
+  generation.sampler_preset = ID4_IDEOGRAM4_SAMPLER_PRESET_V4_DEFAULT_20;
 
   id4_ideogram4_dit_lowering_options_t options = {};
   options.structure_size = sizeof(options);

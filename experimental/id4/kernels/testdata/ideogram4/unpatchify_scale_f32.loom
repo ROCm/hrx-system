@@ -7,7 +7,7 @@
 check.case public @id4_ideogram4_unpatchify_scale_f32_small_case {
   %projected = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xf32>
   %output = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
-  %expected = check.generate.iota offset(-1.0) step(-1.0) : tensor<1x1x4x1xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<1x1x4x1xf32>
   func.call @id4_ideogram4_unpatchify_scale_f32(%projected, %output) : (tensor<4x1xf32>, tensor<1x1x4x1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xf32>
   check.return
@@ -16,7 +16,7 @@ check.case public @id4_ideogram4_unpatchify_scale_f32_small_case {
 check.case public @id4_ideogram4_unpatchify_scale_f32_conditioned_slice_case {
   %projected = check.generate.iota offset(1.0) step(1.0) : tensor<4x2xf32>
   %output = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
-  %expected = check.generate.iota offset(-2.0) step(-2.0) : tensor<1x1x4x1xf32>
+  %expected = check.generate.iota offset(2.0) step(2.0) : tensor<1x1x4x1xf32>
   func.call @id4_ideogram4_unpatchify_scale_f32(%projected, %output) : (tensor<4x2xf32>, tensor<1x1x4x1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xf32>
   check.return

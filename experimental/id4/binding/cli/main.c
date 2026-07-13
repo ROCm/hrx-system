@@ -42,12 +42,10 @@ IREE_FLAG(int32_t, generation_latent_width, 0,
           "Diffusion latent width for --prompt.");
 IREE_FLAG(int32_t, generation_latent_height, 0,
           "Diffusion latent height for --prompt.");
-IREE_FLAG(int32_t, generation_denoise_steps, 0,
-          "Denoise step count for --prompt.");
+IREE_FLAG(string, generation_sampler, "",
+          "Advertised sampler preset for --prompt.");
 IREE_FLAG(int64_t, generation_seed, -1,
           "Non-negative deterministic seed for --prompt.");
-IREE_FLAG(float, generation_guidance_scale, 0.0f,
-          "Positive classifier-free guidance scale for --prompt.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
@@ -261,27 +259,17 @@ static iree_status_t id4_cli_parse_request(
           IREE_STATUS_INVALID_ARGUMENT,
           "--generation_latent_height must be greater than zero for --prompt");
     }
-    if (FLAG_generation_denoise_steps <= 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "--generation_denoise_steps must be greater than zero for --prompt");
-    }
     if (FLAG_generation_seed < 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "--generation_seed must be non-negative for --prompt");
     }
-    if (!isfinite(FLAG_generation_guidance_scale) ||
-        FLAG_generation_guidance_scale <= 0.0f) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "--generation_guidance_scale must be positive "
-                              "for --prompt");
-    }
+    IREE_RETURN_IF_ERROR(id4_ideogram4_sampler_preset_parse(
+        iree_make_cstring_view(FLAG_generation_sampler),
+        &generation.sampler_preset));
     generation.latent_width = (uint32_t)FLAG_generation_latent_width;
     generation.latent_height = (uint32_t)FLAG_generation_latent_height;
-    generation.denoise_step_count = (uint32_t)FLAG_generation_denoise_steps;
     generation.seed = (uint64_t)FLAG_generation_seed;
-    generation.guidance_scale = FLAG_generation_guidance_scale;
     return id4_ideogram4_request_initialize_text(prompt, &generation,
                                                  host_allocator, out_request);
   }
@@ -2242,8 +2230,6 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_tooling_host_bytes_t unconditioned_velocity_bytes;
   memset(&unconditioned_velocity_bytes, 0,
          sizeof(unconditioned_velocity_bytes));
-  id4_tooling_host_bytes_t denoised_latent_bytes;
-  memset(&denoised_latent_bytes, 0, sizeof(denoised_latent_bytes));
   id4_tooling_host_bytes_t final_latent_bytes;
   memset(&final_latent_bytes, 0, sizeof(final_latent_bytes));
   id4_cli_generation_diagnostic_taps_t diagnostic_taps;
@@ -2602,11 +2588,6 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
           &readback_options, &unconditioned_velocity_bytes);
     }
     if (iree_status_is_ok(status) && capture_result_tensors) {
-      readback_options.binding = result.denoised_latent_binding;
-      status = id4_tooling_readback_buffer_binding(&readback_options,
-                                                   &denoised_latent_bytes);
-    }
-    if (iree_status_is_ok(status) && capture_result_tensors) {
       readback_options.binding = result.final_latent_binding;
       status = id4_tooling_readback_buffer_binding(&readback_options,
                                                    &final_latent_bytes);
@@ -2644,7 +2625,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       id4_pipeline_tensor_shape_t image_shape =
           id4_cli_convert_program_shape(summary.decoded_image_shape);
       iree_host_size_t result_summary_tensor_count = 0;
-      if (!iree_host_size_checked_add(5, diagnostic_taps.request_count,
+      if (!iree_host_size_checked_add(4, diagnostic_taps.request_count,
                                       &result_summary_tensor_count)) {
         status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "result summary tensor count overflow");
@@ -2684,19 +2665,6 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
                                           unconditioned_velocity_bytes.length),
         };
         result_summary_tensors[2] = (id4_cli_result_tensor_summary_t){
-            .key = IREE_SV("denoised_latent"),
-            .layout =
-                {
-                    .name = IREE_SV("denoised_latent"),
-                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
-                    .shape = latent_shape,
-                    .byte_length = denoised_latent_bytes.length,
-                    .alignment = 0,
-                },
-            .bytes = iree_make_const_byte_span(denoised_latent_bytes.data,
-                                               denoised_latent_bytes.length),
-        };
-        result_summary_tensors[3] = (id4_cli_result_tensor_summary_t){
             .key = IREE_SV("final_latent"),
             .layout =
                 {
@@ -2709,7 +2677,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
             .bytes = iree_make_const_byte_span(final_latent_bytes.data,
                                                final_latent_bytes.length),
         };
-        result_summary_tensors[4] = (id4_cli_result_tensor_summary_t){
+        result_summary_tensors[3] = (id4_cli_result_tensor_summary_t){
             .key = IREE_SV("decoded_image"),
             .layout =
                 {
@@ -2732,7 +2700,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
             execution, diagnostic_taps.requests[i].stage_key,
             diagnostic_taps.requests[i].tap_name, &tap_layout, &tap_binding);
         if (iree_status_is_ok(status)) {
-          result_summary_tensors[5 + i] = (id4_cli_result_tensor_summary_t){
+          result_summary_tensors[4 + i] = (id4_cli_result_tensor_summary_t){
               .key = diagnostic_taps.requests[i].summary_key,
               .layout = *tap_layout,
               .bytes = iree_make_const_byte_span(
@@ -2803,7 +2771,6 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_allocator_free(host_allocator, result_summary_tensors);
   iree_allocator_free(host_allocator, diagnostic_tap_bytes);
   id4_tooling_host_bytes_deinitialize(&final_latent_bytes, host_allocator);
-  id4_tooling_host_bytes_deinitialize(&denoised_latent_bytes, host_allocator);
   id4_tooling_host_bytes_deinitialize(&unconditioned_velocity_bytes,
                                       host_allocator);
   id4_tooling_host_bytes_deinitialize(&conditioned_velocity_bytes,

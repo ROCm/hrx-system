@@ -1,72 +1,205 @@
 config.decl @id4.sampler.noise.element_count : %value: index where [range(%value, 1, 1048576)]
 
+config.decl @id4.sampler.noise.generator_thread_count : %value: index where [range(%value, 256, 1048576)]
+
+config.decl @id4.sampler.noise.width : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.sampler.noise.height : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.sampler.noise.channel_count : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
+
+func.def inline @id4_sampler_noise_f32_public_index(%linear_index: index, %width: index, %height: index, %channel_count: index) -> (index) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %ae_channel_count = index.div %channel_count, %four : index
+  %token = index.div %linear_index, %channel_count : index
+  %token_channel = index.rem %linear_index, %channel_count : index
+  %x = index.rem %token, %width : index
+  %y = index.div %token, %width : index
+  %ae_channel = index.rem %token_channel, %ae_channel_count : index
+  %patch_pair = index.div %token_channel, %ae_channel_count : index
+  %patch_h = index.rem %patch_pair, %two : index
+  %patch_w = index.div %patch_pair, %two : index
+  %public_channel_base = index.mul %ae_channel, %four : index
+  %public_channel_w = index.madd %patch_w, %two, %public_channel_base : index
+  %public_channel = index.add %public_channel_w, %patch_h : index
+  %public_token = index.madd %x, %height, %y : index
+  %public_index = index.madd %public_token, %channel_count, %public_channel : index
+  func.return %public_index : index
+}
+
 kernel.def export("id4_sampler_noise_f32") @id4_sampler_noise_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %rounding = index.constant 255 : index
-  %element_count = config.get @id4.sampler.noise.element_count : index
-  %rounded = index.add %element_count, %rounding : index
-  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  %generator_thread_count = config.get @id4.sampler.noise.generator_thread_count : index
+  %workgroups_x = index.div %generator_thread_count, %workgroup_size_x : index
   kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%seed: buffer, %latent: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %ten = index.constant 10 : index
   %workgroup_size_x = index.constant 256 : index
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %element_count = config.get @id4.sampler.noise.element_count : index
-  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
-  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %generator_thread_count = config.get @id4.sampler.noise.generator_thread_count : index
+  %width = config.get @id4.sampler.noise.width : index
+  %height = config.get @id4.sampler.noise.height : index
+  %channel_count = config.get @id4.sampler.noise.channel_count : index
+  %generator_span = index.mul %generator_thread_count, %four : index
+  %element_count_minus_one = index.sub %element_count, %one : index
+  %generator_iteration_count = index.div %element_count_minus_one, %generator_span : index
+  %generator_iteration_count_rounded = index.add %generator_iteration_count, %one : index
+  %rounded_element_count = index.mul %generator_iteration_count_rounded, %generator_span : index
+  %thread_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %seed_noalias, %latent_noalias = buffer.assume.noalias %seed, %latent : buffer, buffer
   %seed_global = buffer.assume.memory_space<global> %seed_noalias : buffer
   %latent_global = buffer.assume.memory_space<global> %latent_noalias : buffer
   %seed_view = buffer.view %seed_global[%base] : buffer -> view<2xi32, #dense>
   %latent_view = buffer.view %latent_global[%base] : buffer -> view<[%element_count]xf32, #dense>
-  scf.if %in_bounds {
-    %seed_low = view.load %seed_view[%zero] : view<2xi32, #dense> -> i32
-    %seed_high = view.load %seed_view[%one] : view<2xi32, #dense> -> i32
-    %element_i32 = index.cast %element_index : index to i32
-    %shift5 = scalar.constant 5 : i32
-    %shift13 = scalar.constant 13 : i32
-    %shift16 = scalar.constant 16 : i32
-    %shift17 = scalar.constant 17 : i32
-    %mask23 = scalar.constant 8388607 : i32
-    %one_i32 = scalar.constant 1 : i32
-    %mix_bias = scalar.constant 1831565813 : i32
-    %seed_high_shifted = scalar.shli %seed_high, %shift16 : i32
-    %base_mix0 = scalar.xori %element_i32, %seed_low : i32
-    %base_mix1 = scalar.xori %base_mix0, %seed_high_shifted : i32
-    %x0_shift13 = scalar.shli %base_mix1, %shift13 : i32
-    %x1 = scalar.xori %base_mix1, %x0_shift13 : i32
-    %x1_shift17 = scalar.shrui %x1, %shift17 : i32
-    %x2 = scalar.xori %x1, %x1_shift17 : i32
-    %x2_shift5 = scalar.shli %x2, %shift5 : i32
-    %x3 = scalar.xori %x2, %x2_shift5 : i32
-    %y_seed0 = scalar.addi %base_mix1, %seed_high : i32
-    %y_seed1 = scalar.addi %y_seed0, %mix_bias : i32
-    %y0_shift13 = scalar.shli %y_seed1, %shift13 : i32
-    %y1 = scalar.xori %y_seed1, %y0_shift13 : i32
-    %y1_shift17 = scalar.shrui %y1, %shift17 : i32
-    %y2 = scalar.xori %y1, %y1_shift17 : i32
-    %y2_shift5 = scalar.shli %y2, %shift5 : i32
-    %y3 = scalar.xori %y2, %y2_shift5 : i32
-    %x_mantissa = scalar.andi %x3, %mask23 : i32
-    %y_mantissa = scalar.andi %y3, %mask23 : i32
-    %x_unit_bits = scalar.addi %x_mantissa, %one_i32 : i32
-    %y_unit_bits = scalar.addi %y_mantissa, %one_i32 : i32
-    %x_unit_f32 = scalar.uitofp %x_unit_bits : i32 to f32
-    %y_unit_f32 = scalar.uitofp %y_unit_bits : i32 to f32
-    %unit_scale = scalar.constant 1.1920928955078125e-07 : f32
-    %u1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_unit_f32, %unit_scale : f32
-    %u2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_unit_f32, %unit_scale : f32
-    %negative_two = scalar.constant -2.0 : f32
-    %log_u1 = scalar.logf<afn> %u1 : f32
-    %radius_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %negative_two, %log_u1 : f32
-    %radius = scalar.sqrtf<afn> %radius_square : f32
-    %cosine = scalar.costurnsf<afn> %u2 : f32
-    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %radius, %cosine : f32
-    view.store %value, %latent_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  %seed_low = view.load %seed_view[%zero] : view<2xi32, #dense> -> i32
+  %seed_high = view.load %seed_view[%one] : view<2xi32, #dense> -> i32
+  %thread_index_i32 = index.cast %thread_index : index to i32
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %mask16 = scalar.constant 65535 : i32
+  %shift16 = scalar.constant 16 : i32
+  %multiplier0_low = scalar.constant 8019 : i32
+  %multiplier0_high = scalar.constant 53841 : i32
+  %multiplier1_low = scalar.constant 36183 : i32
+  %multiplier1_high = scalar.constant 52638 : i32
+  %key_increment0_low = scalar.constant 31161 : i32
+  %key_increment0_high = scalar.constant 40503 : i32
+  %key_increment1_low = scalar.constant 44677 : i32
+  %key_increment1_high = scalar.constant 47975 : i32
+  %key_increment0_high_shifted = scalar.shli %key_increment0_high, %shift16 : i32
+  %key_increment0 = scalar.addi %key_increment0_high_shifted, %key_increment0_low : i32
+  %key_increment1_high_shifted = scalar.shli %key_increment1_high, %shift16 : i32
+  %key_increment1 = scalar.addi %key_increment1_high_shifted, %key_increment1_low : i32
+  %uint32_scale = scalar.constant 2.3283064365386963e-10 : f32
+  %uint32_angle_scale = scalar.constant 1.4629180792671596e-09 : f32
+  %negative_two = scalar.constant -2.0 : f32
+  scf.for %linear_index = [%thread_index to %rounded_element_count step %generator_span] {
+    %invocation_index = index.div %linear_index, %generator_span : index
+    %counter0_init = index.cast %invocation_index : index to i32
+    %counter0, %counter1, %counter2, %counter3, %key0, %key1 = scf.for %round = [%zero to %ten step %one](%round_counter0 = %counter0_init : i32, %round_counter1 = %zero_i32 : i32, %round_counter2 = %thread_index_i32 : i32, %round_counter3 = %zero_i32 : i32, %round_key0 = %seed_low : i32, %round_key1 = %seed_high : i32) -> (i32, i32, i32, i32, i32, i32) unroll {
+      %counter0_low = scalar.andi %round_counter0, %mask16 : i32
+      %counter0_high = scalar.shrui %round_counter0, %shift16 : i32
+      %product0_low_low = scalar.muli %counter0_low, %multiplier0_low : i32
+      %product0_low_high = scalar.muli %counter0_low, %multiplier0_high : i32
+      %product0_high_low = scalar.muli %counter0_high, %multiplier0_low : i32
+      %product0_high_high = scalar.muli %counter0_high, %multiplier0_high : i32
+      %product0_middle0 = scalar.shli %product0_low_high, %shift16 : i32
+      %product0_low_partial = scalar.addi %product0_low_low, %product0_middle0 : i32
+      %product0_carry0_i1 = scalar.cmpi ult, %product0_low_partial, %product0_low_low : i32
+      %product0_carry0 = scf.if %product0_carry0_i1 -> (i32) {
+        scf.yield %one_i32 : i32
+      } else {
+        scf.yield %zero_i32 : i32
+      }
+      %product0_middle1 = scalar.shli %product0_high_low, %shift16 : i32
+      %product0_low = scalar.addi %product0_low_partial, %product0_middle1 : i32
+      %product0_carry1_i1 = scalar.cmpi ult, %product0_low, %product0_low_partial : i32
+      %product0_carry1 = scf.if %product0_carry1_i1 -> (i32) {
+        scf.yield %one_i32 : i32
+      } else {
+        scf.yield %zero_i32 : i32
+      }
+      %product0_low_high_upper = scalar.shrui %product0_low_high, %shift16 : i32
+      %product0_high_low_upper = scalar.shrui %product0_high_low, %shift16 : i32
+      %product0_high_partial0 = scalar.addi %product0_high_high, %product0_low_high_upper : i32
+      %product0_high_partial1 = scalar.addi %product0_high_partial0, %product0_high_low_upper : i32
+      %product0_high_partial2 = scalar.addi %product0_high_partial1, %product0_carry0 : i32
+      %product0_high = scalar.addi %product0_high_partial2, %product0_carry1 : i32
+      %counter2_low = scalar.andi %round_counter2, %mask16 : i32
+      %counter2_high = scalar.shrui %round_counter2, %shift16 : i32
+      %product1_low_low = scalar.muli %counter2_low, %multiplier1_low : i32
+      %product1_low_high = scalar.muli %counter2_low, %multiplier1_high : i32
+      %product1_high_low = scalar.muli %counter2_high, %multiplier1_low : i32
+      %product1_high_high = scalar.muli %counter2_high, %multiplier1_high : i32
+      %product1_middle0 = scalar.shli %product1_low_high, %shift16 : i32
+      %product1_low_partial = scalar.addi %product1_low_low, %product1_middle0 : i32
+      %product1_carry0_i1 = scalar.cmpi ult, %product1_low_partial, %product1_low_low : i32
+      %product1_carry0 = scf.if %product1_carry0_i1 -> (i32) {
+        scf.yield %one_i32 : i32
+      } else {
+        scf.yield %zero_i32 : i32
+      }
+      %product1_middle1 = scalar.shli %product1_high_low, %shift16 : i32
+      %product1_low = scalar.addi %product1_low_partial, %product1_middle1 : i32
+      %product1_carry1_i1 = scalar.cmpi ult, %product1_low, %product1_low_partial : i32
+      %product1_carry1 = scf.if %product1_carry1_i1 -> (i32) {
+        scf.yield %one_i32 : i32
+      } else {
+        scf.yield %zero_i32 : i32
+      }
+      %product1_low_high_upper = scalar.shrui %product1_low_high, %shift16 : i32
+      %product1_high_low_upper = scalar.shrui %product1_high_low, %shift16 : i32
+      %product1_high_partial0 = scalar.addi %product1_high_high, %product1_low_high_upper : i32
+      %product1_high_partial1 = scalar.addi %product1_high_partial0, %product1_high_low_upper : i32
+      %product1_high_partial2 = scalar.addi %product1_high_partial1, %product1_carry0 : i32
+      %product1_high = scalar.addi %product1_high_partial2, %product1_carry1 : i32
+      %next0_xor_counter = scalar.xori %product1_high, %round_counter1 : i32
+      %next0 = scalar.xori %next0_xor_counter, %round_key0 : i32
+      %next2_xor_counter = scalar.xori %product0_high, %round_counter3 : i32
+      %next2 = scalar.xori %next2_xor_counter, %round_key1 : i32
+      %next_key0 = scalar.addi %round_key0, %key_increment0 : i32
+      %next_key1 = scalar.addi %round_key1, %key_increment1 : i32
+      scf.yield %next0, %product1_low, %next2, %product0_low, %next_key0, %next_key1 : i32, i32, i32, i32, i32, i32
+    }
+    %counter0_f32 = scalar.uitofp %counter0 : i32 to f32
+    %counter1_f32 = scalar.uitofp %counter1 : i32 to f32
+    %counter2_f32 = scalar.uitofp %counter2 : i32 to f32
+    %counter3_f32 = scalar.uitofp %counter3 : i32 to f32
+    %uniform0_scaled = scalar.mulf %counter0_f32, %uint32_scale : f32
+    %uniform0 = scalar.addf %uint32_scale, %uniform0_scaled : f32
+    %angle0_scaled = scalar.mulf %counter1_f32, %uint32_angle_scale : f32
+    %angle0 = scalar.addf %uint32_angle_scale, %angle0_scaled : f32
+    %log_uniform0 = scalar.logf<afn> %uniform0 : f32
+    %radius0_squared = scalar.mulf %negative_two, %log_uniform0 : f32
+    %radius0 = scalar.sqrtf<afn> %radius0_squared : f32
+    %sine0 = scalar.sinf<afn> %angle0 : f32
+    %cosine0 = scalar.cosf<afn> %angle0 : f32
+    %normal0 = scalar.mulf %sine0, %radius0 : f32
+    %normal1 = scalar.mulf %cosine0, %radius0 : f32
+    %uniform1_scaled = scalar.mulf %counter2_f32, %uint32_scale : f32
+    %uniform1 = scalar.addf %uint32_scale, %uniform1_scaled : f32
+    %angle1_scaled = scalar.mulf %counter3_f32, %uint32_angle_scale : f32
+    %angle1 = scalar.addf %uint32_angle_scale, %angle1_scaled : f32
+    %log_uniform1 = scalar.logf<afn> %uniform1 : f32
+    %radius1_squared = scalar.mulf %negative_two, %log_uniform1 : f32
+    %radius1 = scalar.sqrtf<afn> %radius1_squared : f32
+    %sine1 = scalar.sinf<afn> %angle1 : f32
+    %cosine1 = scalar.cosf<afn> %angle1 : f32
+    %normal2 = scalar.mulf %sine1, %radius1 : f32
+    %normal3 = scalar.mulf %cosine1, %radius1 : f32
+    %output_index1 = index.add %linear_index, %generator_thread_count : index
+    %output_index2 = index.madd %generator_thread_count, %two, %linear_index : index
+    %output_index3 = index.madd %generator_thread_count, %three, %linear_index : index
+    %in_bounds0 = index.cmp ult, %linear_index, %element_count : index
+    %in_bounds1 = index.cmp ult, %output_index1, %element_count : index
+    %in_bounds2 = index.cmp ult, %output_index2, %element_count : index
+    %in_bounds3 = index.cmp ult, %output_index3, %element_count : index
+    scf.if %in_bounds0 {
+      %public_index0 = func.call @id4_sampler_noise_f32_public_index(%linear_index, %width, %height, %channel_count) : (index, index, index, index) -> (index)
+      view.store %normal0, %latent_view[%public_index0] : f32, view<[%element_count]xf32, #dense>
+    }
+    scf.if %in_bounds1 {
+      %public_index1 = func.call @id4_sampler_noise_f32_public_index(%output_index1, %width, %height, %channel_count) : (index, index, index, index) -> (index)
+      view.store %normal1, %latent_view[%public_index1] : f32, view<[%element_count]xf32, #dense>
+    }
+    scf.if %in_bounds2 {
+      %public_index2 = func.call @id4_sampler_noise_f32_public_index(%output_index2, %width, %height, %channel_count) : (index, index, index, index) -> (index)
+      view.store %normal2, %latent_view[%public_index2] : f32, view<[%element_count]xf32, #dense>
+    }
+    scf.if %in_bounds3 {
+      %public_index3 = func.call @id4_sampler_noise_f32_public_index(%output_index3, %width, %height, %channel_count) : (index, index, index, index) -> (index)
+      view.store %normal3, %latent_view[%public_index3] : f32, view<[%element_count]xf32, #dense>
+    }
   }
   kernel.return
 }

@@ -88,13 +88,13 @@ namespace {
 static constexpr char kShortPrompt128[] =
     "{\"prompt\":\"A small red boat on a quiet lake at sunrise.\","
     "\"generation\":{\"latent_width\":8,\"latent_height\":8,"
-    "\"denoise_steps\":1,\"seed\":20260626,\"guidance_scale\":3.5}}";
+    "\"sampler\":\"V4_TURBO_12\",\"seed\":20260626}}";
 
 static constexpr char kMediumPrompt128[] =
     "{\"prompt\":\"Three friends walking through a bright city crosswalk with "
     "glass storefronts, natural clothing, normal hands, and soft afternoon "
     "light.\",\"generation\":{\"latent_width\":8,\"latent_height\":8,"
-    "\"denoise_steps\":1,\"seed\":20260625,\"guidance_scale\":3.5}}";
+    "\"sampler\":\"V4_TURBO_12\",\"seed\":20260625}}";
 
 static constexpr char kStructuredPrompt128[] =
     "{\"prompt\":{\"high_level_description\":\"A realistic street photograph "
@@ -109,7 +109,7 @@ static constexpr char kStructuredPrompt128[] =
     "walking in the center\"},{\"type\":\"obj\","
     "\"bbox\":[260,610,920,830],\"desc\":\"adult man walking on the right\"}]}"
     "},\"generation\":{\"latent_width\":8,\"latent_height\":8,"
-    "\"denoise_steps\":1,\"seed\":20260625,\"guidance_scale\":3.5}}";
+    "\"sampler\":\"V4_TURBO_12\",\"seed\":20260625}}";
 
 struct GenerationPrompt {
   // Stable benchmark label and plan dump stem for this prompt bucket.

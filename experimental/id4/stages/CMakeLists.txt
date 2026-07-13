@@ -258,6 +258,7 @@ iree_cc_library(
     iree::experimental::id4::pipeline::diagnostics
     iree::hal
     iree::hal::drivers::local_sync::sync_driver
+    iree::hal::testing::mock_device
   TESTONLY
   PUBLIC
 )

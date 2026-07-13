@@ -181,6 +181,47 @@ static iree_status_t id4_sampler_stage_validate_latent_shape(
   return iree_ok_status();
 }
 
+static iree_status_t id4_sampler_stage_calculate_noise_generator_thread_count(
+    const id4_sampler_stage_t* stage, iree_host_size_t device_index,
+    id4_pipeline_program_shape_t latent_shape,
+    uint64_t* out_generator_thread_count) {
+  *out_generator_thread_count = 0;
+  if (device_index >=
+      iree_hal_device_group_device_count(stage->base.services.device_group)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "sampler noise device index %" PRIhsz
+                            " is outside the device group",
+                            device_index);
+  }
+  uint64_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_shape_element_count(latent_shape, &element_count));
+  const uint64_t rounded_element_count = iree_align_uint64(element_count, 256);
+  if (rounded_element_count == 256) {
+    *out_generator_thread_count = rounded_element_count;
+    return iree_ok_status();
+  }
+  iree_hal_device_t* device = iree_hal_device_group_device_at(
+      stage->base.services.device_group, device_index);
+  const iree_hal_device_dispatch_spec_t* dispatch_spec =
+      iree_hal_device_spec_dispatch(iree_hal_device_spec(device));
+  if (!dispatch_spec || dispatch_spec->execution.unit_count == 0 ||
+      dispatch_spec->execution.maximum_resident_invocation_count < 256) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "sampler noise requires device execution-unit and resident-invocation "
+        "limits");
+  }
+  const uint64_t resident_workgroups_per_unit =
+      dispatch_spec->execution.maximum_resident_invocation_count / 256;
+  const uint64_t resident_thread_count =
+      (uint64_t)dispatch_spec->execution.unit_count *
+      resident_workgroups_per_unit * 256;
+  *out_generator_thread_count =
+      iree_min(rounded_element_count, resident_thread_count);
+  return iree_ok_status();
+}
+
 static id4_pipeline_diagnostic_event_t id4_sampler_stage_lifecycle_event(
     const id4_sampler_stage_t* stage, iree_string_view_t key,
     iree_string_view_t message) {
@@ -207,12 +248,13 @@ static iree_status_t id4_sampler_stage_emit_lifecycle(
 }
 
 static iree_status_t id4_sampler_stage_author_noise_program(
-    id4_pipeline_program_shape_t latent_shape,
+    id4_pipeline_program_shape_t latent_shape, uint64_t generator_thread_count,
     id4_pipeline_program_builder_t* builder) {
   id4_sampler_noise_program_options_t program_options;
   memset(&program_options, 0, sizeof(program_options));
   program_options.structure_size = sizeof(program_options);
   program_options.request.latent_shape = latent_shape;
+  program_options.request.generator_thread_count = generator_thread_count;
   return id4_sampler_program_author_noise(&program_options, builder);
 }
 
@@ -228,7 +270,8 @@ static iree_status_t id4_sampler_stage_author_denoise_program(
 
 static iree_status_t id4_sampler_stage_author_program(
     const id4_sampler_stage_t* stage, id4_pipeline_program_shape_t latent_shape,
-    iree_allocator_t host_allocator, id4_pipeline_program_t** out_program) {
+    uint64_t generator_thread_count, iree_allocator_t host_allocator,
+    id4_pipeline_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
 
@@ -247,7 +290,8 @@ static iree_status_t id4_sampler_stage_author_program(
   if (iree_status_is_ok(status)) {
     switch (stage->descriptor->kind) {
       case ID4_SAMPLER_STAGE_KIND_NOISE:
-        status = id4_sampler_stage_author_noise_program(latent_shape, builder);
+        status = id4_sampler_stage_author_noise_program(
+            latent_shape, generator_thread_count, builder);
         break;
       case ID4_SAMPLER_STAGE_KIND_DENOISE:
         status =
@@ -315,9 +359,18 @@ static iree_status_t id4_sampler_stage_plan(
   IREE_RETURN_IF_ERROR(
       id4_sampler_stage_validate_latent_shape(stage, latent_shape));
 
+  uint64_t generator_thread_count = 0;
+  if (stage->descriptor->kind == ID4_SAMPLER_STAGE_KIND_NOISE) {
+    IREE_RETURN_IF_ERROR(
+        id4_sampler_stage_calculate_noise_generator_thread_count(
+            stage, options->device_index, latent_shape,
+            &generator_thread_count));
+  }
+
   id4_pipeline_program_t* program = NULL;
   iree_status_t status = id4_sampler_stage_author_program(
-      stage, latent_shape, stage->host_allocator, &program);
+      stage, latent_shape, generator_thread_count, stage->host_allocator,
+      &program);
   if (iree_status_is_ok(status)) {
     status = id4_sampler_stage_create_program_plan(stage, options, program,
                                                    out_plan);

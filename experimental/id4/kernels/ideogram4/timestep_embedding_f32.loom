@@ -1,5 +1,21 @@
 config.decl @id4.ideogram4.timestep_embedding.embedding_size : %value: index where [range(%value, 2, 65536)]
 
+// Reduces a non-negative radian angle to a small turn value before using the
+// native trigonometric instructions. Splitting 2*pi keeps the subtraction
+// accurate across the official [0, 10000] timestep input range.
+func.def inline @id4_ideogram4_timestep_reduce_turns_f32(%angle: f32) -> (f32) {
+  %inverse_two_pi = scalar.constant 0.15915494309189535 : f32
+  %two_pi_high = scalar.constant 6.28125 : f32
+  %two_pi_low = scalar.constant 0.001935307179586477 : f32
+  %turn_estimate = scalar.mulf %angle, %inverse_two_pi : f32
+  %turn_count = scalar.roundevenf %turn_estimate : f32
+  %negative_turn_count = scalar.negf %turn_count : f32
+  %reduced_high = scalar.fmaf %negative_turn_count, %two_pi_high, %angle : f32
+  %reduced_angle = scalar.fmaf %negative_turn_count, %two_pi_low, %reduced_high : f32
+  %reduced_turns = scalar.mulf %reduced_angle, %inverse_two_pi : f32
+  func.return %reduced_turns : f32
+}
+
 kernel.def export("id4_ideogram4_timestep_embedding_f32") @id4_ideogram4_timestep_embedding_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
@@ -11,40 +27,49 @@ kernel.def export("id4_ideogram4_timestep_embedding_f32") @id4_ideogram4_timeste
 } launch(%timestep: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
+  %one = index.constant 1 : index
   %two = index.constant 2 : index
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
   %embedding_size = config.get @id4.ideogram4.timestep_embedding.embedding_size : index
   %half_size = index.div %embedding_size, %two : index
+  %half_size_is_one = index.cmp eq, %half_size, %one : index
+  %frequency_denominator = scf.if %half_size_is_one -> (index) {
+    scf.yield %one : index
+  } else {
+    %half_size_minus_one = index.sub %half_size, %one : index
+    scf.yield %half_size_minus_one : index
+  }
   %channel = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %channel, %embedding_size : index
-
   %timestep_noalias, %output_noalias = buffer.assume.noalias %timestep, %output : buffer, buffer
   %timestep_global = buffer.assume.memory_space<global> %timestep_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
   %timestep_view = buffer.view %timestep_global[%base] : buffer -> view<1xf32, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%embedding_size]xf32, #dense>
-
   scf.if %in_bounds {
     %is_sine_half = index.cmp ult, %channel, %half_size : index
     %freq_index = index.rem %channel, %half_size : index
     %freq_index_i32 = index.cast %freq_index : index to i32
-    %half_size_i32 = index.cast %half_size : index to i32
+    %frequency_denominator_i32 = index.cast %frequency_denominator : index to i32
     %freq_index_f32 = scalar.sitofp %freq_index_i32 : i32 to f32
-    %half_size_f32 = scalar.sitofp %half_size_i32 : i32 to f32
+    %frequency_denominator_f32 = scalar.sitofp %frequency_denominator_i32 : i32 to f32
     %negative_one = scalar.constant -1.0 : f32
     %max_period_log2 = scalar.constant 13.287712379549449 : f32
-    %time_factor = scalar.constant 10.0 : f32
-    %inverse_two_pi = scalar.constant 0.15915494309189535 : f32
     %freq_scale_numerator = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %freq_index_f32, %negative_one : f32
-    %freq_scale = scalar.divf<nnan|ninf|nsz|arcp> %freq_scale_numerator, %half_size_f32 : f32
+    %freq_scale = scalar.divf %freq_scale_numerator, %frequency_denominator_f32 : f32
     %freq_log2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %freq_scale, %max_period_log2 : f32
     %inverse_frequency = scalar.exp2f<afn> %freq_log2 : f32
     %raw_timestep = view.load %timestep_view[%zero] : view<1xf32, #dense> -> f32
-    %scaled_timestep = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %raw_timestep, %time_factor : f32
+    // The official BF16 transformer casts the scheduler time to its compute
+    // dtype before constructing the sinusoidal embedding.
+    %raw_timestep_bf16 = scalar.fptrunc %raw_timestep : f32 to bf16
+    %compute_timestep = scalar.extf %raw_timestep_bf16 : bf16 to f32
+    %input_range_scale = scalar.constant 10000.0 : f32
+    %scaled_timestep = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %compute_timestep, %input_range_scale : f32
     %angle = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_timestep, %inverse_frequency : f32
-    %turns = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %angle, %inverse_two_pi : f32
+    %turns = func.call @id4_ideogram4_timestep_reduce_turns_f32(%angle) : (f32) -> (f32)
     %sine = scalar.sinturnsf<afn> %turns : f32
     %cosine = scalar.costurnsf<afn> %turns : f32
     %value = scf.if %is_sine_half -> (f32) {

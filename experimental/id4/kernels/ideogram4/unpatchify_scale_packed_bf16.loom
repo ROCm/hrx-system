@@ -22,7 +22,6 @@ kernel.def export("id4_ideogram4_unpatchify_scale_packed_bf16") @id4_ideogram4_u
   %two = index.constant 2 : index
   %four = index.constant 4 : index
   %zero = index.constant 0 : index
-  %minus_one = scalar.constant -1.0 : f32
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
@@ -56,8 +55,7 @@ kernel.def export("id4_ideogram4_unpatchify_scale_packed_bf16") @id4_ideogram4_u
     %token_channel = index.add %ae_channel, %token_channel_hw : index
     %projected_bf16 = view.load %projected_view[%token, %token_channel] : view<[%spatial_count]x[%input_channel_count]xbf16, #dense> -> bf16
     %projected_value = scalar.extf %projected_bf16 : bf16 to f32
-    %output_value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %projected_value, %minus_one : f32
-    view.store %output_value, %output_view[%x, %y, %latent_channel, %zero] : f32, view<[%width]x[%height]x[%input_channel_count]x1xf32, #dense>
+    view.store %projected_value, %output_view[%x, %y, %latent_channel, %zero] : f32, view<[%width]x[%height]x[%input_channel_count]x1xf32, #dense>
   }
   kernel.return
 }

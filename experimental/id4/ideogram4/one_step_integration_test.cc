@@ -26,9 +26,6 @@ IREE_FLAG(string, id4_dit_cond_fixture_dir, "",
 IREE_FLAG(string, id4_dit_uncond_fixture_dir, "",
           "Directory containing the unconditioned Ideogram4 DiT reduced BF16 "
           "fixture.");
-IREE_FLAG(string, id4_sampler_fixture_dir, "",
-          "Directory containing the sampler reduced BF16 fixture.");
-
 namespace {
 
 constexpr uint8_t kOutputSentinel = 0xA5;
@@ -283,16 +280,10 @@ static iree_status_t PlanSamplerStage(
   sampler_options.structure_size = sizeof(sampler_options);
   sampler_options.request.latent_shape = latent_shape;
 
-  const iree_string_view_t diagnostic_tap_names[] = {IREE_SV("guided_pred")};
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &sampler_options;
-  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
-  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
-      IREE_ARRAYSIZE(diagnostic_tap_names),
-      diagnostic_tap_names,
-  };
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = diagnostics_sink;
@@ -440,20 +431,16 @@ static iree_status_t IssueStage(
   return id4_pipeline_stage_issue(stage, bundle, &issue_options);
 }
 
-TEST(Ideogram4OneStepIntegration,
-     RunsQwenAndReferenceDitSamplerWithDeviceHandoffs) {
+TEST(Ideogram4OneStepIntegration, RunsQwenDitAndSamplerWithDeviceHandoffs) {
   const iree_string_view_t qwen_fixture_dir =
       iree_make_cstring_view(FLAG_id4_qwen_fixture_dir);
   const iree_string_view_t dit_cond_fixture_dir =
       iree_make_cstring_view(FLAG_id4_dit_cond_fixture_dir);
   const iree_string_view_t dit_uncond_fixture_dir =
       iree_make_cstring_view(FLAG_id4_dit_uncond_fixture_dir);
-  const iree_string_view_t sampler_fixture_dir =
-      iree_make_cstring_view(FLAG_id4_sampler_fixture_dir);
   ASSERT_FALSE(iree_string_view_is_empty(qwen_fixture_dir));
   ASSERT_FALSE(iree_string_view_is_empty(dit_cond_fixture_dir));
   ASSERT_FALSE(iree_string_view_is_empty(dit_uncond_fixture_dir));
-  ASSERT_FALSE(iree_string_view_is_empty(sampler_fixture_dir));
 
   id4::test::FixtureTensorSet qwen_tensors;
   IREE_ASSERT_OK(
@@ -464,10 +451,6 @@ TEST(Ideogram4OneStepIntegration,
   id4::test::FixtureTensorSet dit_uncond_tensors;
   IREE_ASSERT_OK(id4::test::LoadFixtureTensors(dit_uncond_fixture_dir,
                                                &dit_uncond_tensors));
-  id4::test::FixtureTensorSet sampler_tensors;
-  IREE_ASSERT_OK(
-      id4::test::LoadFixtureTensors(sampler_fixture_dir, &sampler_tensors));
-
   uint32_t qwen_token_count = 0;
   IREE_ASSERT_OK(id4::test::InferRank1TensorLengthFromFixture(
       qwen_tensors, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
@@ -635,22 +618,13 @@ TEST(Ideogram4OneStepIntegration,
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
       sampler_boundaries, IREE_SV("x_t"), dit_cond_tensors, IREE_SV("x"),
       update_semaphore.get(), &update_value));
-  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
-      sampler_boundaries, IREE_SV("scalings"), sampler_tensors,
-      IREE_SV("scalings"), update_semaphore.get(), &update_value));
-  const float step_sigmas[2] = {1.0f, 0.0f};
-  iree_hal_buffer_binding_t sigmas_binding = {};
-  IREE_ASSERT_OK(
-      id4::test::FindBoundaryBinding(sampler_plan.get(), sampler_boundaries,
-                                     IREE_SV("sigmas"), &sigmas_binding));
+  const float step_values[3] = {0.0f, 1.0f, 3.5f};
+  iree_hal_buffer_binding_t step_binding = {};
+  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
+      sampler_plan.get(), sampler_boundaries, IREE_SV("step"), &step_binding));
   IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &sigmas_binding,
-      step_sigmas, sizeof(step_sigmas), update_semaphore.get(), &update_value));
-  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
-      sampler_boundaries, IREE_SV("guidance"), sampler_tensors,
-      IREE_SV("guidance"), update_semaphore.get(), &update_value));
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &step_binding,
+      step_values, sizeof(step_values), update_semaphore.get(), &update_value));
   IREE_ASSERT_OK(id4::test::QueueFillBoundaryTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, qwen_plan.get(),
       qwen_boundaries, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
@@ -876,16 +850,16 @@ TEST(Ideogram4OneStepIntegration,
                             sampler_wait.list(), sampler_signal.list(),
                             &diagnostics_sink));
 
-  iree_hal_buffer_binding_t denoised = {};
+  iree_hal_buffer_binding_t x_next = {};
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      sampler_plan.get(), sampler_boundaries, IREE_SV("denoised"), &denoised));
+      sampler_plan.get(), sampler_boundaries, IREE_SV("x_next"), &x_next));
   IREE_ASSERT_OK(ReplaceBoundaryBinding(decode_plan.get(), &decode_boundaries,
                                         IREE_SV("media.latent.diffusion"),
-                                        denoised));
+                                        x_next));
   id4::test::SemaphoreListStorage sampler_read_wait;
   sampler_read_wait.semaphore = sampler_done.get();
   sampler_read_wait.payload_value = 1;
-  IREE_ASSERT_OK(VerifyBindingWasWritten(context.device.get(), &denoised,
+  IREE_ASSERT_OK(VerifyBindingWasWritten(context.device.get(), &x_next,
                                          sampler_read_wait.list(),
                                          kOutputSentinel));
 

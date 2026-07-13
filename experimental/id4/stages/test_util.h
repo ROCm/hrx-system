@@ -35,6 +35,12 @@ id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 // group. Callers must release the returned reference.
 iree_hal_device_group_t* CreateLocalSyncDeviceGroup();
 
+// Returns a retained reference to a process-wide metadata-only device group
+// with representative GPU dispatch capabilities. This supports planning tests
+// that inspect target facts without preparing or issuing device work. Callers
+// must release the returned reference.
+iree_hal_device_group_t* CreateGpuPlanningDeviceGroup();
+
 }  // namespace id4::test
 
 #endif  // EXPERIMENTAL_ID4_STAGES_TEST_UTIL_H_

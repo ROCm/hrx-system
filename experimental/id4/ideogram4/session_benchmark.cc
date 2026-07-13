@@ -115,7 +115,7 @@ static iree_hal_executable_cache_t* CreateExecutableCache(
 static void RunPlanGenerationBenchmark(benchmark::State& state,
                                        iree_string_view_t prompt_json) {
   iree_hal_device_group_t* device_group =
-      id4::test::CreateLocalSyncDeviceGroup();
+      id4::test::CreateGpuPlanningDeviceGroup();
   iree_hal_executable_cache_t* executable_cache =
       CreateExecutableCache(device_group);
   id4_pipeline_kernel_cache_t* kernel_cache = CreateKernelCache();
@@ -169,8 +169,8 @@ static void BM_Ideogram4SessionPlanGenerationShort(benchmark::State& state) {
   RunPlanGenerationBenchmark(
       state,
       IREE_SV("{\"prompt\":\"a city\",\"generation\":{\"latent_width\":16,"
-              "\"latent_height\":16,\"denoise_steps\":20,\"seed\":1,"
-              "\"guidance_scale\":3.5}}"));
+              "\"latent_height\":16,\"sampler\":\"V4_DEFAULT_20\","
+              "\"seed\":1}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationShort);
 
@@ -180,7 +180,7 @@ static void BM_Ideogram4SessionPlanGenerationMedium(benchmark::State& state) {
       IREE_SV("{\"prompt\":\"three people walking through a reflective city "
               "street with umbrellas and neon signs\","
               "\"generation\":{\"latent_width\":16,\"latent_height\":16,"
-              "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"));
+              "\"sampler\":\"V4_DEFAULT_20\",\"seed\":1}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationMedium);
 
@@ -194,7 +194,7 @@ static void BM_Ideogram4SessionPlanGenerationStructured(
               "\"lighting\":\"neon signs and warm window reflections\"},"
               "\"negative_prompt\":\"blurred faces, malformed hands, text\"},"
               "\"generation\":{\"latent_width\":16,\"latent_height\":16,"
-              "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"));
+              "\"sampler\":\"V4_DEFAULT_20\",\"seed\":1}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationStructured);
 
