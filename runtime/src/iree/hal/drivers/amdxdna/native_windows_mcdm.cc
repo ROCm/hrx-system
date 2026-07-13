@@ -17,6 +17,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdxdna/native.h"
+#include "iree/hal/drivers/amdxdna/native_windows_mcdm_internal.h"
 #include "iree/hal/drivers/amdxdna/shim/ert.h"
 #include "iree/hal/drivers/amdxdna/shim/windows/mcdm/context_blob.h"
 #include "iree/hal/drivers/amdxdna/shim/windows/mcdm/kmt_api.h"
@@ -1075,13 +1076,17 @@ uint32_t txn_bd_key(uint32_t location, uint32_t bd_id) {
 }
 
 bool find_partial_elf_bd_ops(const uint8_t* bytes, size_t total,
-                             uint32_t op_count, uint32_t key,
+                             uint32_t op_count, size_t queue_offset,
+                             uint32_t key,
                              const uint8_t** out_dma,
                              const uint8_t** out_ddr) {
   *out_dma = nullptr;
   *out_ddr = nullptr;
   size_t offset = 4 * sizeof(uint32_t);
-  for (uint32_t i = 0; i < op_count; ++i) {
+  // A transaction may reprogram the same BD ID multiple times. Resolve each
+  // queue push against the most recent programming that precedes it, matching
+  // the order in which the transaction executes.
+  for (uint32_t i = 0; i < op_count && offset < queue_offset; ++i) {
     const uint32_t op_size = windows_txn_op_size(bytes, total, offset);
     if (op_size == 0 || (op_size & 3u) != 0 || offset > total ||
         op_size > total - offset) {
@@ -1183,7 +1188,8 @@ iree_status_t refresh_partial_elf_output_ranges(
         const uint32_t key = txn_bd_key(location, queue_value & 0xf);
         const uint8_t* dma = nullptr;
         const uint8_t* ddr = nullptr;
-        if (!find_partial_elf_bd_ops(bytes, total, op_count, key, &dma, &ddr)) {
+        if (!find_partial_elf_bd_ops(bytes, total, op_count, offset, key, &dma,
+                                     &ddr)) {
           return refresh_all_runtime_bindings(command);
         }
         if (dma && ddr) {
@@ -2038,6 +2044,14 @@ iree_status_t sync_prepared_pathb_chain_batch(
 }
 
 }  // namespace
+
+bool iree_hal_amdxdna_native_windows_find_partial_elf_bd_ops(
+    const uint8_t* bytes, size_t total, uint32_t op_count,
+    size_t queue_offset, uint32_t key, const uint8_t** out_dma,
+    const uint8_t** out_ddr) {
+  return find_partial_elf_bd_ops(bytes, total, op_count, queue_offset, key,
+                                 out_dma, out_ddr);
+}
 
 iree_status_t materialize_deferred_buffer(
     iree_hal_amdxdna_native_buffer_t* buffer) {

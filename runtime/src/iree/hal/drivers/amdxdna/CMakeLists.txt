@@ -16,6 +16,7 @@ iree_cc_library(
   HDRS
     "api.h"
     "native.h"
+    "native_windows_mcdm_internal.h"
     "util.h"
   SRCS
     "native_linux_kmq.cc"
@@ -430,3 +431,19 @@ iree_cc_test(
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_HAL_DRIVER_AMDXDNA)
+iree_cc_test(
+  NAME
+    native_windows_mcdm_test
+  SRCS
+    "native_windows_mcdm_test.cc"
+  DEPS
+    ::native_windows_mcdm
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdxdna"
+    "iree-build-requirement=runtime.hal.amdxdna"
+)
+endif()

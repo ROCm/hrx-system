@@ -52,6 +52,7 @@ iree_runtime_cc_library(
     hdrs = [
         "api.h",
         "native.h",
+        "native_windows_mcdm_internal.h",
     ],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
@@ -60,6 +61,18 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdxdna/shim",
         "//runtime/src/iree/hal/drivers/amdxdna/shim/windows/mcdm:kmt_api",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "native_windows_mcdm_test",
+    srcs = ["native_windows_mcdm_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":native_windows_mcdm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
