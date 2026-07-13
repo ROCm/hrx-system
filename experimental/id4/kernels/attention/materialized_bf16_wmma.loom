@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.attention.materialized_wmma.valid_token_count : %value: index where [range(%value, 1, 131072)]
 
@@ -12,7 +12,7 @@ config.decl @id4.attention.materialized_wmma.attention_head_count : %value: inde
 
 config.decl @id4.attention.materialized_wmma.head_size : %value: index where [range(%value, 16, 1024), mul(%value, 16)]
 
-kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f32_wmma") @id4_attention_qk_scores_all_heads_bf16_f32_wmma() {
+kernel.def export("id4_attention_qk_scores_all_heads_bf16_f32_wmma") @id4_attention_qk_scores_all_heads_bf16_f32_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
@@ -23,14 +23,19 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
   %key_tile_count = index.div %padded_token_count, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %key_tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %scores: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %key_tile = kernel.workgroup.id<y> : index
+  %query_head = kernel.workgroup.id<z> : index
+  func.apply<id4.attention.scaled_qk_bf16_f32.m16n16>(%query, %key, %scores, %query_tile, %key_tile, %query_head) : (buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.attention.scaled_qk_bf16_f32.m16n16> target(@gfx1100) priority(20) @id4_attention_qk_scores_all_heads_bf16_f32_wmma_gfx1100(%query: buffer, %key: buffer, %scores: buffer, %query_tile: index, %key_tile: index, %query_head: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four_bytes = index.constant 4 : offset
   %sixteen = index.constant 16 : index
-  %query_tile = kernel.workgroup.id<x> : index
-  %key_tile = kernel.workgroup.id<y> : index
-  %query_head = kernel.workgroup.id<z> : index
   %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
   %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
@@ -75,10 +80,10 @@ kernel.def target(@id4_gfx1100) export("id4_attention_qk_scores_all_heads_bf16_f
   }
   %scaled_scores = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %attention_scale_vector : vector<8xf32>
   vector.fragment.store<result> %scaled_scores, %scores_view[%local_query_origin, %key_origin] shape [%m, %n] : vector<8xf32>, view<[%query_block_token_count]x[%padded_token_count]xf32, #dense>
-  kernel.return
+  func.return
 }
 
-kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16") @id4_attention_softmax_all_heads_f32_bf16() {
+kernel.def target(@gfx1100) export("id4_attention_softmax_all_heads_f32_bf16") @id4_attention_softmax_all_heads_f32_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
@@ -162,7 +167,7 @@ kernel.def target(@id4_gfx1100) export("id4_attention_softmax_all_heads_f32_bf16
   kernel.return
 }
 
-kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmma") @id4_attention_pv_all_heads_bf16_bf16_wmma() {
+kernel.def export("id4_attention_pv_all_heads_bf16_bf16_wmma") @id4_attention_pv_all_heads_bf16_bf16_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
@@ -173,14 +178,19 @@ kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmm
   %channel_tile_count = index.div %head_size, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %channel_tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%probabilities: buffer, %value: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %channel_tile = kernel.workgroup.id<y> : index
+  %query_head = kernel.workgroup.id<z> : index
+  func.apply<id4.attention.pv_bf16_bf16.m16n16>(%probabilities, %value, %output, %query_tile, %channel_tile, %query_head) : (buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+func.template<id4.attention.pv_bf16_bf16.m16n16> target(@gfx1100) priority(20) @id4_attention_pv_all_heads_bf16_bf16_wmma_gfx1100(%probabilities: buffer, %value: buffer, %output: buffer, %query_tile: index, %channel_tile: index, %query_head: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two_bytes = index.constant 2 : offset
   %sixteen = index.constant 16 : index
-  %query_tile = kernel.workgroup.id<x> : index
-  %channel_tile = kernel.workgroup.id<y> : index
-  %query_head = kernel.workgroup.id<z> : index
   %query_block_offset = config.get @id4.attention.materialized_wmma.query_block_offset : index
   %query_block_token_count = config.get @id4.attention.materialized_wmma.query_block_token_count : index
   %padded_token_count = config.get @id4.attention.materialized_wmma.padded_token_count : index
@@ -220,5 +230,5 @@ kernel.def target(@id4_gfx1100) export("id4_attention_pv_all_heads_bf16_bf16_wmm
     scf.yield %next : vector<8xf32>
   }
   vector.fragment.store<result> %result, %output_view[%query_origin, %channel_origin] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
-  kernel.return
+  func.return
 }
