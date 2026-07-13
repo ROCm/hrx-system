@@ -197,28 +197,41 @@ static bool id4_pipeline_program_stage_tap_name_requested(
   return false;
 }
 
-static bool id4_pipeline_program_stage_operation_uses_tensor(
-    const id4_pipeline_stage_plan_options_t* options,
-    const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
+static bool id4_pipeline_program_stage_tensor_uses_storage(
+    const id4_pipeline_program_t* program, id4_pipeline_program_tensor_t tensor,
+    id4_pipeline_program_tensor_t storage_root) {
+  const id4_pipeline_program_tensor_record_t* record =
+      id4_pipeline_program_tensor_at(program, tensor.ordinal);
+  return record && record->storage_root_ordinal == storage_root.ordinal;
+}
+
+static bool id4_pipeline_program_stage_operation_uses_storage(
+    const id4_pipeline_program_stage_plan_options_t* options,
+    const id4_pipeline_program_op_t* op,
+    id4_pipeline_program_tensor_t storage_root) {
   if (!op) return false;
   switch (op->kind) {
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
            ++i) {
-        if (op->payload.dispatch_loom.bindings[i].tensor.ordinal ==
-            tensor.ordinal) {
+        if (id4_pipeline_program_stage_tensor_uses_storage(
+                options->program, op->payload.dispatch_loom.bindings[i].tensor,
+                storage_root)) {
           return true;
         }
       }
       return false;
     case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
-      return op->payload.fill.target.ordinal == tensor.ordinal;
+      return id4_pipeline_program_stage_tensor_uses_storage(
+          options->program, op->payload.fill.target, storage_root);
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       return id4_pipeline_program_stage_tap_name_requested(
-                 options, op->payload.tap.name) &&
-             op->payload.tap.tensor.ordinal == tensor.ordinal;
+                 options->stage_options, op->payload.tap.name) &&
+             id4_pipeline_program_stage_tensor_uses_storage(
+                 options->program, op->payload.tap.tensor, storage_root);
     case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
-      return op->payload.export_value.tensor.ordinal == tensor.ordinal;
+      return id4_pipeline_program_stage_tensor_uses_storage(
+          options->program, op->payload.export_value.tensor, storage_root);
     default:
       return false;
   }
@@ -248,8 +261,8 @@ static bool id4_pipeline_program_stage_needs_shared_transient_slot(
         continue;
       }
       if (passed_region_cut &&
-          id4_pipeline_program_stage_operation_uses_tensor(
-              options->stage_options, op, acquire_op->payload.acquire.tensor)) {
+          id4_pipeline_program_stage_operation_uses_storage(
+              options, op, acquire_op->payload.acquire.tensor)) {
         return true;
       }
       if (region_per_dispatch &&

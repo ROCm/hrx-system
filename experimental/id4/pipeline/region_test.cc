@@ -1160,6 +1160,50 @@ TEST_F(RegionBuilderTest, ImportedInitializedTensorCanBeRead) {
   id4_pipeline_region_builder_destroy(builder);
 }
 
+TEST_F(RegionBuilderTest, BoundSubviewAliasesImportedStorage) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t root_layout =
+      MakeTensorLayout(IREE_SV("shared.root"), 64);
+  id4_pipeline_tensor_import_t import = {
+      /*.layout=*/root_layout,
+      /*.binding_slot=*/2,
+      /*.offset=*/256,
+      /*.flags=*/ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED,
+  };
+  id4_pipeline_tensor_t root;
+  IREE_ASSERT_OK(id4_pipeline_region_import_tensor(builder, &import, &root));
+
+  id4_pipeline_tensor_layout_t subview_layout =
+      MakeTensorLayout(IREE_SV("shared.root.middle"), 32);
+  id4_pipeline_tensor_t subview;
+  IREE_ASSERT_OK(id4_pipeline_region_subview_tensor(
+      builder, root, &subview_layout, /*source_byte_offset=*/16,
+      /*flags=*/0, &subview));
+  EXPECT_EQ(subview.storage_class, ID4_PIPELINE_TENSOR_STORAGE_CLASS_BOUND);
+  EXPECT_EQ(subview.binding_slot, 2u);
+  EXPECT_EQ(subview.offset, 272u);
+  EXPECT_EQ(subview.length, 32u);
+
+  id4_pipeline_region_kernel_t read_kernel = MakeDryKernel(IREE_SV("read"), 1);
+  id4_pipeline_region_dispatch_binding_t read_binding = {
+      /*.tensor=*/subview,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.bound_import_count, 1u);
+  EXPECT_EQ(statistics.local_acquire_count, 0u);
+  EXPECT_EQ(statistics.local_subview_count, 0u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 0u);
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
 TEST_F(RegionBuilderTest, ImportedInitializedRangesCombineWithRegionWrites) {
   id4_pipeline_region_builder_t* builder = CreateDryBuilder();
   id4_pipeline_tensor_layout_t layout =

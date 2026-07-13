@@ -418,30 +418,44 @@ static iree_status_t id4_pipeline_program_plan_find_region_index_for_operation(
                           operation_ordinal);
 }
 
-static bool id4_pipeline_program_plan_operation_uses_tensor(
+static bool id4_pipeline_program_plan_tensor_uses_storage(
+    const id4_pipeline_program_t* program, id4_pipeline_program_tensor_t tensor,
+    id4_pipeline_program_tensor_t storage_root) {
+  const id4_pipeline_program_tensor_record_t* record =
+      id4_pipeline_program_tensor_at(program, tensor.ordinal);
+  return record && record->storage_root_ordinal == storage_root.ordinal;
+}
+
+static bool id4_pipeline_program_plan_operation_uses_storage(
     const id4_pipeline_program_plan_options_t* options,
-    const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
+    const id4_pipeline_program_op_t* op,
+    id4_pipeline_program_tensor_t storage_root) {
   if (!op) return false;
   switch (op->kind) {
     case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW:
-      return op->payload.subview.source.ordinal == tensor.ordinal;
+      return id4_pipeline_program_plan_tensor_uses_storage(
+          options->program, op->payload.subview.source, storage_root);
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
            ++i) {
-        if (op->payload.dispatch_loom.bindings[i].tensor.ordinal ==
-            tensor.ordinal) {
+        if (id4_pipeline_program_plan_tensor_uses_storage(
+                options->program, op->payload.dispatch_loom.bindings[i].tensor,
+                storage_root)) {
           return true;
         }
       }
       return false;
     case ID4_PIPELINE_PROGRAM_OP_KIND_FILL:
-      return op->payload.fill.target.ordinal == tensor.ordinal;
+      return id4_pipeline_program_plan_tensor_uses_storage(
+          options->program, op->payload.fill.target, storage_root);
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       return id4_pipeline_program_plan_tap_name_requested(
                  options, op->payload.tap.name) &&
-             op->payload.tap.tensor.ordinal == tensor.ordinal;
+             id4_pipeline_program_plan_tensor_uses_storage(
+                 options->program, op->payload.tap.tensor, storage_root);
     case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
-      return op->payload.export_value.tensor.ordinal == tensor.ordinal;
+      return id4_pipeline_program_plan_tensor_uses_storage(
+          options->program, op->payload.export_value.tensor, storage_root);
     default:
       return false;
   }
@@ -456,7 +470,7 @@ static iree_host_size_t id4_pipeline_program_plan_find_last_tensor_use(
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const id4_pipeline_program_op_t* op =
         id4_pipeline_program_operation_at(options->program, i);
-    if (id4_pipeline_program_plan_operation_uses_tensor(options, op, tensor)) {
+    if (id4_pipeline_program_plan_operation_uses_storage(options, op, tensor)) {
       last_use_operation_ordinal = i;
     }
   }

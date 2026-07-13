@@ -802,6 +802,86 @@ static id4_pipeline_program_t* CreateRegionCutSharedAcquireProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateRegionCutSharedSubviewProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t root = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t root_options = {
+      /*.structure_size=*/sizeof(root_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared.root"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(8),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &root_options, &root));
+
+  id4_pipeline_program_dispatch_binding_t write_root =
+      id4_pipeline_program_write(root);
+  id4_pipeline_program_dispatch_loom_options_t producer_options = {
+      /*.structure_size=*/sizeof(producer_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared.producer"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/shared"), IREE_SV("write")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&write_root,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &producer_options));
+
+  id4_pipeline_program_barrier_options_t barrier_options = {
+      /*.structure_size=*/sizeof(barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared.after_producer"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &barrier_options));
+
+  id4_pipeline_program_tensor_t upper_half =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_subview_tensor_options_t subview_options = {
+      /*.structure_size=*/sizeof(subview_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("shared.root.upper_half"),
+      /*.source=*/root,
+      /*.source_byte_offset=*/16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_subview_tensor(builder, &subview_options,
+                                                    &upper_half));
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared.after_subview"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_dispatch_binding_t read_upper_half =
+      id4_pipeline_program_read(upper_half);
+  id4_pipeline_program_dispatch_loom_options_t consumer_options = {
+      /*.structure_size=*/sizeof(consumer_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared.consumer"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/shared"), IREE_SV("read")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_upper_half,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &consumer_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_t* CreateSharedRangeReuseProgram() {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -2027,6 +2107,49 @@ TEST(PipelineProgramPlan, PromotesCrossRegionAcquiredTensorsToSharedSlab) {
               "\"recorded_ref\":{\"binding_slot\":5,\"offset\":0,"
               "\"length\":16}"));
   iree_string_builder_deinitialize(&builder);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, PreservesCrossRegionSubviewOfSharedTensor) {
+  id4_pipeline_program_t* program = CreateRegionCutSharedSubviewProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
+  const id4_pipeline_region_plan_t* producer_region =
+      id4_pipeline_plan_region_at(plan, 0);
+  const id4_pipeline_region_plan_t* consumer_region =
+      id4_pipeline_plan_region_at(plan, 1);
+  ASSERT_NE(producer_region, nullptr);
+  ASSERT_NE(consumer_region, nullptr);
+  EXPECT_EQ(producer_region->statistics.local_slab_byte_length, 0u);
+  EXPECT_EQ(consumer_region->statistics.local_slab_byte_length, 0u);
+  EXPECT_EQ(producer_region->statistics.bound_import_count, 1u);
+  EXPECT_EQ(consumer_region->statistics.bound_import_count, 1u);
+
+  ASSERT_EQ(id4_pipeline_plan_shared_tensor_count(plan), 1u);
+  const id4_pipeline_shared_tensor_plan_t* shared_tensor =
+      id4_pipeline_plan_shared_tensor_at(plan, 0);
+  ASSERT_NE(shared_tensor, nullptr);
+  ExpectStringViewEqual(shared_tensor->layout.name, IREE_SV("shared.root"));
+  EXPECT_EQ(shared_tensor->layout.byte_length, 32u);
+  EXPECT_EQ(shared_tensor->acquire_region_id, 0u);
+  EXPECT_EQ(shared_tensor->last_use_region_id, 1u);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);

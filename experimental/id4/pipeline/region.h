@@ -447,7 +447,7 @@ iree_status_t id4_pipeline_region_acquire_tensor(
     const id4_pipeline_tensor_layout_t* layout,
     id4_pipeline_tensor_t* out_tensor);
 
-// Creates a logical tensor view into an acquired local tensor.
+// Creates a logical tensor view into local or bound tensor storage.
 iree_status_t id4_pipeline_region_subview_tensor(
     id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
     const id4_pipeline_tensor_layout_t* layout,

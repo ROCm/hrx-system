@@ -3040,14 +3040,23 @@ static iree_status_t id4_pipeline_plan_resolve_constant_recorded_binding_ref(
 }
 
 static iree_status_t id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
-    const id4_pipeline_plan_t* plan,
-    const id4_pipeline_program_tensor_record_t* tensor,
-    uint32_t program_tensor_ordinal, bool* out_found,
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_found,
     id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
   *out_found = false;
+  const id4_pipeline_program_tensor_record_t* storage_root =
+      id4_pipeline_program_tensor_at(program, tensor->storage_root_ordinal);
+  if (!storage_root) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %.*s storage root %u is missing",
+                            (int)tensor->name.size, tensor->name.data,
+                            tensor->storage_root_ordinal);
+  }
   for (iree_host_size_t i = 0; i < plan->shared_tensor_count; ++i) {
     const id4_pipeline_shared_tensor_plan_t* shared = &plan->shared_tensors[i];
-    if (shared->program_tensor_ordinal != program_tensor_ordinal) continue;
+    if (shared->program_tensor_ordinal != tensor->storage_root_ordinal) {
+      continue;
+    }
     if (shared->memory_slab_index >= plan->memory_slab_count) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
@@ -3056,13 +3065,27 @@ static iree_status_t id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
     }
     const id4_pipeline_memory_slab_plan_t* slab =
         &plan->memory_slabs[shared->memory_slab_index];
+    iree_device_size_t offset = 0;
+    iree_device_size_t tensor_end = 0;
+    if (!iree_device_size_checked_add(shared->offset,
+                                      tensor->storage_byte_offset, &offset) ||
+        !iree_device_size_checked_add(tensor->storage_byte_offset,
+                                      tensor->byte_length, &tensor_end) ||
+        tensor_end > storage_root->byte_length ||
+        tensor_end > shared->layout.byte_length) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program shared tensor %.*s range exceeds storage root %.*s",
+          (int)tensor->name.size, tensor->name.data,
+          (int)storage_root->name.size, storage_root->name.data);
+    }
     *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
         // Issue-time binding-table slot containing the shared memory slab.
         .binding_slot = slab->binding_slot,
         // Byte offset of this shared tensor in the containing slab.
-        .offset = shared->offset,
-        // Dense shared tensor byte length.
-        .length = shared->layout.byte_length,
+        .offset = offset,
+        // Logical tensor byte length within the shared storage root.
+        .length = tensor->byte_length,
     };
     *out_found = true;
     return iree_ok_status();
@@ -3168,15 +3191,22 @@ static iree_status_t id4_pipeline_plan_resolve_recorded_binding_ref(
       bool found_shared = false;
       IREE_RETURN_IF_ERROR(
           id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
-              plan, tensor, program_tensor_ordinal, &found_shared, out_ref));
+              plan, program, tensor, &found_shared, out_ref));
       return found_shared
                  ? iree_ok_status()
                  : id4_pipeline_plan_resolve_local_recorded_binding_ref(
                        plan, tensor, region_id, out_ref);
     }
-    case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW:
-      return id4_pipeline_plan_resolve_local_recorded_binding_ref(
-          plan, tensor, region_id, out_ref);
+    case ID4_PIPELINE_PROGRAM_OP_KIND_SUBVIEW: {
+      bool found_shared = false;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
+              plan, program, tensor, &found_shared, out_ref));
+      return found_shared
+                 ? iree_ok_status()
+                 : id4_pipeline_plan_resolve_local_recorded_binding_ref(
+                       plan, tensor, region_id, out_ref);
+    }
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program tensor %.*s producer kind %d is not "

@@ -1320,10 +1320,12 @@ iree_status_t id4_pipeline_region_subview_tensor(
   id4_pipeline_region_tensor_record_t* source_record = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_region_lookup_tensor_record(
       builder, source, &source_record));
-  if (source_record->tensor.storage_class !=
-      ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL) {
+  const id4_pipeline_tensor_storage_class_t storage_class =
+      source_record->tensor.storage_class;
+  if (storage_class != ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL &&
+      storage_class != ID4_PIPELINE_TENSOR_STORAGE_CLASS_BOUND) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "subview source %.*s is not a local tensor",
+                            "subview source %.*s is not local or bound",
                             (int)source_record->name.size,
                             source_record->name.data);
   }
@@ -1346,13 +1348,14 @@ iree_status_t id4_pipeline_region_subview_tensor(
   id4_pipeline_region_tensor_record_t* root_record =
       &builder->tensor_records[storage_root_ordinal];
   if (root_record->storage_root_ordinal != storage_root_ordinal ||
-      root_record->tensor.storage_class !=
-          ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL ||
-      root_record->active_view_count == 0) {
+      root_record->tensor.storage_class != storage_class ||
+      (storage_class == ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL &&
+       root_record->active_view_count == 0)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "subview source storage is not live");
   }
-  if (root_record->active_view_count == UINT32_MAX) {
+  if (storage_class == ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL &&
+      root_record->active_view_count == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "subview source view count overflow");
   }
@@ -1398,11 +1401,13 @@ iree_status_t id4_pipeline_region_subview_tensor(
   const bool initialized = source_record->initialized && !discard_contents;
   id4_pipeline_region_tensor_record_t* record = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_region_make_tensor_record(
-      builder, ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL, layout,
-      builder->local_binding_slot, offset, initialized, &record));
+      builder, storage_class, layout, source_record->tensor.binding_slot,
+      offset, initialized, &record));
   record->storage_root_ordinal = storage_root_ordinal;
   record->active_view_count = 0;
-  record->lifetime_flags |= ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_SUBVIEW;
+  if (storage_class == ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL) {
+    record->lifetime_flags |= ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_SUBVIEW;
+  }
 
   iree_status_t status = iree_ok_status();
   source_record = &builder->tensor_records[source_ordinal];
@@ -1437,9 +1442,11 @@ iree_status_t id4_pipeline_region_subview_tensor(
     return status;
   }
 
-  root_record = &builder->tensor_records[storage_root_ordinal];
-  ++root_record->active_view_count;
-  ++builder->statistics.local_subview_count;
+  if (storage_class == ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL) {
+    root_record = &builder->tensor_records[storage_root_ordinal];
+    ++root_record->active_view_count;
+    ++builder->statistics.local_subview_count;
+  }
   *out_tensor = record->tensor;
   return iree_ok_status();
 }
