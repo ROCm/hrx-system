@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @id4_gfx1100
+amdgpu.target<gfx1100> @gfx1100
 
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count : %value: index where [range(%value, 1, 65536)]
 
@@ -8,7 +8,7 @@ config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size : %va
 
 config.decl @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.output_size : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
 
-kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged") @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged() {
+kernel.def export("id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged") @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged() {
   %unit = index.constant 1 : index
   %one_twenty_eight = index.constant 128 : index
   %workgroup_size_x = index.constant 128 : index
@@ -18,6 +18,15 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %row_tile_count = index.div %output_size, %one_twenty_eight : index
   kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input_bf16: buffer, %weight: buffer, %scale: buffer, %output: buffer) {
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %subgroup_id = kernel.subgroup.id : index
+  func.apply<id4.matrix.linear_f8e4m3_block128_bf16.m128n128>(%input_bf16, %weight, %scale, %output, %token_tile, %row_tile, %lane, %subgroup_id) : (buffer, buffer, buffer, buffer, index, index, index, index)
+  kernel.return
+}
+
+func.template<id4.matrix.linear_f8e4m3_block128_bf16.m128n128> target(@gfx1100) priority(20) @id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m128n128_4wave_workgroup_staged_gfx1100(%input_bf16: buffer, %weight: buffer, %scale: buffer, %output: buffer, %token_tile: index, %row_tile: index, %lane: index, %subgroup_id: index) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -29,10 +38,6 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   %sixty_four = index.constant 64 : index
   %one_twenty_eight = index.constant 128 : index
   %two_fifty_six = index.constant 256 : index
-  %token_tile = kernel.workgroup.id<x> : index
-  %row_tile = kernel.workgroup.id<y> : index
-  %lane = kernel.workitem.id<x> : index
-  %subgroup_id = kernel.subgroup.id : index
   %valid_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.valid_token_count : index
   %dispatch_token_count = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_fp8_block_scaled_m128n128_wmma.input_size : index
@@ -195,5 +200,5 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_linear_fp8_block_scaled_bf1
   vector.fragment.store<result> %result31, %output_view[%token_origin3, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result32, %output_view[%token_origin3, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
   vector.fragment.store<result> %result33, %output_view[%token_origin3, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%output_size]xbf16, #dense>
-  kernel.return
+  func.return
 }
