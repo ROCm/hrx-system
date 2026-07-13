@@ -143,7 +143,7 @@ struct CommandAperture {
   void* cpu_ptr = nullptr;
   void* gpu_cpu_ptr = nullptr;
   uint64_t cpu_ptr_size = 0;
-  // Control-code view inside the 64 MiB aperture BO at gpu_va + 0x8000. The
+  // Control-code view inside the 64 MiB aperture BO at gpu_va + 0x80000. The
   // working XRT path does not create a separate code allocation; it copies the
   // transaction binary into the aperture allocation at this offset.
   D3DKMT_HANDLE code_allocation = 0;
@@ -190,11 +190,19 @@ bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
                                       CommandAperture* aperture,
                                       Error* out_error);
 
+bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                     CommandAperture* aperture,
+                                     Error* out_error);
+
+bool ReleaseCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                      CommandAperture* aperture,
+                                      Error* out_error);
+
 bool RefreshBufferCpuMapping(const KmtApi& api, const Device& device,
                              Buffer* buffer, Error* out_error);
 
 bool WaitForBufferResidency(const KmtApi& api, const Device& device,
-                            const Context& context, const Buffer& buffer,
+                             const Context& context, const Buffer& buffer,
                             const char* label, Error* out_error);
 
 void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer);

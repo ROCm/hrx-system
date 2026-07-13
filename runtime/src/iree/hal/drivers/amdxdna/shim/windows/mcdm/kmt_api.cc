@@ -23,6 +23,7 @@ constexpr uint64_t kPageSize = 4096;
 constexpr uint64_t kCommandApertureAllocationSize = 0x1000;
 constexpr D3DGPU_VIRTUAL_ADDRESS kCommandApertureGpuVaBase = 0x04000000;
 constexpr uint64_t kCommandApertureGpuVaSize = 0x04000000;
+constexpr uint64_t kCommandApertureCodeOffset = 0x80000;
 constexpr uint32_t kCommandAperturePrivateType = 0x332b;
 constexpr uint32_t kQhdlSubmitPrivateSize = 0x268;
 constexpr uint32_t kQhdlSubmitPacketOffset = 0x68;
@@ -86,7 +87,7 @@ uint32_t Flags32(const D3DKMT_CREATEALLOCATIONFLAGS& flags) {
   return value;
 }
 
-bool TrustFenceCompletionEnabled() { return true; }
+bool TrustFenceCompletionEnabled() { return false; }
 
 bool CcccCompletionSlotEnabled() { return false; }
 
@@ -930,7 +931,7 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
   // XRT creates the 64 MiB command aperture as a separate cacheable allocation
   // and folds the driver context writeback cookie into xcl_flags:
   //   xcl_flags = 0x01000001 | (context_blob[0x40] << 16)
-  // The transaction instruction stream lives inside this same BO at +0x8000.
+  // The transaction instruction stream lives inside this same BO at +0x80000.
   AllocPrivate gpu_private = {};
   gpu_private.requested_size = kCommandApertureGpuVaSize;
   gpu_private.aligned_size = kCommandApertureGpuVaSize;
@@ -958,6 +959,7 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
 
   D3DDDI_MAPGPUVIRTUALADDRESS map = {};
   map.hPagingQueue = device.paging_queue;
+  map.BaseAddress = kCommandApertureGpuVaBase;
   map.hAllocation = aperture.gpu_allocation;
   map.SizeInPages = kCommandApertureGpuVaSize / kPageSize;
   map.Protection.Write = 1;
@@ -975,16 +977,15 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
     DestroyCommandAperture(api, device, &aperture);
     return false;
   }
-  aperture.gpu_va = map.VirtualAddress;
-  if (aperture.gpu_va != kCommandApertureGpuVaBase) {
-    SetErrorFormat(out_error,
-                   "D3DKMTMapGpuVirtualAddress(command aperture) returned "
-                   "VA 0x%llx, expected 0x%llx",
-                   static_cast<unsigned long long>(aperture.gpu_va),
-                   static_cast<unsigned long long>(kCommandApertureGpuVaBase));
+
+  if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
+    SetError(out_error,
+             "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture map) "
+             "failed");
     DestroyCommandAperture(api, device, &aperture);
     return false;
   }
+  aperture.gpu_va = map.VirtualAddress;
 
   D3DKMT_HANDLE resident_allocs[1] = {aperture.gpu_allocation};
   D3DDDI_MAKERESIDENT resident = {};
@@ -999,35 +1000,116 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
     DestroyCommandAperture(api, device, &aperture);
     return false;
   }
-  D3DKMT_HANDLE wait_objects[1] = {device.paging_sync_object};
-  UINT64 wait_values[1] = {resident.PagingFenceValue};
-  D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait = {};
-  wait.hContext = context.context;
-  wait.ObjectCount = 1;
-  wait.ObjectHandleArray = wait_objects;
-  wait.MonitoredFenceValueArray = wait_values;
-  if (context.context) {
-    status = api.wait_from_gpu(&wait);
-    if (!CheckStatus(
-            "D3DKMTWaitForSynchronizationObjectFromGpu(command aperture)",
-            status, out_error)) {
-      DestroyCommandAperture(api, device, &aperture);
-      return false;
-    }
-  } else if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
+  if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
     SetError(out_error,
              "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture "
-             "precreate) failed");
+             "resident) failed");
     DestroyCommandAperture(api, device, &aperture);
     return false;
   }
 
-  constexpr uint64_t kCodeOffset = 0x8000;
   aperture.code_allocation = aperture.gpu_allocation;
-  aperture.code_gpu_va = aperture.gpu_va + kCodeOffset;
-  aperture.code_size = aperture.gpu_va_size - kCodeOffset;
+  aperture.code_gpu_va =
+      kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
+  aperture.code_size = aperture.gpu_va_size - kCommandApertureCodeOffset;
 
   *out_aperture = aperture;
+  return true;
+}
+
+bool ReleaseCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                      CommandAperture* aperture,
+                                      Error* out_error) {
+  if (!aperture || !aperture->gpu_va) return true;
+  D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
+  free_va.hAdapter = device.adapter;
+  free_va.BaseAddress = aperture->gpu_va;
+  free_va.Size = aperture->gpu_va_size;
+  NTSTATUS status = api.free_gpu_virtual_address(&free_va);
+  if (!CheckStatus("D3DKMTFreeGpuVirtualAddress(command aperture)", status,
+                   out_error)) {
+    return false;
+  }
+  aperture->gpu_va = 0;
+  aperture->code_gpu_va = 0;
+  return true;
+}
+
+bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                     CommandAperture* aperture,
+                                     Error* out_error) {
+  if (!aperture || !aperture->gpu_allocation) {
+    SetError(out_error,
+             "EnsureCommandApertureGpuMapping called before aperture setup");
+    return false;
+  }
+  if (aperture->gpu_va) {
+    if (aperture->gpu_va != kCommandApertureGpuVaBase) {
+      SetErrorFormat(out_error,
+                     "command aperture mapped at unexpected VA 0x%llx; expected 0x%llx",
+                     static_cast<unsigned long long>(aperture->gpu_va),
+                     static_cast<unsigned long long>(kCommandApertureGpuVaBase));
+      return false;
+    }
+    aperture->code_allocation = aperture->gpu_allocation;
+    aperture->code_gpu_va = kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
+    aperture->code_size = aperture->gpu_va_size - kCommandApertureCodeOffset;
+    return true;
+  }
+
+  D3DDDI_MAPGPUVIRTUALADDRESS map = {};
+  map.hPagingQueue = device.paging_queue;
+  map.BaseAddress = kCommandApertureGpuVaBase;
+  map.hAllocation = aperture->gpu_allocation;
+  map.SizeInPages = kCommandApertureGpuVaSize / kPageSize;
+  map.Protection.Write = 1;
+  NTSTATUS status = api.map_gpu_virtual_address(&map);
+  if (status != 0 && status != kStatusPending) {
+    SetErrorFormat(out_error,
+                   "D3DKMTMapGpuVirtualAddress(command aperture remap) failed with 0x%08x%s allocation=0x%08x pages=0x%llx",
+                   static_cast<uint32_t>(status), NtStatusSuffix(status),
+                   static_cast<unsigned>(aperture->gpu_allocation),
+                   static_cast<unsigned long long>(map.SizeInPages));
+    return false;
+  }
+  if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
+    SetError(out_error,
+             "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture remap) failed");
+    return false;
+  }
+  aperture->gpu_va = map.VirtualAddress;
+  if (aperture->gpu_va != kCommandApertureGpuVaBase) {
+    SetErrorFormat(out_error,
+                   "command aperture remapped at unexpected VA 0x%llx; expected 0x%llx",
+                   static_cast<unsigned long long>(aperture->gpu_va),
+                   static_cast<unsigned long long>(kCommandApertureGpuVaBase));
+    ReleaseCommandApertureGpuMapping(api, device, aperture, out_error);
+    return false;
+  }
+
+  D3DKMT_HANDLE resident_allocs[1] = {aperture->gpu_allocation};
+  D3DDDI_MAKERESIDENT resident = {};
+  resident.hPagingQueue = device.paging_queue;
+  resident.NumAllocations = 1;
+  resident.AllocationList = resident_allocs;
+  resident.Flags.CantTrimFurther = 1;
+  resident.Flags.MustSucceed = 1;
+  status = api.make_resident(&resident);
+  if (!CheckStatusOrPending("D3DKMTMakeResident(command aperture remap)", status,
+                            out_error)) {
+    ReleaseCommandApertureGpuMapping(api, device, aperture, out_error);
+    return false;
+  }
+  if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
+    SetError(out_error,
+             "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture remap resident) failed");
+    ReleaseCommandApertureGpuMapping(api, device, aperture, out_error);
+    return false;
+  }
+
+  aperture->code_allocation = aperture->gpu_allocation;
+  aperture->code_gpu_va = kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
+  aperture->code_size = aperture->gpu_va_size - kCommandApertureCodeOffset;
   return true;
 }
 
@@ -1052,9 +1134,9 @@ bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
   }
   aperture->gpu_cpu_ptr = gpu_lock.pData;
   if (aperture->gpu_cpu_ptr) {
-    constexpr uint64_t kCodeOffset = 0x8000;
     aperture->code_cpu_ptr =
-        static_cast<uint8_t*>(aperture->gpu_cpu_ptr) + kCodeOffset;
+        static_cast<uint8_t*>(aperture->gpu_cpu_ptr) +
+        kCommandApertureCodeOffset;
   }
 
   D3DKMT_INVALIDATECACHE invalidate = {};
@@ -1098,7 +1180,7 @@ bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
   }
 
   // XRT locks and invalidates the 64 MiB aperture only after the opcode-2
-  // bootstrap submit. Do the same so later CPU writes to aperture+0x8000 use
+  // bootstrap submit. Do the same so later CPU writes to aperture+0x80000 use
   // the same MCDM object state as the reference runtime.
   return LockCommandApertureGpuAfterBootstrap(api, device, aperture, out_error);
 }
