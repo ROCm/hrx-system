@@ -1,0 +1,36 @@
+{
+  "prompt": {
+    "high_level_description": "A realistic street photograph of three adults walking together through a modern city crosswalk on a clear afternoon.",
+    "style_description": {
+      "medium": "photograph",
+      "lighting": "soft afternoon sunlight",
+      "aesthetics": "naturalistic candid modern urban lifestyle"
+    },
+    "compositional_deconstruction": {
+      "background": "clean downtown street with storefront reflections",
+      "elements": [
+        {
+          "type": "obj",
+          "bbox": [260, 170, 920, 390],
+          "desc": "adult man walking on the left"
+        },
+        {
+          "type": "obj",
+          "bbox": [230, 390, 930, 610],
+          "desc": "adult woman walking in the center"
+        },
+        {
+          "type": "obj",
+          "bbox": [260, 610, 920, 830],
+          "desc": "adult man walking on the right"
+        }
+      ]
+    }
+  },
+  "generation": {
+    "latent_width": 8,
+    "latent_height": 8,
+    "sampler": "V4_DEFAULT_20",
+    "seed": 20260625
+  }
+}

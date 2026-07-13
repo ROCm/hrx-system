@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "kind": "id4_current_head_long_1024_confirmation",
+  "source_revision": "ade5d01a410f4992ebe8a3ba967bd5b4f4d72838",
+  "binary_sha256": "f176f61dd308213f0f411805c9a7c9e9a652df808b20a7ae021b3d8aa091fb64",
+  "benchmark_sha256": "6942a04c1ff3c91f7e08cbd72935da826554da4912b598fb8d24d16e24977140",
+  "request": "../requests/long_1024.json",
+  "request_sha256": "aed305894bb2b69214671bc8762b41d03150c40896e77f652d0fcca08a772c41",
+  "plan_sha256": "bf4de5b9f83f996c2f2f29a41c0788c432b4b0866dd9c095b774ab6937fc1016",
+  "canonical_plan_sha256": "bf4de5b9f83f996c2f2f29a41c0788c432b4b0866dd9c095b774ab6937fc1016",
+  "measurement": {
+    "statistic": "mean",
+    "warmup_generations": 1,
+    "measured_generations": 3,
+    "id4_seconds": 89.78798389434814,
+    "official_pytorch_seconds": 93.49386040819809,
+    "id4_over_pytorch": 0.960362354301449,
+    "canonical_id4_seconds": 89.71042513847351,
+    "drift_percent": 0.08645456283917774
+  },
+  "policy": {
+    "qwen_token_count": 269,
+    "qwen_token_capacity": 320,
+    "image_token_count": 4096,
+    "conditioned_token_count": 4365,
+    "conditioned_token_capacity": 4480,
+    "unconditioned_token_count": 4096,
+    "denoise_step_count": 20,
+    "sampler": "V4_DEFAULT_20",
+    "parameter_source": "execution_layout",
+    "qwen_parameter_format": "fp8_e4m3_block_scaled",
+    "dit_parameter_format": "fp8_e4m3",
+    "activation_format": "bf16_linear_input",
+    "dit_weight_execution_format": "fp8_compact_rhs",
+    "dit_attention": "online_wmma",
+    "dit_feed_forward": "pytorch_parity",
+    "residency": "all_stage_bundles",
+    "issue": "stage_serial"
+  },
+  "plan": {
+    "parameter_mebibytes": 24216,
+    "largest_parameter_slab_mebibytes": 8860,
+    "local_high_water_mebibytes": 2450,
+    "largest_local_slab_mebibytes": 1568,
+    "boundary_mebibytes": 159,
+    "kernel_specialization_count": 140,
+    "stage_dispatch_count": 1851,
+    "logical_peak_mebibytes": 25874
+  }
+}

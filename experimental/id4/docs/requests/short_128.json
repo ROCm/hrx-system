@@ -1,0 +1,9 @@
+{
+  "prompt": "A small red boat on a quiet lake at sunrise.",
+  "generation": {
+    "latent_width": 8,
+    "latent_height": 8,
+    "sampler": "V4_DEFAULT_20",
+    "seed": 20260626
+  }
+}

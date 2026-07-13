@@ -21,9 +21,11 @@ golden fixtures.
 
 Checked-in files in this tree must be public archaeology. Do not mention
 machine-specific paths, downloaded model locations, scratch directories,
-private workflow names, or issue-tracker records. External models, generated
-images, and large tensor captures are inputs or diagnostics, not repository
-content.
+private workflow names, or issue-tracker records. External models, ordinary
+generated images, and large tensor captures are inputs or diagnostics, not
+repository content. A compact visual result or reduced fixture may enter the
+repository only after an explicit license, redistribution, and provenance
+review establishes that it is durable public evidence.
 
 When referencing external projects, use public URLs and describe the stable
 behavior being relied on. Preserve licensing and attribution for any borrowed
