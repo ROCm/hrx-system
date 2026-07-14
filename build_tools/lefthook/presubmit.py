@@ -1380,6 +1380,8 @@ def run_root_devtools_tests_for_lane(
             "unittest",
             "build_tools.devtools.cli_test",
             "build_tools.devtools.command_plan_test",
+            "build_tools.devtools.environment_test",
+            "build_tools.devtools.install_test",
             "build_tools.devtools.setup_test",
         ],
         "Root devtools Python tests",

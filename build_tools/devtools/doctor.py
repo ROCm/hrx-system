@@ -16,7 +16,7 @@ from build_tools.devtools.command_plan import (
     CommandStep,
     OptionalCheckCommandStep,
 )
-from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
+from build_tools.devtools.environment import BAZEL_SH_ENV, REPO_ROOT, ToolEnvironment
 
 COMMON_TOOLS = (
     ("lefthook", "version", r"\b2\.1\.9\b"),
@@ -93,6 +93,16 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
             )
         )
     if lane:
+        if lane == "bazel" and sys.platform == "win32":
+            plan.add(
+                CheckCommandStep(
+                    [env.get(BAZEL_SH_ENV, "bash"), "--version"],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    expected_pattern=r"GNU bash",
+                    label="check Bazel shell",
+                )
+            )
         for tool, version_arg, expected_pattern in LANE_TOOLS[lane]:
             plan.add(
                 CheckCommandStep(

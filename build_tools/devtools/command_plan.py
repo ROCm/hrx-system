@@ -148,14 +148,21 @@ class CheckCommandStep:
             print(f"dev.py: {self.label or quote_command(self.argv)}")
             print("  " + quote_command(self.argv))
             sys.stdout.flush()
-        result = subprocess.run(
-            self.argv,
-            cwd=self.cwd,
-            env=self.env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                self.argv,
+                cwd=self.cwd,
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except OSError as exc:
+            print(
+                f"dev.py: failed to run {quote_command(self.argv)}: {exc}",
+                file=sys.stderr,
+            )
+            return 127
         output = result.stdout.rstrip()
         if output:
             print(output)

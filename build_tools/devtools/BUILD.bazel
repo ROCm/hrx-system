@@ -158,6 +158,15 @@ py_test(
 )
 
 py_test(
+    name = "environment_test",
+    srcs = [
+        "environment.py",
+        "environment_test.py",
+    ],
+    main = "environment_test.py",
+)
+
+py_test(
     name = "install_test",
     srcs = [
         "__init__.py",

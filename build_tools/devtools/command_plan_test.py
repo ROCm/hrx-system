@@ -168,6 +168,17 @@ class CommandPlanTest(unittest.TestCase):
 
         self.assertIn("warning", output.getvalue())
 
+    def test_required_check_step_reports_missing_command(self):
+        step = command_plan.CheckCommandStep(
+            ["definitely-not-an-iree-tool"], cwd=Path.cwd()
+        )
+        error = io.StringIO()
+
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(step.run(), 127)
+
+        self.assertIn("failed to run", error.getvalue())
+
     def test_optional_check_step_reports_hint(self):
         plan = CommandPlan(
             [
