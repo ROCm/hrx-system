@@ -1425,6 +1425,11 @@ void id4_pipeline_program_prepared_release(
   }
 }
 
+const id4_pipeline_plan_t* id4_pipeline_program_prepared_plan(
+    const id4_pipeline_program_prepared_t* prepared) {
+  return prepared ? prepared->plan : NULL;
+}
+
 static iree_status_t id4_pipeline_program_prepared_make_initial_wait_list(
     id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options,

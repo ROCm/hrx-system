@@ -384,6 +384,12 @@ const id4_pipeline_parameter_request_table_t*
 id4_pipeline_plan_parameter_request_table_at(const id4_pipeline_plan_t* plan,
                                              iree_host_size_t index);
 
+// Resolves parameter slab |index| to its complete allocation and placement
+// descriptor.
+iree_status_t id4_pipeline_plan_parameter_slab_load_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index,
+    id4_pipeline_parameter_slab_load_t* out_load);
+
 // Returns the number of planned parameter tensors in |plan|.
 iree_host_size_t id4_pipeline_plan_parameter_tensor_count(
     const id4_pipeline_plan_t* plan);

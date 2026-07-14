@@ -79,6 +79,10 @@ void id4_pipeline_program_prepared_retain(
 void id4_pipeline_program_prepared_release(
     id4_pipeline_program_prepared_t* prepared);
 
+// Returns the exact plan retained by |prepared|.
+const id4_pipeline_plan_t* id4_pipeline_program_prepared_plan(
+    const id4_pipeline_program_prepared_t* prepared);
+
 // Issues one execution of |prepared| using the retained parameter slabs in
 // |bundle| and boundary bindings supplied in |options|.
 iree_status_t id4_pipeline_program_prepared_issue(

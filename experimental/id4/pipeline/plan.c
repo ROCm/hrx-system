@@ -1949,6 +1949,56 @@ id4_pipeline_plan_parameter_request_table_at(const id4_pipeline_plan_t* plan,
   return &plan->parameter_request_tables[index];
 }
 
+iree_status_t id4_pipeline_plan_parameter_slab_load_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index,
+    id4_pipeline_parameter_slab_load_t* out_load) {
+  IREE_ASSERT_ARGUMENT(out_load);
+  memset(out_load, 0, sizeof(*out_load));
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab plan is required");
+  }
+  if (index >= plan->parameter_slab_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter slab index %" PRIhsz
+                            " is outside plan slab count %" PRIhsz,
+                            index, plan->parameter_slab_count);
+  }
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      &plan->parameter_slabs[index];
+  const id4_pipeline_device_placement_t* placement =
+      id4_pipeline_plan_placement_at(plan, slab->placement_id);
+  if (!placement) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter slab %" PRIhsz
+                            " references missing placement %u",
+                            index, slab->placement_id);
+  }
+  iree_hal_device_t* device = iree_hal_device_group_device_at(
+      plan->device_group, placement->device_index);
+  if (!device) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter slab %" PRIhsz
+                            " references missing device %" PRIhsz,
+                            index, placement->device_index);
+  }
+  *out_load = (id4_pipeline_parameter_slab_load_t){
+      // Plan-local slab index.
+      .slab_index = index,
+      // Plan-owned allocation metadata.
+      .slab = slab,
+      // Plan-owned parameter request metadata.
+      .request_table = &plan->parameter_request_tables[index],
+      // Device group ordinal selected by the placement.
+      .device_index = placement->device_index,
+      // Device selected by the placement.
+      .device = device,
+      // Queue affinity selected by the placement.
+      .queue_affinity = placement->queue_affinity,
+  };
+  return iree_ok_status();
+}
+
 iree_host_size_t id4_pipeline_plan_parameter_tensor_count(
     const id4_pipeline_plan_t* plan) {
   return plan ? plan->parameter_tensor_count : 0;
@@ -2278,23 +2328,7 @@ static iree_status_t id4_pipeline_plan_make_parameter_slab_loads(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < plan->parameter_slab_count && iree_status_is_ok(status); ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab = &plan->parameter_slabs[i];
-    const id4_pipeline_device_placement_t* placement =
-        id4_pipeline_plan_placement_at(plan, slab->placement_id);
-    if (!placement) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "parameter slab %" PRIhsz
-                                " references missing placement %u",
-                                i, slab->placement_id);
-      break;
-    }
-    loads[i].slab_index = i;
-    loads[i].slab = slab;
-    loads[i].request_table = &plan->parameter_request_tables[i];
-    loads[i].device_index = placement->device_index;
-    loads[i].device = iree_hal_device_group_device_at(plan->device_group,
-                                                      placement->device_index);
-    loads[i].queue_affinity = placement->queue_affinity;
+    status = id4_pipeline_plan_parameter_slab_load_at(plan, i, &loads[i]);
   }
   if (iree_status_is_ok(status)) {
     *out_loads = loads;
@@ -2519,16 +2553,11 @@ iree_status_t id4_pipeline_plan_validate_parameter_slabs(
           IREE_STATUS_INVALID_ARGUMENT,
           "parameter slab %" PRIhsz " has no retained buffer", i);
     }
-    const iree_device_size_t buffer_byte_length =
-        iree_hal_buffer_byte_length(buffer);
-    if (buffer_byte_length != plan->parameter_slabs[i].byte_length) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "parameter slab %" PRIhsz
-                              " byte length mismatch: plan requires %" PRIu64
-                              " bytes but slab set has %" PRIu64,
-                              i, plan->parameter_slabs[i].byte_length,
-                              buffer_byte_length);
-    }
+    id4_pipeline_parameter_slab_load_t load;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_parameter_slab_load_at(plan, i, &load));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_parameter_slab_validate_resident_buffer(&load, buffer));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slab_metadata(
         &plan->parameter_slabs[i],
         id4_pipeline_parameter_slab_set_plan_at(slab_set, i), i));

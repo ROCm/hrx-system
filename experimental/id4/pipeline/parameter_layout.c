@@ -994,44 +994,14 @@ static iree_status_t id4_pipeline_parameter_layout_validate_load_options(
 static iree_status_t id4_pipeline_parameter_layout_make_load(
     const id4_pipeline_plan_t* plan, iree_host_size_t slab_index,
     id4_pipeline_parameter_slab_load_t* out_load) {
-  memset(out_load, 0, sizeof(*out_load));
-  const id4_pipeline_parameter_slab_plan_t* slab =
-      id4_pipeline_plan_parameter_slab_at(plan, slab_index);
-  const id4_pipeline_parameter_request_table_t* request_table =
-      id4_pipeline_plan_parameter_request_table_at(plan, slab_index);
-  iree_hal_device_group_t* device_group = id4_pipeline_plan_device_group(plan);
-  const id4_pipeline_device_placement_t* placement =
-      slab ? id4_pipeline_plan_placement_at(plan, slab->placement_id) : NULL;
-  iree_hal_device_t* device = placement
-                                  ? iree_hal_device_group_device_at(
-                                        device_group, placement->device_index)
-                                  : NULL;
-  if (!slab || !request_table || !placement || !device) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "parameter layout slab %" PRIhsz
-                            " placement is incomplete",
-                            slab_index);
-  }
-  if (request_table->count == 0) {
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_parameter_slab_load_at(plan, slab_index, out_load));
+  if (out_load->request_table->count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "parameter layout slab %" PRIhsz
                             " has no parameter requests",
                             slab_index);
   }
-  *out_load = (id4_pipeline_parameter_slab_load_t){
-      // Plan-local slab index.
-      .slab_index = slab_index,
-      // Final resident allocation plan.
-      .slab = slab,
-      // Original request identity retained by the resident slab set.
-      .request_table = request_table,
-      // Device index selected by the plan placement.
-      .device_index = placement->device_index,
-      // Device selected by the plan placement.
-      .device = device,
-      // Queue affinity selected by the plan placement.
-      .queue_affinity = placement->queue_affinity,
-  };
   return iree_ok_status();
 }
 

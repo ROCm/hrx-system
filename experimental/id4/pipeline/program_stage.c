@@ -10,8 +10,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/parameter_binding.h"
 #include "experimental/id4/pipeline/parameter_layout.h"
-#include "experimental/id4/pipeline/parameter_materialization.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/pipeline/program_plan.h"
 #include "experimental/id4/pipeline/program_prepare.h"
@@ -49,8 +49,8 @@ typedef struct id4_pipeline_program_stage_binding_layout_t {
 typedef struct id4_pipeline_program_stage_bundle_payload_t {
   // Prepared semantic program retained by the bundle payload.
   id4_pipeline_program_prepared_t* prepared_program;
-  // Published parameter materialization retained by derived bundles.
-  id4_pipeline_parameter_materialization_t* parameter_materialization;
+  // Complete materialized parameter binding retained by variant bundles.
+  id4_pipeline_parameter_binding_t* parameter_binding;
 } id4_pipeline_program_stage_bundle_payload_t;
 
 static iree_status_t id4_pipeline_program_stage_validate_options_size(
@@ -516,9 +516,56 @@ static void id4_pipeline_program_stage_bundle_payload_destroy(
   id4_pipeline_program_stage_bundle_payload_t* program_payload =
       (id4_pipeline_program_stage_bundle_payload_t*)payload;
   id4_pipeline_program_prepared_release(program_payload->prepared_program);
-  id4_pipeline_parameter_materialization_release(
-      program_payload->parameter_materialization);
+  id4_pipeline_parameter_binding_release(program_payload->parameter_binding);
   memset(program_payload, 0, sizeof(*program_payload));
+}
+
+static iree_status_t id4_pipeline_program_stage_create_bundle(
+    id4_pipeline_program_prepared_t* prepared_program,
+    id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    iree_hal_semaphore_list_t readiness_semaphore_list,
+    id4_pipeline_parameter_binding_t* parameter_binding,
+    iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle) {
+  IREE_ASSERT_ARGUMENT(out_bundle);
+  *out_bundle = NULL;
+  const id4_pipeline_plan_t* plan =
+      id4_pipeline_program_prepared_plan(prepared_program);
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared program is required");
+  }
+
+  const id4_pipeline_bundle_create_options_t create_options = {
+      // Structure version for bundle creation.
+      .structure_size = sizeof(create_options),
+      // No bundle creation extensions.
+      .next = NULL,
+      // Exact plan retained by the prepared program.
+      .plan = plan,
+      // Complete immutable resident parameter binding.
+      .parameter_slabs = parameter_slabs,
+      // Parameter publication edges retained by the bundle.
+      .readiness_semaphore_list = readiness_semaphore_list,
+      // Program-stage payload retaining executable and binding ownership.
+      .payload_size = sizeof(id4_pipeline_program_stage_bundle_payload_t),
+      // Natural program-stage payload alignment.
+      .payload_alignment =
+          iree_alignof(id4_pipeline_program_stage_bundle_payload_t),
+      // Releases prepared state and optional parameter binding.
+      .payload_destroy = id4_pipeline_program_stage_bundle_payload_destroy,
+  };
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_bundle_create(&create_options, host_allocator, &bundle));
+  id4_pipeline_program_stage_bundle_payload_t* payload =
+      (id4_pipeline_program_stage_bundle_payload_t*)id4_pipeline_bundle_payload(
+          bundle);
+  payload->prepared_program = prepared_program;
+  id4_pipeline_program_prepared_retain(payload->prepared_program);
+  payload->parameter_binding = parameter_binding;
+  id4_pipeline_parameter_binding_retain(payload->parameter_binding);
+  *out_bundle = bundle;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
@@ -732,29 +779,12 @@ iree_status_t id4_pipeline_program_stage_prepare(
                                           &prepared_program);
   }
   if (iree_status_is_ok(status)) {
-    id4_pipeline_bundle_create_options_t create_options;
-    memset(&create_options, 0, sizeof(create_options));
-    create_options.structure_size = sizeof(create_options);
-    create_options.plan = options->plan;
-    create_options.parameter_slabs = parameter_slabs;
-    create_options.readiness_semaphore_list =
+    const iree_hal_semaphore_list_t readiness_semaphore_list =
         parameter_load_submitted ? options->stage_options->signal_semaphore_list
                                  : iree_hal_semaphore_list_empty();
-    create_options.payload_size =
-        sizeof(id4_pipeline_program_stage_bundle_payload_t);
-    create_options.payload_alignment =
-        iree_alignof(id4_pipeline_program_stage_bundle_payload_t);
-    create_options.payload_destroy =
-        id4_pipeline_program_stage_bundle_payload_destroy;
-    status =
-        id4_pipeline_bundle_create(&create_options, host_allocator, &bundle);
-  }
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_program_stage_bundle_payload_t* payload =
-        (id4_pipeline_program_stage_bundle_payload_t*)
-            id4_pipeline_bundle_payload(bundle);
-    payload->prepared_program = prepared_program;
-    prepared_program = NULL;
+    status = id4_pipeline_program_stage_create_bundle(
+        prepared_program, parameter_slabs, readiness_semaphore_list,
+        /*parameter_binding=*/NULL, host_allocator, &bundle);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_stage_emit_lifecycle(
@@ -770,113 +800,36 @@ iree_status_t id4_pipeline_program_stage_prepare(
                       options->stage_options->signal_semaphore_list));
     }
     id4_pipeline_bundle_release(bundle);
-    id4_pipeline_program_prepared_release(prepared_program);
   }
+  id4_pipeline_program_prepared_release(prepared_program);
   id4_pipeline_parameter_residency_plan_release(parameter_residency_plan);
   id4_pipeline_parameter_slab_set_release(parameter_slabs);
   return status;
 }
 
-iree_status_t id4_pipeline_program_stage_derive_bundle(
-    id4_pipeline_bundle_t* base_bundle,
-    id4_pipeline_parameter_materialization_t* materialization,
+iree_status_t id4_pipeline_program_stage_bind_parameters(
+    id4_pipeline_program_prepared_t* prepared_program,
+    id4_pipeline_parameter_binding_t* parameter_binding,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle) {
   IREE_ASSERT_ARGUMENT(out_bundle);
   *out_bundle = NULL;
-  if (!base_bundle) {
+  if (!prepared_program) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "base program stage bundle is required");
+                            "prepared program is required");
   }
-  if (!materialization) {
+  if (!parameter_binding) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameter materialization is required");
+                            "complete parameter binding is required");
   }
-
-  id4_pipeline_parameter_materialization_binding_t binding;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_query_binding(
-      materialization, &binding));
-  const id4_pipeline_plan_t* plan = id4_pipeline_bundle_plan(base_bundle);
-  id4_pipeline_parameter_slab_set_t* base_parameter_slabs =
-      id4_pipeline_bundle_parameter_slabs(base_bundle);
-  if (!base_parameter_slabs) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "base program stage bundle has no parameter slabs");
-  }
-  const iree_host_size_t slab_count =
-      id4_pipeline_parameter_slab_set_count(base_parameter_slabs);
-  if (binding.target_slab_index >= slab_count ||
-      id4_pipeline_parameter_slab_set_count(binding.parameter_slabs) !=
-          slab_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter materialization slab layout does not match the base bundle");
-  }
-  for (iree_host_size_t i = 0; i < slab_count; ++i) {
-    if (i == binding.target_slab_index) continue;
-    if (id4_pipeline_parameter_slab_set_buffer_at(binding.parameter_slabs, i) !=
-        id4_pipeline_parameter_slab_set_buffer_at(base_parameter_slabs, i)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "parameter materialization shared slab %" PRIhsz
-                              " does not come from the base bundle",
-                              i);
-    }
-  }
+  const id4_pipeline_plan_t* plan =
+      id4_pipeline_program_prepared_plan(prepared_program);
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
-      plan, binding.parameter_slabs));
-
-  id4_pipeline_program_stage_bundle_payload_t* base_payload =
-      (id4_pipeline_program_stage_bundle_payload_t*)id4_pipeline_bundle_payload(
-          base_bundle);
-  if (!base_payload || !base_payload->prepared_program) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "base program stage bundle is not prepared");
-  }
-  if (base_payload->parameter_materialization) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "program stage bundle already contains a parameter materialization");
-  }
-
-  const iree_hal_semaphore_list_t readiness_semaphore_list =
-      binding.readiness_semaphore_list;
-
-  id4_pipeline_bundle_t* bundle = NULL;
-  const id4_pipeline_bundle_create_options_t create_options = {
-      // Structure version for bundle creation.
-      .structure_size = sizeof(create_options),
-      // No bundle creation extensions.
-      .next = NULL,
-      // Exact source plan retained by the derived bundle.
-      .plan = plan,
-      // Immutable slabs carrying the materialized replacement.
-      .parameter_slabs = binding.parameter_slabs,
-      // Publication causally dominates population and unchanged-base readiness.
-      .readiness_semaphore_list = readiness_semaphore_list,
-      // Program-stage payload retaining prepared execution state.
-      .payload_size = sizeof(id4_pipeline_program_stage_bundle_payload_t),
-      // Natural program-stage payload alignment.
-      .payload_alignment =
-          iree_alignof(id4_pipeline_program_stage_bundle_payload_t),
-      // Releases prepared state and the materialization retain.
-      .payload_destroy = id4_pipeline_program_stage_bundle_payload_destroy,
-  };
-  iree_status_t status =
-      id4_pipeline_bundle_create(&create_options, host_allocator, &bundle);
-
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_program_stage_bundle_payload_t* payload =
-        (id4_pipeline_program_stage_bundle_payload_t*)
-            id4_pipeline_bundle_payload(bundle);
-    payload->prepared_program = base_payload->prepared_program;
-    id4_pipeline_program_prepared_retain(payload->prepared_program);
-    payload->parameter_materialization = materialization;
-    id4_pipeline_parameter_materialization_retain(
-        payload->parameter_materialization);
-    *out_bundle = bundle;
-  } else {
-    id4_pipeline_bundle_release(bundle);
-  }
-  return status;
+      plan, id4_pipeline_parameter_binding_slabs(parameter_binding)));
+  return id4_pipeline_program_stage_create_bundle(
+      prepared_program, id4_pipeline_parameter_binding_slabs(parameter_binding),
+      id4_pipeline_parameter_binding_readiness_semaphore_list(
+          parameter_binding),
+      parameter_binding, host_allocator, out_bundle);
 }
 
 iree_status_t id4_pipeline_program_stage_issue(

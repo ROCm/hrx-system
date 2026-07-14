@@ -7,8 +7,10 @@
 #include <cstring>
 #include <vector>
 
+#include "experimental/id4/pipeline/parameter_binding.h"
 #include "experimental/id4/pipeline/parameter_layout.h"
 #include "experimental/id4/pipeline/parameter_materialization.h"
+#include "experimental/id4/pipeline/program_prepare.h"
 #include "experimental/id4/pipeline/program_stage.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/internal/arena.h"
@@ -316,6 +318,8 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
   const id4_pipeline_program_shape_t shape =
       id4_pipeline_program_make_shape_rank1(4);
+  const bool separates_parameter_domains = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_MATERIALIZE_PARAMETER_DOMAIN);
 
   id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
   id4_pipeline_program_import_tensor_options_t input_options = {
@@ -362,6 +366,9 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
       /*.shape=*/shape,
       /*.source_span_count=*/IREE_ARRAYSIZE(first_source_span),
       /*.source_spans=*/first_source_span,
+      /*.domain=*/
+      separates_parameter_domains ? IREE_SV("patchable")
+                                  : iree_string_view_empty(),
   };
   id4_pipeline_program_tensor_t first = id4_pipeline_program_tensor_invalid();
   IREE_CHECK_OK(
@@ -447,6 +454,11 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
       /*.key=*/IREE_SV("second.bias"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/shape,
+      /*.source_span_count=*/0,
+      /*.source_spans=*/nullptr,
+      /*.domain=*/
+      separates_parameter_domains ? IREE_SV("shared")
+                                  : iree_string_view_empty(),
   };
   id4_pipeline_program_tensor_t second = id4_pipeline_program_tensor_invalid();
   IREE_CHECK_OK(
@@ -644,6 +656,8 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(CreateTwoRegionAddPlan(
       program.get(), context, stage_plan_flags, stage_diagnostic_tap_names,
       &diagnostics_sink, plan.out()));
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
+      variant_execution_plan;
   ASSERT_EQ(id4_pipeline_plan_region_count(plan.get()),
             segments_parameter_residency ? 1u : 2u);
   iree_host_size_t load_group_count = 0;
@@ -668,20 +682,6 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
-  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
-      parameter_load_gate;
-  iree_hal_semaphore_t* parameter_load_gate_semaphore = nullptr;
-  uint64_t parameter_load_gate_value = 1;
-  iree_hal_semaphore_list_t parameter_load_gate_list =
-      iree_hal_semaphore_list_empty();
-  if (materializes_parameter_domain) {
-    IREE_ASSERT_OK(iree_hal_semaphore_create(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, parameter_load_gate.out()));
-    parameter_load_gate_semaphore = parameter_load_gate.get();
-    parameter_load_gate_list = OneSemaphoreList(&parameter_load_gate_semaphore,
-                                                &parameter_load_gate_value);
-  }
   iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
   uint64_t prepare_signal_value = 1;
   iree_hal_semaphore_list_t prepare_signal_list =
@@ -710,7 +710,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                                      : 0);
   }
   stage_prepare_options.kernel_library = kernel_library.get();
-  stage_prepare_options.wait_semaphore_list = parameter_load_gate_list;
+  stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
   stage_prepare_options.command_buffer_mode = context.value.command_buffer_mode;
   stage_prepare_options.diagnostics_sink = &diagnostics_sink;
@@ -724,8 +724,36 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   prepare_options.kernel_cache = context.value.kernel_cache;
   prepare_options.executable_cache = context.value.executable_cache;
   OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release> bundle;
+  OwningRef<id4_pipeline_program_prepared_t,
+            id4_pipeline_program_prepared_release>
+      prepared_program;
   OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release> source_bundle;
-  if (reuses_parameter_slabs) {
+  if (materializes_parameter_domain) {
+    IREE_ASSERT_OK(CreateTwoRegionAddPlan(
+        program.get(), context, stage_plan_flags, stage_diagnostic_tap_names,
+        &diagnostics_sink, variant_execution_plan.out()));
+    ASSERT_NE(variant_execution_plan.get(), plan.get());
+    id4_pipeline_program_prepare_options_t program_prepare_options;
+    std::memset(&program_prepare_options, 0, sizeof(program_prepare_options));
+    program_prepare_options.structure_size = sizeof(program_prepare_options);
+    program_prepare_options.program = program.get();
+    program_prepare_options.plan = variant_execution_plan.get();
+    program_prepare_options.kernel_cache = context.value.kernel_cache;
+    program_prepare_options.kernel_library = kernel_library.get();
+    program_prepare_options.executable_cache = context.value.executable_cache;
+    program_prepare_options.executable_caching_mode =
+        IREE_HAL_EXECUTABLE_CACHING_MODE_NONE;
+    program_prepare_options.command_buffer_mode =
+        context.value.command_buffer_mode;
+    program_prepare_options.transient_slab_alloca_flags =
+        IREE_HAL_ALLOCA_FLAG_NONE;
+    program_prepare_options.transient_slab_dealloca_flags =
+        IREE_HAL_DEALLOCA_FLAG_NONE;
+    program_prepare_options.diagnostics_sink = &diagnostics_sink;
+    IREE_ASSERT_OK(id4_pipeline_program_prepare(&program_prepare_options,
+                                                iree_allocator_system(),
+                                                prepared_program.out()));
+  } else if (reuses_parameter_slabs) {
     IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
         &prepare_options, iree_allocator_system(), source_bundle.out()));
     id4_pipeline_parameter_slab_set_t* source_parameter_slabs =
@@ -779,171 +807,140 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
         &prepare_options, iree_allocator_system(), bundle.out()));
   }
-  id4_pipeline_parameter_slab_set_t* parameter_slabs =
-      id4_pipeline_bundle_parameter_slabs(bundle.get());
-  ASSERT_NE(parameter_slabs, nullptr);
-  EXPECT_EQ(id4_pipeline_parameter_slab_set_load_group_count(parameter_slabs),
-            uses_execution_layout ? 0u : 2u);
-  EXPECT_EQ(id4_pipeline_parameter_slab_set_has_deferred_load_context(
-                parameter_slabs),
-            defers_parameter_loads);
-  EXPECT_EQ(
-      id4_pipeline_parameter_slab_set_has_resident_buffers(parameter_slabs),
-      !defers_parameter_loads);
-  EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle.get()).count,
-            (defers_parameter_loads || reuses_parameter_slabs) ? 0u : 1u);
+  id4_pipeline_parameter_slab_set_t* parameter_slabs = nullptr;
+  if (!materializes_parameter_domain) {
+    parameter_slabs = id4_pipeline_bundle_parameter_slabs(bundle.get());
+    ASSERT_NE(parameter_slabs, nullptr);
+    EXPECT_EQ(id4_pipeline_parameter_slab_set_load_group_count(parameter_slabs),
+              uses_execution_layout ? 0u : 2u);
+    EXPECT_EQ(id4_pipeline_parameter_slab_set_has_deferred_load_context(
+                  parameter_slabs),
+              defers_parameter_loads);
+    EXPECT_EQ(
+        id4_pipeline_parameter_slab_set_has_resident_buffers(parameter_slabs),
+        !defers_parameter_loads);
+    EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle.get()).count,
+              (defers_parameter_loads || reuses_parameter_slabs) ? 0u : 1u);
+  }
 
-  id4_pipeline_parameter_materialization_t* materialization = nullptr;
+  id4_pipeline_parameter_materialization_t* materializations[2] = {};
+  iree_host_size_t materialization_count = 0;
+  OwningRef<id4_pipeline_parameter_binding_t,
+            id4_pipeline_parameter_binding_release>
+      parameter_binding;
   OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       materialization_semaphore;
+  iree_hal_semaphore_t* materialization_timeline_semaphore = nullptr;
+  uint64_t materialization_timeline_value = 1;
   if (materializes_parameter_domain) {
-    ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan.get()), 1u);
+    ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan.get()),
+              IREE_ARRAYSIZE(materializations));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/1,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, materialization_semaphore.out()));
-    iree_hal_semaphore_t* timeline_semaphore = materialization_semaphore.get();
-    uint64_t acquisition_wait_value = 1;
-    iree_hal_semaphore_list_t acquisition_wait_list =
-        OneSemaphoreList(&timeline_semaphore, &acquisition_wait_value);
-    uint64_t acquisition_signal_value = 2;
-    iree_hal_semaphore_list_t acquisition_signal_list =
-        OneSemaphoreList(&timeline_semaphore, &acquisition_signal_value);
-
-    id4_pipeline_parameter_materialization_acquire_options_t acquire_options;
-    std::memset(&acquire_options, 0, sizeof(acquire_options));
-    acquire_options.structure_size = sizeof(acquire_options);
-    acquire_options.plan = plan.get();
-    acquire_options.base_parameter_slabs = parameter_slabs;
-    acquire_options.target_slab_index = 0;
-    acquire_options.wait_semaphore_list = acquisition_wait_list;
-    acquire_options.base_readiness_semaphore_list =
-        id4_pipeline_bundle_readiness_semaphore_list(bundle.get());
-    acquire_options.signal_semaphore_list = acquisition_signal_list;
-    acquire_options.diagnostics_sink = &diagnostics_sink;
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_acquire(
-        &acquire_options, iree_allocator_system(), &materialization));
-
-    // Replacement storage is independent of unchanged-base readiness. Prove
-    // that acquisition completes while canonical parameter loading remains
-    // blocked, then release the base path before publication.
-    IREE_ASSERT_OK(iree_hal_semaphore_wait(
-        timeline_semaphore, acquisition_signal_value, iree_infinite_timeout(),
-        IREE_ASYNC_WAIT_FLAG_NONE));
-    uint64_t current_parameter_load_gate_value = 0;
-    IREE_ASSERT_OK(iree_hal_semaphore_query(
-        parameter_load_gate.get(), &current_parameter_load_gate_value));
-    EXPECT_EQ(current_parameter_load_gate_value, 0u);
-    IREE_ASSERT_OK(iree_hal_semaphore_signal(parameter_load_gate.get(),
-                                             parameter_load_gate_value,
-                                             /*frontier=*/nullptr));
-
-    id4_pipeline_parameter_materialization_target_t materialization_target;
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_query_target(
-        materialization, &materialization_target));
-    id4_pipeline_parameter_materialization_binding_t materialization_binding;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                          id4_pipeline_parameter_materialization_query_binding(
-                              materialization, &materialization_binding));
-    uint64_t gather_signal_value = 3;
-    iree_hal_semaphore_list_t gather_signal_list =
-        OneSemaphoreList(&timeline_semaphore, &gather_signal_value);
-    iree_hal_buffer_t* target_buffer = materialization_target.target_buffer;
-    ASSERT_NE(target_buffer, nullptr);
-    id4_pipeline_parameter_layout_load_options_t gather_options = {
-        /*.structure_size=*/sizeof(gather_options),
-        /*.next=*/nullptr,
-        /*.index=*/baked_archive_index.get(),
-        /*.provider=*/baked_archive_provider.get(),
-        /*.scope=*/IREE_SV("baked"),
-        /*.wait_semaphore_list=*/
-        materialization_target.readiness_semaphore_list,
-        /*.signal_semaphore_list=*/gather_signal_list,
-        /*.diagnostics_sink=*/&diagnostics_sink,
-    };
-    IREE_ASSERT_OK(id4_pipeline_parameter_layout_gather_slab(
-        plan.get(), &gather_options, materialization_target.slab_index,
-        target_buffer, iree_allocator_system()));
-
+    materialization_timeline_semaphore = materialization_semaphore.get();
     const id4_pipeline_parameter_tensor_plan_t* first_parameter =
         FindParameterTensor(plan.get(), IREE_SV("first.bias"));
     ASSERT_NE(first_parameter, nullptr);
-    ASSERT_EQ(first_parameter->parameter_slab_index, 0u);
-    const float replacement_values[] = {20.0f, 20.0f, 20.0f, 20.0f};
-    uint64_t update_wait_value = gather_signal_value;
-    iree_hal_semaphore_list_t update_wait_list =
-        OneSemaphoreList(&timeline_semaphore, &update_wait_value);
-    uint64_t update_signal_value = 4;
-    iree_hal_semaphore_list_t update_signal_list =
-        OneSemaphoreList(&timeline_semaphore, &update_signal_value);
-    IREE_ASSERT_OK(iree_hal_device_queue_update(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, update_wait_list,
-        update_signal_list, replacement_values, /*source_offset=*/0,
-        target_buffer, first_parameter->offset, sizeof(replacement_values),
-        IREE_HAL_UPDATE_FLAG_NONE));
+    for (iree_host_size_t slab_index = 0;
+         slab_index < IREE_ARRAYSIZE(materializations); ++slab_index) {
+      uint64_t acquisition_wait_value = materialization_timeline_value;
+      iree_hal_semaphore_list_t acquisition_wait_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &acquisition_wait_value);
+      uint64_t acquisition_signal_value = ++materialization_timeline_value;
+      iree_hal_semaphore_list_t acquisition_signal_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &acquisition_signal_value);
+      id4_pipeline_parameter_materialization_acquire_options_t acquire_options;
+      std::memset(&acquire_options, 0, sizeof(acquire_options));
+      acquire_options.structure_size = sizeof(acquire_options);
+      acquire_options.plan = plan.get();
+      acquire_options.target_slab_index = slab_index;
+      acquire_options.wait_semaphore_list = acquisition_wait_list;
+      acquire_options.signal_semaphore_list = acquisition_signal_list;
+      acquire_options.diagnostics_sink = &diagnostics_sink;
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_acquire(
+          &acquire_options, iree_allocator_system(),
+          &materializations[slab_index]));
+      ++materialization_count;
 
-    if (aborts_parameter_materialization) {
-      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_abort(
-          materialization, update_signal_list, &diagnostics_sink));
-      id4_pipeline_parameter_materialization_release(materialization);
-      materialization = nullptr;
-      return;
+      id4_pipeline_parameter_materialization_target_t materialization_target;
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_query_target(
+          materializations[slab_index], &materialization_target));
+      id4_pipeline_parameter_materialization_binding_t materialization_binding;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_FAILED_PRECONDITION,
+          id4_pipeline_parameter_materialization_query_binding(
+              materializations[slab_index], &materialization_binding));
+
+      uint64_t gather_signal_value = ++materialization_timeline_value;
+      iree_hal_semaphore_list_t gather_signal_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &gather_signal_value);
+      id4_pipeline_parameter_layout_load_options_t gather_options = {
+          /*.structure_size=*/sizeof(gather_options),
+          /*.next=*/nullptr,
+          /*.index=*/baked_archive_index.get(),
+          /*.provider=*/baked_archive_provider.get(),
+          /*.scope=*/IREE_SV("baked"),
+          /*.wait_semaphore_list=*/
+          materialization_target.readiness_semaphore_list,
+          /*.signal_semaphore_list=*/gather_signal_list,
+          /*.diagnostics_sink=*/&diagnostics_sink,
+      };
+      IREE_ASSERT_OK(id4_pipeline_parameter_layout_gather_slab(
+          plan.get(), &gather_options, materialization_target.slab_index,
+          materialization_target.target_buffer, iree_allocator_system()));
+
+      if (aborts_parameter_materialization) {
+        IREE_ASSERT_OK(id4_pipeline_parameter_materialization_abort(
+            materializations[slab_index], gather_signal_list,
+            &diagnostics_sink));
+        id4_pipeline_parameter_materialization_release(
+            materializations[slab_index]);
+        materializations[slab_index] = nullptr;
+        materialization_count = 0;
+        return;
+      }
+
+      uint64_t publication_wait_value = gather_signal_value;
+      if (slab_index == first_parameter->parameter_slab_index) {
+        const float replacement_values[] = {20.0f, 20.0f, 20.0f, 20.0f};
+        uint64_t update_signal_value = ++materialization_timeline_value;
+        iree_hal_semaphore_list_t update_signal_list = OneSemaphoreList(
+            &materialization_timeline_semaphore, &update_signal_value);
+        IREE_ASSERT_OK(iree_hal_device_queue_update(
+            device, IREE_HAL_QUEUE_AFFINITY_ANY, gather_signal_list,
+            update_signal_list, replacement_values, /*source_offset=*/0,
+            materialization_target.target_buffer, first_parameter->offset,
+            sizeof(replacement_values), IREE_HAL_UPDATE_FLAG_NONE));
+        publication_wait_value = update_signal_value;
+      }
+
+      iree_hal_semaphore_list_t publication_wait_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &publication_wait_value);
+      uint64_t publication_signal_value = ++materialization_timeline_value;
+      iree_hal_semaphore_list_t publication_signal_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &publication_signal_value);
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_publish(
+          materializations[slab_index], publication_wait_list,
+          publication_signal_list, &diagnostics_sink));
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_FAILED_PRECONDITION,
+          id4_pipeline_parameter_materialization_query_target(
+              materializations[slab_index], &materialization_target));
     }
 
-    uint64_t publication_wait_value = update_signal_value;
-    iree_hal_semaphore_list_t publication_wait_list =
-        OneSemaphoreList(&timeline_semaphore, &publication_wait_value);
-    uint64_t publication_signal_value = 5;
-    iree_hal_semaphore_list_t publication_signal_list =
-        OneSemaphoreList(&timeline_semaphore, &publication_signal_value);
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_publish(
-        materialization, publication_wait_list, publication_signal_list,
-        &diagnostics_sink));
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                          id4_pipeline_parameter_materialization_query_target(
-                              materialization, &materialization_target));
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_query_binding(
-        materialization, &materialization_binding));
-
-    // Prepare an independent but structurally compatible plan. The published
-    // domain must follow parameter-layout compatibility rather than the pointer
-    // identity of the plan that produced it.
-    OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> compatible_plan;
-    IREE_ASSERT_OK(CreateTwoRegionAddPlan(
-        program.get(), context, stage_plan_flags, stage_diagnostic_tap_names,
-        &diagnostics_sink, compatible_plan.out()));
-    ASSERT_NE(compatible_plan.get(), plan.get());
-    id4_pipeline_stage_prepare_options_t compatible_stage_prepare_options =
-        stage_prepare_options;
-    compatible_stage_prepare_options.parameter_policy =
-        id4_pipeline_stage_parameters(
-            id4_pipeline_resident_parameter_source(parameter_slabs),
-            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
-            /*maximum_parameter_window_byte_length=*/0);
-    compatible_stage_prepare_options.wait_semaphore_list =
-        iree_hal_semaphore_list_empty();
-    compatible_stage_prepare_options.signal_semaphore_list =
-        iree_hal_semaphore_list_empty();
-    id4_pipeline_program_stage_prepare_options_t compatible_prepare_options =
-        prepare_options;
-    compatible_prepare_options.stage_options =
-        &compatible_stage_prepare_options;
-    compatible_prepare_options.plan = compatible_plan.get();
-    OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
-        compatible_base_bundle;
-    IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
-        &compatible_prepare_options, iree_allocator_system(),
-        compatible_base_bundle.out()));
-
-    OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
-        derived_bundle;
-    IREE_ASSERT_OK(id4_pipeline_program_stage_derive_bundle(
-        compatible_base_bundle.get(), materialization, iree_allocator_system(),
-        derived_bundle.out()));
-    EXPECT_EQ(id4_pipeline_bundle_plan(derived_bundle.get()),
-              compatible_plan.get());
-    ASSERT_EQ(id4_pipeline_bundle_parameter_slabs(derived_bundle.get()),
-              materialization_binding.parameter_slabs);
-    bundle.reset(derived_bundle.release());
+    const id4_pipeline_parameter_binding_create_options_t binding_options = {
+        /*.structure_size=*/sizeof(binding_options),
+        /*.next=*/nullptr,
+        /*.plan=*/plan.get(),
+        /*.materialization_count=*/materialization_count,
+        /*.materializations=*/materializations,
+    };
+    IREE_ASSERT_OK(id4_pipeline_parameter_binding_create(
+        &binding_options, iree_allocator_system(), parameter_binding.out()));
+    IREE_ASSERT_OK(id4_pipeline_program_stage_bind_parameters(
+        prepared_program.get(), parameter_binding.get(),
+        iree_allocator_system(), bundle.out()));
   }
 
   OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> input_buffer;
@@ -1036,7 +1033,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       issue_semaphore.get(), issue_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
-  if (!defers_parameter_loads) {
+  if (!defers_parameter_loads && !materializes_parameter_domain) {
     IREE_ASSERT_OK(iree_hal_semaphore_wait(
         prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1054,26 +1051,32 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     ExpectFloatValues(device, first_tap_buffer.get(), expected_first_tap);
     ExpectFloatValues(device, second_tap_buffer.get(), expected_output);
   }
-  if (materialization) {
+  if (materialization_count != 0) {
     bundle.reset();
-    iree_hal_semaphore_t* issue_wait_semaphore = issue_semaphore.get();
-    iree_hal_semaphore_list_t retirement_wait_list =
-        OneSemaphoreList(&issue_wait_semaphore, &issue_signal_value);
-    iree_hal_semaphore_t* retirement_signal_semaphore =
-        materialization_semaphore.get();
-    uint64_t retirement_signal_value = 6;
-    iree_hal_semaphore_list_t retirement_signal_list = OneSemaphoreList(
-        &retirement_signal_semaphore, &retirement_signal_value);
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_retire(
-        materialization, retirement_wait_list, retirement_signal_list,
-        IREE_HAL_DEALLOCA_FLAG_NONE, &diagnostics_sink));
+    parameter_binding.reset();
+    iree_hal_semaphore_t* retirement_wait_semaphore = issue_semaphore.get();
+    uint64_t retirement_wait_value = issue_signal_value;
+    for (iree_host_size_t i = 0; i < materialization_count; ++i) {
+      iree_hal_semaphore_list_t retirement_wait_list =
+          OneSemaphoreList(&retirement_wait_semaphore, &retirement_wait_value);
+      uint64_t retirement_signal_value = ++materialization_timeline_value;
+      iree_hal_semaphore_list_t retirement_signal_list = OneSemaphoreList(
+          &materialization_timeline_semaphore, &retirement_signal_value);
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_retire(
+          materializations[i], retirement_wait_list, retirement_signal_list,
+          IREE_HAL_DEALLOCA_FLAG_NONE, &diagnostics_sink));
+      retirement_wait_semaphore = materialization_timeline_semaphore;
+      retirement_wait_value = retirement_signal_value;
+    }
     IREE_ASSERT_OK(iree_hal_semaphore_wait(
-        retirement_signal_semaphore, retirement_signal_value,
+        materialization_timeline_semaphore, materialization_timeline_value,
         iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-    IREE_ASSERT_OK(id4_pipeline_parameter_materialization_complete_retirement(
-        materialization));
-    id4_pipeline_parameter_materialization_release(materialization);
-    materialization = nullptr;
+    for (iree_host_size_t i = 0; i < materialization_count; ++i) {
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_complete_retirement(
+          materializations[i]));
+      id4_pipeline_parameter_materialization_release(materializations[i]);
+      materializations[i] = nullptr;
+    }
   }
 }
 

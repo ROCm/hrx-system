@@ -497,18 +497,6 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
 typedef struct id4_pipeline_parameter_slab_set_t
     id4_pipeline_parameter_slab_set_t;
 
-// One physical slab replacement used to derive a resident parameter variant.
-typedef struct id4_pipeline_parameter_slab_replacement_t {
-  // Slab index in the base set replaced by this entry.
-  iree_host_size_t target_slab_index;
-  // Semantic domain expected on both the target and source slab plans.
-  iree_string_view_t expected_domain;
-  // Resident slab set retaining the replacement allocation.
-  id4_pipeline_parameter_slab_set_t* source_slab_set;
-  // Slab index in |source_slab_set| supplying the replacement buffer.
-  iree_host_size_t source_slab_index;
-} id4_pipeline_parameter_slab_replacement_t;
-
 // Issue-local context for deferred parameter load submissions.
 typedef struct id4_pipeline_parameter_slab_issue_context_t
     id4_pipeline_parameter_slab_issue_context_t;
@@ -580,20 +568,6 @@ iree_status_t id4_pipeline_parameter_slab_set_wrap_resident(
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_hal_buffer_t* const* buffers, iree_allocator_t host_allocator,
-    id4_pipeline_parameter_slab_set_t** out_slab_set);
-
-// Derives an immutable resident set by replacing selected physical slabs in
-// |base_slab_set|. The derived set directly retains every bound buffer, but not
-// the base or source slab sets. It does not preserve or retire asynchronous
-// allocation ownership. It preserves the base plan and binding metadata and
-// owns no loading schedule or readiness edges. Callers must own replacement
-// allocations and publish source contents through explicit semaphore
-// dependencies before issuing work that binds the derived set.
-iree_status_t id4_pipeline_parameter_slab_set_derive(
-    id4_pipeline_parameter_slab_set_t* base_slab_set,
-    iree_host_size_t replacement_count,
-    const id4_pipeline_parameter_slab_replacement_t* replacements,
-    iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
 // Allocates final slabs and retained readiness edges without submitting load

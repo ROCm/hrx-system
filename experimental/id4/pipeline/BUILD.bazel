@@ -100,6 +100,20 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "parameter_binding",
+    srcs = ["parameter_binding.c"],
+    hdrs = ["parameter_binding.h"],
+    deps = [
+        ":parameter_materialization",
+        ":parameter_slab",
+        ":plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "parameter_materialization",
     srcs = ["parameter_materialization.c"],
     hdrs = ["parameter_materialization.h"],
@@ -225,8 +239,8 @@ iree_runtime_cc_library(
     hdrs = ["program_stage.h"],
     deps = [
         ":kernel_cache",
+        ":parameter_binding",
         ":parameter_layout",
-        ":parameter_materialization",
         ":parameter_residency",
         ":parameter_slab",
         ":program",
@@ -398,10 +412,12 @@ iree_runtime_cc_test(
         ":diagnostics",
         ":kernel_cache",
         ":kernel_library",
+        ":parameter_binding",
         ":parameter_layout",
         ":parameter_materialization",
         ":parameter_slab",
         ":plan",
+        ":program_prepare",
         ":program_stage",
         "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",

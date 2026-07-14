@@ -19,9 +19,12 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Asynchronously published parameter-domain replacement.
-typedef struct id4_pipeline_parameter_materialization_t
-    id4_pipeline_parameter_materialization_t;
+// Opaque complete materialized parameter binding.
+typedef struct id4_pipeline_parameter_binding_t
+    id4_pipeline_parameter_binding_t;
+
+// Opaque prepared semantic program execution state.
+typedef struct id4_pipeline_program_prepared_t id4_pipeline_program_prepared_t;
 
 // Options for deriving a pipeline plan from one stage-authored program.
 typedef struct id4_pipeline_program_stage_plan_options_t {
@@ -75,18 +78,14 @@ iree_status_t id4_pipeline_program_stage_prepare(
     const id4_pipeline_program_stage_prepare_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
-// Derives a reusable bundle by rebinding one published parameter domain while
-// retaining the source bundle's prepared executables and command buffers. All
-// unreplaced slab buffers must be identical to the base bundle's bindings. The
-// materialized slab layout must be structurally compatible with the base
-// bundle's plan, but may have been produced from another compatible plan. The
-// returned bundle uses the publication edge that causally dominates source
-// readiness and retains the materialization until the bundle is released.
-// |base_bundle| must be a prepared canonical bundle rather than another derived
-// bundle; it need not remain live after this call succeeds.
-iree_status_t id4_pipeline_program_stage_derive_bundle(
-    id4_pipeline_bundle_t* base_bundle,
-    id4_pipeline_parameter_materialization_t* materialization,
+// Binds one complete immutable parameter binding to reusable prepared program
+// state. The binding's semantic slab metadata, parameter request tables, and
+// resident buffers must satisfy the prepared program's plan. The returned
+// bundle retains the prepared command buffers, complete slab binding, and all
+// domain publication edges without requiring a canonical parameter bundle.
+iree_status_t id4_pipeline_program_stage_bind_parameters(
+    id4_pipeline_program_prepared_t* prepared_program,
+    id4_pipeline_parameter_binding_t* parameter_binding,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Issues a bundle prepared by id4_pipeline_program_stage_prepare.

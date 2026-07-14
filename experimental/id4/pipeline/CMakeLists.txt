@@ -119,6 +119,23 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_binding
+  HDRS
+    "parameter_binding.h"
+  SRCS
+    "parameter_binding.c"
+  DEPS
+    ::parameter_materialization
+    ::parameter_slab
+    ::plan
+    iree::base
+    iree::base::internal
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_materialization
   HDRS
     "parameter_materialization.h"
@@ -266,8 +283,8 @@ iree_cc_library(
     "program_stage.c"
   DEPS
     ::kernel_cache
+    ::parameter_binding
     ::parameter_layout
-    ::parameter_materialization
     ::parameter_residency
     ::parameter_slab
     ::program
@@ -452,10 +469,12 @@ iree_cc_test(
     ::diagnostics
     ::kernel_cache
     ::kernel_library
+    ::parameter_binding
     ::parameter_layout
     ::parameter_materialization
     ::parameter_slab
     ::plan
+    ::program_prepare
     ::program_stage
     iree::base
     iree::base::internal::arena

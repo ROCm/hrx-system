@@ -46,25 +46,21 @@ struct id4_pipeline_parameter_materialization_t {
   id4_pipeline_parameter_materialization_state_t state;
   // Plan retaining the parameter-domain layout and device group.
   const id4_pipeline_plan_t* plan;
-  // Immutable slabs with the target domain replaced.
-  id4_pipeline_parameter_slab_set_t* derived_parameter_slabs;
-  // Plan-local slab index replaced by the materialization.
+  // Plan-local slab index populated by the materialization.
   iree_host_size_t target_slab_index;
-  // Device owning the replacement allocation; retained by |plan|.
+  // Device owning the domain allocation; retained by |plan|.
   iree_hal_device_t* device;
   // Queue affinity used for materialization operations.
   iree_hal_queue_affinity_t queue_affinity;
-  // Optional allocation pool retained for the replacement lifetime.
+  // Optional allocation pool retained for the domain lifetime.
   iree_hal_pool_t* allocation_pool;
-  // Queue-allocated replacement buffer owned by this object.
+  // Queue-allocated domain buffer owned by this object.
   iree_hal_buffer_t* target_buffer;
-  // Acquisition edge retained while the replacement may be populated.
+  // Acquisition edge retained while the domain may be populated.
   id4_pipeline_parameter_materialization_edge_t acquisition_edge;
-  // Readiness edge retained for unchanged slabs inherited from the base set.
-  id4_pipeline_parameter_materialization_edge_t base_readiness_edge;
-  // Publication edge retained while the replacement may be bound.
+  // Publication edge retained while the domain may be bound.
   id4_pipeline_parameter_materialization_edge_t publication_edge;
-  // Retirement edge retained until the replacement allocation is reusable.
+  // Retirement edge retained until the domain allocation is reusable.
   id4_pipeline_parameter_materialization_edge_t retirement_edge;
   // True while this object owns the target allocation preserve.
   bool owns_target_allocation;
@@ -166,54 +162,6 @@ static iree_status_t id4_pipeline_parameter_materialization_edge_initialize(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_materialization_join_lists(
-    iree_hal_semaphore_list_t first, iree_hal_semaphore_list_t second,
-    iree_allocator_t host_allocator, iree_hal_semaphore_list_t* out_list,
-    void** out_storage) {
-  *out_list = iree_hal_semaphore_list_empty();
-  *out_storage = NULL;
-  if (first.count == 0) {
-    *out_list = second;
-    return iree_ok_status();
-  }
-  if (second.count == 0) {
-    *out_list = first;
-    return iree_ok_status();
-  }
-
-  iree_host_size_t count = 0;
-  if (!iree_host_size_checked_add(first.count, second.count, &count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "materialization publication wait count overflows");
-  }
-  iree_host_size_t semaphores_offset = 0;
-  iree_host_size_t payload_values_offset = 0;
-  iree_host_size_t total_size = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      0, &total_size,
-      IREE_STRUCT_FIELD(count, iree_hal_semaphore_t*, &semaphores_offset),
-      IREE_STRUCT_FIELD(count, uint64_t, &payload_values_offset)));
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, out_storage));
-  iree_hal_semaphore_t** semaphores =
-      (iree_hal_semaphore_t**)((uint8_t*)*out_storage + semaphores_offset);
-  uint64_t* payload_values =
-      (uint64_t*)((uint8_t*)*out_storage + payload_values_offset);
-  memcpy(semaphores, first.semaphores, first.count * sizeof(semaphores[0]));
-  memcpy(semaphores + first.count, second.semaphores,
-         second.count * sizeof(semaphores[0]));
-  memcpy(payload_values, first.payload_values,
-         first.count * sizeof(payload_values[0]));
-  memcpy(payload_values + first.count, second.payload_values,
-         second.count * sizeof(payload_values[0]));
-  *out_list = (iree_hal_semaphore_list_t){
-      .count = count,
-      .semaphores = semaphores,
-      .payload_values = payload_values,
-  };
-  return iree_ok_status();
-}
-
 static iree_status_t id4_pipeline_parameter_materialization_edge_query_reached(
     const id4_pipeline_parameter_materialization_edge_t* edge,
     bool* out_reached) {
@@ -242,12 +190,8 @@ static void id4_pipeline_parameter_materialization_destroy(
   id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->publication_edge, host_allocator);
   id4_pipeline_parameter_materialization_edge_deinitialize(
-      &materialization->base_readiness_edge, host_allocator);
-  id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->acquisition_edge, host_allocator);
   iree_hal_buffer_release(materialization->target_buffer);
-  id4_pipeline_parameter_slab_set_release(
-      materialization->derived_parameter_slabs);
   iree_hal_pool_release(materialization->allocation_pool);
   id4_pipeline_plan_release((id4_pipeline_plan_t*)materialization->plan);
   iree_allocator_free(host_allocator, materialization);
@@ -273,11 +217,6 @@ static iree_status_t id4_pipeline_parameter_materialization_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter materialization plan is required");
   }
-  if (!options->base_parameter_slabs) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter materialization base slab set is required");
-  }
   if (iree_all_bits_set(options->alloca_flags,
                         IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {
     return iree_make_status(
@@ -290,9 +229,6 @@ static iree_status_t id4_pipeline_parameter_materialization_validate_options(
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
       options->signal_semaphore_list, IREE_SV("materialization acquire signal"),
       ID4_PIPELINE_PARAMETER_MATERIALIZATION_LIST_FLAG_REQUIRE_NONEMPTY));
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
-      options->base_readiness_semaphore_list,
-      IREE_SV("materialization base readiness"), /*flags=*/0));
   return id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("parameter materialization"));
 }
@@ -321,8 +257,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
   *out_materialization = NULL;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_materialization_validate_options(options));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
-      options->plan, options->base_parameter_slabs));
 
   const iree_host_size_t slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
@@ -335,9 +269,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
   const id4_pipeline_parameter_slab_plan_t* slab_plan =
       id4_pipeline_plan_parameter_slab_at(options->plan,
                                           options->target_slab_index);
-  const id4_pipeline_parameter_request_table_t* request_table =
-      id4_pipeline_plan_parameter_request_table_at(options->plan,
-                                                   options->target_slab_index);
   const id4_pipeline_device_placement_t* placement =
       id4_pipeline_plan_placement_at(options->plan, slab_plan->placement_id);
   if (!placement) {
@@ -373,11 +304,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
       IREE_SV("acquiring parameter-domain storage"), options->diagnostics_sink);
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_materialization_edge_initialize(
-        options->base_readiness_semaphore_list, host_allocator,
-        &materialization->base_readiness_edge);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_materialization_edge_initialize(
         options->signal_semaphore_list, host_allocator,
         &materialization->acquisition_edge);
   }
@@ -389,43 +315,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
         &materialization->target_buffer);
     materialization->owns_target_allocation = iree_status_is_ok(status);
   }
-
-  id4_pipeline_parameter_slab_set_t* replacement_slabs = NULL;
-  if (iree_status_is_ok(status)) {
-    const id4_pipeline_parameter_slab_load_t load = {
-        // The replacement source set contains one local slab.
-        .slab_index = 0,
-        // Exact target-domain allocation metadata.
-        .slab = slab_plan,
-        // Exact target-domain parameter request metadata.
-        .request_table = request_table,
-        // Device index selected by the plan placement.
-        .device_index = placement->device_index,
-        // Device selected by the plan placement.
-        .device = device,
-        // Queue affinity selected by the plan placement.
-        .queue_affinity = placement->queue_affinity,
-    };
-    iree_hal_buffer_t* buffer = materialization->target_buffer;
-    status = id4_pipeline_parameter_slab_set_wrap_resident(
-        /*load_count=*/1, &load, &buffer, host_allocator, &replacement_slabs);
-  }
-  if (iree_status_is_ok(status)) {
-    const id4_pipeline_parameter_slab_replacement_t replacement = {
-        // Plan-local target domain being replaced.
-        .target_slab_index = options->target_slab_index,
-        // Semantic domain must match the target plan.
-        .expected_domain = slab_plan->domain,
-        // One-slab set retaining the queue allocation.
-        .source_slab_set = replacement_slabs,
-        // The replacement set stores its only slab at index zero.
-        .source_slab_index = 0,
-    };
-    status = id4_pipeline_parameter_slab_set_derive(
-        options->base_parameter_slabs, /*replacement_count=*/1, &replacement,
-        host_allocator, &materialization->derived_parameter_slabs);
-  }
-  id4_pipeline_parameter_slab_set_release(replacement_slabs);
 
   if (iree_status_is_ok(status)) {
     *out_materialization = materialization;
@@ -551,29 +440,14 @@ iree_status_t id4_pipeline_parameter_materialization_publish(
         signal_semaphore_list, materialization->host_allocator,
         &materialization->publication_edge);
   }
-  iree_hal_semaphore_list_t publication_wait_list =
-      iree_hal_semaphore_list_empty();
-  void* publication_wait_storage = NULL;
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_materialization_join_lists(
-        id4_pipeline_parameter_materialization_edge_list(
-            &materialization->base_readiness_edge),
-        wait_semaphore_list, materialization->host_allocator,
-        &publication_wait_list, &publication_wait_storage);
-  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_barrier(
         materialization->device, materialization->queue_affinity,
-        publication_wait_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
+        wait_semaphore_list, signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
   }
-  iree_allocator_free(materialization->host_allocator,
-                      publication_wait_storage);
   if (iree_status_is_ok(status)) {
     materialization->state =
         ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_PUBLISHED;
-    id4_pipeline_parameter_materialization_edge_deinitialize(
-        &materialization->base_readiness_edge, materialization->host_allocator);
     id4_pipeline_parameter_materialization_edge_deinitialize(
         &materialization->acquisition_edge, materialization->host_allocator);
   } else {
@@ -600,8 +474,9 @@ iree_status_t id4_pipeline_parameter_materialization_query_binding(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter materialization must be published before binding");
   }
-  out_binding->target_slab_index = materialization->target_slab_index;
-  out_binding->parameter_slabs = materialization->derived_parameter_slabs;
+  out_binding->plan = materialization->plan;
+  out_binding->slab_index = materialization->target_slab_index;
+  out_binding->buffer = materialization->target_buffer;
   out_binding->readiness_semaphore_list =
       id4_pipeline_parameter_materialization_edge_list(
           &materialization->publication_edge);
@@ -628,7 +503,7 @@ iree_status_t id4_pipeline_parameter_materialization_retire(
   if (iree_atomic_ref_count_load(&materialization->ref_count) != 1) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "parameter materialization cannot retire while bundles retain it");
+        "parameter materialization cannot retire while bindings retain it");
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
       wait_semaphore_list, IREE_SV("materialization retirement wait"),
@@ -708,8 +583,6 @@ iree_status_t id4_pipeline_parameter_materialization_complete_retirement(
       &materialization->retirement_edge, materialization->host_allocator);
   id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->publication_edge, materialization->host_allocator);
-  id4_pipeline_parameter_materialization_edge_deinitialize(
-      &materialization->base_readiness_edge, materialization->host_allocator);
   id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->acquisition_edge, materialization->host_allocator);
   return iree_ok_status();
