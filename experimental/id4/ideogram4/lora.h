@@ -18,6 +18,9 @@ extern "C" {
 // An immutable catalog of validated Ideogram 4 LoRA parameter pairs.
 typedef struct id4_ideogram4_lora_t id4_ideogram4_lora_t;
 
+// An immutable composition topology for an ordered set of LoRA catalogs.
+typedef struct id4_ideogram4_lora_topology_t id4_ideogram4_lora_topology_t;
+
 // One low-rank update targeting a conditioned-DiT linear parameter.
 typedef struct id4_ideogram4_lora_target_t {
   // Canonical base parameter key patched by this update.
@@ -34,6 +37,36 @@ typedef struct id4_ideogram4_lora_target_t {
   uint32_t rank;
 } id4_ideogram4_lora_target_t;
 
+// One adapter's contiguous rank segment within a composed target.
+typedef struct id4_ideogram4_lora_segment_t {
+  // Adapter ordinal whose issue-time strength controls this segment.
+  iree_host_size_t adapter_ordinal;
+  // First rank position assigned to this segment in the composed projection.
+  uint32_t rank_offset;
+  // Number of rank positions assigned to this segment.
+  uint32_t rank;
+  // Provider parameter key for the BF16 down-projection matrix [rank, input].
+  iree_string_view_t down_parameter_key;
+  // Provider parameter key for the BF16 up-projection matrix [output, rank].
+  iree_string_view_t up_parameter_key;
+} id4_ideogram4_lora_segment_t;
+
+// Composed low-rank update for one conditioned-DiT linear parameter.
+typedef struct id4_ideogram4_lora_topology_target_t {
+  // Canonical base parameter key patched by this update.
+  iree_string_view_t base_parameter_key;
+  // Input feature count consumed by every segment's down projection.
+  uint32_t input_size;
+  // Output feature count produced by every segment's up projection.
+  uint32_t output_size;
+  // Sum of segment ranks in adapter order.
+  uint32_t total_rank;
+  // Number of entries in |segments|.
+  iree_host_size_t segment_count;
+  // Contiguous segments ordered by adapter ordinal.
+  const id4_ideogram4_lora_segment_t* segments;
+} id4_ideogram4_lora_topology_target_t;
+
 // Options for importing an Ideogram 4 LoRA parameter index.
 typedef struct id4_ideogram4_lora_import_options_t {
   // Size of this structure for versioning.
@@ -47,6 +80,18 @@ typedef struct id4_ideogram4_lora_import_options_t {
   // Provider scope through which the indexed parameters will be loaded.
   iree_string_view_t source_scope;
 } id4_ideogram4_lora_import_options_t;
+
+// Options for composing an ordered set of immutable LoRA catalogs.
+typedef struct id4_ideogram4_lora_topology_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Number of ordered catalogs in |loras|.
+  iree_host_size_t lora_count;
+  // Caller-owned catalog pointers borrowed for the duration of the call.
+  id4_ideogram4_lora_t* const* loras;
+} id4_ideogram4_lora_topology_create_options_t;
 
 // Imports and validates an immutable LoRA catalog.
 //
@@ -79,6 +124,47 @@ const id4_ideogram4_lora_target_t* id4_ideogram4_lora_target_at(
 // Absence is expected for partial adapters and is not an error.
 const id4_ideogram4_lora_target_t* id4_ideogram4_lora_lookup_target(
     const id4_ideogram4_lora_t* lora, iree_string_view_t base_parameter_key);
+
+// Creates an immutable topology for an ordered set of LoRA catalogs.
+//
+// Catalog contents are copied; the caller may release every input catalog after
+// this call returns. Strengths are deliberately excluded from the topology and
+// remain issue-time values.
+iree_status_t id4_ideogram4_lora_topology_create(
+    const id4_ideogram4_lora_topology_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_ideogram4_lora_topology_t** out_topology);
+
+// Retains |topology| for the caller.
+void id4_ideogram4_lora_topology_retain(
+    id4_ideogram4_lora_topology_t* topology);
+
+// Releases |topology| from the caller.
+void id4_ideogram4_lora_topology_release(
+    id4_ideogram4_lora_topology_t* topology);
+
+// Returns the number of ordered adapters represented by |topology|.
+iree_host_size_t id4_ideogram4_lora_topology_adapter_count(
+    const id4_ideogram4_lora_topology_t* topology);
+
+// Returns the provider scope for adapter |index| or an empty view when absent.
+iree_string_view_t id4_ideogram4_lora_topology_adapter_source_scope(
+    const id4_ideogram4_lora_topology_t* topology, iree_host_size_t index);
+
+// Returns the number of unique patched base parameters in |topology|.
+iree_host_size_t id4_ideogram4_lora_topology_target_count(
+    const id4_ideogram4_lora_topology_t* topology);
+
+// Returns composed target |index| or NULL when it is out of range.
+const id4_ideogram4_lora_topology_target_t*
+id4_ideogram4_lora_topology_target_at(
+    const id4_ideogram4_lora_topology_t* topology, iree_host_size_t index);
+
+// Finds the composed target patching |base_parameter_key| or returns NULL.
+const id4_ideogram4_lora_topology_target_t*
+id4_ideogram4_lora_topology_lookup_target(
+    const id4_ideogram4_lora_topology_t* topology,
+    iree_string_view_t base_parameter_key);
 
 #ifdef __cplusplus
 }  // extern "C"

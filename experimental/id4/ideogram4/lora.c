@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
@@ -107,6 +108,8 @@ struct id4_ideogram4_lora_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator owning this packed catalog allocation.
   iree_allocator_t host_allocator;
+  // Static model dimensions against which this catalog was validated.
+  id4_ideogram4_dit_model_config_t model;
   // Provider scope copied from the import options.
   iree_string_view_t source_scope;
   // Number of entries in |targets|.
@@ -114,6 +117,59 @@ struct id4_ideogram4_lora_t {
   // Validated target table stored within the packed allocation.
   id4_ideogram4_lora_target_t* targets;
 };
+
+typedef struct id4_ideogram4_lora_topology_entry_t {
+  // Adapter ordinal preserving caller composition order.
+  iree_host_size_t adapter_ordinal;
+  // Catalog target borrowed while constructing the topology.
+  const id4_ideogram4_lora_target_t* target;
+} id4_ideogram4_lora_topology_entry_t;
+
+struct id4_ideogram4_lora_topology_t {
+  // Reference count for shared immutable topology ownership.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator owning this packed topology allocation.
+  iree_allocator_t host_allocator;
+  // Number of ordered adapter scopes.
+  iree_host_size_t adapter_count;
+  // Provider scopes indexed by adapter ordinal.
+  iree_string_view_t* adapter_source_scopes;
+  // Number of unique composed targets.
+  iree_host_size_t target_count;
+  // Composed target table stored within the packed allocation.
+  id4_ideogram4_lora_topology_target_t* targets;
+  // Number of rank segments across all targets.
+  iree_host_size_t segment_count;
+  // Rank segment table stored within the packed allocation.
+  id4_ideogram4_lora_segment_t* segments;
+};
+
+static bool id4_ideogram4_lora_model_config_equal(
+    const id4_ideogram4_dit_model_config_t* lhs,
+    const id4_ideogram4_dit_model_config_t* rhs) {
+  return lhs->layer_count == rhs->layer_count &&
+         lhs->input_channel_count == rhs->input_channel_count &&
+         lhs->hidden_size == rhs->hidden_size &&
+         lhs->intermediate_size == rhs->intermediate_size &&
+         lhs->attention_head_count == rhs->attention_head_count &&
+         lhs->adaln_size == rhs->adaln_size &&
+         lhs->llm_feature_count == rhs->llm_feature_count &&
+         lhs->image_indicator_count == rhs->image_indicator_count;
+}
+
+static int id4_ideogram4_lora_topology_entry_compare(const void* lhs_ptr,
+                                                     const void* rhs_ptr) {
+  const id4_ideogram4_lora_topology_entry_t* lhs =
+      (const id4_ideogram4_lora_topology_entry_t*)lhs_ptr;
+  const id4_ideogram4_lora_topology_entry_t* rhs =
+      (const id4_ideogram4_lora_topology_entry_t*)rhs_ptr;
+  int key_order = iree_string_view_compare(lhs->target->base_parameter_key,
+                                           rhs->target->base_parameter_key);
+  if (key_order != 0) return key_order;
+  if (lhs->adapter_ordinal < rhs->adapter_ordinal) return -1;
+  if (lhs->adapter_ordinal > rhs->adapter_ordinal) return 1;
+  return 0;
+}
 
 static uint32_t id4_ideogram4_lora_model_dimension(
     const id4_ideogram4_dit_model_config_t* model,
@@ -475,6 +531,7 @@ iree_status_t id4_ideogram4_lora_import(
       memset(lora, 0, sizeof(*lora));
       iree_atomic_ref_count_init(&lora->ref_count);
       lora->host_allocator = host_allocator;
+      lora->model = options->model;
       lora->target_count = target_count;
       lora->targets =
           (id4_ideogram4_lora_target_t*)((uint8_t*)lora + target_offset);
@@ -541,6 +598,314 @@ const id4_ideogram4_lora_target_t* id4_ideogram4_lora_lookup_target(
     if (iree_string_view_equal(lora->targets[i].base_parameter_key,
                                base_parameter_key)) {
       return &lora->targets[i];
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t id4_ideogram4_lora_topology_validate_options(
+    const id4_ideogram4_lora_topology_create_options_t* options) {
+  if (!options || options->structure_size < sizeof(*options)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "LoRA topology create options are required");
+  }
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "LoRA topology create extension structures are not supported");
+  }
+  if (options->lora_count == 0 || !options->loras) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "LoRA topology requires at least one catalog");
+  }
+  const id4_ideogram4_lora_t* first_lora = options->loras[0];
+  if (!first_lora) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "LoRA topology catalog 0 is required");
+  }
+  for (iree_host_size_t i = 1; i < options->lora_count; ++i) {
+    const id4_ideogram4_lora_t* lora = options->loras[i];
+    if (!lora) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "LoRA topology catalog %" PRIhsz " is required",
+                              i);
+    }
+    if (!id4_ideogram4_lora_model_config_equal(&first_lora->model,
+                                               &lora->model)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "LoRA topology catalog %" PRIhsz
+          " was validated against incompatible model dimensions",
+          i);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_lora_topology_build_entries(
+    const id4_ideogram4_lora_topology_create_options_t* options,
+    iree_allocator_t host_allocator, iree_host_size_t* out_entry_count,
+    id4_ideogram4_lora_topology_entry_t** out_entries) {
+  *out_entry_count = 0;
+  *out_entries = NULL;
+  iree_host_size_t entry_count = 0;
+  for (iree_host_size_t i = 0; i < options->lora_count; ++i) {
+    if (!iree_host_size_checked_add(
+            entry_count, options->loras[i]->target_count, &entry_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "LoRA topology target count overflows");
+    }
+  }
+  if (entry_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "LoRA topology catalogs contain no targets");
+  }
+
+  id4_ideogram4_lora_topology_entry_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, entry_count, sizeof(entries[0]), (void**)&entries));
+  iree_host_size_t entry_index = 0;
+  for (iree_host_size_t adapter_ordinal = 0;
+       adapter_ordinal < options->lora_count; ++adapter_ordinal) {
+    const id4_ideogram4_lora_t* lora = options->loras[adapter_ordinal];
+    for (iree_host_size_t target_index = 0; target_index < lora->target_count;
+         ++target_index) {
+      entries[entry_index++] = (id4_ideogram4_lora_topology_entry_t){
+          // Adapter ordinal preserving caller composition order.
+          .adapter_ordinal = adapter_ordinal,
+          // Catalog target borrowed until topology construction completes.
+          .target = &lora->targets[target_index],
+      };
+    }
+  }
+  qsort(entries, entry_count, sizeof(entries[0]),
+        id4_ideogram4_lora_topology_entry_compare);
+  *out_entry_count = entry_count;
+  *out_entries = entries;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_lora_topology_measure(
+    const id4_ideogram4_lora_topology_create_options_t* options,
+    iree_host_size_t entry_count,
+    const id4_ideogram4_lora_topology_entry_t* entries,
+    iree_host_size_t* out_target_count,
+    iree_host_size_t* out_string_byte_length) {
+  iree_host_size_t string_byte_length = 0;
+  for (iree_host_size_t i = 0; i < options->lora_count; ++i) {
+    if (!iree_host_size_checked_add(string_byte_length,
+                                    options->loras[i]->source_scope.size,
+                                    &string_byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "LoRA topology string storage overflows");
+    }
+  }
+
+  iree_host_size_t target_count = 0;
+  for (iree_host_size_t i = 0; i < entry_count;) {
+    const id4_ideogram4_lora_target_t* first_target = entries[i].target;
+    ++target_count;
+    if (!iree_host_size_checked_add(string_byte_length,
+                                    first_target->base_parameter_key.size,
+                                    &string_byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "LoRA topology string storage overflows");
+    }
+    uint32_t total_rank = 0;
+    iree_host_size_t group_limit = i;
+    while (
+        group_limit < entry_count &&
+        iree_string_view_equal(entries[group_limit].target->base_parameter_key,
+                               first_target->base_parameter_key)) {
+      const id4_ideogram4_lora_target_t* target = entries[group_limit].target;
+      if (target->input_size != first_target->input_size ||
+          target->output_size != first_target->output_size) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "LoRA target %.*s has incompatible dimensions across catalogs",
+            (int)first_target->base_parameter_key.size,
+            first_target->base_parameter_key.data);
+      }
+      if (target->rank > UINT32_MAX - total_rank) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "LoRA target %.*s composed rank overflows",
+                                (int)first_target->base_parameter_key.size,
+                                first_target->base_parameter_key.data);
+      }
+      total_rank += target->rank;
+      iree_host_size_t segment_string_byte_length =
+          target->down_parameter_key.size;
+      if (!iree_host_size_checked_add(segment_string_byte_length,
+                                      target->up_parameter_key.size,
+                                      &segment_string_byte_length) ||
+          !iree_host_size_checked_add(string_byte_length,
+                                      segment_string_byte_length,
+                                      &string_byte_length)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "LoRA topology string storage overflows");
+      }
+      ++group_limit;
+    }
+    i = group_limit;
+  }
+  *out_target_count = target_count;
+  *out_string_byte_length = string_byte_length;
+  return iree_ok_status();
+}
+
+static void id4_ideogram4_lora_topology_destroy(
+    id4_ideogram4_lora_topology_t* topology) {
+  iree_allocator_free(topology->host_allocator, topology);
+}
+
+iree_status_t id4_ideogram4_lora_topology_create(
+    const id4_ideogram4_lora_topology_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_ideogram4_lora_topology_t** out_topology) {
+  IREE_ASSERT_ARGUMENT(out_topology);
+  *out_topology = NULL;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_lora_topology_validate_options(options));
+
+  iree_host_size_t entry_count = 0;
+  id4_ideogram4_lora_topology_entry_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_lora_topology_build_entries(
+      options, host_allocator, &entry_count, &entries));
+
+  iree_host_size_t target_count = 0;
+  iree_host_size_t string_byte_length = 0;
+  iree_status_t status = id4_ideogram4_lora_topology_measure(
+      options, entry_count, entries, &target_count, &string_byte_length);
+  id4_ideogram4_lora_topology_t* topology = NULL;
+  iree_host_size_t scope_offset = 0;
+  iree_host_size_t target_offset = 0;
+  iree_host_size_t segment_offset = 0;
+  iree_host_size_t string_offset = 0;
+  iree_host_size_t allocation_size = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(*topology), &allocation_size,
+        IREE_STRUCT_FIELD(options->lora_count, iree_string_view_t,
+                          &scope_offset),
+        IREE_STRUCT_FIELD(target_count, id4_ideogram4_lora_topology_target_t,
+                          &target_offset),
+        IREE_STRUCT_FIELD(entry_count, id4_ideogram4_lora_segment_t,
+                          &segment_offset),
+        IREE_STRUCT_FIELD(string_byte_length, char, &string_offset));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, allocation_size,
+                                   (void**)&topology);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(topology, 0, sizeof(*topology));
+    iree_atomic_ref_count_init(&topology->ref_count);
+    topology->host_allocator = host_allocator;
+    topology->adapter_count = options->lora_count;
+    topology->adapter_source_scopes =
+        (iree_string_view_t*)((uint8_t*)topology + scope_offset);
+    topology->target_count = target_count;
+    topology->targets =
+        (id4_ideogram4_lora_topology_target_t*)((uint8_t*)topology +
+                                                target_offset);
+    topology->segment_count = entry_count;
+    topology->segments =
+        (id4_ideogram4_lora_segment_t*)((uint8_t*)topology + segment_offset);
+
+    char* string_cursor = (char*)topology + string_offset;
+    for (iree_host_size_t i = 0; i < options->lora_count; ++i) {
+      topology->adapter_source_scopes[i] = id4_ideogram4_lora_copy_string(
+          options->loras[i]->source_scope, &string_cursor);
+    }
+
+    iree_host_size_t target_index = 0;
+    iree_host_size_t topology_segment_offset = 0;
+    for (iree_host_size_t i = 0; i < entry_count;) {
+      const id4_ideogram4_lora_target_t* first_target = entries[i].target;
+      id4_ideogram4_lora_topology_target_t* target =
+          &topology->targets[target_index++];
+      target->base_parameter_key = id4_ideogram4_lora_copy_string(
+          first_target->base_parameter_key, &string_cursor);
+      target->input_size = first_target->input_size;
+      target->output_size = first_target->output_size;
+      target->segments = &topology->segments[topology_segment_offset];
+      uint32_t rank_offset = 0;
+      while (i < entry_count &&
+             iree_string_view_equal(entries[i].target->base_parameter_key,
+                                    first_target->base_parameter_key)) {
+        const id4_ideogram4_lora_target_t* source_target = entries[i].target;
+        id4_ideogram4_lora_segment_t* segment =
+            &topology->segments[topology_segment_offset++];
+        segment->adapter_ordinal = entries[i].adapter_ordinal;
+        segment->rank_offset = rank_offset;
+        segment->rank = source_target->rank;
+        segment->down_parameter_key = id4_ideogram4_lora_copy_string(
+            source_target->down_parameter_key, &string_cursor);
+        segment->up_parameter_key = id4_ideogram4_lora_copy_string(
+            source_target->up_parameter_key, &string_cursor);
+        rank_offset += source_target->rank;
+        ++target->segment_count;
+        ++i;
+      }
+      target->total_rank = rank_offset;
+    }
+  }
+
+  iree_allocator_free(host_allocator, entries);
+  if (iree_status_is_ok(status)) {
+    *out_topology = topology;
+  } else {
+    iree_allocator_free(host_allocator, topology);
+  }
+  return status;
+}
+
+void id4_ideogram4_lora_topology_retain(
+    id4_ideogram4_lora_topology_t* topology) {
+  if (!topology) return;
+  iree_atomic_ref_count_inc(&topology->ref_count);
+}
+
+void id4_ideogram4_lora_topology_release(
+    id4_ideogram4_lora_topology_t* topology) {
+  if (topology && iree_atomic_ref_count_dec(&topology->ref_count) == 1) {
+    id4_ideogram4_lora_topology_destroy(topology);
+  }
+}
+
+iree_host_size_t id4_ideogram4_lora_topology_adapter_count(
+    const id4_ideogram4_lora_topology_t* topology) {
+  return topology ? topology->adapter_count : 0;
+}
+
+iree_string_view_t id4_ideogram4_lora_topology_adapter_source_scope(
+    const id4_ideogram4_lora_topology_t* topology, iree_host_size_t index) {
+  if (!topology || index >= topology->adapter_count) {
+    return iree_string_view_empty();
+  }
+  return topology->adapter_source_scopes[index];
+}
+
+iree_host_size_t id4_ideogram4_lora_topology_target_count(
+    const id4_ideogram4_lora_topology_t* topology) {
+  return topology ? topology->target_count : 0;
+}
+
+const id4_ideogram4_lora_topology_target_t*
+id4_ideogram4_lora_topology_target_at(
+    const id4_ideogram4_lora_topology_t* topology, iree_host_size_t index) {
+  if (!topology || index >= topology->target_count) return NULL;
+  return &topology->targets[index];
+}
+
+const id4_ideogram4_lora_topology_target_t*
+id4_ideogram4_lora_topology_lookup_target(
+    const id4_ideogram4_lora_topology_t* topology,
+    iree_string_view_t base_parameter_key) {
+  if (!topology) return NULL;
+  for (iree_host_size_t i = 0; i < topology->target_count; ++i) {
+    if (iree_string_view_equal(topology->targets[i].base_parameter_key,
+                               base_parameter_key)) {
+      return &topology->targets[i];
     }
   }
   return NULL;
