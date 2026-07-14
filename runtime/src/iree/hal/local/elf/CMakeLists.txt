@@ -116,7 +116,6 @@ iree_cc_library(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-# TODO(*): figure out how to make this work on Bazel+Windows.
 if(MSVC)
   # CMake + MASM does not work well and CMake ends up passing all our C/C++
   # flags confusing MASM. We invoke MASM directly (ml.exe/ml64.exe) to keep it

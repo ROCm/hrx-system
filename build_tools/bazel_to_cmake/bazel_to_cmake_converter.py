@@ -1128,6 +1128,10 @@ class BuildFileFunctions(object):
     def iree_build_test(self, **kwargs):
         pass
 
+    def iree_msvc_masm_library(self, **kwargs):
+        # CMakeLists.txt owns its equivalent custom ml.exe/ml64.exe invocation.
+        pass
+
     def iree_assert_no_dependency(self, **kwargs):
         pass
 
