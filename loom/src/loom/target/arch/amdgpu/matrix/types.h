@@ -215,41 +215,6 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X4_F32 = 20,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
-typedef enum loom_amdgpu_matrix_fragment_map_kind_e {
-  // No lane/register coordinate formula is defined.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_UNKNOWN = LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN,
-  // Row is lane mod M; reduction is packed by register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-  // Column is lane mod N; reduction is packed by register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-  // Row is register-interleaved by the lane group; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN,
-  // Row is lane mod M; reduction is packed by lane group and register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,
-  // Column is lane mod N; reduction is packed by lane group and register
-  // element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-  // Row is register-local within a lane group; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-  // Row is register-interleaved by the lane group; column is lane mod N; only
-  // the low packed subword element carries a logical coordinate.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD =
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD,
-  // Row is register-local within a lane group; column is lane mod N; only the
-  // low packed subword element carries a logical coordinate.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD,
-  // Row is packed by lane group, register, and element; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN,
-} loom_amdgpu_matrix_fragment_map_kind_t;
-
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
   // Contract consumes an explicit sparse index operand.
   LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE = 1u << 0,
