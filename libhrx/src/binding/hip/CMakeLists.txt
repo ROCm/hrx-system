@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     amdhip64
@@ -41,7 +42,9 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
 )
+endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     hip_get_proc_address_test
@@ -53,6 +56,7 @@ iree_cc_test(
     iree::testing::gtest_main
     libhrx_defs
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
@@ -75,19 +79,21 @@ endif()
 # The symbol version script and --undefined-version are applied through the
 # generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
 # LINK_FLAGS here so the version script is not applied twice.
-set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
-  OUTPUT_NAME amdhip64
-  VERSION 7.9999.0
-  SOVERSION 7
-  POSITION_INDEPENDENT_CODE ON
-  INSTALL_RPATH "$ORIGIN"
-)
+if(TARGET libhrx_src_binding_hip_amdhip64)
+  set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
+    OUTPUT_NAME amdhip64
+    VERSION 7.9999.0
+    SOVERSION 7
+    POSITION_INDEPENDENT_CODE ON
+    INSTALL_RPATH "$ORIGIN"
+  )
 
-install(TARGETS libhrx_src_binding_hip_amdhip64
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+  install(TARGETS libhrx_src_binding_hip_amdhip64
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+      NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+endif()
