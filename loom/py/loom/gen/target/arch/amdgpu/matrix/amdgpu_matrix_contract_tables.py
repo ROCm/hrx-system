@@ -368,7 +368,7 @@ def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
         raise ValueError(f"unknown AMDGPU matrix numeric type '{payload.numeric_type}'")
     return "\n".join(
         [
-            "(loom_amdgpu_matrix_payload_shape_t){",
+            "{",
             f"    .numeric_type = {numeric_type},",
             f"    .register_count = {payload.register_count},",
             f"    .element_count = {payload.element_count},",
@@ -432,7 +432,7 @@ def _contract_initializer(
             f"    .wave_size_bits = {wave_size},",
             f"    .flags = {_c_bitset(contract.flags, _FLAG_C_NAMES, field_name='flag', contract=contract)},",
             f"    .source_requirement_flags = {_c_bitset(contract.source_requirements, _SOURCE_REQUIREMENT_C_NAMES, field_name='source requirement', contract=contract)},",
-            "    .tile_shape = (loom_amdgpu_matrix_tile_shape_t){",
+            "    .tile_shape = {",
             f"        .result_row_count = {result_row_count},",
             f"        .result_column_count = {result_column_count},",
             f"        .reduction_count = {reduction_count},",
