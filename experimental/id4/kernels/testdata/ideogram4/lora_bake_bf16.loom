@@ -1,0 +1,108 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Independent one-tile transpose used to validate the packed Down layout.
+kernel.def export("id4_ideogram4_lora_bake_pack_down_reference_bf16") @id4_ideogram4_lora_bake_pack_down_reference_bf16() {
+  %unit = index.constant 1 : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  kernel.launch.config workgroups(%input_size, %rank, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %input = kernel.workgroup.id<x> : index
+  %rank_index = kernel.workgroup.id<y> : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%rank]x[%input_size]xbf16, #dense>
+  %target_view = buffer.view %target_global[%base] : buffer -> view<[%input_size]x[%rank]xbf16, #dense>
+  %value = view.load %source_view[%rank_index, %input] : view<[%rank]x[%input_size]xbf16, #dense> -> bf16
+  view.store %value, %target_view[%input, %rank_index] : bf16, view<[%input_size]x[%rank]xbf16, #dense>
+  kernel.return
+}
+
+check.case public @id4_ideogram4_lora_bake_packed_update_parity_case {
+  %source_down = check.generate.iota offset(-0.25) step(0.001953125) : tensor<16x16xbf16>
+  %packed_down = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %expected_packed_down = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %up = check.generate.iota offset(-0.125) step(0.0009765625) : tensor<16x16xbf16>
+  %strength = check.generate.fill value(0.6) : tensor<1xf32>
+  %scalar_output = check.generate.iota offset(-0.5) step(0.00390625) : tensor<16x16xbf16>
+  %wmma_output = check.generate.iota offset(-0.5) step(0.00390625) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_lora_bake_pack_down_bf16(%source_down, %packed_down) : (tensor<16x16xbf16>, tensor<16x16xbf16>)
+  func.call @id4_ideogram4_lora_bake_pack_down_reference_bf16(%source_down, %expected_packed_down) : (tensor<16x16xbf16>, tensor<16x16xbf16>)
+  check.expect.close actual(%packed_down) expected(%expected_packed_down) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_lora_bake_update_bf16(%packed_down, %up, %strength, %scalar_output) : (tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<1xf32>, tensor<16x16xbf16>)
+  func.call @id4_ideogram4_lora_bake_update_bf16_wmma(%packed_down, %up, %strength, %wmma_output) : (tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<1xf32>, tensor<16x16xbf16>)
+  check.expect.close actual(%wmma_output) expected(%scalar_output) atol(0.00390625) rtol(0.00390625) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_decode_fp8_bf16_small_case {
+  %weight = check.generate.fill value(2.0) : tensor<256xf8E4M3>
+  %scale = check.generate.fill value(0.5) : tensor<16xf32>
+  %effective_weight = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_lora_bake_decode_fp8_bf16(%weight, %scale, %effective_weight) : (tensor<256xf8E4M3>, tensor<16xf32>, tensor<16x16xbf16>)
+  check.expect.close actual(%effective_weight) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_pack_down_bf16_small_case {
+  %source = check.generate.fill value(0.5) : tensor<16x16xbf16>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(0.5) : tensor<256xbf16>
+  func.call @id4_ideogram4_lora_bake_pack_down_bf16(%source, %target) : (tensor<16x16xbf16>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_update_bf16_small_case {
+  %down = check.generate.fill value(0.5) : tensor<256xbf16>
+  %up = check.generate.fill value(0.25) : tensor<16x3xbf16>
+  %strength = check.generate.fill value(2.0) : tensor<1xf32>
+  %effective_weight = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(1.75) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_lora_bake_update_bf16(%down, %up, %strength, %effective_weight) : (tensor<256xbf16>, tensor<16x3xbf16>, tensor<1xf32>, tensor<16x16xbf16>)
+  check.expect.close actual(%effective_weight) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_update_bf16_wmma_small_case {
+  %down = check.generate.fill value(0.5) : tensor<16x16xbf16>
+  %up = check.generate.fill value(0.25) : tensor<16x16xbf16>
+  %strength = check.generate.fill value(2.0) : tensor<1xf32>
+  %effective_weight = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(5.0) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_lora_bake_update_bf16_wmma(%down, %up, %strength, %effective_weight) : (tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<1xf32>, tensor<16x16xbf16>)
+  check.expect.close actual(%effective_weight) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_scale_bf16_fp8_small_case {
+  %effective_weight = check.generate.fill value(224.0) : tensor<16x16xbf16>
+  %scale = check.generate.fill value(0.0) : tensor<16xf32>
+  %expected = check.generate.fill value(0.5) : tensor<16xf32>
+  func.call @id4_ideogram4_lora_bake_scale_bf16_fp8(%effective_weight, %scale) : (tensor<16x16xbf16>, tensor<16xf32>)
+  check.expect.close actual(%scale) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xf32>
+  %zero_weight = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %zero_scale = check.generate.fill value(0.0) : tensor<16xf32>
+  %expected_zero_scale = check.generate.fill value(2.2321428999999999e-15) : tensor<16xf32>
+  func.call @id4_ideogram4_lora_bake_scale_bf16_fp8(%zero_weight, %zero_scale) : (tensor<16x16xbf16>, tensor<16xf32>)
+  check.expect.close actual(%zero_scale) expected(%expected_zero_scale) atol(9.9999999999999991e-22) rtol(9.9999999999999995e-07) nan(same) : tensor<16xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_lora_bake_decode_fp8_bf16_small_case> @id4_ideogram4_lora_bake_decode_fp8_bf16_small
+
+check.benchmark<@id4_ideogram4_lora_bake_pack_down_bf16_small_case> @id4_ideogram4_lora_bake_pack_down_bf16_small
+
+check.benchmark<@id4_ideogram4_lora_bake_update_bf16_small_case> @id4_ideogram4_lora_bake_update_bf16_small
+
+check.benchmark<@id4_ideogram4_lora_bake_update_bf16_wmma_small_case> @id4_ideogram4_lora_bake_update_bf16_wmma_small
+
+check.benchmark<@id4_ideogram4_lora_bake_scale_bf16_fp8_small_case> @id4_ideogram4_lora_bake_scale_bf16_fp8_small

@@ -52,6 +52,39 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    lora_bake_plan
+  HDRS
+    "lora_bake_plan.h"
+  SRCS
+    "lora_bake_plan.c"
+  DEPS
+    ::lora
+    iree::base
+    iree::base::internal
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::stages::ideogram4_dit_program
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    lora_bake_plan_test
+  SRCS
+    "lora_bake_plan_test.cc"
+  DEPS
+    ::lora_bake_plan
+    iree::base
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_plan
+    iree::experimental::id4::stages::test_util
+    iree::io::parameter_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     request
   HDRS
     "request.h"

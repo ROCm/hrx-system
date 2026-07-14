@@ -23,6 +23,61 @@ package(
 
 _KERNEL_CASES = [
     {
+        "actual_case": "@id4_ideogram4_lora_bake_decode_fp8_bf16_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_decode_fp8_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=1",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_decode_fp8_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_pack_down_bf16_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_pack_down_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=16",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_pack_down_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_update_bf16_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_update_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=3",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_update_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_update_bf16_wmma_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_update_bf16_wmma_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=16",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_update_bf16_wmma_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_scale_bf16_fp8_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_scale_bf16_fp8_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=1",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_scale_bf16_fp8_small",
+    },
+    {
         "actual_case": "@id4_ideogram4_lora_down_bf16_small_case",
         "benchmark": "@id4_ideogram4_lora_down_bf16_small",
         "configs": [
@@ -8178,6 +8233,16 @@ _KERNEL_CASES = [
 
 _KERNEL_CORRECTNESS_CASES = [
     {
+        "actual_case": "@id4_ideogram4_lora_bake_packed_update_parity_case",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=16",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_packed_update_parity",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_fp8_block_scaled_bf16_wmma_m64n128_4wave_workgroup_staged_masked_input_prefix_case",
         "configs": [
             "--config=id4.qwen3_vl.linear_fp8_block_scaled_m64n128_wmma.valid_token_count=33",
@@ -8323,6 +8388,7 @@ _KERNEL_SOURCES = [
     "ideogram4/linear_fp8_f32.loom",
     "ideogram4/linear_input_pack_f32_bf16.loom",
     "ideogram4/linear_input_unpack_bf16_f32.loom",
+    "ideogram4/lora_bake_bf16.loom",
     "ideogram4/lora_bf16.loom",
     "ideogram4/mlp_gate_up_silu_f32.loom",
     "ideogram4/mlp_up_silu_product_bf16_tail.loom",

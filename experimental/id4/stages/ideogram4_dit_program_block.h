@@ -154,10 +154,6 @@ iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(
     id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,
     id4_ideogram4_dit_parameter_source_rule_t* out_source);
 
-iree_status_t id4_ideogram4_dit_program_format_parameter_scale_key(
-    iree_string_view_t weight_key, char* buffer,
-    iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
-
 iree_status_t id4_ideogram4_dit_program_acquire_tensor(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     id4_pipeline_program_dtype_t dtype, id4_pipeline_program_shape_t shape,

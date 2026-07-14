@@ -1,0 +1,319 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+config.decl @id4.ideogram4.lora_bake.output_row_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.ideogram4.lora_bake.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.ideogram4.lora_bake.rank : %value: index where [range(%value, 1, 65536)]
+
+amdgpu.target<gfx1100> @gfx1100
+
+// Packs one source-layout Down matrix [rank, input] into compact 16x16 RHS
+// tiles. The final rank tile is zero-padded, allowing the scalar update path to
+// preserve arbitrary ranks while WMMA providers select aligned ranks.
+kernel.def export("id4_ideogram4_lora_bake_pack_down_bf16") @id4_ideogram4_lora_bake_pack_down_bf16() {
+  %unit = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 16 : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  %rounded_rank = index.add %rank, %fifteen : index
+  %rank_tile_count = index.div %rounded_rank, %sixteen : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  kernel.launch.config workgroups(%rank_tile_count, %input_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %rank_tile = kernel.workgroup.id<x> : index
+  %input_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  %rounded_rank = index.add %rank, %fifteen : index
+  %rank_tile_count = index.div %rounded_rank, %sixteen : index
+  %padded_rank = index.mul %rank_tile_count, %sixteen : index
+  %packed_element_count = index.mul %input_size, %padded_rank : index
+  %rank_origin = index.mul %rank_tile, %sixteen : index
+  %input = index.madd %input_tile, %sixteen, %lane : index
+  %tile = index.madd %input_tile, %rank_tile_count, %rank_tile : index
+  %tile_offset = index.mul %tile, %two_fifty_six : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %target_index = index.add %tile_offset, %lane_offset : index
+  %zero_bf16 = scalar.constant 0.0 : bf16
+  %zero_values = vector.constant 0.0 : vector<16xbf16>
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_aligned = buffer.assume.alignment %source_global {minimum_alignment = 16} : buffer
+  %target_aligned = buffer.assume.alignment %target_global {minimum_alignment = 16} : buffer
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<[%rank]x[%input_size]xbf16, #dense>
+  %target_view = buffer.view %target_aligned[%base] : buffer -> view<[%packed_element_count]xbf16, #dense>
+  %values = scf.for %rank_lane = [%zero to %sixteen step %one](%acc = %zero_values : vector<16xbf16>) -> (vector<16xbf16>) {
+    %source_rank = index.add %rank_origin, %rank_lane : index
+    %rank_valid = index.cmp ult, %source_rank, %rank : index
+    %value = scf.if %rank_valid -> (bf16) {
+      %loaded = view.load %source_view[%source_rank, %input] : view<[%rank]x[%input_size]xbf16, #dense> -> bf16
+      scf.yield %loaded : bf16
+    } else {
+      scf.yield %zero_bf16 : bf16
+    }
+    %next = vector.insert %value into %acc[%rank_lane] : bf16, vector<16xbf16>
+    scf.yield %next : vector<16xbf16>
+  }
+  vector.store %values, %target_view[%target_index] : vector<16xbf16>, view<[%packed_element_count]xbf16, #dense>
+  kernel.return
+}
+
+// Decodes one contiguous output-row window from the compact FP8 RHS tile into
+// a row-major BF16 effective-weight window. Binding offsets select the source
+// row window; all indices here are relative to that window.
+kernel.def export("id4_ideogram4_lora_bake_decode_fp8_bf16") @id4_ideogram4_lora_bake_decode_fp8_bf16() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_row_count, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%weight: buffer, %scale: buffer, %effective_weight: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %element_count = index.mul %output_row_count, %input_size : index
+  %weight_noalias, %scale_noalias, %effective_weight_noalias = buffer.assume.noalias %weight, %scale, %effective_weight : buffer, buffer, buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %dense = encoding.layout.dense : encoding<layout>
+  %fp8_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_schema : encoding<schema>} : encoding<storage>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%element_count]xf8E4M3, %fp8_storage>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_offset = index.mul %tile, %two_fifty_six : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %weight_index = index.add %tile_offset, %lane_offset : index
+  %weight_fp8 = vector.load %weight_view[%weight_index] : view<[%element_count]xf8E4M3, %fp8_storage> -> vector<16xf8E4M3>
+  %weight_f32 = vector.extf %weight_fp8 : vector<16xf8E4M3> to vector<16xf32>
+  %scale_f32 = view.load %scale_view[%output_row] : view<[%output_row_count]xf32, #dense> -> f32
+  %scale_vector = vector.splat %scale_f32 : vector<16xf32>
+  %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_vector : vector<16xf32>
+  %rounded = vector.fptrunc %scaled : vector<16xf32> to vector<16xbf16>
+  vector.store %rounded, %effective_weight_view[%output_row, %input] : vector<16xbf16>, view<[%output_row_count]x[%input_size]xbf16, #dense>
+  kernel.return
+}
+
+// Applies one BF16 LoRA segment to an effective-weight window. The Down matrix
+// remains resident across windows; binding offsets select this segment's Down,
+// current Up window, and one issue-time strength. The output is rounded to BF16
+// after each adapter so adapter order remains deterministic.
+kernel.def export("id4_ideogram4_lora_bake_update_bf16") @id4_ideogram4_lora_bake_update_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup_rounding = index.constant 255 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rounded_input_size = index.add %input_size, %workgroup_rounding : index
+  %input_workgroup_count = index.div %rounded_input_size, %workgroup_size_x : index
+  kernel.launch.config workgroups(%input_workgroup_count, %output_row_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%down: buffer, %up: buffer, %strength: buffer, %effective_weight: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %workgroup_size_x = index.constant 256 : index
+  %input_group = kernel.workgroup.id<x> : index
+  %output_row = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %input_group_base = index.mul %input_group, %workgroup_size_x : index
+  %input = index.add %input_group_base, %lane : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  %rounded_rank = index.add %rank, %fifteen : index
+  %rank_tile_count = index.div %rounded_rank, %sixteen : index
+  %padded_rank = index.mul %rank_tile_count, %sixteen : index
+  %packed_element_count = index.mul %input_size, %padded_rank : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %down_noalias, %up_noalias, %strength_noalias, %effective_weight_noalias = buffer.assume.noalias %down, %up, %strength, %effective_weight : buffer, buffer, buffer, buffer
+  %down_global = buffer.assume.memory_space<global> %down_noalias : buffer
+  %up_global = buffer.assume.memory_space<global> %up_noalias : buffer
+  %strength_global = buffer.assume.memory_space<global> %strength_noalias : buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %down_view = buffer.view %down_global[%base] : buffer -> view<[%packed_element_count]xbf16, #dense>
+  %up_view = buffer.view %up_global[%base] : buffer -> view<[%output_row_count]x[%rank]xbf16, #dense>
+  %strength_view = buffer.view %strength_global[%base] : buffer -> view<1xf32, #dense>
+  %effective_weight_view = buffer.view %effective_weight_global[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %input_valid = index.cmp ult, %input, %input_size : index
+  scf.if %input_valid {
+    %delta = scf.for %rank_index = [%zero to %rank step %one](%acc = %zero_f32 : f32) -> (f32) {
+      %input_tile = index.div %input, %sixteen : index
+      %input_lane = index.rem %input, %sixteen : index
+      %rank_tile = index.div %rank_index, %sixteen : index
+      %rank_lane = index.rem %rank_index, %sixteen : index
+      %tile = index.madd %input_tile, %rank_tile_count, %rank_tile : index
+      %tile_offset = index.mul %tile, %two_fifty_six : index
+      %lane_offset = index.mul %input_lane, %sixteen : index
+      %lane_base = index.add %tile_offset, %lane_offset : index
+      %down_index = index.add %lane_base, %rank_lane : index
+      %down_bf16 = view.load %down_view[%down_index] : view<[%packed_element_count]xbf16, #dense> -> bf16
+      %up_bf16 = view.load %up_view[%output_row, %rank_index] : view<[%output_row_count]x[%rank]xbf16, #dense> -> bf16
+      %down_f32 = scalar.extf %down_bf16 : bf16 to f32
+      %up_f32 = scalar.extf %up_bf16 : bf16 to f32
+      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_f32, %down_f32 : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %product : f32
+      scf.yield %next : f32
+    }
+    %strength_f32 = view.load %strength_view[%zero] : view<1xf32, #dense> -> f32
+    %scaled_delta = scalar.mulf<reassoc|nnan|ninf|nsz> %delta, %strength_f32 : f32
+    %base_bf16 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
+    %base_f32 = scalar.extf %base_bf16 : bf16 to f32
+    %updated = scalar.addf<reassoc|nnan|ninf|nsz> %base_f32, %scaled_delta : f32
+    %rounded = scalar.fptrunc %updated : f32 to bf16
+    view.store %rounded, %effective_weight_view[%output_row, %input] : bf16, view<[%output_row_count]x[%input_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
+// Applies one BF16 LoRA segment with one 16x16 WMMA output tile per workgroup.
+// The rank must be a multiple of 16. This preserves the scalar kernel's F32
+// accumulation and rounds the updated effective weight once per adapter.
+kernel.def export("id4_ideogram4_lora_bake_update_bf16_wmma") @id4_ideogram4_lora_bake_update_bf16_wmma() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 32 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_row_count, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%down: buffer, %up: buffer, %strength: buffer, %effective_weight: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %lane_column = index.rem %lane, %sixteen : index
+  %lane_group = index.div %lane, %sixteen : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %rank = config.get @id4.ideogram4.lora_bake.rank : index
+  %rank_tile_count = index.div %rank, %sixteen : index
+  %packed_element_count = index.mul %input_size, %rank : index
+  %input_origin = index.mul %input_tile, %sixteen : index
+  %output_origin = index.mul %output_tile, %sixteen : index
+  %input_column = index.add %input_origin, %lane_column : index
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %down_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %down_noalias, %up_noalias, %strength_noalias, %effective_weight_noalias = buffer.assume.noalias %down, %up, %strength, %effective_weight : buffer, buffer, buffer, buffer
+  %down_global = buffer.assume.memory_space<global> %down_noalias : buffer
+  %up_global = buffer.assume.memory_space<global> %up_noalias : buffer
+  %strength_global = buffer.assume.memory_space<global> %strength_noalias : buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %down_aligned = buffer.assume.alignment %down_global {minimum_alignment = 16} : buffer
+  %up_aligned = buffer.assume.alignment %up_global {minimum_alignment = 16} : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %down_view = buffer.view %down_aligned[%base] : buffer -> view<[%packed_element_count]x16xbf16, %down_layout>
+  %up_view = buffer.view %up_aligned[%base] : buffer -> view<[%output_row_count]x[%rank]xbf16, #dense>
+  %strength_view = buffer.view %strength_global[%base] : buffer -> view<1xf32, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result = scf.for %rank_tile = [%zero to %rank_tile_count step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %rank_origin = index.mul %rank_tile, %sixteen : index
+    %packed_tile = index.madd %input_tile, %rank_tile_count, %rank_tile : index
+    %packed_row = index.mul %packed_tile, %two_fifty_six : index
+    %lhs = vector.fragment.load<lhs> %up_view[%output_origin, %rank_origin] shape [%m, %k] : view<[%output_row_count]x[%rank]xbf16, #dense> -> vector<16xbf16>
+    %rhs = vector.fragment.load<rhs> %down_view[%packed_row, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %down_layout> -> vector<16xbf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %strength_f32 = view.load %strength_view[%zero] : view<1xf32, #dense> -> f32
+  scf.for %register_index = [%zero to %eight step %one] {
+    %register_row_base = index.mul %register_index, %two : index
+    %local_row = index.add %register_row_base, %lane_group : index
+    %output_row = index.add %output_origin, %local_row : index
+    %value = vector.extract %result[%register_index] : vector<8xf32> -> f32
+    %scaled_delta = scalar.mulf<reassoc|nnan|ninf|nsz> %value, %strength_f32 : f32
+    %base_bf16 = view.load %effective_weight_view[%output_row, %input_column] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
+    %base_f32 = scalar.extf %base_bf16 : bf16 to f32
+    %updated = scalar.addf<reassoc|nnan|ninf|nsz> %base_f32, %scaled_delta : f32
+    %rounded = scalar.fptrunc %updated : f32 to bf16
+    view.store %rounded, %effective_weight_view[%output_row, %input_column] : bf16, view<[%output_row_count]x[%input_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
+// Derives the finite E4M3 scale for each effective-weight row. The minimum
+// magnitude matches the reference quantizer and keeps an all-zero row
+// representable without dividing by zero in the encoding pass.
+kernel.def export("id4_ideogram4_lora_bake_scale_bf16_fp8") @id4_ideogram4_lora_bake_scale_bf16_fp8() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  kernel.launch.config workgroups(%output_row_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%effective_weight: buffer, %scale: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %workgroup_size = index.constant 256 : index
+  %output_row = kernel.workgroup.id<x> : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %fp8_max = scalar.constant 448.0 : f32
+  %minimum_amax = scalar.constant 9.9999999999999998e-13 : f32
+  %effective_weight_noalias, %scale_noalias = buffer.assume.noalias %effective_weight, %scale : buffer, buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
+  %lane_amax = scf.for %input = [%lane to %input_size step %workgroup_size](%current = %zero_f32 : f32) -> (f32) {
+    %value_bf16 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
+    %value_f32 = scalar.extf %value_bf16 : bf16 to f32
+    %magnitude = scalar.absf %value_f32 : f32
+    %next = scalar.maxnumf %current, %magnitude : f32
+    scf.yield %next : f32
+  }
+  %amax = kernel.workgroup.reduce<maxnumf> %lane_amax : f32
+  %clamped_amax = scalar.maxnumf %amax, %minimum_amax : f32
+  %row_scale = scalar.divf %clamped_amax, %fp8_max : f32
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %row_scale, %scale_view[%output_row] : f32, view<[%output_row_count]xf32, #dense>
+  }
+  kernel.return
+}

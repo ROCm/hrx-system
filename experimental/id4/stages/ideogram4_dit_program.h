@@ -248,6 +248,11 @@ iree_status_t id4_ideogram4_dit_program_format_layer_parameter(
     uint32_t layer_ordinal, iree_string_view_t suffix, char* buffer,
     iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
 
+// Formats the canonical output-row scale key for an FP8 weight parameter.
+iree_status_t id4_ideogram4_dit_program_format_parameter_scale_key(
+    iree_string_view_t weight_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
+
 // Returns the Ideogram 4 DiT model configuration.
 const id4_ideogram4_dit_model_config_t*
 id4_ideogram4_dit_program_ideogram4_model_config(void);
