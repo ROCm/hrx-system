@@ -212,7 +212,12 @@ TEST_F(LoraImportTest, ComposesOrderedCatalogTopology) {
       IREE_SV("sketch")));
   EXPECT_EQ(id4_ideogram4_lora_topology_target_count(topology), 3u);
 
-  const id4_ideogram4_lora_topology_target_t* qkv =
+  id4_ideogram4_dit_lora_topology_t topology_view =
+      id4_ideogram4_lora_topology_view(topology);
+  EXPECT_EQ(topology_view.adapter_count, 2u);
+  EXPECT_EQ(topology_view.target_count, 3u);
+
+  const id4_ideogram4_dit_lora_target_t* qkv =
       id4_ideogram4_lora_topology_lookup_target(
           topology, IREE_SV("layers.1.attention.qkv.weight"));
   ASSERT_NE(qkv, nullptr);
@@ -223,6 +228,8 @@ TEST_F(LoraImportTest, ComposesOrderedCatalogTopology) {
   EXPECT_EQ(qkv->segments[0].adapter_ordinal, 0u);
   EXPECT_EQ(qkv->segments[0].rank_offset, 0u);
   EXPECT_EQ(qkv->segments[0].rank, 3u);
+  EXPECT_TRUE(
+      iree_string_view_equal(qkv->segments[0].source_scope, IREE_SV("archer")));
   EXPECT_TRUE(iree_string_view_equal(
       qkv->segments[0].down_parameter_key,
       IREE_SV("diffusion_model.layers.1.attention.qkv.lora_A.weight")));
@@ -230,7 +237,7 @@ TEST_F(LoraImportTest, ComposesOrderedCatalogTopology) {
   EXPECT_EQ(qkv->segments[1].rank_offset, 3u);
   EXPECT_EQ(qkv->segments[1].rank, 2u);
 
-  const id4_ideogram4_lora_topology_target_t* attention_output =
+  const id4_ideogram4_dit_lora_target_t* attention_output =
       id4_ideogram4_lora_topology_lookup_target(
           topology, IREE_SV("layers.0.attention.o.weight"));
   ASSERT_NE(attention_output, nullptr);

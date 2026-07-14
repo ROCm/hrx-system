@@ -130,6 +130,48 @@ typedef struct id4_ideogram4_dit_model_config_t {
   uint32_t image_indicator_count;
 } id4_ideogram4_dit_model_config_t;
 
+// One adapter's contiguous rank segment within a composed DiT LoRA target.
+typedef struct id4_ideogram4_dit_lora_segment_t {
+  // Provider scope containing this segment's down and up parameters.
+  iree_string_view_t source_scope;
+  // Adapter ordinal whose issue-time strength controls this segment.
+  iree_host_size_t adapter_ordinal;
+  // First rank position assigned to this segment in the composed projection.
+  uint32_t rank_offset;
+  // Number of rank positions assigned to this segment.
+  uint32_t rank;
+  // Provider parameter key for the BF16 down-projection matrix [rank, input].
+  iree_string_view_t down_parameter_key;
+  // Provider parameter key for the BF16 up-projection matrix [output, rank].
+  iree_string_view_t up_parameter_key;
+} id4_ideogram4_dit_lora_segment_t;
+
+// Composed low-rank update for one conditioned-DiT linear parameter.
+typedef struct id4_ideogram4_dit_lora_target_t {
+  // Canonical base parameter key patched by this update.
+  iree_string_view_t base_parameter_key;
+  // Input feature count consumed by every segment's down projection.
+  uint32_t input_size;
+  // Output feature count produced by every segment's up projection.
+  uint32_t output_size;
+  // Sum of segment ranks in adapter order.
+  uint32_t total_rank;
+  // Number of entries in |segments|.
+  iree_host_size_t segment_count;
+  // Contiguous segments ordered by adapter ordinal.
+  const id4_ideogram4_dit_lora_segment_t* segments;
+} id4_ideogram4_dit_lora_target_t;
+
+// Borrowed static LoRA topology used while authoring conditioned DiT.
+typedef struct id4_ideogram4_dit_lora_topology_t {
+  // Number of ordered adapters represented by issue-time strengths.
+  iree_host_size_t adapter_count;
+  // Number of unique patched base parameters in |targets|.
+  iree_host_size_t target_count;
+  // Composed targets with storage owned by the topology provider.
+  const id4_ideogram4_dit_lora_target_t* targets;
+} id4_ideogram4_dit_lora_topology_t;
+
 // Dynamic request dimensions used when authoring the DiT forward program.
 typedef struct id4_ideogram4_dit_request_config_t {
   // Latent tensor shape supplied by the sampler.
@@ -192,6 +234,8 @@ typedef struct id4_ideogram4_dit_program_options_t {
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
+  // Static conditioned-DiT LoRA topology; empty selects exact base execution.
+  id4_ideogram4_dit_lora_topology_t lora_topology;
 } id4_ideogram4_dit_program_options_t;
 
 // Authors the Ideogram4 DiT forward program into |builder|.

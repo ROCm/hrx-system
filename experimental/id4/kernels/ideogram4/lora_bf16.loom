@@ -1,0 +1,152 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+config.decl @id4.ideogram4.lora.token_count : %value: index where [range(%value, 1, 131072)]
+
+config.decl @id4.ideogram4.lora.token_capacity : %value: index where [range(%value, 1, 131072)]
+
+config.decl @id4.ideogram4.lora.input_size : %value: index where [range(%value, 1, 131072)]
+
+config.decl @id4.ideogram4.lora.output_size : %value: index where [range(%value, 1, 131072)]
+
+config.decl @id4.ideogram4.lora.total_rank : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.ideogram4.lora.segment_count : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.ideogram4.lora.adapter_count : %value: index where [range(%value, 1, 65536)]
+
+// Computes the composed low-rank activation X*A^T. The result is rounded to
+// BF16 at the same semantic boundary used by the reference adapter path.
+kernel.def export("id4_ideogram4_lora_down_bf16") @id4_ideogram4_lora_down_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.lora.token_count : index
+  %total_rank = config.get @id4.ideogram4.lora.total_rank : index
+  kernel.launch.config workgroups(%token_count, %total_rank, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %down: buffer, %low_rank: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token = kernel.workgroup.id<x> : index
+  %rank_index = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_capacity = config.get @id4.ideogram4.lora.token_capacity : index
+  %input_size = config.get @id4.ideogram4.lora.input_size : index
+  %total_rank = config.get @id4.ideogram4.lora.total_rank : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %input_noalias, %down_noalias, %low_rank_noalias = buffer.assume.noalias %input, %down, %low_rank : buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %down_global = buffer.assume.memory_space<global> %down_noalias : buffer
+  %low_rank_global = buffer.assume.memory_space<global> %low_rank_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_capacity]x[%input_size]xbf16, #dense>
+  %down_view = buffer.view %down_global[%base] : buffer -> view<[%total_rank]x[%input_size]xbf16, #dense>
+  %low_rank_view = buffer.view %low_rank_global[%base] : buffer -> view<[%token_capacity]x[%total_rank]xbf16, #dense>
+  %lane_dot = scf.for %input_index = [%lane to %input_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+    %input_bf16 = view.load %input_view[%token, %input_index] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> bf16
+    %down_bf16 = view.load %down_view[%rank_index, %input_index] : view<[%total_rank]x[%input_size]xbf16, #dense> -> bf16
+    %input_f32 = scalar.extf %input_bf16 : bf16 to f32
+    %down_f32 = scalar.extf %down_bf16 : bf16 to f32
+    %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_f32, %down_f32 : f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %product : f32
+    scf.yield %next : f32
+  }
+  %dot = kernel.workgroup.reduce<addf> %lane_dot : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    %rounded = scalar.fptrunc %dot : f32 to bf16
+    view.store %rounded, %low_rank_view[%token, %rank_index] : bf16, view<[%token_capacity]x[%total_rank]xbf16, #dense>
+  }
+  kernel.return
+}
+
+// Applies every adapter segment as B*(X*A^T), scales each segment with its
+// issue-time strength, and adds the composed update to the rounded base output.
+// Up matrices remain in their source [output, rank] layout and are concatenated
+// adapter-major; the compact segment table supplies their base offsets.
+kernel.def export("id4_ideogram4_lora_up_add_bf16") @id4_ideogram4_lora_up_add_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup_rounding = index.constant 255 : index
+  %token_count = config.get @id4.ideogram4.lora.token_count : index
+  %output_size = config.get @id4.ideogram4.lora.output_size : index
+  %rounded_output_size = index.add %output_size, %workgroup_rounding : index
+  %output_workgroup_count = index.div %rounded_output_size, %workgroup_size_x : index
+  kernel.launch.config workgroups(%output_workgroup_count, %token_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%low_rank: buffer, %up: buffer, %segment_metadata: buffer, %strengths: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %workgroup_size_x = index.constant 256 : index
+  %output_group = kernel.workgroup.id<x> : index
+  %token = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_group_base = index.mul %output_group, %workgroup_size_x : index
+  %output_row = index.add %output_group_base, %lane : index
+  %token_capacity = config.get @id4.ideogram4.lora.token_capacity : index
+  %output_size = config.get @id4.ideogram4.lora.output_size : index
+  %total_rank = config.get @id4.ideogram4.lora.total_rank : index
+  %segment_count = config.get @id4.ideogram4.lora.segment_count : index
+  %adapter_count = config.get @id4.ideogram4.lora.adapter_count : index
+  %up_element_count = index.mul %output_size, %total_rank : index
+  %metadata_element_count = index.mul %segment_count, %four : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %low_rank_noalias, %up_noalias, %metadata_noalias, %strengths_noalias, %output_noalias = buffer.assume.noalias %low_rank, %up, %segment_metadata, %strengths, %output : buffer, buffer, buffer, buffer, buffer
+  %low_rank_global = buffer.assume.memory_space<global> %low_rank_noalias : buffer
+  %up_global = buffer.assume.memory_space<global> %up_noalias : buffer
+  %metadata_global = buffer.assume.memory_space<global> %metadata_noalias : buffer
+  %strengths_global = buffer.assume.memory_space<global> %strengths_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %low_rank_view = buffer.view %low_rank_global[%base] : buffer -> view<[%token_capacity]x[%total_rank]xbf16, #dense>
+  %up_view = buffer.view %up_global[%base] : buffer -> view<[%up_element_count]xbf16, #dense>
+  %metadata_view = buffer.view %metadata_global[%base] : buffer -> view<[%metadata_element_count]xi32, #dense>
+  %strengths_view = buffer.view %strengths_global[%base] : buffer -> view<[%adapter_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_capacity]x[%output_size]xbf16, #dense>
+  %output_valid = index.cmp ult, %output_row, %output_size : index
+  scf.if %output_valid {
+    %base_bf16 = view.load %output_view[%token, %output_row] : view<[%token_capacity]x[%output_size]xbf16, #dense> -> bf16
+    %base_f32 = scalar.extf %base_bf16 : bf16 to f32
+    %updated = scf.for %segment_index = [%zero to %segment_count step %one](%acc = %base_f32 : f32) -> (f32) {
+      %metadata_base = index.mul %segment_index, %four : index
+      %rank_offset_field = index.add %metadata_base, %one : index
+      %rank_field = index.add %rank_offset_field, %one : index
+      %up_base_field = index.add %rank_field, %one : index
+      %adapter_ordinal_i32 = view.load %metadata_view[%metadata_base] : view<[%metadata_element_count]xi32, #dense> -> i32
+      %rank_offset_i32 = view.load %metadata_view[%rank_offset_field] : view<[%metadata_element_count]xi32, #dense> -> i32
+      %rank_i32 = view.load %metadata_view[%rank_field] : view<[%metadata_element_count]xi32, #dense> -> i32
+      %up_base_i32 = view.load %metadata_view[%up_base_field] : view<[%metadata_element_count]xi32, #dense> -> i32
+      %adapter_ordinal = index.cast %adapter_ordinal_i32 : i32 to index
+      %rank_offset = index.cast %rank_offset_i32 : i32 to index
+      %rank = index.cast %rank_i32 : i32 to index
+      %up_base = index.cast %up_base_i32 : i32 to index
+      %valid_adapter_ordinal = index.assume %adapter_ordinal [ge(%adapter_ordinal, 0), lt(%adapter_ordinal, %adapter_count)] : index
+      %valid_rank_offset = index.assume %rank_offset [ge(%rank_offset, 0), lt(%rank_offset, %total_rank)] : index
+      %valid_rank = index.assume %rank [ge(%rank, 1)] : index
+      %valid_up_base = index.assume %up_base [ge(%up_base, 0), lt(%up_base, %up_element_count)] : index
+      %output_up_offset = index.mul %output_row, %valid_rank : index
+      %output_up_base = index.add %valid_up_base, %output_up_offset : index
+      %segment_sum = scf.for %local_rank = [%zero to %valid_rank step %one](%segment_acc = %zero_f32 : f32) -> (f32) {
+        %rank_index0 = index.add %valid_rank_offset, %local_rank : index
+        %rank_index = index.assume %rank_index0 [ge(%rank_index0, 0), lt(%rank_index0, %total_rank)] : index
+        %up_index0 = index.add %output_up_base, %local_rank : index
+        %up_index = index.assume %up_index0 [ge(%up_index0, 0), lt(%up_index0, %up_element_count)] : index
+        %low_rank_bf16 = view.load %low_rank_view[%token, %rank_index] : view<[%token_capacity]x[%total_rank]xbf16, #dense> -> bf16
+        %up_bf16 = view.load %up_view[%up_index] : view<[%up_element_count]xbf16, #dense> -> bf16
+        %low_rank_f32 = scalar.extf %low_rank_bf16 : bf16 to f32
+        %up_f32 = scalar.extf %up_bf16 : bf16 to f32
+        %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %low_rank_f32, %up_f32 : f32
+        %segment_next = scalar.addf<reassoc|nnan|ninf|nsz> %segment_acc, %product : f32
+        scf.yield %segment_next : f32
+      }
+      %strength = view.load %strengths_view[%valid_adapter_ordinal] : view<[%adapter_count]xf32, #dense> -> f32
+      %scaled = scalar.mulf<reassoc|nnan|ninf|nsz> %segment_sum, %strength : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %scaled : f32
+      scf.yield %next : f32
+    }
+    %rounded = scalar.fptrunc %updated : f32 to bf16
+    view.store %rounded, %output_view[%token, %output_row] : bf16, view<[%token_capacity]x[%output_size]xbf16, #dense>
+  }
+  kernel.return
+}

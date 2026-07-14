@@ -137,11 +137,11 @@ struct id4_ideogram4_lora_topology_t {
   // Number of unique composed targets.
   iree_host_size_t target_count;
   // Composed target table stored within the packed allocation.
-  id4_ideogram4_lora_topology_target_t* targets;
+  id4_ideogram4_dit_lora_target_t* targets;
   // Number of rank segments across all targets.
   iree_host_size_t segment_count;
   // Rank segment table stored within the packed allocation.
-  id4_ideogram4_lora_segment_t* segments;
+  id4_ideogram4_dit_lora_segment_t* segments;
 };
 
 static bool id4_ideogram4_lora_model_config_equal(
@@ -786,9 +786,9 @@ iree_status_t id4_ideogram4_lora_topology_create(
         sizeof(*topology), &allocation_size,
         IREE_STRUCT_FIELD(options->lora_count, iree_string_view_t,
                           &scope_offset),
-        IREE_STRUCT_FIELD(target_count, id4_ideogram4_lora_topology_target_t,
+        IREE_STRUCT_FIELD(target_count, id4_ideogram4_dit_lora_target_t,
                           &target_offset),
-        IREE_STRUCT_FIELD(entry_count, id4_ideogram4_lora_segment_t,
+        IREE_STRUCT_FIELD(entry_count, id4_ideogram4_dit_lora_segment_t,
                           &segment_offset),
         IREE_STRUCT_FIELD(string_byte_length, char, &string_offset));
   }
@@ -805,11 +805,11 @@ iree_status_t id4_ideogram4_lora_topology_create(
         (iree_string_view_t*)((uint8_t*)topology + scope_offset);
     topology->target_count = target_count;
     topology->targets =
-        (id4_ideogram4_lora_topology_target_t*)((uint8_t*)topology +
-                                                target_offset);
+        (id4_ideogram4_dit_lora_target_t*)((uint8_t*)topology + target_offset);
     topology->segment_count = entry_count;
     topology->segments =
-        (id4_ideogram4_lora_segment_t*)((uint8_t*)topology + segment_offset);
+        (id4_ideogram4_dit_lora_segment_t*)((uint8_t*)topology +
+                                            segment_offset);
 
     char* string_cursor = (char*)topology + string_offset;
     for (iree_host_size_t i = 0; i < options->lora_count; ++i) {
@@ -821,7 +821,7 @@ iree_status_t id4_ideogram4_lora_topology_create(
     iree_host_size_t topology_segment_offset = 0;
     for (iree_host_size_t i = 0; i < entry_count;) {
       const id4_ideogram4_lora_target_t* first_target = entries[i].target;
-      id4_ideogram4_lora_topology_target_t* target =
+      id4_ideogram4_dit_lora_target_t* target =
           &topology->targets[target_index++];
       target->base_parameter_key = id4_ideogram4_lora_copy_string(
           first_target->base_parameter_key, &string_cursor);
@@ -833,8 +833,10 @@ iree_status_t id4_ideogram4_lora_topology_create(
              iree_string_view_equal(entries[i].target->base_parameter_key,
                                     first_target->base_parameter_key)) {
         const id4_ideogram4_lora_target_t* source_target = entries[i].target;
-        id4_ideogram4_lora_segment_t* segment =
+        id4_ideogram4_dit_lora_segment_t* segment =
             &topology->segments[topology_segment_offset++];
+        segment->source_scope =
+            topology->adapter_source_scopes[entries[i].adapter_ordinal];
         segment->adapter_ordinal = entries[i].adapter_ordinal;
         segment->rank_offset = rank_offset;
         segment->rank = source_target->rank;
@@ -890,14 +892,23 @@ iree_host_size_t id4_ideogram4_lora_topology_target_count(
   return topology ? topology->target_count : 0;
 }
 
-const id4_ideogram4_lora_topology_target_t*
-id4_ideogram4_lora_topology_target_at(
+id4_ideogram4_dit_lora_topology_t id4_ideogram4_lora_topology_view(
+    const id4_ideogram4_lora_topology_t* topology) {
+  if (!topology) return (id4_ideogram4_dit_lora_topology_t){0};
+  return (id4_ideogram4_dit_lora_topology_t){
+      .adapter_count = topology->adapter_count,
+      .target_count = topology->target_count,
+      .targets = topology->targets,
+  };
+}
+
+const id4_ideogram4_dit_lora_target_t* id4_ideogram4_lora_topology_target_at(
     const id4_ideogram4_lora_topology_t* topology, iree_host_size_t index) {
   if (!topology || index >= topology->target_count) return NULL;
   return &topology->targets[index];
 }
 
-const id4_ideogram4_lora_topology_target_t*
+const id4_ideogram4_dit_lora_target_t*
 id4_ideogram4_lora_topology_lookup_target(
     const id4_ideogram4_lora_topology_t* topology,
     iree_string_view_t base_parameter_key) {

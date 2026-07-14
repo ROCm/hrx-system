@@ -86,6 +86,12 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
+  // Static composed LoRA topology applied by conditioned block projections.
+  id4_ideogram4_dit_lora_topology_t lora_topology;
+  // Issue-time F32 adapter strengths imported by the containing program.
+  id4_pipeline_program_tensor_t lora_strengths;
+  // Number of topology targets consumed by all authored blocks.
+  iree_host_size_t* lora_target_use_count;
 } id4_ideogram4_dit_program_block_options_t;
 
 iree_status_t id4_ideogram4_dit_program_format(char* buffer,

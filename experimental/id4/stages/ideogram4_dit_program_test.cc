@@ -169,6 +169,8 @@ static id4_ideogram4_dit_program_options_t MakeProgramOptions(
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT,
       // Diagnostic tap names requested by the stage plan.
       /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
+      // Static conditioned-DiT LoRA topology.
+      /*.lora_topology=*/{},
   };
   return options;
 }
@@ -355,6 +357,27 @@ static const id4_pipeline_program_parameter_op_t* FindProgramParameter(
             program, operation->payload.parameter.tensor.ordinal);
     if (tensor && iree_string_view_equal(tensor->name, key)) {
       return &operation->payload.parameter;
+    }
+  }
+  return nullptr;
+}
+
+static const id4_pipeline_program_parameter_op_t*
+FindProgramParameterByFirstSourceKey(const id4_pipeline_program_t* program,
+                                     iree_string_view_t source_key) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
+      continue;
+    }
+    const id4_pipeline_program_parameter_op_t* parameter =
+        &operation->payload.parameter;
+    if (parameter->source_count == 0) continue;
+    if (iree_string_view_equal(parameter->sources[0].key, source_key)) {
+      return parameter;
     }
   }
   return nullptr;
@@ -1211,6 +1234,144 @@ TEST(Ideogram4DitProgram, RejectsProjectionTapWithoutPyTorchParityFeedForward) {
       diagnostic_tap_names,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, ComposesLoraParameterSourcesForConditionedForward) {
+  const id4_ideogram4_dit_lora_segment_t segments[] = {
+      {
+          /*.source_scope=*/IREE_SV("portrait"),
+          /*.adapter_ordinal=*/0,
+          /*.rank_offset=*/0,
+          /*.rank=*/2,
+          /*.down_parameter_key=*/IREE_SV("portrait.qkv.lora_A.weight"),
+          /*.up_parameter_key=*/IREE_SV("portrait.qkv.lora_B.weight"),
+      },
+      {
+          /*.source_scope=*/IREE_SV("lighting"),
+          /*.adapter_ordinal=*/1,
+          /*.rank_offset=*/2,
+          /*.rank=*/3,
+          /*.down_parameter_key=*/IREE_SV("lighting.qkv.lora_A.weight"),
+          /*.up_parameter_key=*/IREE_SV("lighting.qkv.lora_B.weight"),
+      },
+  };
+  const id4_ideogram4_dit_lora_target_t targets[] = {
+      {
+          /*.base_parameter_key=*/IREE_SV("layers.0.attention.qkv.weight"),
+          /*.input_size=*/32,
+          /*.output_size=*/96,
+          /*.total_rank=*/5,
+          /*.segment_count=*/IREE_ARRAYSIZE(segments),
+          /*.segments=*/segments,
+      },
+  };
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
+  options.request.text_token_count = 2;
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.lora_topology = {
+      /*.adapter_count=*/2,
+      /*.target_count=*/IREE_ARRAYSIZE(targets),
+      /*.targets=*/targets,
+  };
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  ASSERT_TRUE(ProgramHasTensor(program, IREE_SV("lora.strengths"),
+                               ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                               id4_pipeline_program_make_shape_rank1(2)));
+
+  const id4_pipeline_program_parameter_op_t* down =
+      FindProgramParameterByFirstSourceKey(
+          program, IREE_SV("portrait.qkv.lora_A.weight"));
+  ASSERT_NE(down, nullptr);
+  EXPECT_EQ(down->encoding, ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT);
+  ASSERT_EQ(down->source_count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(down->domain, IREE_SV("lora_dynamic")));
+  EXPECT_TRUE(iree_string_view_equal(down->sources[0].source_scope,
+                                     IREE_SV("portrait")));
+  EXPECT_TRUE(iree_string_view_equal(down->sources[1].source_scope,
+                                     IREE_SV("lighting")));
+  EXPECT_TRUE(iree_string_view_equal(down->sources[1].key,
+                                     IREE_SV("lighting.qkv.lora_A.weight")));
+  ASSERT_EQ(down->source_span_count, 2u);
+  EXPECT_EQ(down->source_spans[0].source_index, 0u);
+  EXPECT_EQ(down->source_spans[0].target_offset, 0u);
+  EXPECT_EQ(down->source_spans[0].length, 2u * 32u * sizeof(uint16_t));
+  EXPECT_EQ(down->source_spans[1].source_index, 1u);
+  EXPECT_EQ(down->source_spans[1].target_offset, 2u * 32u * sizeof(uint16_t));
+  EXPECT_EQ(down->source_spans[1].length, 3u * 32u * sizeof(uint16_t));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(Ideogram4DitProgram, RejectsLoraTargetOutsideAuthoredModel) {
+  ProgramBuilderScope builder_scope;
+  const id4_ideogram4_dit_lora_segment_t segment = {
+      /*.source_scope=*/IREE_SV("adapter"),
+      /*.adapter_ordinal=*/0,
+      /*.rank_offset=*/0,
+      /*.rank=*/2,
+      /*.down_parameter_key=*/IREE_SV("missing.lora_A.weight"),
+      /*.up_parameter_key=*/IREE_SV("missing.lora_B.weight"),
+  };
+  const id4_ideogram4_dit_lora_target_t target = {
+      /*.base_parameter_key=*/IREE_SV("layers.99.attention.qkv.weight"),
+      /*.input_size=*/32,
+      /*.output_size=*/96,
+      /*.total_rank=*/2,
+      /*.segment_count=*/1,
+      /*.segments=*/&segment,
+  };
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
+  options.request.text_token_count = 2;
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.lora_topology = {
+      /*.adapter_count=*/1,
+      /*.target_count=*/1,
+      /*.targets=*/&target,
+  };
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsLoraOnUnconditionedForward) {
+  ProgramBuilderScope builder_scope;
+  const id4_ideogram4_dit_lora_segment_t segment = {
+      /*.source_scope=*/IREE_SV("adapter"),
+      /*.adapter_ordinal=*/0,
+      /*.rank_offset=*/0,
+      /*.rank=*/2,
+      /*.down_parameter_key=*/IREE_SV("qkv.lora_A.weight"),
+      /*.up_parameter_key=*/IREE_SV("qkv.lora_B.weight"),
+  };
+  const id4_ideogram4_dit_lora_target_t target = {
+      /*.base_parameter_key=*/IREE_SV("layers.0.attention.qkv.weight"),
+      /*.input_size=*/32,
+      /*.output_size=*/96,
+      /*.total_rank=*/2,
+      /*.segment_count=*/1,
+      /*.segments=*/&segment,
+  };
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.lora_topology = {
+      /*.adapter_count=*/1,
+      /*.target_count=*/1,
+      /*.targets=*/&target,
+  };
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));
 }

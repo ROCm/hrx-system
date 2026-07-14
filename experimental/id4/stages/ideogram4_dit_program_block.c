@@ -7,6 +7,7 @@
 #include "experimental/id4/stages/ideogram4_dit_program_block.h"
 
 #include "experimental/id4/pipeline/program_matrix.h"
+#include "experimental/id4/stages/ideogram4_dit_program_lora.h"
 
 enum {
   ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK = 16,
@@ -912,6 +913,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       feed_forward_implementation = options->feed_forward_implementation;
   const iree_string_view_list_t diagnostic_tap_names =
       options->diagnostic_tap_names;
+  const id4_ideogram4_dit_lora_topology_t lora_topology =
+      options->lora_topology;
+  const id4_pipeline_program_tensor_t lora_strengths = options->lora_strengths;
+  iree_host_size_t* lora_target_use_count = options->lora_target_use_count;
   const uint32_t head_size = hidden_size / attention_head_count;
   const bool f32_canonical_activations =
       activation_format == ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
@@ -1010,6 +1015,17 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       adaln_modulation_prefix_buffer,
       IREE_ARRAYSIZE(adaln_modulation_prefix_buffer),
       &adaln_modulation_prefix));
+  char adaln_modulation_weight_key_buffer
+      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t adaln_modulation_weight_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      adaln_modulation_weight_key_buffer,
+      IREE_ARRAYSIZE(adaln_modulation_weight_key_buffer),
+      &adaln_modulation_weight_key, "%.*s.weight",
+      (int)adaln_modulation_prefix.size, adaln_modulation_prefix.data));
+  const id4_ideogram4_dit_lora_target_t* adaln_modulation_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(lora_topology,
+                                                   adaln_modulation_weight_key);
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
       branch_name, layer_ordinal, IREE_SV("adaln_modulation"),
       adaln_modulation_name_buffer,
@@ -1052,7 +1068,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         .output_size = modulation_output_size,
         .activation_kind = ID4_IDEOGRAM4_DIT_ACTIVATION_IDENTITY,
     };
-    if (bf16_resident_generic_linear_weight_execution) {
+    if (bf16_resident_generic_linear_weight_execution &&
+        !adaln_modulation_lora_target) {
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dense_bf16_rounded_f32(
           builder, &adaln_modulation_options, &raw_modulation));
     } else {
@@ -1088,8 +1105,26 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
           id4_pipeline_program_tensor_invalid();
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dense_bf16(
           builder, &direct_fp8_options, &raw_modulation_bf16));
+      id4_ideogram4_dit_program_lora_application_t lora_application;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+          builder, adaln_modulation_name, adaln_modulation_lora_target,
+          lora_topology.adapter_count, lora_strengths, 1, 1, adaln_size,
+          modulation_output_size, adaln_input, raw_modulation_bf16,
+          lora_target_use_count, &lora_application));
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
           builder, after_adaln_modulation_bf16_name));
+      if (lora_application.target) {
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+            builder, adaln_modulation_name, &lora_application));
+        char after_lora_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+        iree_string_view_t after_lora_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+            after_lora_name_buffer, IREE_ARRAYSIZE(after_lora_name_buffer),
+            &after_lora_name, "%.*s.after_lora",
+            (int)adaln_modulation_name.size, adaln_modulation_name.data));
+        IREE_RETURN_IF_ERROR(
+            id4_ideogram4_dit_program_barrier(builder, after_lora_name));
+      }
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
           builder, adaln_modulation_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
           id4_pipeline_program_make_shape_rank1(modulation_output_size),
@@ -1263,6 +1298,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter_source(
       parameter_sources, layer_ordinal, IREE_SV("attention.qkv.weight"),
       hidden_size, qkv_size, lora_parameter_domain, &qkv_parameter_source));
+  const id4_ideogram4_dit_lora_target_t* qkv_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(
+          lora_topology, qkv_parameter_source.matrix.weight.key);
   const bool qkv_uses_parameter_matrix =
       !f32_canonical_activations &&
       qkv_parameter_source.storage ==
@@ -1308,6 +1346,25 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
             builder, qkv_dispatch_name, total_token_count, bf16_token_capacity,
             hidden_size, qkv_size, attention_input, qkv_parameter, qkv));
+  }
+  id4_ideogram4_dit_program_lora_application_t qkv_lora_application;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+      builder, qkv_dispatch_name, qkv_lora_target, lora_topology.adapter_count,
+      lora_strengths, total_token_count, bf16_token_capacity, hidden_size,
+      qkv_size, attention_input, qkv, lora_target_use_count,
+      &qkv_lora_application));
+  if (qkv_lora_application.target) {
+    char after_qkv_base_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t after_qkv_base_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+        branch_name, layer_ordinal,
+        IREE_SV("after_attention_qkv_base_and_lora_down"),
+        after_qkv_base_name_buffer, IREE_ARRAYSIZE(after_qkv_base_name_buffer),
+        &after_qkv_base_name));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_barrier(builder, after_qkv_base_name));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+        builder, qkv_dispatch_name, &qkv_lora_application));
   }
 
   char after_qkv_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -1613,6 +1670,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       parameter_sources, layer_ordinal, IREE_SV("attention.o.weight"),
       hidden_size, hidden_size, lora_parameter_domain,
       &attention_output_parameter_source));
+  const id4_ideogram4_dit_lora_target_t* attention_output_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(
+          lora_topology, attention_output_parameter_source.matrix.weight.key);
   id4_pipeline_program_tensor_t attention_output =
       id4_pipeline_program_tensor_invalid();
   const bool tap_attention_output =
@@ -1668,6 +1728,31 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
             builder, attention_output_dispatch_name, total_token_count,
             bf16_token_capacity, hidden_size, hidden_size, attention_context,
             attention_output_parameter, attention_output));
+  }
+  id4_ideogram4_dit_program_lora_application_t
+      attention_output_lora_application;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+      builder, attention_output_dispatch_name, attention_output_lora_target,
+      lora_topology.adapter_count, lora_strengths, total_token_count,
+      bf16_token_capacity, hidden_size, hidden_size, attention_context,
+      attention_output, lora_target_use_count,
+      &attention_output_lora_application));
+  if (attention_output_lora_application.target) {
+    char after_attention_output_base_name_buffer
+        [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t after_attention_output_base_name =
+        iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+        branch_name, layer_ordinal,
+        IREE_SV("after_attention_output_base_and_lora_down"),
+        after_attention_output_base_name_buffer,
+        IREE_ARRAYSIZE(after_attention_output_base_name_buffer),
+        &after_attention_output_base_name));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
+        builder, after_attention_output_base_name));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+        builder, attention_output_dispatch_name,
+        &attention_output_lora_application));
   }
 
   char after_attention_output_name_buffer
@@ -1821,8 +1906,6 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         "Ideogram4 DiT feed-forward projection taps require PyTorch parity "
         "feed-forward structure");
   }
-  const bool materialize_feed_forward_projections = pytorch_parity_feed_forward;
-
   id4_pipeline_program_tensor_t ffn_norm1_weight =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_parameter_bf16(
@@ -1909,6 +1992,15 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       parameter_sources, layer_ordinal, IREE_SV("feed_forward.w3.weight"),
       hidden_size, intermediate_size, lora_parameter_domain,
       &feed_forward_w3_parameter_source));
+  const id4_ideogram4_dit_lora_target_t* feed_forward_w1_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(
+          lora_topology, feed_forward_w1_parameter_source.matrix.weight.key);
+  const id4_ideogram4_dit_lora_target_t* feed_forward_w3_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(
+          lora_topology, feed_forward_w3_parameter_source.matrix.weight.key);
+  const bool materialize_feed_forward_projections =
+      pytorch_parity_feed_forward || feed_forward_w1_lora_target ||
+      feed_forward_w3_lora_target;
   const bool feed_forward_uses_parameter_swiglu =
       !capture_mlp_hidden_as_f32 && !materialize_feed_forward_projections &&
       feed_forward_w1_parameter_source.storage ==
@@ -1993,6 +2085,12 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               builder, mlp_gate_dispatch_name, total_token_count,
               bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
               feed_forward_w1_parameter, mlp_gate));
+      id4_ideogram4_dit_program_lora_application_t mlp_gate_lora_application;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+          builder, mlp_gate_dispatch_name, feed_forward_w1_lora_target,
+          lora_topology.adapter_count, lora_strengths, total_token_count,
+          bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
+          mlp_gate, lora_target_use_count, &mlp_gate_lora_application));
 
       id4_pipeline_program_tensor_t mlp_up =
           id4_pipeline_program_tensor_invalid();
@@ -2006,6 +2104,12 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               builder, mlp_up_dispatch_name, total_token_count,
               bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
               feed_forward_w3_parameter, mlp_up));
+      id4_ideogram4_dit_program_lora_application_t mlp_up_lora_application;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+          builder, mlp_up_dispatch_name, feed_forward_w3_lora_target,
+          lora_topology.adapter_count, lora_strengths, total_token_count,
+          bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
+          mlp_up, lora_target_use_count, &mlp_up_lora_application));
 
       char after_mlp_projection_name_buffer
           [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -2017,6 +2121,21 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
           &after_mlp_projection_name));
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
           builder, after_mlp_projection_name));
+
+      if (mlp_gate_lora_application.target || mlp_up_lora_application.target) {
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+            builder, mlp_gate_dispatch_name, &mlp_gate_lora_application));
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+            builder, mlp_up_dispatch_name, &mlp_up_lora_application));
+        char after_lora_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+        iree_string_view_t after_lora_name = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+            branch_name, layer_ordinal, IREE_SV("after_ffn_w1_w3_lora"),
+            after_lora_name_buffer, IREE_ARRAYSIZE(after_lora_name_buffer),
+            &after_lora_name));
+        IREE_RETURN_IF_ERROR(
+            id4_ideogram4_dit_program_barrier(builder, after_lora_name));
+      }
 
       if (tap_mlp_gate) {
         IREE_RETURN_IF_ERROR(
@@ -2152,6 +2271,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       parameter_sources, layer_ordinal, IREE_SV("feed_forward.w2.weight"),
       intermediate_size, hidden_size, lora_parameter_domain,
       &feed_forward_w2_parameter_source));
+  const id4_ideogram4_dit_lora_target_t* feed_forward_w2_lora_target =
+      id4_ideogram4_dit_program_lookup_lora_target(
+          lora_topology, feed_forward_w2_parameter_source.matrix.weight.key);
   const bool feed_forward_w2_uses_parameter_matrix =
       !mlp_output_as_f32 && !capture_mlp_hidden_as_f32 &&
       feed_forward_w2_parameter_source.storage ==
@@ -2210,6 +2332,27 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               bf16_token_capacity, intermediate_size, hidden_size, mlp_hidden,
               feed_forward_w2_parameter, mlp_output));
     }
+  }
+  id4_ideogram4_dit_program_lora_application_t mlp_output_lora_application;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_begin_lora(
+      builder, mlp_output_dispatch_name, feed_forward_w2_lora_target,
+      lora_topology.adapter_count, lora_strengths, total_token_count,
+      bf16_token_capacity, intermediate_size, hidden_size, mlp_hidden,
+      mlp_output, lora_target_use_count, &mlp_output_lora_application));
+  if (mlp_output_lora_application.target) {
+    char after_mlp_output_base_name_buffer
+        [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t after_mlp_output_base_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+        branch_name, layer_ordinal,
+        IREE_SV("after_ffn_output_base_and_lora_down"),
+        after_mlp_output_base_name_buffer,
+        IREE_ARRAYSIZE(after_mlp_output_base_name_buffer),
+        &after_mlp_output_base_name));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_barrier(builder, after_mlp_output_base_name));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_finish_lora(
+        builder, mlp_output_dispatch_name, &mlp_output_lora_application));
   }
 
   char after_mlp_output_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];

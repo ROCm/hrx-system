@@ -444,6 +444,7 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
         dit_options->attention_implementation;
     program_options.feed_forward_implementation =
         dit_options->feed_forward_implementation;
+    program_options.lora_topology = dit_options->lora_topology;
     if (iree_all_bits_set(
             stage_options->flags,
             ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {

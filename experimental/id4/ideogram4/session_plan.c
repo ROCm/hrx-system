@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/ideogram4/lora.h"
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/ideogram4/session_generation.h"
 #include "experimental/id4/ideogram4/session_state.h"
@@ -339,6 +340,10 @@ static iree_status_t id4_ideogram4_plan_generation_dit(
       options->policy.dit_attention_implementation;
   dit_options.feed_forward_implementation =
       options->policy.dit_feed_forward_implementation;
+  if (conditioning_mode == ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED) {
+    dit_options.lora_topology =
+        id4_ideogram4_lora_topology_view(options->lora_topology);
+  }
   return id4_ideogram4_plan_stage(
       conditioning_mode == ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED
           ? ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED
@@ -452,6 +457,10 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   if (iree_status_is_ok(status)) {
     plan->summary.denoise_step_count = id4_ideogram4_sampler_preset_step_count(
         options->request->generation.sampler_preset);
+    plan->summary.lora_adapter_count =
+        id4_ideogram4_lora_topology_adapter_count(options->lora_topology);
+    plan->summary.lora_target_count =
+        id4_ideogram4_lora_topology_target_count(options->lora_topology);
     plan->summary.decoded_image_shape =
         id4_ideogram4_generation_decoded_image_shape(
             session->decode_model, plan->summary.diffusion_latent_shape);
@@ -2128,14 +2137,16 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       ",\"conditioned_dit_token_capacity\":%" PRIu32
       ",\"unconditioned_dit_token_count\":%" PRIu32
       ",\"unconditioned_dit_token_capacity\":%" PRIu32
-      ",\"denoise_step_count\":%" PRIu32 ",\"diffusion_latent_shape\":",
+      ",\"denoise_step_count\":%" PRIu32 ",\"lora_adapter_count\":%" PRIhsz
+      ",\"lora_target_count\":%" PRIhsz ",\"diffusion_latent_shape\":",
       plan->summary.qwen_token_count, plan->summary.qwen_token_capacity,
       plan->summary.image_token_count,
       plan->summary.conditioned_dit_token_count,
       plan->summary.conditioned_dit_token_capacity,
       plan->summary.unconditioned_dit_token_count,
       plan->summary.unconditioned_dit_token_capacity,
-      plan->summary.denoise_step_count));
+      plan->summary.denoise_step_count, plan->summary.lora_adapter_count,
+      plan->summary.lora_target_count));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
       builder, plan->summary.diffusion_latent_shape));
   IREE_RETURN_IF_ERROR(

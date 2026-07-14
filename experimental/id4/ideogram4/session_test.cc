@@ -7,10 +7,12 @@
 #include "experimental/id4/ideogram4/session.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
 
+#include "experimental/id4/ideogram4/lora.h"
 #include "experimental/id4/pipeline/parameter_residency.h"
 #include "experimental/id4/pipeline/parameter_window_statistics.h"
 #include "experimental/id4/stages/qwen3_vl_program.h"
@@ -68,6 +70,15 @@ struct GenerationPlanDeleter {
 using GenerationPlanPtr =
     std::unique_ptr<id4_ideogram4_generation_plan_t, GenerationPlanDeleter>;
 
+struct LoraTopologyDeleter {
+  void operator()(id4_ideogram4_lora_topology_t* topology) const {
+    id4_ideogram4_lora_topology_release(topology);
+  }
+};
+
+using LoraTopologyPtr =
+    std::unique_ptr<id4_ideogram4_lora_topology_t, LoraTopologyDeleter>;
+
 struct ParameterResidencyPlanDeleter {
   void operator()(id4_pipeline_parameter_residency_plan_t* plan) const {
     id4_pipeline_parameter_residency_plan_release(plan);
@@ -83,6 +94,65 @@ static TokenizerPtr LoadTokenizer() {
   IREE_CHECK_OK(iree_tokenizer_from_huggingface_json(
       GetEmbeddedTokenizerJson(), iree_allocator_system(), &tokenizer));
   return TokenizerPtr(tokenizer);
+}
+
+static void AddLoraTensor(iree_io_parameter_index_t* parameter_index,
+                          iree_string_view_t key, uint32_t rows,
+                          uint32_t columns) {
+  char metadata_buffer[160];
+  const uint64_t byte_length = (uint64_t)rows * columns * sizeof(uint16_t);
+  const int metadata_length =
+      std::snprintf(metadata_buffer, sizeof(metadata_buffer),
+                    "{\"dtype\":\"BF16\",\"shape\":[%" PRIu32 ",%" PRIu32
+                    "],\"data_offsets\":[0,%" PRIu64 "]}",
+                    rows, columns, byte_length);
+  ASSERT_GE(metadata_length, 0);
+  ASSERT_LT((iree_host_size_t)metadata_length, sizeof(metadata_buffer));
+  iree_io_parameter_index_entry_t entry;
+  std::memset(&entry, 0, sizeof(entry));
+  entry.key = key;
+  entry.metadata = iree_make_const_byte_span(metadata_buffer, metadata_length);
+  entry.length = byte_length;
+  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT;
+  entry.storage.splat.pattern_length = 1;
+  IREE_ASSERT_OK(iree_io_parameter_index_add(parameter_index, &entry));
+}
+
+static LoraTopologyPtr CreateSingleLoraTopology() {
+  const id4_ideogram4_dit_model_config_t* model =
+      id4_ideogram4_dit_program_ideogram4_model_config();
+  iree_io_parameter_index_t* parameter_index = nullptr;
+  IREE_CHECK_OK(iree_io_parameter_index_create(iree_allocator_system(),
+                                               &parameter_index));
+  AddLoraTensor(parameter_index,
+                IREE_SV("diffusion_model.layers.0.attention.qkv.lora_A.weight"),
+                2, model->hidden_size);
+  AddLoraTensor(parameter_index,
+                IREE_SV("diffusion_model.layers.0.attention.qkv.lora_B.weight"),
+                model->hidden_size * 3, 2);
+
+  id4_ideogram4_lora_import_options_t import_options;
+  std::memset(&import_options, 0, sizeof(import_options));
+  import_options.structure_size = sizeof(import_options);
+  import_options.model = *model;
+  import_options.parameter_index = parameter_index;
+  import_options.source_scope = IREE_SV("adapter");
+  id4_ideogram4_lora_t* lora = nullptr;
+  IREE_CHECK_OK(id4_ideogram4_lora_import(&import_options,
+                                          iree_allocator_system(), &lora));
+  iree_io_parameter_index_release(parameter_index);
+
+  id4_ideogram4_lora_t* loras[] = {lora};
+  id4_ideogram4_lora_topology_create_options_t topology_options;
+  std::memset(&topology_options, 0, sizeof(topology_options));
+  topology_options.structure_size = sizeof(topology_options);
+  topology_options.lora_count = IREE_ARRAYSIZE(loras);
+  topology_options.loras = loras;
+  id4_ideogram4_lora_topology_t* topology = nullptr;
+  IREE_CHECK_OK(id4_ideogram4_lora_topology_create(
+      &topology_options, iree_allocator_system(), &topology));
+  id4_ideogram4_lora_release(lora);
+  return LoraTopologyPtr(topology);
 }
 
 static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
@@ -575,9 +645,10 @@ class SessionTest : public ::testing::Test {
     return CreateLoadedSession(CreateOptions());
   }
 
-  GenerationPlanPtr PlanGeneration(id4_ideogram4_session_t* session,
-                                   const iree_tokenizer_t* tokenizer,
-                                   const id4_ideogram4_request_t* request) {
+  GenerationPlanPtr PlanGeneration(
+      id4_ideogram4_session_t* session, const iree_tokenizer_t* tokenizer,
+      const id4_ideogram4_request_t* request,
+      const id4_ideogram4_lora_topology_t* lora_topology = nullptr) {
     id4_ideogram4_generation_plan_options_t plan_options;
     std::memset(&plan_options, 0, sizeof(plan_options));
     plan_options.structure_size = sizeof(plan_options);
@@ -585,6 +656,7 @@ class SessionTest : public ::testing::Test {
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
     plan_options.policy = MakeGenerationPolicy();
+    plan_options.lora_topology = lora_topology;
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     id4::test::StageDiagnostics diagnostics = {};
@@ -835,6 +907,10 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"qwen_token_capacity\""), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"lora_adapter_count\":0"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"lora_target_count\":0"), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 json, IREE_SV("\"phase_parameter_high_water_mark\""), 0),
             IREE_STRING_VIEW_NPOS);
@@ -847,6 +923,38 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
       iree_string_view_find(json, IREE_SV("\"peak_live_byte_length\""), 0),
       IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
+}
+
+TEST_F(SessionTest, PlansIssueTimeLoraStrengthsForConditionedDit) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  LoraTopologyPtr topology = CreateSingleLoraTopology();
+
+  GenerationPlanPtr plan = PlanGeneration(session.get(), tokenizer.get(),
+                                          &request.value, topology.get());
+  id4_ideogram4_generation_plan_summary_t summary;
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_summary(plan.get(), &summary));
+  EXPECT_EQ(summary.lora_adapter_count, 1u);
+  EXPECT_EQ(summary.lora_target_count, 1u);
+
+  const id4_pipeline_plan_t* conditioned_plan =
+      FindStagePlan(plan.get(), IREE_SV("dit_conditioned"));
+  ASSERT_NE(conditioned_plan, nullptr);
+  const id4_pipeline_tensor_layout_t* strengths =
+      FindBoundaryLayout(conditioned_plan, IREE_SV("lora.strengths"));
+  ASSERT_NE(strengths, nullptr);
+  EXPECT_EQ(strengths->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+  EXPECT_TRUE(ShapeEquals(
+      strengths->shape, TensorShape(id4_pipeline_program_make_shape_rank1(1))));
+
+  const id4_pipeline_plan_t* unconditioned_plan =
+      FindStagePlan(plan.get(), IREE_SV("dit_unconditioned"));
+  ASSERT_NE(unconditioned_plan, nullptr);
+  EXPECT_EQ(FindBoundaryLayout(unconditioned_plan, IREE_SV("lora.strengths")),
+            nullptr);
 }
 
 TEST_F(SessionTest, PlansGenerationBoundaryShapesFromDynamicLatentShape) {

@@ -611,6 +611,21 @@ loom_link_module(
 
 loom_link_module(
   NAME
+    ideogram4_lora_bf16_test_module
+  SRCS
+    "testdata/ideogram4/lora_bf16.loom"
+  LIBRARIES
+    "ideogram4/lora_bf16.loom"
+  MODE
+    "archive"
+  OUTPUT
+    "ideogram4_lora_bf16_test_module.loom"
+  OUTPUT_FORMAT
+    "text"
+)
+
+loom_link_module(
+  NAME
     ideogram4_mlp_gate_up_silu_f32_test_module
   SRCS
     "testdata/ideogram4/mlp_gate_up_silu_f32.loom"
@@ -1984,6 +1999,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/linear_fp8_f32.loom"
     "ideogram4/linear_input_pack_f32_bf16.loom"
     "ideogram4/linear_input_unpack_bf16_f32.loom"
+    "ideogram4/lora_bf16.loom"
     "ideogram4/mlp_gate_up_silu_f32.loom"
     "ideogram4/mlp_up_silu_product_bf16_tail.loom"
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom"
@@ -2116,6 +2132,7 @@ iree_c_embed_data(
     "ideogram4/linear_fp8_f32.loom"
     "ideogram4/linear_input_pack_f32_bf16.loom"
     "ideogram4/linear_input_unpack_bf16_f32.loom"
+    "ideogram4/lora_bf16.loom"
     "ideogram4/mlp_gate_up_silu_f32.loom"
     "ideogram4/mlp_up_silu_product_bf16_tail.loom"
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom"
@@ -2211,6 +2228,69 @@ iree_c_embed_data(
     "id4_kernel_embedded_loom_sources"
   STRIP_PREFIX
   PUBLIC
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_lora_down_bf16_small_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_lora_down_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=2"
+    "--config=id4.ideogram4.lora.total_rank=3"
+    "--config=id4.ideogram4.lora.segment_count=1"
+    "--config=id4.ideogram4.lora.adapter_count=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_lora_up_add_bf16_small_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_lora_up_add_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=2"
+    "--config=id4.ideogram4.lora.total_rank=4"
+    "--config=id4.ideogram4.lora.segment_count=1"
+    "--config=id4.ideogram4.lora.adapter_count=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_lora_up_add_bf16_composed_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_lora_up_add_bf16_composed"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=1"
+    "--config=id4.ideogram4.lora.total_rank=14"
+    "--config=id4.ideogram4.lora.segment_count=2"
+    "--config=id4.ideogram4.lora.adapter_count=5"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
 )
 
 iree_native_test(
@@ -14255,6 +14335,81 @@ iree_native_test(
   LABELS
     "hostonly"
 )
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_lora_down_bf16_small_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--case=@id4_ideogram4_lora_down_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=2"
+    "--config=id4.ideogram4.lora.total_rank=3"
+    "--config=id4.ideogram4.lora.segment_count=1"
+    "--config=id4.ideogram4.lora.adapter_count=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_lora_up_add_bf16_small_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--case=@id4_ideogram4_lora_up_add_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=2"
+    "--config=id4.ideogram4.lora.total_rank=4"
+    "--config=id4.ideogram4.lora.segment_count=1"
+    "--config=id4.ideogram4.lora.adapter_count=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_lora_up_add_bf16_composed_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bf16_test_module.loom}}"
+    "--case=@id4_ideogram4_lora_up_add_bf16_composed_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.lora.token_count=2"
+    "--config=id4.ideogram4.lora.token_capacity=2"
+    "--config=id4.ideogram4.lora.input_size=4"
+    "--config=id4.ideogram4.lora.output_size=1"
+    "--config=id4.ideogram4.lora.total_rank=14"
+    "--config=id4.ideogram4.lora.segment_count=2"
+    "--config=id4.ideogram4.lora.adapter_count=5"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(

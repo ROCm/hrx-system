@@ -56,6 +56,8 @@ typedef struct id4_ideogram4_dit_stage_plan_options_t {
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation selected for internal transformer blocks.
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
+  // Static conditioned-DiT LoRA topology borrowed for this planning call.
+  id4_ideogram4_dit_lora_topology_t lora_topology;
 } id4_ideogram4_dit_stage_plan_options_t;
 
 // Creates an Ideogram4 DiT forward stage.

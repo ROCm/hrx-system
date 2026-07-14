@@ -773,6 +773,14 @@ iree_status_t id4_pipeline_program_builder_create(
 void id4_pipeline_program_builder_destroy(
     id4_pipeline_program_builder_t* builder);
 
+// Returns the append-only allocator owned by |builder|.
+//
+// Authoring helpers may use this for variable-size scratch tables that remain
+// valid until the builder is destroyed. Individual allocations are not
+// reclaimed and must not escape the builder lifetime.
+iree_allocator_t id4_pipeline_program_builder_allocator(
+    id4_pipeline_program_builder_t* builder);
+
 // Imports an external tensor from the stage boundary.
 iree_status_t id4_pipeline_program_import_tensor(
     id4_pipeline_program_builder_t* builder,

@@ -155,6 +155,8 @@ iree_cc_library(
     "ideogram4_dit_program.c"
     "ideogram4_dit_program_block.c"
     "ideogram4_dit_program_block.h"
+    "ideogram4_dit_program_lora.c"
+    "ideogram4_dit_program_lora.h"
   DEPS
     iree::base
     iree::experimental::id4::pipeline::program

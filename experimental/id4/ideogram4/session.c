@@ -6,6 +6,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -20,6 +21,32 @@
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/qwen3_vl.h"
 #include "experimental/id4/stages/sampler.h"
+
+static iree_status_t id4_ideogram4_validate_generation_lora_strengths(
+    const id4_ideogram4_generation_plan_summary_t* summary,
+    iree_host_size_t strength_count, const float* strengths) {
+  if (strength_count != summary->lora_adapter_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation has %" PRIhsz
+        " LoRA strengths but the prepared bundle requires %" PRIhsz,
+        strength_count, summary->lora_adapter_count);
+  }
+  if ((strength_count == 0) != (strengths == NULL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation LoRA strength storage must exactly match its "
+        "count");
+  }
+  for (iree_host_size_t i = 0; i < strength_count; ++i) {
+    if (!isfinite(strengths[i])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation LoRA strength %" PRIhsz " is not finite", i);
+    }
+  }
+  return iree_ok_status();
+}
 
 static iree_status_t id4_ideogram4_validate_generation_issue_options(
     const id4_ideogram4_session_t* session,
@@ -59,6 +86,8 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
         IREE_STATUS_UNIMPLEMENTED,
         "Ideogram 4 generation issue extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_lora_strengths(
+      &bundle->summary, options->lora_strength_count, options->lora_strengths));
   switch (options->issue_policy) {
     case ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT:
     case ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL:
@@ -164,6 +193,8 @@ static iree_status_t id4_ideogram4_validate_generation_begin_options(
         IREE_STATUS_UNIMPLEMENTED,
         "Ideogram 4 generation begin extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_lora_strengths(
+      &bundle->summary, options->lora_strength_count, options->lora_strengths));
   if (!options->tokenizer) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -356,6 +387,22 @@ static iree_status_t id4_ideogram4_generation_upload_noise_seed(
   return id4_ideogram4_generation_upload_boundary_tensor(
       execution, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE, IREE_SV("seed"),
       seed_words, sizeof(seed_words), initial_wait_semaphore_list);
+}
+
+static iree_status_t id4_ideogram4_generation_upload_lora_strengths(
+    id4_ideogram4_generation_execution_t* execution,
+    iree_host_size_t strength_count, const float* strengths) {
+  if (strength_count == 0) return iree_ok_status();
+  iree_host_size_t strength_byte_length = 0;
+  if (!iree_host_size_checked_mul(strength_count, sizeof(*strengths),
+                                  &strength_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 LoRA strength upload size overflows");
+  }
+  return id4_ideogram4_generation_upload_boundary_tensor(
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+      IREE_SV("lora.strengths"), strengths, strength_byte_length,
+      iree_hal_semaphore_list_empty());
 }
 
 static iree_status_t id4_ideogram4_generation_upload_qwen_inputs(
@@ -698,6 +745,7 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_request_t* request, const iree_tokenizer_t* tokenizer,
     iree_tokenizer_encode_flags_t tokenizer_flags,
+    iree_host_size_t lora_strength_count, const float* lora_strengths,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list,
     id4_ideogram4_generation_execution_t** out_execution) {
@@ -774,6 +822,10 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
         &execution->dit_inputs.conditioned);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_lora_strengths(
+        execution, lora_strength_count, lora_strengths);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_upload_dit_branch_inputs(
         execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
         &execution->dit_inputs.unconditioned);
@@ -814,7 +866,8 @@ iree_status_t id4_ideogram4_session_begin_generation(
       session, bundle, options));
   return id4_ideogram4_generation_begin_execution(
       session, bundle, options->request, options->tokenizer,
-      options->tokenizer_flags, options->wait_semaphore_list,
+      options->tokenizer_flags, options->lora_strength_count,
+      options->lora_strengths, options->wait_semaphore_list,
       options->signal_semaphore_list, out_execution);
 }
 
@@ -1475,7 +1528,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
       ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL) {
     iree_status_t status = id4_ideogram4_generation_begin_execution(
         session, bundle, options->request, options->tokenizer,
-        options->tokenizer_flags, options->wait_semaphore_list,
+        options->tokenizer_flags, options->lora_strength_count,
+        options->lora_strengths, options->wait_semaphore_list,
         iree_hal_semaphore_list_empty(), &execution);
     if (iree_status_is_ok(status)) {
       execution->parameter_load_prefetch_segment_distance =
@@ -1510,7 +1564,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
 
   iree_status_t status = id4_ideogram4_generation_begin_execution(
       session, bundle, options->request, options->tokenizer,
-      options->tokenizer_flags, options->wait_semaphore_list,
+      options->tokenizer_flags, options->lora_strength_count,
+      options->lora_strengths, options->wait_semaphore_list,
       iree_hal_semaphore_list_empty(), &execution);
   if (iree_status_is_ok(status)) {
     execution->parameter_load_prefetch_segment_distance =

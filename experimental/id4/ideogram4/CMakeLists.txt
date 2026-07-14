@@ -98,6 +98,7 @@ iree_cc_library(
     "session_support.c"
     "session_support.h"
   DEPS
+    ::lora
     ::request
     iree::base
     iree::experimental::id4::pipeline::binding
@@ -145,6 +146,7 @@ iree_cc_test(
   SRCS
     "session_test.cc"
   DEPS
+    ::lora
     ::session
     iree::base
     iree::experimental::id4::pipeline::parameter_residency
@@ -152,6 +154,7 @@ iree_cc_test(
     iree::experimental::id4::stages::qwen3_vl_program
     iree::experimental::id4::stages::test_util
     iree::hal
+    iree::io::parameter_index
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer::format::huggingface::tokenizer_json

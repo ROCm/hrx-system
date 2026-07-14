@@ -91,6 +91,7 @@ iree_runtime_cc_library(
     ],
     hdrs = ["session.h"],
     deps = [
+        ":lora",
         ":request",
         "//experimental/id4/pipeline:binding",
         "//experimental/id4/pipeline:diagnostics",
@@ -135,6 +136,7 @@ iree_runtime_cc_test(
     name = "session_test",
     srcs = ["session_test.cc"],
     deps = [
+        ":lora",
         ":session",
         "//experimental/id4/pipeline:parameter_residency",
         "//experimental/id4/pipeline:parameter_window",
@@ -142,6 +144,7 @@ iree_runtime_cc_test(
         "//experimental/id4/stages:test_util",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",

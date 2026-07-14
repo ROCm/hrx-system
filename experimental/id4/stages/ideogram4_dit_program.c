@@ -13,6 +13,7 @@
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/pipeline/program_matrix.h"
 #include "experimental/id4/stages/ideogram4_dit_program_block.h"
+#include "experimental/id4/stages/ideogram4_dit_program_lora.h"
 
 enum {
   ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK = 16,
@@ -746,6 +747,22 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
           options->feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_diagnostic_taps(
       options->diagnostic_tap_names));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_validate_lora_topology(options->lora_topology));
+  if (options->lora_topology.target_count != 0 &&
+      options->request.conditioning_mode !=
+          ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT LoRA topology requires conditioned execution");
+  }
+  if (options->lora_topology.target_count != 0 &&
+      options->activation_format !=
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram4 DiT dynamic LoRA requires BF16 linear-input activations");
+  }
   return id4_ideogram4_dit_program_token_counts(options, out_image_token_count,
                                                 out_total_token_count);
 }
@@ -5287,6 +5304,17 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
                                               text_token_count),
         &condition));
   }
+  id4_pipeline_program_tensor_t lora_strengths =
+      id4_pipeline_program_tensor_invalid();
+  if (options->lora_topology.adapter_count != 0) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_import_tensor(
+        builder, IREE_SV("lora.strengths"),
+        ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+        ID4_PIPELINE_PROGRAM_DTYPE_F32,
+        id4_pipeline_program_make_shape_rank1(
+            options->lora_topology.adapter_count),
+        &lora_strengths));
+  }
 
   id4_ideogram4_dit_program_linear_parameter_t input_proj = {
       .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID,
@@ -5686,6 +5714,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         id4_ideogram4_dit_program_tap(builder, adaln_input_name, adaln_input));
   }
   const iree_string_view_t lora_parameter_domain = IREE_SV("lora_patchable");
+  iree_host_size_t lora_target_use_count = 0;
   id4_pipeline_program_tensor_t layer_input = prelude_hidden;
   for (uint32_t layer_ordinal = 0; layer_ordinal < options->model.layer_count;
        ++layer_ordinal) {
@@ -5711,10 +5740,20 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         .attention_implementation = options->attention_implementation,
         .feed_forward_implementation = options->feed_forward_implementation,
         .diagnostic_tap_names = options->diagnostic_tap_names,
+        .lora_topology = options->lora_topology,
+        .lora_strengths = lora_strengths,
+        .lora_target_use_count = &lora_target_use_count,
     };
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_author_transformer_block(
         &block_options, &layer_output));
     layer_input = layer_output;
+  }
+  if (lora_target_use_count != options->lora_topology.target_count) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "Ideogram4 DiT program consumed %" PRIhsz
+                            " of %" PRIhsz " LoRA targets",
+                            lora_target_use_count,
+                            options->lora_topology.target_count);
   }
   return id4_ideogram4_dit_program_author_final_output(
       options, builder, branch_name, total_token_count, layer_input,

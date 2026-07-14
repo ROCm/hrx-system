@@ -1659,6 +1659,12 @@ void id4_pipeline_program_builder_destroy(
   iree_allocator_free(host_allocator, builder);
 }
 
+iree_allocator_t id4_pipeline_program_builder_allocator(
+    id4_pipeline_program_builder_t* builder) {
+  IREE_ASSERT_ARGUMENT(builder);
+  return builder->arena_allocator;
+}
+
 iree_status_t id4_pipeline_program_import_tensor(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_import_tensor_options_t* options,

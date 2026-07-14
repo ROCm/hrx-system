@@ -40,6 +40,9 @@ typedef struct id4_ideogram4_generation_plan_t id4_ideogram4_generation_plan_t;
 typedef struct id4_ideogram4_generation_bundle_t
     id4_ideogram4_generation_bundle_t;
 
+// Opaque immutable composition topology for an ordered set of LoRAs.
+typedef struct id4_ideogram4_lora_topology_t id4_ideogram4_lora_topology_t;
+
 // Opaque prepared generation phase bundle assembled from one generation bundle.
 typedef struct id4_ideogram4_generation_phase_bundle_t
     id4_ideogram4_generation_phase_bundle_t;
@@ -145,6 +148,9 @@ typedef struct id4_ideogram4_generation_plan_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Target and representation policy for this generation plan.
   id4_ideogram4_generation_plan_policy_t policy;
+  // Immutable ordered LoRA topology borrowed for this planning call; NULL
+  // selects exact base-model execution.
+  const id4_ideogram4_lora_topology_t* lora_topology;
   // Coarse stages planned with one semantic dispatch per executable region.
   id4_ideogram4_generation_resident_stage_mask_t region_per_dispatch_stage_mask;
   // Device index within the session device group used by every stage plan.
@@ -178,6 +184,10 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   uint32_t unconditioned_dit_token_capacity;
   // Number of denoise steps requested for the generation.
   uint32_t denoise_step_count;
+  // Number of issue-time LoRA strengths required by this plan.
+  iree_host_size_t lora_adapter_count;
+  // Number of conditioned-DiT parameters patched by the LoRA topology.
+  iree_host_size_t lora_target_count;
   // Diffusion latent tensor shape shared by DiT, sampler, and decode stages.
   id4_pipeline_program_shape_t diffusion_latent_shape;
   // Decoded image tensor shape produced by the final decode stage.
@@ -433,6 +443,10 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   const iree_tokenizer_t* tokenizer;
   // Tokenizer flags used while encoding the Qwen prompt text.
   iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Number of F32 values in |lora_strengths|; must exactly match the plan.
+  iree_host_size_t lora_strength_count;
+  // Caller-owned LoRA strengths ordered by the plan topology.
+  const float* lora_strengths;
   // Policy controlling how the full generation is submitted.
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Stage issue flags forwarded to each coarse generation stage.
@@ -463,6 +477,10 @@ typedef struct id4_ideogram4_generation_begin_options_t {
   const iree_tokenizer_t* tokenizer;
   // Tokenizer flags used while encoding the Qwen prompt text.
   iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Number of F32 values in |lora_strengths|; must exactly match the plan.
+  iree_host_size_t lora_strength_count;
+  // Caller-owned LoRA strengths ordered by the plan topology.
+  const float* lora_strengths;
   // Semaphores that generation begin waits on before request uploads.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled after request uploads are queued.

@@ -23,6 +23,51 @@ package(
 
 _KERNEL_CASES = [
     {
+        "actual_case": "@id4_ideogram4_lora_down_bf16_small_case",
+        "benchmark": "@id4_ideogram4_lora_down_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.lora.token_count=2",
+            "--config=id4.ideogram4.lora.token_capacity=2",
+            "--config=id4.ideogram4.lora.input_size=4",
+            "--config=id4.ideogram4.lora.output_size=2",
+            "--config=id4.ideogram4.lora.total_rank=3",
+            "--config=id4.ideogram4.lora.segment_count=1",
+            "--config=id4.ideogram4.lora.adapter_count=1",
+        ],
+        "source": "ideogram4/lora_bf16.loom",
+        "target_name": "ideogram4_lora_down_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_up_add_bf16_small_case",
+        "benchmark": "@id4_ideogram4_lora_up_add_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.lora.token_count=2",
+            "--config=id4.ideogram4.lora.token_capacity=2",
+            "--config=id4.ideogram4.lora.input_size=4",
+            "--config=id4.ideogram4.lora.output_size=2",
+            "--config=id4.ideogram4.lora.total_rank=4",
+            "--config=id4.ideogram4.lora.segment_count=1",
+            "--config=id4.ideogram4.lora.adapter_count=1",
+        ],
+        "source": "ideogram4/lora_bf16.loom",
+        "target_name": "ideogram4_lora_up_add_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_up_add_bf16_composed_case",
+        "benchmark": "@id4_ideogram4_lora_up_add_bf16_composed",
+        "configs": [
+            "--config=id4.ideogram4.lora.token_count=2",
+            "--config=id4.ideogram4.lora.token_capacity=2",
+            "--config=id4.ideogram4.lora.input_size=4",
+            "--config=id4.ideogram4.lora.output_size=1",
+            "--config=id4.ideogram4.lora.total_rank=14",
+            "--config=id4.ideogram4.lora.segment_count=2",
+            "--config=id4.ideogram4.lora.adapter_count=5",
+        ],
+        "source": "ideogram4/lora_bf16.loom",
+        "target_name": "ideogram4_lora_up_add_bf16_composed",
+    },
+    {
         "actual_case": "@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small_case",
         "benchmark": "@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small",
         "configs": [
@@ -8278,6 +8323,7 @@ _KERNEL_SOURCES = [
     "ideogram4/linear_fp8_f32.loom",
     "ideogram4/linear_input_pack_f32_bf16.loom",
     "ideogram4/linear_input_unpack_bf16_f32.loom",
+    "ideogram4/lora_bf16.loom",
     "ideogram4/mlp_gate_up_silu_f32.loom",
     "ideogram4/mlp_up_silu_product_bf16_tail.loom",
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom",
