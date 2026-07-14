@@ -871,11 +871,44 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                               materialization, &materialization_target));
     IREE_ASSERT_OK(id4_pipeline_parameter_materialization_query_binding(
         materialization, &materialization_binding));
+
+    // Prepare an independent but structurally compatible plan. The published
+    // domain must follow parameter-layout compatibility rather than the pointer
+    // identity of the plan that produced it.
+    OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> compatible_plan;
+    IREE_ASSERT_OK(CreateTwoRegionAddPlan(
+        program.get(), context, stage_plan_flags, stage_diagnostic_tap_names,
+        &diagnostics_sink, compatible_plan.out()));
+    ASSERT_NE(compatible_plan.get(), plan.get());
+    id4_pipeline_stage_prepare_options_t compatible_stage_prepare_options =
+        stage_prepare_options;
+    compatible_stage_prepare_options.parameter_policy =
+        id4_pipeline_stage_parameters(
+            id4_pipeline_resident_parameter_source(parameter_slabs),
+            ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT,
+            /*maximum_parameter_window_byte_length=*/0);
+    compatible_stage_prepare_options.wait_semaphore_list =
+        iree_hal_semaphore_list_empty();
+    compatible_stage_prepare_options.signal_semaphore_list =
+        iree_hal_semaphore_list_empty();
+    id4_pipeline_program_stage_prepare_options_t compatible_prepare_options =
+        prepare_options;
+    compatible_prepare_options.stage_options =
+        &compatible_stage_prepare_options;
+    compatible_prepare_options.plan = compatible_plan.get();
+    OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+        compatible_base_bundle;
+    IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
+        &compatible_prepare_options, iree_allocator_system(),
+        compatible_base_bundle.out()));
+
     OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
         derived_bundle;
     IREE_ASSERT_OK(id4_pipeline_program_stage_derive_bundle(
-        bundle.get(), materialization, iree_allocator_system(),
+        compatible_base_bundle.get(), materialization, iree_allocator_system(),
         derived_bundle.out()));
+    EXPECT_EQ(id4_pipeline_bundle_plan(derived_bundle.get()),
+              compatible_plan.get());
     ASSERT_EQ(id4_pipeline_bundle_parameter_slabs(derived_bundle.get()),
               materialization_binding.parameter_slabs);
     bundle.reset(derived_bundle.release());

@@ -519,7 +519,6 @@ iree_status_t id4_pipeline_parameter_materialization_query_binding(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter materialization must be published before binding");
   }
-  out_binding->plan = materialization->plan;
   out_binding->target_slab_index = materialization->target_slab_index;
   out_binding->parameter_slabs = materialization->derived_parameter_slabs;
   out_binding->readiness_semaphore_list =

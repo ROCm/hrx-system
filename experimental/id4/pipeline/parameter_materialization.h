@@ -35,8 +35,6 @@ typedef struct id4_pipeline_parameter_materialization_target_t {
 
 // Borrowed binding state for one published parameter domain.
 typedef struct id4_pipeline_parameter_materialization_binding_t {
-  // Exact pipeline plan retained by the materialization.
-  const id4_pipeline_plan_t* plan;
   // Plan-local slab index replaced by the materialization.
   iree_host_size_t target_slab_index;
   // Derived slab set containing the published replacement.

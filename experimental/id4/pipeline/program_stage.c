@@ -796,13 +796,12 @@ iree_status_t id4_pipeline_program_stage_derive_bundle(
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_query_binding(
       materialization, &binding));
   const id4_pipeline_plan_t* plan = id4_pipeline_bundle_plan(base_bundle);
-  if (binding.plan != plan) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter materialization must use the base bundle plan");
-  }
   id4_pipeline_parameter_slab_set_t* base_parameter_slabs =
       id4_pipeline_bundle_parameter_slabs(base_bundle);
+  if (!base_parameter_slabs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "base program stage bundle has no parameter slabs");
+  }
   const iree_host_size_t slab_count =
       id4_pipeline_parameter_slab_set_count(base_parameter_slabs);
   if (binding.target_slab_index >= slab_count ||
