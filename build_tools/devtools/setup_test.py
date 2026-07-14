@@ -38,7 +38,12 @@ class SetupPlanTest(unittest.TestCase):
     def test_venv_mode_schedules_python_tool_install(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             venv_root = Path(temporary_directory) / "venv"
-            plan = setup_plan("bazel", ToolEnvironment(ToolMode.VENV, venv_root), None)
+            plan = setup_plan(
+                "bazel",
+                ToolEnvironment(ToolMode.VENV, venv_root),
+                None,
+                platform_name="linux",
+            )
 
             commands = [step for step in plan.steps if isinstance(step, CommandStep)]
             self.assertTrue(any("-m venv" in step.describe() for step in commands))

@@ -147,7 +147,8 @@ class CommandPlanTest(unittest.TestCase):
             description = step.describe()
 
         self.assertIn('set "PATH=C:/source tree/.venv/Scripts;%PATH%"', description)
-        self.assertIn('cd /d "C:/source tree" &&', description)
+        expected_cwd = subprocess.list2cmdline([str(step.cwd)])
+        self.assertIn(f"cd /d {expected_cwd} &&", description)
         self.assertNotIn("$PATH", description)
 
     def test_optional_check_step_warns_without_failing(self):

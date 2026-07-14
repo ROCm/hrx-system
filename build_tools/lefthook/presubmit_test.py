@@ -203,7 +203,10 @@ class PresubmitTest(unittest.TestCase):
             "--output_groups=iree_clang_tidy_reports,iree_clang_tidy_fixes",
             command,
         )
-        self.assertIn("--build_event_json_file=.tmp/fixes/build_events.json", command)
+        self.assertIn(
+            f"--build_event_json_file={Path('.tmp/fixes/build_events.json')}",
+            command,
+        )
 
     def test_clang_tidy_bazel_command_can_use_local_output_groups(self):
         command = presubmit.clang_tidy_bazel_command(
@@ -290,10 +293,10 @@ class PresubmitTest(unittest.TestCase):
         self.assertEqual(command[0], "run-clang-tidy")
         self.assertIn("-clang-tidy-binary", command)
         self.assertIn("clang-tidy", command)
-        self.assertIn("-load=.tmp/plugin/libIREEClangTidyPlugin.so", command)
+        self.assertIn(f"-load={Path('.tmp/plugin/libIREEClangTidyPlugin.so')}", command)
         self.assertIn(f"-checks={presubmit.CLANG_TIDY_CHECKS}", command)
         self.assertIn("-p", command)
-        self.assertIn("build/cmake-debug", command)
+        self.assertIn(str(Path("build/cmake-debug")), command)
         self.assertIn("-j", command)
         self.assertIn("17", command)
         self.assertIn("-warnings-as-errors=*", command)
@@ -307,7 +310,7 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertEqual(command[0], "cmake")
         self.assertIn("--build", command)
-        self.assertIn("build/cmake-debug", command)
+        self.assertIn(str(Path("build/cmake-debug")), command)
         self.assertIn("--target", command)
         self.assertIn(presubmit.CLANG_TIDY_CMAKE_GENERATED_INPUTS_TARGET, command)
         self.assertIn("--parallel", command)
@@ -339,7 +342,8 @@ class PresubmitTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_dir:
             state_file = Path(temporary_dir) / "iree" / "cmake_build_dir"
             state_file.parent.mkdir()
-            state_file.write_text("/tmp/iree-cmake-configured\n", encoding="utf-8")
+            configured_build_dir = Path(temporary_dir) / "configured-build"
+            state_file.write_text(f"{configured_build_dir}\n", encoding="utf-8")
 
             with mock.patch.dict(
                 os.environ,
@@ -348,7 +352,7 @@ class PresubmitTest(unittest.TestCase):
             ):
                 self.assertEqual(
                     presubmit.cmake_build_dir_from_env(),
-                    Path("/tmp/iree-cmake-configured"),
+                    configured_build_dir,
                 )
 
     def test_bazel_package_target_for_path_finds_nearest_package(self):
