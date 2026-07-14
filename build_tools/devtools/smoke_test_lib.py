@@ -17,6 +17,11 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+try:
+    from build_tools.devtools import environment
+except ModuleNotFoundError:
+    import environment
+
 
 def find_repo_root() -> Path:
     bazel_workspace_directory = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
@@ -110,9 +115,20 @@ def run_command(
 
 def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
     env = smoke_python_environment(remove_python_override=True)
+    wrapper_path = checkout / "build_tools/bin" / wrapper_name
+    command = [str(wrapper_path), *args]
+    if os.name == "nt":
+        bazel_sh = environment.find_windows_bazel_sh(env)
+        if not bazel_sh:
+            raise RuntimeError(
+                "Git Bash is required to run the build_tools/bin wrappers on "
+                "Windows; install Git for Windows or set BAZEL_SH"
+            )
+        env[environment.BAZEL_SH_ENV] = bazel_sh
+        command = [bazel_sh, str(wrapper_path), *args]
     run_command(
         checkout,
-        [str(checkout / "build_tools/bin" / wrapper_name), *args],
+        command,
         env=env,
     )
 

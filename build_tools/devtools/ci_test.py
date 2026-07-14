@@ -17,6 +17,16 @@ from build_tools.devtools import ci, ci_config
 
 
 class CiTest(unittest.TestCase):
+    def uses_cmake_build_dir(self, step: ci.CiStep, command_name: str) -> bool:
+        expected_args = (
+            "--cmake-build-dir",
+            str(ci.CMAKE_CI_BUILD_ROOT / command_name),
+        )
+        return any(
+            step.argv[index : index + 2] == expected_args
+            for index in range(len(step.argv) - 1)
+        )
+
     def ctest_exclude_regexes(self, step: ci.CiStep) -> list[str]:
         return [
             step.argv[index + 1]
@@ -131,7 +141,8 @@ class CiTest(unittest.TestCase):
             step for step in steps if step.name == "Test IREE AMDGPU runtime resources"
         )
         self.assertIn(
-            "--test_env=IREE_HAL_AMDGPU_LIBHSA_PATH=/tmp/rocm-root/lib/libhsa-runtime64.so.1",
+            "--test_env=IREE_HAL_AMDGPU_LIBHSA_PATH="
+            + str(Path("/tmp/rocm-root") / "lib" / "libhsa-runtime64.so.1"),
             runtime_resource_test.argv,
         )
 
@@ -228,10 +239,7 @@ class CiTest(unittest.TestCase):
             "//loom/py/loom/importers/tilelang:tilelang_import_test",
             command_lines[2],
         )
-        self.assertIn(
-            "--cmake-build-dir build/ci/iree-importers-tilelang",
-            command_lines[3],
-        )
+        self.assertTrue(self.uses_cmake_build_dir(steps[3], "iree-importers-tilelang"))
         self.assertIn("--importer-env tilelang", command_lines[3])
         self.assertIn("cmake build loom-opt --parallel", command_lines[4])
         self.assertIn(
@@ -747,8 +755,8 @@ class CiTest(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "--cmake-build-dir build/ci/iree-cmake-cpu-ubsan" in line
-                for line in command_lines
+                self.uses_cmake_build_dir(step, "iree-cmake-cpu-ubsan")
+                for step in steps
             )
         )
         self.assertTrue(any("-DIREE_ENABLE_UBSAN=ON" in line for line in command_lines))
@@ -824,9 +832,10 @@ class CiTest(unittest.TestCase):
         for sanitizer in ("asan", "ubsan", "tsan", "msan"):
             self.assertTrue(
                 any(
-                    f"--cmake-build-dir build/ci/iree-cmake-sanitizer-smoke-{sanitizer}"
-                    in line
-                    for line in command_lines
+                    self.uses_cmake_build_dir(
+                        step, f"iree-cmake-sanitizer-smoke-{sanitizer}"
+                    )
+                    for step in steps
                 )
             )
             self.assertTrue(
@@ -1011,8 +1020,8 @@ class CiTest(unittest.TestCase):
         self.assertEqual(len(steps), 3)
         self.assertTrue(
             any(
-                "--cmake-build-dir build/ci/iree-cmake-loom-amdgpu" in line
-                for line in command_lines
+                self.uses_cmake_build_dir(step, "iree-cmake-loom-amdgpu")
+                for step in steps
             )
         )
         self.assertTrue(
