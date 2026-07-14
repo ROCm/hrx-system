@@ -24,9 +24,6 @@ extern "C" {
 // Invalid semantic program tensor ordinal.
 #define ID4_PIPELINE_PROGRAM_TENSOR_ORDINAL_INVALID UINT32_MAX
 
-// Maximum provider source tensors used to populate one execution parameter.
-#define ID4_PIPELINE_PROGRAM_PARAMETER_MAX_SOURCE_COUNT 2
-
 // Immutable semantic pipeline program authored by a stage.
 typedef struct id4_pipeline_program_t id4_pipeline_program_t;
 
@@ -183,6 +180,8 @@ typedef struct id4_pipeline_program_parameter_source_span_t {
   iree_device_size_t target_offset;
   // Byte length copied from the provider source into the execution tensor.
   iree_device_size_t length;
+  // Ordinal of the provider source supplying this span.
+  iree_host_size_t source_index;
 } id4_pipeline_program_parameter_source_span_t;
 
 // Tensor metadata copied into a semantic program.

@@ -339,8 +339,14 @@ static id4_pipeline_program_t* CreateMultiSpanParameterProgram() {
 
   const id4_pipeline_program_parameter_source_t row_sources[] = {
       {
-          /*.source_scope=*/IREE_SV("model"),
-          /*.key=*/IREE_SV("embedding.table"),
+          /*.source_scope=*/IREE_SV("embedding_a"),
+          /*.key=*/IREE_SV("embedding.table_a"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 4),
+      },
+      {
+          /*.source_scope=*/IREE_SV("embedding_b"),
+          /*.key=*/IREE_SV("embedding.table_b"),
           /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
           /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 4),
       },
@@ -355,6 +361,7 @@ static id4_pipeline_program_t* CreateMultiSpanParameterProgram() {
           /*.source_offset=*/40,
           /*.target_offset=*/8,
           /*.length=*/8,
+          /*.source_index=*/1,
       },
   };
   id4_pipeline_program_tensor_t rows = id4_pipeline_program_tensor_invalid();
@@ -1849,12 +1856,12 @@ TEST(PipelineProgramPlan, RetainsMultiSpanParameterTensorRanges) {
   EXPECT_EQ(parameter_slab->byte_length, 48u);
   ASSERT_EQ(parameter_requests->count, 3u);
   ExpectStringViewEqual(parameter_requests->values[0].key,
-                        IREE_SV("embedding.table"));
+                        IREE_SV("embedding.table_a"));
   EXPECT_EQ(parameter_requests->values[0].span.parameter_offset, 16u);
   EXPECT_EQ(parameter_requests->values[0].span.buffer_offset, 0u);
   EXPECT_EQ(parameter_requests->values[0].span.length, 8u);
   ExpectStringViewEqual(parameter_requests->values[1].key,
-                        IREE_SV("embedding.table"));
+                        IREE_SV("embedding.table_b"));
   EXPECT_EQ(parameter_requests->values[1].span.parameter_offset, 40u);
   EXPECT_EQ(parameter_requests->values[1].span.buffer_offset, 8u);
   EXPECT_EQ(parameter_requests->values[1].span.length, 8u);
@@ -1884,6 +1891,26 @@ TEST(PipelineProgramPlan, RetainsMultiSpanParameterTensorRanges) {
   EXPECT_EQ(weight->global_request_offset, 2u);
   EXPECT_EQ(weight->offset, 16u);
   EXPECT_EQ(weight->layout.byte_length, 32u);
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 3u);
+  const id4_pipeline_parameter_load_step_t* first_gather =
+      id4_pipeline_plan_parameter_load_step_at(plan, 0);
+  const id4_pipeline_parameter_load_step_t* second_gather =
+      id4_pipeline_plan_parameter_load_step_at(plan, 1);
+  const id4_pipeline_parameter_load_step_t* third_gather =
+      id4_pipeline_plan_parameter_load_step_at(plan, 2);
+  ASSERT_NE(first_gather, nullptr);
+  ASSERT_NE(second_gather, nullptr);
+  ASSERT_NE(third_gather, nullptr);
+  ExpectStringViewEqual(first_gather->source_scope, IREE_SV("embedding_a"));
+  EXPECT_EQ(first_gather->request_offset, 0u);
+  EXPECT_EQ(first_gather->request_count, 1u);
+  ExpectStringViewEqual(second_gather->source_scope, IREE_SV("embedding_b"));
+  EXPECT_EQ(second_gather->request_offset, 1u);
+  EXPECT_EQ(second_gather->request_count, 1u);
+  ExpectStringViewEqual(third_gather->source_scope, IREE_SV("model"));
+  EXPECT_EQ(third_gather->request_offset, 2u);
+  EXPECT_EQ(third_gather->request_count, 1u);
 
   iree_string_builder_t json_builder;
   iree_string_builder_initialize(iree_allocator_system(), &json_builder);

@@ -215,6 +215,40 @@ TEST(PipelineProgram, AuthorsDirectParameterFromDenseSourceSpans) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgram, RejectsDirectParameterSourceSpanOutsideSourceTable) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t source = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("embedding.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  const id4_pipeline_program_parameter_source_span_t source_span = {
+      /*.source_offset=*/0,
+      /*.target_offset=*/0,
+      /*.length=*/4 * sizeof(uint16_t),
+      /*.source_index=*/1,
+  };
+  const id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&source,
+      /*.key=*/IREE_SV("embedding.prompt_row"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+      /*.source_span_count=*/1,
+      /*.source_spans=*/&source_span,
+  };
+  id4_pipeline_program_tensor_t rows = id4_pipeline_program_tensor_invalid();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      id4_pipeline_program_parameter(builder, &options, &rows));
+}
+
 TEST(PipelineProgram, RetainsSemanticParameterDomainsInFirstUseOrder) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();

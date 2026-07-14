@@ -162,23 +162,7 @@ static iree_status_t id4_pipeline_program_validate_parameter_source(
 
 static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
     const id4_pipeline_program_parameter_options_t* options) {
-  const id4_pipeline_program_parameter_source_t* source = &options->sources[0];
   if (options->source_span_count != 0) {
-    if (options->source_count != 1) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "direct parameter %.*s source spans require exactly one source",
-          (int)options->key.size, options->key.data);
-    }
-    if (source->dtype != options->dtype) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "direct parameter %.*s source span dtype must match execution dtype",
-          (int)options->key.size, options->key.data);
-    }
-    iree_device_size_t source_byte_length = 0;
-    IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
-        source->dtype, source->shape, &source_byte_length));
     iree_device_size_t target_byte_length = 0;
     IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
         options->dtype, options->shape, &target_byte_length));
@@ -186,6 +170,25 @@ static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
     for (iree_host_size_t i = 0; i < options->source_span_count; ++i) {
       const id4_pipeline_program_parameter_source_span_t* span =
           &options->source_spans[i];
+      if (span->source_index >= options->source_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "direct parameter %.*s source span %" PRIhsz
+                                " source index %" PRIhsz
+                                " exceeds source count %" PRIhsz,
+                                (int)options->key.size, options->key.data, i,
+                                span->source_index, options->source_count);
+      }
+      const id4_pipeline_program_parameter_source_t* source =
+          &options->sources[span->source_index];
+      if (source->dtype != options->dtype) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "direct parameter %.*s source span %" PRIhsz
+                                " dtype must match execution dtype",
+                                (int)options->key.size, options->key.data, i);
+      }
+      iree_device_size_t source_byte_length = 0;
+      IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+          source->dtype, source->shape, &source_byte_length));
       if (span->length == 0) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "direct parameter %.*s source span %" PRIhsz
@@ -223,6 +226,7 @@ static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
     }
     return iree_ok_status();
   }
+  const id4_pipeline_program_parameter_source_t* source = &options->sources[0];
   iree_device_size_t source_byte_length = 0;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
       source->dtype, source->shape, &source_byte_length));
@@ -365,8 +369,7 @@ id4_pipeline_program_validate_fp8_e4m3_linear_rhs_tile_parameter_encoding(
 
 static iree_status_t id4_pipeline_program_validate_parameter_encoding(
     const id4_pipeline_program_parameter_options_t* options) {
-  if (options->source_count == 0 ||
-      options->source_count > ID4_PIPELINE_PROGRAM_PARAMETER_MAX_SOURCE_COUNT) {
+  if (options->source_count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter %.*s source count %" PRIhsz " is invalid",
@@ -395,10 +398,11 @@ static iree_status_t id4_pipeline_program_validate_parameter_encoding(
   }
   switch (options->encoding) {
     case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT:
-      if (options->source_count != 1) {
+      if (options->source_span_count == 0 && options->source_count != 1) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "direct parameter %.*s must have exactly one source",
+            "direct parameter %.*s without source spans must have exactly one "
+            "source",
             (int)options->key.size, options->key.data);
       }
       return id4_pipeline_program_validate_direct_parameter_encoding(options);
@@ -1118,7 +1122,8 @@ static bool id4_pipeline_program_parameter_source_span_equal(
     const id4_pipeline_program_parameter_source_span_t* lhs,
     const id4_pipeline_program_parameter_source_span_t* rhs) {
   return lhs->source_offset == rhs->source_offset &&
-         lhs->target_offset == rhs->target_offset && lhs->length == rhs->length;
+         lhs->target_offset == rhs->target_offset &&
+         lhs->length == rhs->length && lhs->source_index == rhs->source_index;
 }
 
 static void id4_pipeline_program_free_parameter_sources(
