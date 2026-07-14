@@ -43,9 +43,6 @@ hrx_cc_library(
         "internal.h",
         "tls.h",
     ],
-    copts = [
-        "-Wno-unused-variable",
-    ],
     includes = [
         "..",
         "../../../include",

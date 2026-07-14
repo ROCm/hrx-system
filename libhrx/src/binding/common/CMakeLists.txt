@@ -7,8 +7,6 @@ iree_add_all_subdirs()
 iree_cc_library(
   NAME
     common
-  COPTS
-    "-Wno-unused-variable"
   HDRS
     "fat_binary.h"
     "graph.h"
