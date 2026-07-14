@@ -63,7 +63,7 @@ static iree_status_t iree_hal_topology_storage_layout_calculate(
       &device_edges_offset));
   IREE_ASSERT_EQ(device_edges_offset,
                  offsetof(iree_hal_topology_t, device_edges));
-  total_size = iree_host_align(total_size, iree_alignof(iree_max_align_t));
+  total_size = iree_host_align(total_size, iree_max_align_t);
 
   iree_host_size_t nodes_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_topology_storage_layout_append_array(
