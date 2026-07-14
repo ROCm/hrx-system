@@ -628,7 +628,7 @@ TEST_F(MpscQueueTest, ConcurrentProducers) {
 
   std::vector<std::thread> producers;
   for (int p = 0; p < producer_count; ++p) {
-    producers.emplace_back([&queue, p]() {
+    producers.emplace_back([&queue, p, messages_per_producer]() {
       for (int i = 0; i < messages_per_producer; ++i) {
         TaggedMessage msg = {(uint32_t)p, (uint32_t)i};
         while (!iree_mpsc_queue_write(&queue, &msg, sizeof(msg))) {
@@ -685,7 +685,7 @@ TEST_F(MpscQueueTest, ConcurrentBeginWriteCommit) {
 
   std::vector<std::thread> producers;
   for (int p = 0; p < producer_count; ++p) {
-    producers.emplace_back([&queue, p]() {
+    producers.emplace_back([&queue, p, messages_per_producer]() {
       for (int i = 0; i < messages_per_producer; ++i) {
         iree_mpsc_queue_reservation_t reservation;
         void* payload;
@@ -738,7 +738,7 @@ TEST_F(MpscQueueTest, ConcurrentVariableSizeStress) {
 
   std::vector<std::thread> producers;
   for (int p = 0; p < producer_count; ++p) {
-    producers.emplace_back([&queue, p]() {
+    producers.emplace_back([&queue, p, messages_per_producer]() {
       for (int i = 0; i < messages_per_producer; ++i) {
         // Variable payload: 8 bytes header + 0-120 bytes of fill.
         // Header is (producer_id, sequence).
@@ -805,7 +805,7 @@ TEST_F(MpscQueueTest, ConcurrentCancelStress) {
 
   std::vector<std::thread> producers;
   for (int p = 0; p < producer_count; ++p) {
-    producers.emplace_back([&queue, p]() {
+    producers.emplace_back([&queue, p, messages_per_producer]() {
       uint32_t committed = 0;
       for (int i = 0; committed < (uint32_t)messages_per_producer; ++i) {
         iree_mpsc_queue_reservation_t reservation;
