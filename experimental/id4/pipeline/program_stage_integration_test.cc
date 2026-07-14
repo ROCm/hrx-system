@@ -280,6 +280,7 @@ enum id4_pipeline_test_program_flag_bits_t {
   ID4_PIPELINE_TEST_PROGRAM_FLAG_SEGMENT_PARAMETER_RESIDENCY = 1u << 4,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_USE_EXECUTION_LAYOUT = 1u << 5,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_MATERIALIZE_PARAMETER_DOMAIN = 1u << 6,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_ABORT_PARAMETER_MATERIALIZATION = 1u << 7,
 };
 
 typedef struct id4_pipeline_test_program_diagnostics_t {
@@ -601,9 +602,13 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_USE_EXECUTION_LAYOUT);
   const bool materializes_parameter_domain = iree_all_bits_set(
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_MATERIALIZE_PARAMETER_DOMAIN);
+  const bool aborts_parameter_materialization = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_ABORT_PARAMETER_MATERIALIZATION);
   ASSERT_FALSE(segments_parameter_residency && !defers_parameter_loads);
   ASSERT_FALSE(uses_execution_layout && !segments_parameter_residency);
   ASSERT_FALSE(materializes_parameter_domain && defers_parameter_loads);
+  ASSERT_FALSE(aborts_parameter_materialization &&
+               !materializes_parameter_domain);
 
   RuntimeContext& context = SharedRuntimeContext();
 
@@ -840,6 +845,14 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
         target_buffer, first_parameter->offset, sizeof(replacement_values),
         IREE_HAL_UPDATE_FLAG_NONE));
 
+    if (aborts_parameter_materialization) {
+      IREE_ASSERT_OK(id4_pipeline_parameter_materialization_abort(
+          materialization, update_signal_list, &diagnostics_sink));
+      id4_pipeline_parameter_materialization_release(materialization);
+      materialization = nullptr;
+      return;
+    }
+
     uint64_t publication_wait_value = update_signal_value;
     iree_hal_semaphore_list_t publication_wait_list =
         OneSemaphoreList(&timeline_semaphore, &publication_wait_value);
@@ -1032,6 +1045,13 @@ TEST(ProgramStageIntegration,
      IssuesPreparedProgramWithMaterializedParameterDomain) {
   RunTwoRegionAddProgram(
       ID4_PIPELINE_TEST_PROGRAM_FLAG_MATERIALIZE_PARAMETER_DOMAIN);
+}
+
+TEST(ProgramStageIntegration,
+     AbortsUnpublishedParameterDomainAfterAcceptedWrites) {
+  RunTwoRegionAddProgram(
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_MATERIALIZE_PARAMETER_DOMAIN |
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_ABORT_PARAMETER_MATERIALIZATION);
 }
 
 TEST(ProgramStageIntegration, RejectsDeferredParameterSlabReuse) {

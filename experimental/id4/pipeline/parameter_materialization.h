@@ -98,6 +98,20 @@ iree_status_t id4_pipeline_parameter_materialization_query_target(
     const id4_pipeline_parameter_materialization_t* materialization,
     id4_pipeline_parameter_materialization_target_t* out_target);
 
+// Abandons an unpublished replacement after failed population.
+//
+// This is a synchronous error-unwind operation. |wait_semaphore_list| must
+// dominate acquisition and every accepted operation that may access either
+// materialization buffer. The function waits until those operations terminate,
+// reclaims the replacement allocation through ordinary buffer release, and
+// transitions the materialization to its retired state. No queue operation is
+// submitted. The caller must own the only materialization reference and may
+// release it after this function returns.
+iree_status_t id4_pipeline_parameter_materialization_abort(
+    id4_pipeline_parameter_materialization_t* materialization,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Publishes completely initialized replacement contents. |wait_semaphore_list|
 // must dominate every write to the target buffer. |signal_semaphore_list| is
 // retained as the immutable readiness edge for derived execution bundles.

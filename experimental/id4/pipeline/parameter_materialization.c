@@ -428,6 +428,49 @@ iree_status_t id4_pipeline_parameter_materialization_query_target(
   return iree_ok_status();
 }
 
+iree_status_t id4_pipeline_parameter_materialization_abort(
+    id4_pipeline_parameter_materialization_t* materialization,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!materialization) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter materialization is required");
+  }
+  if (materialization->state !=
+      ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_ACQUIRED) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "only an unpublished parameter materialization can be aborted");
+  }
+  if (iree_atomic_ref_count_load(&materialization->ref_count) != 1) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter materialization cannot abort while another owner retains "
+        "it");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
+      wait_semaphore_list, IREE_SV("materialization abort wait"),
+      ID4_PIPELINE_PARAMETER_MATERIALIZATION_LIST_FLAG_REQUIRE_NONEMPTY));
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("parameter materialization abort")));
+
+  iree_status_t status = id4_pipeline_parameter_materialization_emit(
+      materialization, IREE_SV("parameter.materialization.abort"),
+      IREE_SV("aborting unpublished parameter-domain contents"),
+      diagnostics_sink);
+  iree_status_t wait_status = iree_hal_semaphore_list_wait(
+      wait_semaphore_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+  status = iree_status_join(status, wait_status);
+
+  // A reached or failed wait is terminal for all operations represented by the
+  // edge. Final buffer release may now reclaim the queue allocation directly.
+  materialization->owns_target_allocation = false;
+  materialization->state = ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_RETIRED;
+  id4_pipeline_parameter_materialization_edge_deinitialize(
+      &materialization->acquisition_edge, materialization->host_allocator);
+  return status;
+}
+
 iree_status_t id4_pipeline_parameter_materialization_publish(
     id4_pipeline_parameter_materialization_t* materialization,
     iree_hal_semaphore_list_t wait_semaphore_list,
