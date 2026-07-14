@@ -24,6 +24,31 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "lora",
+    srcs = ["lora.c"],
+    hdrs = ["lora.h"],
+    deps = [
+        "//experimental/id4/stages:ideogram4_dit_program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/io:parameter_index",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "lora_test",
+    srcs = ["lora_test.cc"],
+    deps = [
+        ":lora",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "request",
     srcs = ["request.c"],
     hdrs = ["request.h"],

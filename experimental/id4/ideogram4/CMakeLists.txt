@@ -23,6 +23,35 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    lora
+  HDRS
+    "lora.h"
+  SRCS
+    "lora.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::json
+    iree::experimental::id4::stages::ideogram4_dit_program
+    iree::io::parameter_index
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    lora_test
+  SRCS
+    "lora_test.cc"
+  DEPS
+    ::lora
+    iree::base
+    iree::io::parameter_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     request
   HDRS
     "request.h"
