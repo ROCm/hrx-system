@@ -850,7 +850,7 @@ iree_status_t id4_pipeline_program_stage_derive_bundle(
       .plan = plan,
       // Immutable slabs carrying the materialized replacement.
       .parameter_slabs = binding.parameter_slabs,
-      // Publication causally dominates acquisition and base readiness.
+      // Publication causally dominates population and unchanged-base readiness.
       .readiness_semaphore_list = readiness_semaphore_list,
       // Program-stage payload retaining prepared execution state.
       .payload_size = sizeof(id4_pipeline_program_stage_bundle_payload_t),

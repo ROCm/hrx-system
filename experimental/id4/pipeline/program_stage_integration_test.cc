@@ -668,6 +668,20 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      parameter_load_gate;
+  iree_hal_semaphore_t* parameter_load_gate_semaphore = nullptr;
+  uint64_t parameter_load_gate_value = 1;
+  iree_hal_semaphore_list_t parameter_load_gate_list =
+      iree_hal_semaphore_list_empty();
+  if (materializes_parameter_domain) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, parameter_load_gate.out()));
+    parameter_load_gate_semaphore = parameter_load_gate.get();
+    parameter_load_gate_list = OneSemaphoreList(&parameter_load_gate_semaphore,
+                                                &parameter_load_gate_value);
+  }
   iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
   uint64_t prepare_signal_value = 1;
   iree_hal_semaphore_list_t prepare_signal_list =
@@ -696,7 +710,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                                      : 0);
   }
   stage_prepare_options.kernel_library = kernel_library.get();
-  stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  stage_prepare_options.wait_semaphore_list = parameter_load_gate_list;
   stage_prepare_options.signal_semaphore_list = prepare_signal_list;
   stage_prepare_options.command_buffer_mode = context.value.command_buffer_mode;
   stage_prepare_options.diagnostics_sink = &diagnostics_sink;
@@ -785,10 +799,13 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   if (materializes_parameter_domain) {
     ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan.get()), 1u);
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/1,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, materialization_semaphore.out()));
     iree_hal_semaphore_t* timeline_semaphore = materialization_semaphore.get();
-    uint64_t acquisition_signal_value = 1;
+    uint64_t acquisition_wait_value = 1;
+    iree_hal_semaphore_list_t acquisition_wait_list =
+        OneSemaphoreList(&timeline_semaphore, &acquisition_wait_value);
+    uint64_t acquisition_signal_value = 2;
     iree_hal_semaphore_list_t acquisition_signal_list =
         OneSemaphoreList(&timeline_semaphore, &acquisition_signal_value);
 
@@ -798,12 +815,27 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     acquire_options.plan = plan.get();
     acquire_options.base_parameter_slabs = parameter_slabs;
     acquire_options.target_slab_index = 0;
-    acquire_options.wait_semaphore_list =
+    acquire_options.wait_semaphore_list = acquisition_wait_list;
+    acquire_options.base_readiness_semaphore_list =
         id4_pipeline_bundle_readiness_semaphore_list(bundle.get());
     acquire_options.signal_semaphore_list = acquisition_signal_list;
     acquire_options.diagnostics_sink = &diagnostics_sink;
     IREE_ASSERT_OK(id4_pipeline_parameter_materialization_acquire(
         &acquire_options, iree_allocator_system(), &materialization));
+
+    // Replacement storage is independent of unchanged-base readiness. Prove
+    // that acquisition completes while canonical parameter loading remains
+    // blocked, then release the base path before publication.
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        timeline_semaphore, acquisition_signal_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+    uint64_t current_parameter_load_gate_value = 0;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(
+        parameter_load_gate.get(), &current_parameter_load_gate_value));
+    EXPECT_EQ(current_parameter_load_gate_value, 0u);
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(parameter_load_gate.get(),
+                                             parameter_load_gate_value,
+                                             /*frontier=*/nullptr));
 
     id4_pipeline_parameter_materialization_target_t materialization_target;
     IREE_ASSERT_OK(id4_pipeline_parameter_materialization_query_target(
@@ -812,7 +844,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                           id4_pipeline_parameter_materialization_query_binding(
                               materialization, &materialization_binding));
-    uint64_t gather_signal_value = 2;
+    uint64_t gather_signal_value = 3;
     iree_hal_semaphore_list_t gather_signal_list =
         OneSemaphoreList(&timeline_semaphore, &gather_signal_value);
     iree_hal_buffer_t* target_buffer = materialization_target.target_buffer;
@@ -840,7 +872,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     uint64_t update_wait_value = gather_signal_value;
     iree_hal_semaphore_list_t update_wait_list =
         OneSemaphoreList(&timeline_semaphore, &update_wait_value);
-    uint64_t update_signal_value = 3;
+    uint64_t update_signal_value = 4;
     iree_hal_semaphore_list_t update_signal_list =
         OneSemaphoreList(&timeline_semaphore, &update_signal_value);
     IREE_ASSERT_OK(iree_hal_device_queue_update(
@@ -860,7 +892,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     uint64_t publication_wait_value = update_signal_value;
     iree_hal_semaphore_list_t publication_wait_list =
         OneSemaphoreList(&timeline_semaphore, &publication_wait_value);
-    uint64_t publication_signal_value = 4;
+    uint64_t publication_signal_value = 5;
     iree_hal_semaphore_list_t publication_signal_list =
         OneSemaphoreList(&timeline_semaphore, &publication_signal_value);
     IREE_ASSERT_OK(id4_pipeline_parameter_materialization_publish(
@@ -1029,7 +1061,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
         OneSemaphoreList(&issue_wait_semaphore, &issue_signal_value);
     iree_hal_semaphore_t* retirement_signal_semaphore =
         materialization_semaphore.get();
-    uint64_t retirement_signal_value = 5;
+    uint64_t retirement_signal_value = 6;
     iree_hal_semaphore_list_t retirement_signal_list = OneSemaphoreList(
         &retirement_signal_semaphore, &retirement_signal_value);
     IREE_ASSERT_OK(id4_pipeline_parameter_materialization_retire(

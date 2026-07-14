@@ -59,19 +59,23 @@ typedef struct id4_pipeline_parameter_materialization_acquire_options_t {
   iree_hal_pool_t* allocation_pool;
   // HAL queue-allocation flags for the replacement storage.
   iree_hal_alloca_flags_t alloca_flags;
-  // Semaphores that dominate base slab readiness and allocation backpressure.
+  // Semaphores expressing replacement-allocation backpressure.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when replacement storage is safe for first access.
   iree_hal_semaphore_list_t signal_semaphore_list;
+  // Readiness edge for every unchanged slab retained from the base binding.
+  iree_hal_semaphore_list_t base_readiness_semaphore_list;
   // Diagnostics sink for materialization lifecycle events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_parameter_materialization_acquire_options_t;
 
 // Acquires undefined queue-ordered storage matching one base parameter domain.
-// Both acquisition semaphore lists must be nonempty, and the wait list must
-// dominate every base slab retained in the derived binding. The returned
-// materialization owns the asynchronous allocation. The base slab set is
-// borrowed only for this call; derived bindings retain the unchanged buffers
+// Both allocation semaphore lists must be nonempty. Base readiness is retained
+// independently and may be empty when all unchanged slabs are already ready.
+// This allows replacement allocation and population to overlap base loading;
+// publication joins both paths before exposing the derived binding. The
+// returned materialization owns the asynchronous allocation. The base slab set
+// is borrowed only for this call; derived bindings retain the unchanged buffers
 // directly and never retain the replaced buffer. Callers must populate the
 // target buffer after the acquire-readiness edge, publish it, and explicitly
 // retire it before releasing their final reference.
@@ -111,7 +115,8 @@ iree_status_t id4_pipeline_parameter_materialization_abort(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Publishes completely initialized replacement contents. |wait_semaphore_list|
-// must dominate every write to the target buffer. |signal_semaphore_list| is
+// must dominate every write to the target buffer. Publication joins that edge
+// with the retained unchanged-base readiness edge. |signal_semaphore_list| is
 // retained as the immutable readiness edge for derived execution bundles.
 iree_status_t id4_pipeline_parameter_materialization_publish(
     id4_pipeline_parameter_materialization_t* materialization,
