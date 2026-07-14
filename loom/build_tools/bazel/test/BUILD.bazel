@@ -6,7 +6,7 @@
 #
 # bazel-to-cmake: skip
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 
@@ -21,9 +21,9 @@ loom_check_test(
 
 loom_check_rules_test_suite(name = "loom_check_rules_tests")
 
-iree_executable_test(
+sh_test(
     name = "loom_check_wrapper_direct_test",
-    src = "loom_check_wrapper_direct_test.sh",
+    srcs = ["loom_check_wrapper_direct_test.sh"],
     args = ["$(rootpath :loom_check_wrapper_subject)"],
     data = [
         "loom_check_fixture_runner.sh",
