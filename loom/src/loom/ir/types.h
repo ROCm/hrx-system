@@ -392,7 +392,7 @@ typedef struct loom_type_t {
 } loom_type_t;
 
 // Static assert: type must be exactly 24 bytes, no padding.
-_Static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
+static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
 
 // Arena-allocated overflow data for function types. Stored via pointer
 // in dims[0] of a LOOM_TYPE_FUNCTION loom_type_t. The types array
@@ -409,8 +409,8 @@ typedef struct loom_func_type_data_t {
   loom_type_t types[];
 } loom_func_type_data_t;
 
-_Static_assert(sizeof(loom_func_type_data_t) == 8,
-               "loom_func_type_data_t header must be 8 bytes");
+static_assert(sizeof(loom_func_type_data_t) == 8,
+              "loom_func_type_data_t header must be 8 bytes");
 
 // --- Header accessors ---
 

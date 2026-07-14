@@ -72,6 +72,8 @@ typedef enum loom_spirv_execution_model_e {
 } loom_spirv_execution_model_t;
 
 typedef enum loom_spirv_addressing_model_e {
+  // No addressing model has been selected.
+  LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED = -1,
   LOOM_SPIRV_ADDRESSING_MODEL_LOGICAL = 0,
   LOOM_SPIRV_ADDRESSING_MODEL_PHYSICAL32 = 1,
   LOOM_SPIRV_ADDRESSING_MODEL_PHYSICAL64 = 2,
@@ -81,6 +83,8 @@ typedef enum loom_spirv_addressing_model_e {
 } loom_spirv_addressing_model_t;
 
 typedef enum loom_spirv_memory_model_e {
+  // No memory model has been selected.
+  LOOM_SPIRV_MEMORY_MODEL_UNSPECIFIED = -1,
   LOOM_SPIRV_MEMORY_MODEL_SIMPLE = 0,
   LOOM_SPIRV_MEMORY_MODEL_GLSL450 = 1,
   LOOM_SPIRV_MEMORY_MODEL_OPEN_CL = 2,

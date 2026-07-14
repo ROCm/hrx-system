@@ -21,13 +21,6 @@
 extern "C" {
 #endif
 
-enum {
-  // Feature atom does not impose an addressing model.
-  LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED = UINT32_MAX,
-  // Feature atom does not impose a memory model.
-  LOOM_SPIRV_MEMORY_MODEL_UNSPECIFIED = UINT32_MAX,
-};
-
 typedef enum loom_spirv_feature_atom_e {
   // Unknown or uninitialized feature atom.
   LOOM_SPIRV_FEATURE_ATOM_UNKNOWN = 0,
