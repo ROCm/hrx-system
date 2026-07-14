@@ -33,8 +33,6 @@ iree_amdgpu_binary_variants_embed_data(
 iree_cc_library(
   NAME
     core
-  COPTS
-    "-fexceptions"
   HDRS
     "core/hrx_loader.hpp"
     "core/hrx_test_fixture.hpp"
@@ -320,3 +318,9 @@ hrx_cc_test(
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# The CTS catches loader failures and therefore opts back into C++ exceptions.
+# MSVC and clang-cl inherit /EHsc from the first-party compiler policy.
+if(NOT MSVC)
+  target_compile_options(libhrx_cts_core PRIVATE "-fexceptions")
+endif()

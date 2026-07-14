@@ -4,6 +4,7 @@
 // Custom Catch2 main for hrx CTS. Initializes hrx and selects a device.
 
 #include <catch2/catch_session.hpp>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,22 +30,35 @@ void printStatusAndConsume(HrxLoader& loader, const char* context,
   loader.status_ignore(status);
 }
 
-void seedInstalledCtsSourceDir(const char* argv0) {
+bool seedInstalledCtsSourceDirectory(const char* argv0) {
   if (std::getenv("HRX_CTS_SOURCE_DIR") || !argv0) {
-    return;
+    return true;
   }
 
   std::filesystem::path executable_dir =
       std::filesystem::path(argv0).parent_path();
   if (executable_dir.empty()) {
-    return;
+    return true;
   }
 
   std::error_code ec;
   if (std::filesystem::is_directory(executable_dir / "testdata", ec)) {
     std::string source_dir = executable_dir.string();
-    setenv("HRX_CTS_SOURCE_DIR", source_dir.c_str(), /*overwrite=*/0);
+#if defined(_WIN32)
+    const int error_code = _putenv_s("HRX_CTS_SOURCE_DIR", source_dir.c_str());
+#else
+    const int error_code =
+        setenv("HRX_CTS_SOURCE_DIR", source_dir.c_str(), /*overwrite=*/0) == 0
+            ? 0
+            : errno;
+#endif
+    if (error_code != 0) {
+      fprintf(stderr, "Failed to set HRX_CTS_SOURCE_DIR: %s\n",
+              strerror(error_code));
+      return false;
+    }
   }
+  return true;
 }
 
 }  // namespace
@@ -72,7 +86,9 @@ int main(int argc, char* argv[]) {
   if (ret != 0) return ret;
   g_test_hip_library_path = hip_library;
 
-  seedInstalledCtsSourceDir(argc > 0 ? argv[0] : nullptr);
+  if (!seedInstalledCtsSourceDirectory(argc > 0 ? argv[0] : nullptr)) {
+    return 1;
+  }
 
   // Load library.
   if (!hrx_library.empty()) {
