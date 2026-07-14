@@ -801,11 +801,26 @@ iree_status_t id4_pipeline_program_stage_derive_bundle(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter materialization must use the base bundle plan");
   }
-  if (binding.base_parameter_slabs !=
-      id4_pipeline_bundle_parameter_slabs(base_bundle)) {
+  id4_pipeline_parameter_slab_set_t* base_parameter_slabs =
+      id4_pipeline_bundle_parameter_slabs(base_bundle);
+  const iree_host_size_t slab_count =
+      id4_pipeline_parameter_slab_set_count(base_parameter_slabs);
+  if (binding.target_slab_index >= slab_count ||
+      id4_pipeline_parameter_slab_set_count(binding.parameter_slabs) !=
+          slab_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter materialization must derive from the base bundle slabs");
+        "parameter materialization slab layout does not match the base bundle");
+  }
+  for (iree_host_size_t i = 0; i < slab_count; ++i) {
+    if (i == binding.target_slab_index) continue;
+    if (id4_pipeline_parameter_slab_set_buffer_at(binding.parameter_slabs, i) !=
+        id4_pipeline_parameter_slab_set_buffer_at(base_parameter_slabs, i)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter materialization shared slab %" PRIhsz
+                              " does not come from the base bundle",
+                              i);
+    }
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
       plan, binding.parameter_slabs));

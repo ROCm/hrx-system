@@ -46,8 +46,6 @@ struct id4_pipeline_parameter_materialization_t {
   id4_pipeline_parameter_materialization_state_t state;
   // Plan retaining the parameter-domain layout and device group.
   const id4_pipeline_plan_t* plan;
-  // Resident base slabs from which the replacement is derived.
-  id4_pipeline_parameter_slab_set_t* base_parameter_slabs;
   // Immutable slabs with the target domain replaced.
   id4_pipeline_parameter_slab_set_t* derived_parameter_slabs;
   // Plan-local slab index replaced by the materialization.
@@ -58,7 +56,7 @@ struct id4_pipeline_parameter_materialization_t {
   iree_hal_queue_affinity_t queue_affinity;
   // Optional allocation pool retained for the replacement lifetime.
   iree_hal_pool_t* allocation_pool;
-  // Canonical source buffer retained by |base_parameter_slabs|.
+  // Canonical source buffer retained until publication or abort.
   iree_hal_buffer_t* base_buffer;
   // Queue-allocated replacement buffer owned by this object.
   iree_hal_buffer_t* target_buffer;
@@ -196,11 +194,10 @@ static void id4_pipeline_parameter_materialization_destroy(
       &materialization->publication_edge, host_allocator);
   id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->acquisition_edge, host_allocator);
+  iree_hal_buffer_release(materialization->base_buffer);
   iree_hal_buffer_release(materialization->target_buffer);
   id4_pipeline_parameter_slab_set_release(
       materialization->derived_parameter_slabs);
-  id4_pipeline_parameter_slab_set_release(
-      materialization->base_parameter_slabs);
   iree_hal_pool_release(materialization->allocation_pool);
   id4_pipeline_plan_release((id4_pipeline_plan_t*)materialization->plan);
   iree_allocator_free(host_allocator, materialization);
@@ -313,8 +310,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
       ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_ACQUIRED;
   materialization->plan = options->plan;
   id4_pipeline_plan_retain((id4_pipeline_plan_t*)materialization->plan);
-  materialization->base_parameter_slabs = options->base_parameter_slabs;
-  id4_pipeline_parameter_slab_set_retain(materialization->base_parameter_slabs);
   materialization->target_slab_index = options->target_slab_index;
   materialization->device = device;
   materialization->queue_affinity = placement->queue_affinity;
@@ -322,6 +317,7 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
   iree_hal_pool_retain(materialization->allocation_pool);
   materialization->base_buffer = id4_pipeline_parameter_slab_set_buffer_at(
       options->base_parameter_slabs, options->target_slab_index);
+  iree_hal_buffer_retain(materialization->base_buffer);
 
   iree_status_t status = id4_pipeline_parameter_materialization_emit(
       materialization, IREE_SV("parameter.materialization.acquire"),
@@ -464,6 +460,8 @@ iree_status_t id4_pipeline_parameter_materialization_abort(
 
   // A reached or failed wait is terminal for all operations represented by the
   // edge. Final buffer release may now reclaim the queue allocation directly.
+  iree_hal_buffer_release(materialization->base_buffer);
+  materialization->base_buffer = NULL;
   materialization->owns_target_allocation = false;
   materialization->state = ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_RETIRED;
   id4_pipeline_parameter_materialization_edge_deinitialize(
@@ -507,6 +505,8 @@ iree_status_t id4_pipeline_parameter_materialization_publish(
   if (iree_status_is_ok(status)) {
     materialization->state =
         ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_PUBLISHED;
+    iree_hal_buffer_release(materialization->base_buffer);
+    materialization->base_buffer = NULL;
   } else {
     id4_pipeline_parameter_materialization_edge_deinitialize(
         &materialization->publication_edge, materialization->host_allocator);
@@ -532,7 +532,7 @@ iree_status_t id4_pipeline_parameter_materialization_query_binding(
         "parameter materialization must be published before binding");
   }
   out_binding->plan = materialization->plan;
-  out_binding->base_parameter_slabs = materialization->base_parameter_slabs;
+  out_binding->target_slab_index = materialization->target_slab_index;
   out_binding->parameter_slabs = materialization->derived_parameter_slabs;
   out_binding->readiness_semaphore_list =
       id4_pipeline_parameter_materialization_edge_list(

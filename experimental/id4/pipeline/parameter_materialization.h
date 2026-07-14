@@ -39,8 +39,8 @@ typedef struct id4_pipeline_parameter_materialization_target_t {
 typedef struct id4_pipeline_parameter_materialization_binding_t {
   // Exact pipeline plan retained by the materialization.
   const id4_pipeline_plan_t* plan;
-  // Canonical slab set from which the replacement was derived.
-  id4_pipeline_parameter_slab_set_t* base_parameter_slabs;
+  // Plan-local slab index replaced by the materialization.
+  iree_host_size_t target_slab_index;
   // Derived slab set containing the published replacement.
   id4_pipeline_parameter_slab_set_t* parameter_slabs;
   // Edge that must be reached before the derived slab set is used.
@@ -74,8 +74,10 @@ typedef struct id4_pipeline_parameter_materialization_acquire_options_t {
 // Acquires undefined queue-ordered storage matching one base parameter domain.
 // Both acquisition semaphore lists must be nonempty, and the wait list must
 // dominate every base slab that may be retained in the derived binding. The
-// returned materialization owns the asynchronous allocation. Callers must
-// populate its target buffer after the acquire-readiness edge, publish it, and
+// returned materialization owns the asynchronous allocation. It directly
+// retains the replaced base buffer while target population may read from it;
+// the rest of the base slab set is borrowed only for this call. Callers must
+// populate the target buffer after the acquire-readiness edge, publish it, and
 // explicitly retire it before releasing their final reference.
 iree_status_t id4_pipeline_parameter_materialization_acquire(
     const id4_pipeline_parameter_materialization_acquire_options_t* options,
@@ -87,8 +89,8 @@ void id4_pipeline_parameter_materialization_retain(
     id4_pipeline_parameter_materialization_t* materialization);
 
 // Releases |materialization| from the caller. The final reference may only be
-// released after id4_pipeline_parameter_materialization_complete_retirement
-// succeeds.
+// released after id4_pipeline_parameter_materialization_complete_retirement or
+// id4_pipeline_parameter_materialization_abort succeeds.
 void id4_pipeline_parameter_materialization_release(
     id4_pipeline_parameter_materialization_t* materialization);
 
@@ -113,8 +115,10 @@ iree_status_t id4_pipeline_parameter_materialization_abort(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Publishes completely initialized replacement contents. |wait_semaphore_list|
-// must dominate every write to the target buffer. |signal_semaphore_list| is
-// retained as the immutable readiness edge for derived execution bundles.
+// must dominate every read of the base buffer and every write to the target
+// buffer. |signal_semaphore_list| is retained as the immutable readiness edge
+// for derived execution bundles. Successful publication releases the
+// materialization's base-buffer retain.
 iree_status_t id4_pipeline_parameter_materialization_publish(
     id4_pipeline_parameter_materialization_t* materialization,
     iree_hal_semaphore_list_t wait_semaphore_list,

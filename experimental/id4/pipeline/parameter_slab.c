@@ -82,10 +82,6 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_host_size_t count;
   // Loaded slab buffers retained by this set.
   iree_hal_buffer_t** buffers;
-  // Number of slab sets retaining allocation ownership for derived buffers.
-  iree_host_size_t parent_count;
-  // Slab sets retaining allocation ownership for derived buffers.
-  id4_pipeline_parameter_slab_set_t** parents;
   // Number of copied slab load descriptors.
   iree_host_size_t load_count;
   // Copied slab load descriptors used by deferred group submissions.
@@ -832,9 +828,6 @@ static void id4_pipeline_parameter_slab_set_destroy(
       iree_hal_buffer_release(slab_set->buffers[i]);
     }
   }
-  for (iree_host_size_t i = 0; i < slab_set->parent_count; ++i) {
-    id4_pipeline_parameter_slab_set_release(slab_set->parents[i]);
-  }
   if (slab_set->loads) {
     for (iree_host_size_t i = 0; i < slab_set->load_count; ++i) {
       iree_hal_device_release(slab_set->loads[i].device);
@@ -873,7 +866,6 @@ static void id4_pipeline_parameter_slab_set_destroy(
   iree_allocator_free(host_allocator, slab_set->request_tables);
   iree_allocator_free(host_allocator, slab_set->slab_plans);
   iree_allocator_free(host_allocator, slab_set->loads);
-  iree_allocator_free(host_allocator, slab_set->parents);
   iree_allocator_free(host_allocator, slab_set->buffers);
   iree_allocator_free(host_allocator, slab_set);
 }
@@ -4572,12 +4564,6 @@ iree_status_t id4_pipeline_parameter_slab_set_derive(
       }
     }
   }
-  iree_host_size_t parent_count = 0;
-  if (!iree_host_size_checked_add(replacement_count, 1, &parent_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter slab parent count overflows");
-  }
-
   id4_pipeline_parameter_slab_set_t* slab_set = NULL;
   iree_status_t status = id4_pipeline_parameter_slab_set_create_empty(
       base_slab_set->count, host_allocator, &slab_set);
@@ -4586,18 +4572,6 @@ iree_status_t id4_pipeline_parameter_slab_set_derive(
         slab_set, base_slab_set->load_count, base_slab_set->loads);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, parent_count,
-                                         sizeof(slab_set->parents[0]),
-                                         (void**)&slab_set->parents);
-  }
-  if (iree_status_is_ok(status)) {
-    slab_set->parents[slab_set->parent_count++] = base_slab_set;
-    id4_pipeline_parameter_slab_set_retain(base_slab_set);
-    for (iree_host_size_t i = 0; i < replacement_count; ++i) {
-      slab_set->parents[slab_set->parent_count++] =
-          replacements[i].source_slab_set;
-      id4_pipeline_parameter_slab_set_retain(replacements[i].source_slab_set);
-    }
     for (iree_host_size_t i = 0; i < slab_set->count; ++i) {
       slab_set->buffers[i] = base_slab_set->buffers[i];
       iree_hal_buffer_retain(slab_set->buffers[i]);

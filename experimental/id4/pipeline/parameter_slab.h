@@ -579,12 +579,12 @@ iree_status_t id4_pipeline_parameter_slab_set_wrap_resident(
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
 // Derives an immutable resident set by replacing selected physical slabs in
-// |base_slab_set|. The derived set retains the base and every source set so
-// bound buffer object lifetimes remain valid. It does not preserve or retire
-// asynchronous allocation ownership. It preserves the base plan and binding
-// metadata and owns no loading schedule or readiness edges. Callers must own
-// replacement allocations and publish source contents through explicit
-// semaphore dependencies before issuing work that binds the derived set.
+// |base_slab_set|. The derived set directly retains every bound buffer, but not
+// the base or source slab sets. It does not preserve or retire asynchronous
+// allocation ownership. It preserves the base plan and binding metadata and
+// owns no loading schedule or readiness edges. Callers must own replacement
+// allocations and publish source contents through explicit semaphore
+// dependencies before issuing work that binds the derived set.
 iree_status_t id4_pipeline_parameter_slab_set_derive(
     id4_pipeline_parameter_slab_set_t* base_slab_set,
     iree_host_size_t replacement_count,

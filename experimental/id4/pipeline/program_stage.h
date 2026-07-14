@@ -76,11 +76,12 @@ iree_status_t id4_pipeline_program_stage_prepare(
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Derives a reusable bundle by rebinding one published parameter domain while
-// retaining the source bundle's prepared executables and command buffers. The
+// retaining the source bundle's prepared executables and command buffers. All
+// unreplaced slab buffers must be identical to the base bundle's bindings. The
 // returned bundle uses the publication edge that causally dominates source
 // readiness and retains the materialization until the bundle is released.
 // |base_bundle| must be the prepared canonical bundle rather than another
-// derived bundle.
+// derived bundle; it need not remain live after this call succeeds.
 iree_status_t id4_pipeline_program_stage_derive_bundle(
     id4_pipeline_bundle_t* base_bundle,
     id4_pipeline_parameter_materialization_t* materialization,
