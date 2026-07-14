@@ -19,6 +19,11 @@ from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import WriteFileStep
 
 
+def normalized_plan_description(plan) -> str:
+    """Returns a host-neutral rendering for semantic plan assertions."""
+    return plan.describe().replace("\\", "/").replace(".exe", "")
+
+
 class CliTest(unittest.TestCase):
     def planned_argv(self, arguments: list[str]) -> list[str]:
         args = cli.parse_arguments(arguments)
@@ -51,7 +56,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["importers", "setup", "tilelang"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn(".tmp/importers/tilelang/venv", description)
         self.assertIn("pip install --require-hashes --only-binary=:all:", description)
@@ -61,7 +66,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["importers", "env", "tilelang", "--format=shell"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# print importer environment tilelang manifest", description)
 
@@ -69,7 +74,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["cmake", "configure", "--fresh"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--fresh", description)
         self.assertNotIn("-- --fresh", description)
@@ -86,7 +91,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build/cmake-ci", description)
         self.assertNotIn("../builds", description)
@@ -309,14 +314,14 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel cquery --output=files //runtime/...", description)
 
         args = cli.parse_arguments(["bazel", "info", "execution_root"])
 
         plan = args.handler(args)
-        self.assertIn("bazel info execution_root", plan.describe())
+        self.assertIn("bazel info execution_root", normalized_plan_description(plan))
 
     def test_bazel_run_builds_and_resolves_binary_before_exec(self):
         args = cli.parse_arguments(
@@ -331,11 +336,12 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel build --config=asan", description)
         self.assertIn("bazel cquery --output=files --config=asan", description)
-        self.assertIn("exec '<built executable>' --benchmark_filter=Alloc", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--benchmark_filter=Alloc", description)
 
     def test_bazel_run_importer_environment_adds_config_and_pythonpath(self):
         with self.importer_manifest_patch():
@@ -351,7 +357,7 @@ class CliTest(unittest.TestCase):
             )
             plan = args.handler(args)
 
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("--config=loom-importer-tilelang", description)
         self.assertEqual(
             plan.steps[0].env.get("PYTHONPATH", "").split(os.pathsep)[0],
@@ -385,7 +391,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn(".iree/bazel-try/run-<pid>/BUILD.bazel", description)
         self.assertIn("bazel build", description)
@@ -406,7 +412,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn(".tmp/iree-cmake-try/run-<pid>/try.cmake", description)
         self.assertIn("cmake -S", description)
@@ -502,16 +508,17 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel build --config=fuzzer", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
 
     def test_bazel_compile_commands_defaults_to_repo_roots(self):
         args = cli.parse_arguments(["bazel", "compile-commands"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# bazel compile-commands", description)
         self.assertIn("bazel build", description)
@@ -542,7 +549,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--config=asan", description)
         self.assertIn("out/compile_commands.json", description)
@@ -559,7 +566,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# bazel clang-tidy", description)
         self.assertIn("bazel build", description)
@@ -584,7 +591,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--keep_going", description)
         self.assertIn("//runtime/src/iree/vm:all", description)
@@ -593,7 +600,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["bazel", "clang-tidy", "--base", "origin/main"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--clang-tidy", description)
@@ -607,7 +614,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--clang-tidy", description)
@@ -624,7 +631,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--fix", description)
@@ -652,7 +659,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# cmake compile-commands", description)
         self.assertIn("build/cmake-debug/compile_commands.json", description)
@@ -671,7 +678,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build/cmake-debug/compile_commands.json", description)
         self.assertIn("out/cmake_compile_commands.json", description)
@@ -690,7 +697,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("IREE_CMAKE_BUILD_DIR=", description)
         self.assertIn("build/cmake-debug", description)
@@ -706,7 +713,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--lane cmake", description)
@@ -724,7 +731,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build_tools/lefthook/presubmit.py", description)
         self.assertIn("--lane cmake", description)
@@ -775,7 +782,7 @@ class CliTest(unittest.TestCase):
         self.assertTrue(args.dry_run)
         self.assertTrue(args.verbose)
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("bazel build --config=asan", description)
         self.assertNotIn("-n", description)
         self.assertNotIn("-v", description)
@@ -797,7 +804,7 @@ class CliTest(unittest.TestCase):
 
         self.assertTrue(args.dry_run)
         plan = args.handler(args)
-        self.assertIn("bazel build --dry-run", plan.describe())
+        self.assertIn("bazel build --dry-run", normalized_plan_description(plan))
 
     def test_passthrough_tool_environment_options_are_wrapper_flags(self):
         args = cli.parse_arguments(["bazel", "build", "--system", "//runtime/..."])
@@ -818,7 +825,7 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(args.cmake_build_dir, Path("build/cmake-debug"))
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("build/cmake-debug", description)
         self.assertNotIn("--cmake-build-dir", description)
 
@@ -922,7 +929,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["cmake", "build", "hrx"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--target hrx", description)
 
@@ -961,14 +968,15 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
         self.assertIn("--parallel 8", description)
 
     def test_cmake_test_forwards_options_without_separator(self):
         args = cli.parse_arguments(["cmake", "test", "-R", "hrx"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("-R hrx", description)
         self.assertNotIn("-- -R", description)
@@ -981,7 +989,8 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("# cmake run iree-run-module", description)
         self.assertIn("CMake File API", description)
-        self.assertIn("exec '<built executable>' --help", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--help", description)
 
     def test_cmake_run_agents_md_explains_no_implicit_build(self):
         output = self.parse_agents_md(["cmake", "run", "--agents_md"])
@@ -995,7 +1004,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["bazel", "precommit"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertEqual(len(plan.steps), 1)
         self.assertIn("--check", plan.steps[0].argv)
@@ -1108,7 +1117,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("IREE_CMAKE_BUILD_DIR=", description)
         self.assertIn("build/cmake-ci", description)
