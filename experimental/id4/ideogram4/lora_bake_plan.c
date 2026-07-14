@@ -287,15 +287,22 @@ static iree_status_t id4_ideogram4_lora_bake_calculate_working_set(
   IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
       strength_byte_length, &out_working_set->strengths, &total));
   IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
-      down_source_byte_length, &out_working_set->down_source, &total));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
       down_byte_length, &out_working_set->down, &total));
+
+  // Down packing and row-window mutation are distinct phases. Reuse their
+  // scratch range while keeping strengths and packed Down factors live across
+  // both phases.
+  iree_device_size_t down_pack_total = total;
   IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
-      up_byte_length, &out_working_set->up, &total));
+      down_source_byte_length, &out_working_set->down_source,
+      &down_pack_total));
+  iree_device_size_t row_window_total = total;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
+      up_byte_length, &out_working_set->up, &row_window_total));
   IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_pack_working_range(
       effective_weight_byte_length, &out_working_set->effective_weight,
-      &total));
-  out_working_set->byte_length = total;
+      &row_window_total));
+  out_working_set->byte_length = iree_max(down_pack_total, row_window_total);
   return iree_ok_status();
 }
 

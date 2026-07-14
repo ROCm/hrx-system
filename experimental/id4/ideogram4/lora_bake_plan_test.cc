@@ -346,12 +346,14 @@ TEST(Ideogram4LoraBakePlan, PlansBoundedCompactTargetWindows) {
   EXPECT_EQ(target->working_set.strengths.offset, 0u);
   EXPECT_LE(target->working_set.strengths.offset +
                 target->working_set.strengths.length,
-            target->working_set.down_source.offset);
-  EXPECT_LE(target->working_set.down_source.offset +
-                target->working_set.down_source.length,
             target->working_set.down.offset);
   EXPECT_LE(target->working_set.down.offset + target->working_set.down.length,
+            target->working_set.down_source.offset);
+  EXPECT_EQ(target->working_set.down_source.offset,
             target->working_set.up.offset);
+  EXPECT_LE(target->working_set.down_source.offset +
+                target->working_set.down_source.length,
+            target->working_set.byte_length);
   EXPECT_LE(target->working_set.up.offset + target->working_set.up.length,
             target->working_set.effective_weight.offset);
   EXPECT_LE(target->working_set.effective_weight.offset +

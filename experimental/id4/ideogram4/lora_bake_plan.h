@@ -30,11 +30,11 @@ typedef struct id4_ideogram4_lora_bake_parameter_range_t {
 typedef struct id4_ideogram4_lora_bake_working_set_t {
   // F32 adapter strengths ordered by topology adapter ordinal.
   id4_ideogram4_lora_bake_parameter_range_t strengths;
-  // Reusable source-layout BF16 down projection [segment_rank, input].
+  // Source-layout BF16 Down matrix, aliased with row-window scratch by phase.
   id4_ideogram4_lora_bake_parameter_range_t down_source;
   // Concatenated compact BF16 RHS tiles, padded per segment rank.
   id4_ideogram4_lora_bake_parameter_range_t down;
-  // Reusable BF16 up-projection window [output_rows, maximum_segment_rank].
+  // BF16 Up window sharing its phase base with the dead Down source range.
   id4_ideogram4_lora_bake_parameter_range_t up;
   // F32 effective base-plus-adapter weight window [output_rows, input].
   id4_ideogram4_lora_bake_parameter_range_t effective_weight;
