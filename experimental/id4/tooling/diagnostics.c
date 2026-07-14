@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/tooling/filesystem.h"
 
 static iree_string_view_t id4_tooling_diagnostics_event_kind_name(
@@ -29,67 +30,11 @@ static iree_string_view_t id4_tooling_diagnostics_event_kind_name(
   }
 }
 
-static iree_status_t id4_tooling_diagnostics_append_json_string(
-    iree_string_builder_t* builder, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    const unsigned char c = (unsigned char)value.data[i];
-    switch (c) {
-      case '\"': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\""));
-        break;
-      }
-      case '\\': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\\"));
-        break;
-      }
-      case '\b': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\b"));
-        break;
-      }
-      case '\f': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\f"));
-        break;
-      }
-      case '\n': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\n"));
-        break;
-      }
-      case '\r': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\r"));
-        break;
-      }
-      case '\t': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\t"));
-        break;
-      }
-      default: {
-        if (c < 0x20) {
-          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-              builder, "\\u%04x", (unsigned int)c));
-        } else {
-          IREE_RETURN_IF_ERROR(
-              iree_string_builder_append_format(builder, "%c", c));
-        }
-        break;
-      }
-    }
-  }
-  return iree_string_builder_append_cstring(builder, "\"");
-}
-
 static iree_status_t id4_tooling_diagnostics_append_json_field_string(
     iree_string_builder_t* builder, const char* key, iree_string_view_t value) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_format(builder, "\"%s\":", key));
-  return id4_tooling_diagnostics_append_json_string(builder, value);
+  return id4_pipeline_json_append_string(builder, value);
 }
 
 static iree_status_t id4_tooling_diagnostics_append_host_size_or_null(

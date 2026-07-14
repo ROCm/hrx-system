@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/pipeline/program.h"
 
 struct id4_pipeline_plan_t {
@@ -2628,36 +2629,6 @@ iree_status_t id4_pipeline_plan_submit_parameter_load_group(
       context, group_context, plan->stage_name, diagnostics_sink);
 }
 
-static iree_status_t id4_pipeline_plan_append_json_string(
-    iree_string_builder_t* builder, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    switch (value.data[i]) {
-      case '\\': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\\"));
-        break;
-      }
-      case '"': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\""));
-        break;
-      }
-      case '\n': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\n"));
-        break;
-      }
-      default: {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-            builder, iree_make_string_view(value.data + i, 1)));
-        break;
-      }
-    }
-  }
-  return iree_string_builder_append_cstring(builder, "\"");
-}
-
 static iree_status_t id4_pipeline_plan_append_buffer_params_json(
     iree_string_builder_t* builder, iree_hal_buffer_params_t params) {
   return iree_string_builder_append_format(
@@ -2685,21 +2656,21 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_step_kind_json(
     id4_pipeline_parameter_load_step_kind_t kind) {
   switch (kind) {
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER:
-      return id4_pipeline_plan_append_json_string(builder, IREE_SV("gather"));
+      return id4_pipeline_json_append_string(builder, IREE_SV("gather"));
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
-      return id4_pipeline_plan_append_json_string(
+      return id4_pipeline_json_append_string(
           builder, IREE_SV("encode_fp8_e4m3_scaled_to_bf16"));
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
-      return id4_pipeline_plan_append_json_string(
+      return id4_pipeline_json_append_string(
           builder, IREE_SV("encode_bf16_linear_rhs_tile"));
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
-      return id4_pipeline_plan_append_json_string(
+      return id4_pipeline_json_append_string(
           builder, IREE_SV("encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile"));
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
-      return id4_pipeline_plan_append_json_string(
+      return id4_pipeline_json_append_string(
           builder, IREE_SV("encode_fp8_e4m3_linear_rhs_tile"));
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_BLOCK_SCALED_TO_BF16_LINEAR_RHS_TILE:
-      return id4_pipeline_plan_append_json_string(
+      return id4_pipeline_json_append_string(
           builder,
           IREE_SV("encode_fp8_e4m3_block_scaled_to_bf16_linear_rhs_tile"));
     default:
@@ -2714,9 +2685,9 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_group_kind_json(
     id4_pipeline_parameter_load_group_kind_t kind) {
   switch (kind) {
     case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER:
-      return id4_pipeline_plan_append_json_string(builder, IREE_SV("gather"));
+      return id4_pipeline_json_append_string(builder, IREE_SV("gather"));
     case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE:
-      return id4_pipeline_plan_append_json_string(builder, IREE_SV("encode"));
+      return id4_pipeline_json_append_string(builder, IREE_SV("encode"));
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown parameter load group kind %u",
@@ -2754,7 +2725,7 @@ id4_pipeline_plan_append_parameter_load_kind_statistics_json(
     const id4_pipeline_parameter_load_kind_statistics_t* kind_statistics =
         &statistics->parameter_load_kind_statistics[kKindEntries[i].kind];
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, kKindEntries[i].name));
+        id4_pipeline_json_append_string(builder, kKindEntries[i].name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ":{\"step_count\":%" PRIhsz ",\"source_byte_length\":%" PRIu64
@@ -2813,14 +2784,13 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_sources_json(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, "{\"source_scope\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, source->source_scope));
+        id4_pipeline_json_append_string(builder, source->source_scope));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"key\":"));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, source->key));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, source->key));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, id4_pipeline_tensor_dtype_format(source->dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, ",\"byte_length\":%" PRIu64 ",\"shape\":",
@@ -2912,11 +2882,11 @@ static iree_status_t id4_pipeline_plan_append_config_bindings_json(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, "{\"key\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, binding->key));
+        id4_pipeline_json_append_string(builder, binding->key));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"value\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, binding->value));
+        id4_pipeline_json_append_string(builder, binding->value));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   return iree_string_builder_append_cstring(builder, "]");
@@ -3246,11 +3216,10 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, "{\"index\":%" PRIhsz ",\"tensor_ordinal\":%u,\"name\":",
       binding_index, binding->tensor.ordinal));
-  IREE_RETURN_IF_ERROR(
-      id4_pipeline_plan_append_json_string(builder, tensor->name));
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, tensor->name));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"access\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       builder,
       id4_pipeline_plan_program_tensor_access_format(binding->access)));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -3279,7 +3248,7 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       builder, id4_pipeline_plan_program_dtype_format(tensor->dtype)));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, ",\"byte_length\":%" PRIu64 ",\"shape\":",
@@ -3303,15 +3272,15 @@ static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
       ",\"name\":",
       dispatch_ordinal, op->ordinal, region_id, region_operation_ordinal));
   IREE_RETURN_IF_ERROR(
-      id4_pipeline_plan_append_json_string(builder, dispatch->name));
+      id4_pipeline_json_append_string(builder, dispatch->name));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"module_path\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
-      builder, dispatch->kernel.module_path));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_json_append_string(builder, dispatch->kernel.module_path));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"function_name\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
-      builder, dispatch->kernel.function_name));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_json_append_string(builder, dispatch->kernel.function_name));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"config_bindings\":"));
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_config_bindings_json(
@@ -3327,11 +3296,11 @@ static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, "{\"key\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, attribute->key));
+        id4_pipeline_json_append_string(builder, attribute->key));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"value\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, attribute->value));
+        id4_pipeline_json_append_string(builder, attribute->value));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
@@ -3355,7 +3324,7 @@ static iree_status_t id4_pipeline_plan_append_program_json(
       id4_pipeline_program_operation_count(program);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "{\"name\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       builder, id4_pipeline_program_name(program)));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
@@ -3418,7 +3387,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "\"stage\":"));
   IREE_RETURN_IF_ERROR(
-      id4_pipeline_plan_append_json_string(builder, plan->stage_name));
+      id4_pipeline_json_append_string(builder, plan->stage_name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       ",\"device_group\":{\"device_count\":%" PRIhsz
@@ -3477,7 +3446,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"role\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, placement->role));
+        id4_pipeline_json_append_string(builder, placement->role));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"device_index\":%" PRIhsz ",\"queue_affinity\":%" PRIu64 "}",
@@ -3495,7 +3464,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"domain\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, slab->domain));
+        id4_pipeline_json_append_string(builder, slab->domain));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
         slab->placement_id, slab->binding_slot));
@@ -3516,7 +3485,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, "{\"key\":"));
       IREE_RETURN_IF_ERROR(
-          id4_pipeline_plan_append_json_string(builder, request->key));
+          id4_pipeline_json_append_string(builder, request->key));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"parameter_offset\":%" PRIu64 ",\"buffer_offset\":%" PRIu64
@@ -3538,7 +3507,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, tensor->layout.name));
+        id4_pipeline_json_append_string(builder, tensor->layout.name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"program_tensor_ordinal\":%u,\"parameter_slab_index\":%" PRIhsz
@@ -3560,12 +3529,11 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     }
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, "{\"name\":"));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, step->name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, step->name));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"source_scope\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, step->source_scope));
+        id4_pipeline_json_append_string(builder, step->source_scope));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"kind\":"));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_step_kind_json(
@@ -3652,8 +3620,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, slab->name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, slab->name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
         slab->placement_id, slab->binding_slot));
@@ -3673,7 +3640,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, "{\"name\":"));
       IREE_RETURN_IF_ERROR(
-          id4_pipeline_plan_append_json_string(builder, request->name));
+          id4_pipeline_json_append_string(builder, request->name));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, ",\"buffer_offset\":%" PRIu64 ",\"length\":%" PRIu64 "}",
           (uint64_t)request->span.buffer_offset,
@@ -3690,11 +3657,10 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, slab->name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, slab->name));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"scope\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, id4_pipeline_memory_slab_scope_format(slab->scope)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
@@ -3720,10 +3686,10 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, tensor->layout.name));
+        id4_pipeline_json_append_string(builder, tensor->layout.name));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, id4_pipeline_tensor_dtype_format(tensor->layout.dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
@@ -3751,10 +3717,10 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, tensor->layout.name));
+        id4_pipeline_json_append_string(builder, tensor->layout.name));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, id4_pipeline_tensor_dtype_format(tensor->layout.dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
@@ -3776,16 +3742,16 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"specialization_key\":", i));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
-        builder, kernel->specialization_key));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_json_append_string(builder, kernel->specialization_key));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"module_path\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, kernel->module_path));
+        id4_pipeline_json_append_string(builder, kernel->module_path));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"function_name\":"));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, kernel->function_name));
+        id4_pipeline_json_append_string(builder, kernel->function_name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"placement_id\":%u,\"config_bindings\":", kernel->placement_id));
@@ -3803,7 +3769,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, region->name));
+        id4_pipeline_json_append_string(builder, region->name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"source_operation_offset\":%" PRIhsz
@@ -3832,10 +3798,10 @@ iree_status_t id4_pipeline_plan_format_json_fields(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, "{\"id\":%" PRIhsz ",\"name\":", j));
       IREE_RETURN_IF_ERROR(
-          id4_pipeline_plan_append_json_string(builder, lifetime->name));
+          id4_pipeline_json_append_string(builder, lifetime->name));
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-      IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
           builder, id4_pipeline_tensor_dtype_format(lifetime->dtype)));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
@@ -3899,8 +3865,7 @@ iree_status_t id4_pipeline_plan_format_json_fields(
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, tap->name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, tap->name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"region_id\":%u,\"after_operation_ordinal\":%" PRIhsz
@@ -3908,10 +3873,10 @@ iree_status_t id4_pipeline_plan_format_json_fields(
         tap->region_id, tap->after_operation_ordinal, tap->placement_id,
         tap->binding_slot));
     IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, tap->target_name));
+        id4_pipeline_json_append_string(builder, tap->target_name));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, id4_pipeline_tensor_dtype_format(tap->layout.dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,

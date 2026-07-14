@@ -60,6 +60,13 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "json",
+    srcs = ["json.c"],
+    hdrs = ["json.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_library(
     name = "parameter_slab",
     srcs = ["parameter_slab.c"],
     hdrs = ["parameter_slab.h"],
@@ -111,6 +118,7 @@ iree_runtime_cc_library(
     srcs = ["parameter_residency.c"],
     hdrs = ["parameter_residency.h"],
     deps = [
+        ":json",
         ":parameter_window",
         ":plan",
         ":program",
@@ -143,6 +151,7 @@ iree_runtime_cc_library(
     hdrs = ["plan.h"],
     deps = [
         ":diagnostics",
+        ":json",
         ":kernel_library",
         ":parameter_slab",
         ":program",
@@ -300,6 +309,17 @@ iree_runtime_cc_test(
     srcs = ["kernel_library_test.cc"],
     deps = [
         ":kernel_library",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "json_test",
+    srcs = ["json_test.cc"],
+    deps = [
+        ":json",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

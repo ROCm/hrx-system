@@ -68,6 +68,18 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    json
+  HDRS
+    "json.h"
+  SRCS
+    "json.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_slab
   HDRS
     "parameter_slab.h"
@@ -130,6 +142,7 @@ iree_cc_library(
   SRCS
     "parameter_residency.c"
   DEPS
+    ::json
     ::parameter_window
     ::plan
     ::program
@@ -164,6 +177,7 @@ iree_cc_library(
     "plan.c"
   DEPS
     ::diagnostics
+    ::json
     ::kernel_library
     ::parameter_slab
     ::program
@@ -349,6 +363,18 @@ iree_cc_test(
     "kernel_library_test.cc"
   DEPS
     ::kernel_library
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    json_test
+  SRCS
+    "json_test.cc"
+  DEPS
+    ::json
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main

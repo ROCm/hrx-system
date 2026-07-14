@@ -19,6 +19,7 @@ iree_runtime_cc_library(
     hdrs = ["capture.h"],
     deps = [
         ":filesystem",
+        "//experimental/id4/pipeline:json",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:region",
         "//runtime/src/iree/base",
@@ -40,6 +41,7 @@ iree_runtime_cc_library(
     deps = [
         ":filesystem",
         "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:json",
         "//runtime/src/iree/base",
     ],
 )

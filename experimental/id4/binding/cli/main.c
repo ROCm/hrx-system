@@ -14,6 +14,7 @@
 #include "experimental/id4/binding/cli/parameter_bake.h"
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/capture.h"
@@ -1027,36 +1028,6 @@ static id4_pipeline_tensor_shape_t id4_cli_convert_program_shape(
   return tensor_shape;
 }
 
-static iree_status_t id4_cli_append_json_string(iree_string_builder_t* builder,
-                                                iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    switch (value.data[i]) {
-      case '\\': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\\"));
-        break;
-      }
-      case '"': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\""));
-        break;
-      }
-      case '\n': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\n"));
-        break;
-      }
-      default: {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-            builder, iree_make_string_view(value.data + i, 1)));
-        break;
-      }
-    }
-  }
-  return iree_string_builder_append_cstring(builder, "\"");
-}
-
 static iree_status_t id4_cli_append_shape_json(
     iree_string_builder_t* builder, id4_pipeline_tensor_shape_t shape) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -1125,11 +1096,11 @@ static iree_status_t id4_cli_append_tensor_summary_prefix_json(
     iree_string_builder_t* builder, iree_string_view_t key,
     const id4_pipeline_tensor_layout_t* layout, iree_host_size_t byte_length,
     iree_host_size_t element_count) {
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, key));
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, key));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":{"));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "\"dtype\":"));
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       builder, id4_pipeline_tensor_dtype_format(layout->dtype)));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"shape\":"));
@@ -1309,13 +1280,13 @@ static iree_status_t id4_cli_append_result_tensor_record_json(
     const id4_cli_result_tensor_summary_t* tensor) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, "{\"ordinal\":%" PRIhsz ",\"key\":", ordinal));
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, tensor->key));
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, tensor->key));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"file\":"));
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, file_name));
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(builder, file_name));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"dtype\":"));
-  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       builder, id4_pipeline_tensor_dtype_format(tensor->layout.dtype)));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"shape\":"));

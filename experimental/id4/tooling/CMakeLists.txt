@@ -19,6 +19,7 @@ iree_cc_library(
   DEPS
     ::filesystem
     iree::base
+    iree::experimental::id4::pipeline::json
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::region
     iree::hal
@@ -48,6 +49,7 @@ iree_cc_library(
     ::filesystem
     iree::base
     iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::json
   PUBLIC
 )
 

@@ -50,6 +50,7 @@ iree_cc_binary(
     iree::experimental::id4::ideogram4::request
     iree::experimental::id4::ideogram4::session
     iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::json
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::stages::ideogram4_dit_parameters

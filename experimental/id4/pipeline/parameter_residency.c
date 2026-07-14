@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/pipeline/program.h"
 #include "iree/base/internal/arena.h"
 
@@ -939,36 +940,6 @@ iree_status_t id4_pipeline_parameter_residency_plan_query_live_statistics(
   return status;
 }
 
-static iree_status_t id4_pipeline_parameter_residency_append_json_string(
-    iree_string_builder_t* builder, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    switch (value.data[i]) {
-      case '\\': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\\"));
-        break;
-      }
-      case '"': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\""));
-        break;
-      }
-      case '\n': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\n"));
-        break;
-      }
-      default: {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-            builder, iree_make_string_view(value.data + i, 1)));
-        break;
-      }
-    }
-  }
-  return iree_string_builder_append_cstring(builder, "\"");
-}
-
 static const id4_pipeline_parameter_tensor_plan_t*
 id4_pipeline_parameter_residency_find_parameter(
     const id4_pipeline_plan_t* plan, uint32_t program_tensor_ordinal) {
@@ -1036,7 +1007,7 @@ iree_status_t id4_pipeline_parameter_residency_plan_format_json(
         builder,
         "{\"semantic_region_id\":%" PRIu32 ",\"semantic_region_name\":",
         segment->semantic_region_id));
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_residency_append_json_string(
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
         builder, region ? region->name : iree_string_view_empty()));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
@@ -1067,7 +1038,7 @@ iree_status_t id4_pipeline_parameter_residency_plan_format_json(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, "{\"program_tensor_ordinal\":%" PRIu32 ",\"name\":",
           program_tensor_ordinal));
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_residency_append_json_string(
+      IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
           builder,
           parameter ? parameter->layout.name : iree_string_view_empty()));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

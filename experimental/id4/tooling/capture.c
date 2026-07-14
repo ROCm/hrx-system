@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/tooling/filesystem.h"
 
 static const uint8_t id4_tooling_capture_tensor_magic[8] = {
@@ -179,64 +180,6 @@ static iree_status_t id4_tooling_capture_write_file(
                                               host_allocator);
 }
 
-static iree_status_t id4_tooling_capture_append_json_string(
-    iree_string_builder_t* builder, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    const unsigned char c = (unsigned char)value.data[i];
-    switch (c) {
-      case '\"': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\""));
-        break;
-      }
-      case '\\': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\\\"));
-        break;
-      }
-      case '\b': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\b"));
-        break;
-      }
-      case '\f': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\f"));
-        break;
-      }
-      case '\n': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\n"));
-        break;
-      }
-      case '\r': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\r"));
-        break;
-      }
-      case '\t': {
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(builder, "\\t"));
-        break;
-      }
-      default: {
-        if (c < 0x20) {
-          IREE_RETURN_IF_ERROR(
-              iree_string_builder_append_format(builder, "\\u%04x", c));
-        } else {
-          char* storage = NULL;
-          IREE_RETURN_IF_ERROR(
-              iree_string_builder_append_inline(builder, 1, &storage));
-          storage[0] = (char)c;
-        }
-        break;
-      }
-    }
-  }
-  return iree_string_builder_append_cstring(builder, "\"");
-}
-
 static iree_status_t id4_tooling_capture_append_shape_json(
     iree_string_builder_t* builder, id4_pipeline_tensor_shape_t shape) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
@@ -272,7 +215,7 @@ iree_status_t id4_tooling_capture_write_tensor_file(
   iree_status_t status = iree_string_builder_append_cstring(
       &header_builder, "{\"version\":1,\"kind\":\"tensor\",\"dtype\":");
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_append_json_string(
+    status = id4_pipeline_json_append_string(
         &header_builder, id4_pipeline_tensor_dtype_format(layout->dtype));
   }
   if (iree_status_is_ok(status)) {
@@ -287,7 +230,7 @@ iree_status_t id4_tooling_capture_write_tensor_file(
                                                 ",\"storage_dtype\":");
   }
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_append_json_string(
+    status = id4_pipeline_json_append_string(
         &header_builder, id4_pipeline_tensor_dtype_format(layout->dtype));
   }
   if (iree_status_is_ok(status)) {
@@ -413,12 +356,12 @@ static iree_status_t id4_tooling_capture_append_record_json(
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(manifest_builder, "    {\"dtype\":"));
-  IREE_RETURN_IF_ERROR(id4_tooling_capture_append_json_string(
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
       manifest_builder, id4_pipeline_tensor_dtype_format(layout->dtype)));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(manifest_builder, ",\"file\":"));
   IREE_RETURN_IF_ERROR(
-      id4_tooling_capture_append_json_string(manifest_builder, file_name));
+      id4_pipeline_json_append_string(manifest_builder, file_name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       manifest_builder, ",\"format\":\"id4tensor-v1\""));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
@@ -426,7 +369,7 @@ static iree_status_t id4_tooling_capture_append_record_json(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(manifest_builder, ",\"name\":"));
   IREE_RETURN_IF_ERROR(
-      id4_tooling_capture_append_json_string(manifest_builder, layout->name));
+      id4_pipeline_json_append_string(manifest_builder, layout->name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       manifest_builder, ",\"role\":\"actual\""));
   IREE_RETURN_IF_ERROR(
@@ -436,7 +379,7 @@ static iree_status_t id4_tooling_capture_append_record_json(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(manifest_builder, ",\"stage\":"));
   IREE_RETURN_IF_ERROR(
-      id4_tooling_capture_append_json_string(manifest_builder, stage_name));
+      id4_pipeline_json_append_string(manifest_builder, stage_name));
   return iree_string_builder_append_cstring(manifest_builder, "}");
 }
 
@@ -527,8 +470,8 @@ iree_status_t id4_tooling_capture_execution(
                                                 "\n  ],\n  \"run_id\": ");
   }
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_append_json_string(&manifest_builder,
-                                                    options->run_id);
+    status =
+        id4_pipeline_json_append_string(&manifest_builder, options->run_id);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(
