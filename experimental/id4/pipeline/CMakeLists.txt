@@ -107,6 +107,23 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_materialization
+  HDRS
+    "parameter_materialization.h"
+  SRCS
+    "parameter_materialization.c"
+  DEPS
+    ::diagnostics
+    ::parameter_slab
+    ::plan
+    iree::base
+    iree::base::internal
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_residency
   HDRS
     "parameter_residency.h"
@@ -236,6 +253,7 @@ iree_cc_library(
   DEPS
     ::kernel_cache
     ::parameter_layout
+    ::parameter_materialization
     ::parameter_residency
     ::parameter_slab
     ::program
@@ -409,6 +427,7 @@ iree_cc_test(
     ::kernel_cache
     ::kernel_library
     ::parameter_layout
+    ::parameter_materialization
     ::parameter_slab
     ::plan
     ::program_stage

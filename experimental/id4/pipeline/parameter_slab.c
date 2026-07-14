@@ -4274,6 +4274,125 @@ iree_status_t id4_pipeline_parameter_slab_set_create_uninitialized(
   return status;
 }
 
+static iree_status_t id4_pipeline_parameter_slab_validate_resident_buffer(
+    const id4_pipeline_parameter_slab_load_t* load, iree_hal_buffer_t* buffer,
+    iree_host_size_t index) {
+  if (!load->slab) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "resident parameter slab %" PRIhsz " has no allocation plan", index);
+  }
+  if (!load->request_table) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "resident parameter slab %" PRIhsz " has no request table", index);
+  }
+  if (!load->device) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "resident parameter slab %" PRIhsz " has no target device", index);
+  }
+  if (!buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab %" PRIhsz " has no buffer",
+                            index);
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_request_table_validate(
+      load->slab, load->request_table));
+  if (iree_hal_buffer_byte_length(buffer) != load->slab->byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "resident parameter slab %" PRIhsz
+        " byte length mismatch: plan=%" PRIu64 ", buffer=%" PRIu64,
+        index, load->slab->byte_length, iree_hal_buffer_byte_length(buffer));
+  }
+  if (load->slab->alignment != 0 &&
+      (!iree_device_size_is_power_of_two(load->slab->alignment) ||
+       iree_hal_buffer_byte_offset(buffer) % load->slab->alignment != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab %" PRIhsz
+                            " does not satisfy alignment %" PRIu64,
+                            index, load->slab->alignment);
+  }
+
+  const iree_hal_buffer_placement_t placement =
+      iree_hal_buffer_allocation_placement(buffer);
+  if (placement.device != load->device) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab %" PRIhsz
+                            " is not allocated on the target device",
+                            index);
+  }
+  if (!iree_hal_queue_affinity_is_any(load->queue_affinity) &&
+      !iree_all_bits_set(placement.queue_affinity, load->queue_affinity)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab %" PRIhsz
+                            " queue affinity is incompatible with the plan",
+                            index);
+  }
+  IREE_RETURN_IF_ERROR(iree_status_annotate_f(
+      iree_hal_buffer_validate_memory_type(iree_hal_buffer_memory_type(buffer),
+                                           load->slab->target_params.type),
+      "resident parameter slab %" PRIhsz, index));
+  IREE_RETURN_IF_ERROR(iree_status_annotate_f(
+      iree_hal_buffer_validate_access(iree_hal_buffer_allowed_access(buffer),
+                                      load->slab->target_params.access),
+      "resident parameter slab %" PRIhsz, index));
+  return iree_status_annotate_f(
+      iree_hal_buffer_validate_usage(iree_hal_buffer_allowed_usage(buffer),
+                                     load->slab->target_params.usage),
+      "resident parameter slab %" PRIhsz, index);
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_wrap_resident(
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_hal_buffer_t* const* buffers, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  IREE_ASSERT_ARGUMENT(out_slab_set);
+  *out_slab_set = NULL;
+  if (load_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "at least one resident parameter slab is required");
+  }
+  if (!loads) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab load array is required");
+  }
+  if (!buffers) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab buffer array is required");
+  }
+  for (iree_host_size_t i = 0; i < load_count; ++i) {
+    if (loads[i].slab_index != i) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "resident parameter slab %" PRIhsz
+                              " has slab index %" PRIhsz,
+                              i, loads[i].slab_index);
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_resident_buffer(
+        &loads[i], buffers[i], i));
+  }
+
+  id4_pipeline_parameter_slab_set_t* slab_set = NULL;
+  iree_status_t status = id4_pipeline_parameter_slab_set_create_empty(
+      load_count, host_allocator, &slab_set);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < load_count; ++i) {
+      slab_set->buffers[i] = buffers[i];
+      iree_hal_buffer_retain(slab_set->buffers[i]);
+    }
+    status =
+        id4_pipeline_parameter_slab_set_copy_loads(slab_set, load_count, loads);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_slab_set = slab_set;
+  } else {
+    id4_pipeline_parameter_slab_set_release(slab_set);
+  }
+  return status;
+}
+
 static iree_status_t id4_pipeline_parameter_slab_set_validate_resident_source(
     const id4_pipeline_parameter_slab_set_t* slab_set,
     iree_string_view_t source_name) {

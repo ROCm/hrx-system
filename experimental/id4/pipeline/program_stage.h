@@ -19,6 +19,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Asynchronously published parameter-domain replacement.
+typedef struct id4_pipeline_parameter_materialization_t
+    id4_pipeline_parameter_materialization_t;
+
 // Options for deriving a pipeline plan from one stage-authored program.
 typedef struct id4_pipeline_program_stage_plan_options_t {
   // Size of this structure for versioning.
@@ -69,6 +73,17 @@ iree_status_t id4_pipeline_program_stage_create_plan(
 // packages the prepared program in a reusable stage bundle.
 iree_status_t id4_pipeline_program_stage_prepare(
     const id4_pipeline_program_stage_prepare_options_t* options,
+    iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
+
+// Derives a reusable bundle by rebinding one published parameter domain while
+// retaining the source bundle's prepared executables and command buffers. The
+// returned bundle uses the publication edge that causally dominates source
+// readiness and retains the materialization until the bundle is released.
+// |base_bundle| must be the prepared canonical bundle rather than another
+// derived bundle.
+iree_status_t id4_pipeline_program_stage_derive_bundle(
+    id4_pipeline_bundle_t* base_bundle,
+    id4_pipeline_parameter_materialization_t* materialization,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Issues a bundle prepared by id4_pipeline_program_stage_prepare.
