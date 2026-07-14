@@ -28,6 +28,18 @@ void WriteU64(std::vector<uint8_t>* data, size_t offset, uint64_t value) {
   std::memcpy(data->data() + offset, &value, sizeof(value));
 }
 
+uint32_t ReadU32(const uint8_t* data, size_t offset) {
+  uint32_t value = 0;
+  std::memcpy(&value, data + offset, sizeof(value));
+  return value;
+}
+
+uint64_t ReadU64(const uint8_t* data, size_t offset) {
+  uint64_t value = 0;
+  std::memcpy(&value, data + offset, sizeof(value));
+  return value;
+}
+
 void WriteString(std::vector<uint8_t>* data, size_t offset, size_t size,
                  const char* value) {
   std::memset(data->data() + offset, 0, size);
@@ -126,6 +138,60 @@ TEST(ContextBlobTest, ParsesMultiPdiIpLayoutAndAiePartition) {
   EXPECT_EQ(info.dpu_kernel_ids[0], 0x100u);
   EXPECT_EQ(info.dpu_kernel_ids[1], 0x101u);
   EXPECT_GT(private_data.data_length, xclbin.size());
+  ContextBlobInfoDeinitialize(&info);
+  iree_allocator_free(iree_allocator_system(), private_data.data);
+}
+
+TEST(ContextBlobTest, BuildsCompactContextPrivateData) {
+  std::vector<uint8_t> xclbin = BuildSyntheticMultiPdiXclbin();
+  Buffer context_buffer;
+  context_buffer.kind = BufferKind::context_private;
+  context_buffer.size = 0x1000;
+  context_buffer.allocation = 0x40000280;
+  context_buffer.cpu_ptr = reinterpret_cast<void*>(uintptr_t{0x252EBB80000});
+
+  iree_byte_span_t private_data = iree_byte_span_empty();
+  ContextBlobInfo info;
+  Error error;
+  ASSERT_TRUE(BuildCompactContextPrivateDataFromXclbin(
+      xclbin.data(), xclbin.size(), /*process_id=*/0x7CA4, context_buffer,
+      iree_allocator_system(), &private_data, &info, &error))
+      << ErrorMessage(&error);
+
+  ASSERT_EQ(private_data.data_length, 0xA0u);
+  EXPECT_EQ(std::memcmp(private_data.data, xclbin.data() + 0x1A0, 16), 0);
+  EXPECT_EQ(ReadU64(private_data.data, 0x48), 0x04000000u);
+  EXPECT_EQ(ReadU32(private_data.data, 0x50), 0x7CA4u);
+  EXPECT_EQ(ReadU32(private_data.data, 0x54), 8u);
+  EXPECT_EQ(ReadU32(private_data.data, 0x5C), 0x800u);
+  EXPECT_EQ(ReadU32(private_data.data, 0x68), 0x40000280u);
+  EXPECT_EQ(ReadU32(private_data.data, 0x74), 0x1000u);
+  EXPECT_EQ(ReadU64(private_data.data, 0x78), 0x252EBB80000u);
+  EXPECT_EQ(info.column_width, 8u);
+  EXPECT_EQ(info.start_column, 2u);
+
+  ContextBlobInfoDeinitialize(&info);
+  iree_allocator_free(iree_allocator_system(), private_data.data);
+}
+
+TEST(ContextBlobTest, DeviceHelperBuildsNegotiatedLegacyContext) {
+  std::vector<uint8_t> xclbin = BuildSyntheticMultiPdiXclbin();
+  KmtApi api = {};
+  Device device = {};
+  device.mcdm_abi = McdmAbi::legacy;
+  Buffer context_buffer;
+  iree_byte_span_t private_data = iree_byte_span_empty();
+  ContextBlobInfo info;
+  Error error;
+
+  ASSERT_TRUE(BuildContextPrivateDataForDevice(
+      api, device, xclbin.data(), xclbin.size(), /*process_id=*/1234,
+      iree_allocator_system(), &private_data, &info, &context_buffer, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(context_buffer.allocation, 0u);
+  EXPECT_GT(private_data.data_length, xclbin.size());
+  EXPECT_EQ(std::memcmp(private_data.data, xclbin.data() + 0x1A0, 16), 0);
+
   ContextBlobInfoDeinitialize(&info);
   iree_allocator_free(iree_allocator_system(), private_data.data);
 }

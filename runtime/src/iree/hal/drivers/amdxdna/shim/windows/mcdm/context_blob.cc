@@ -17,6 +17,8 @@ constexpr size_t kAxlfBaseOffset = 0xE8;
 constexpr size_t kContextTailSize = 0x3C8;
 constexpr uint64_t kCommandApertureBase = 0x04000000;
 constexpr uint64_t kContextCommandBoSize = 0x1000;
+constexpr size_t kCompactContextPrivateDataSize = 0xA0;
+constexpr uint32_t kCompactContextInstructionOffset = 0x800;
 constexpr uint32_t kBuildMetadataSection = 14;
 constexpr uint32_t kAiePartitionSection = 32;
 constexpr uint32_t kIpLayoutSection = 8;
@@ -434,6 +436,42 @@ bool ParseAiePartition(const uint8_t* xclbin, size_t xclbin_size,
   return true;
 }
 
+bool ParseContextBlobInfo(const uint8_t* xclbin, size_t xclbin_size,
+                          iree_allocator_t allocator,
+                          ContextBlobInfo* out_info, Error* out_error) {
+  AxlfSectionList sections;
+  ContextBlobInfo info;
+  info.allocator = allocator;
+
+  if (!ParseSections(xclbin, xclbin_size, allocator, &sections, out_error)) {
+    goto fail;
+  }
+  if (!ParseIpLayout(xclbin, xclbin_size, sections, &info, out_error)) {
+    goto fail;
+  }
+  if (info.kernel_name_count == 0) {
+    if (!DeriveKernelNameFromMetadata(xclbin, sections, info.kernel_name,
+                                      out_error)) {
+      goto fail;
+    }
+  } else {
+    std::memcpy(info.kernel_name, ContextBlobInfoKernelName(&info, 0),
+                kContextBlobNameCapacity);
+  }
+  if (!ParseAiePartition(xclbin, xclbin_size, sections, &info, out_error)) {
+    goto fail;
+  }
+
+  *out_info = info;
+  AxlfSectionListDeinitialize(&sections);
+  return true;
+
+fail:
+  ContextBlobInfoDeinitialize(&info);
+  AxlfSectionListDeinitialize(&sections);
+  return false;
+}
+
 }  // namespace
 
 const char* ContextBlobInfoKernelName(const ContextBlobInfo* info,
@@ -472,28 +510,12 @@ bool BuildContextPrivateDataFromXclbin(const uint8_t* xclbin,
   *out_blob = iree_byte_span_empty();
   if (xclbin_size < 0x1B0) return Fail("xclbin is too small", out_error);
 
-  AxlfSectionList sections;
   ContextBlobInfo info;
-  info.allocator = allocator;
   uint8_t* blob = nullptr;
 
-  if (!ParseSections(xclbin, xclbin_size, allocator, &sections, out_error)) {
-    goto fail;
-  }
-  if (!ParseIpLayout(xclbin, xclbin_size, sections, &info, out_error)) {
-    goto fail;
-  }
-  if (info.kernel_name_count == 0) {
-    if (!DeriveKernelNameFromMetadata(xclbin, sections, info.kernel_name,
-                                      out_error)) {
-      goto fail;
-    }
-  } else {
-    std::memcpy(info.kernel_name, ContextBlobInfoKernelName(&info, 0),
-                kContextBlobNameCapacity);
-  }
-  if (!ParseAiePartition(xclbin, xclbin_size, sections, &info, out_error)) {
-    goto fail;
+  if (!ParseContextBlobInfo(xclbin, xclbin_size, allocator, &info,
+                            out_error)) {
+    return false;
   }
 
   if (xclbin_size >
@@ -546,13 +568,89 @@ bool BuildContextPrivateDataFromXclbin(const uint8_t* xclbin,
   } else {
     ContextBlobInfoDeinitialize(&info);
   }
-  AxlfSectionListDeinitialize(&sections);
   return true;
 
 fail:
   iree_allocator_free(allocator, blob);
   ContextBlobInfoDeinitialize(&info);
-  AxlfSectionListDeinitialize(&sections);
+  return false;
+}
+
+bool BuildCompactContextPrivateDataFromXclbin(
+    const uint8_t* xclbin, size_t xclbin_size, uint32_t process_id,
+    const Buffer& context_private_buffer, iree_allocator_t allocator,
+    iree_byte_span_t* out_blob, ContextBlobInfo* out_info, Error* out_error) {
+  if (!xclbin || !out_blob || iree_allocator_is_null(allocator) ||
+      !context_private_buffer.allocation ||
+      context_private_buffer.size != kContextCommandBoSize ||
+      !context_private_buffer.cpu_ptr) {
+    return Fail("invalid compact context arguments", out_error);
+  }
+  *out_blob = iree_byte_span_empty();
+  if (xclbin_size < 0x1B0) return Fail("xclbin is too small", out_error);
+
+  ContextBlobInfo info;
+  if (!ParseContextBlobInfo(xclbin, xclbin_size, allocator, &info,
+                            out_error)) {
+    return false;
+  }
+
+  uint8_t* blob = nullptr;
+  iree_status_t status = iree_allocator_malloc(
+      allocator, kCompactContextPrivateDataSize,
+      reinterpret_cast<void**>(&blob));
+  if (!FailStatus(status, "compact context allocation failed", out_error)) {
+    ContextBlobInfoDeinitialize(&info);
+    return false;
+  }
+  std::memset(blob, 0, kCompactContextPrivateDataSize);
+  std::memcpy(blob, xclbin + 0x1A0, 16);
+  WriteU64(blob, 0x48, kCommandApertureBase);
+  WriteU32(blob, 0x50, process_id);
+  WriteU32(blob, 0x54, info.column_width);
+  WriteU32(blob, 0x5C, kCompactContextInstructionOffset);
+  WriteU32(blob, 0x68, context_private_buffer.allocation);
+  WriteU32(blob, 0x74,
+           static_cast<uint32_t>(context_private_buffer.size));
+  WriteU64(blob, 0x78,
+           reinterpret_cast<uintptr_t>(context_private_buffer.cpu_ptr));
+
+  *out_blob =
+      iree_make_byte_span(blob, kCompactContextPrivateDataSize);
+  if (out_info) {
+    *out_info = info;
+  } else {
+    ContextBlobInfoDeinitialize(&info);
+  }
+  return true;
+}
+
+bool BuildContextPrivateDataForDevice(
+    const KmtApi& api, const Device& device, const uint8_t* xclbin,
+    size_t xclbin_size, uint32_t process_id, iree_allocator_t allocator,
+    iree_byte_span_t* out_blob, ContextBlobInfo* out_info,
+    Buffer* out_context_private_buffer, Error* out_error) {
+  if (!out_context_private_buffer) {
+    return Fail("invalid context-private buffer output", out_error);
+  }
+  *out_context_private_buffer = {};
+  if (device.mcdm_abi == McdmAbi::legacy) {
+    return BuildContextPrivateDataFromXclbin(
+        xclbin, xclbin_size, process_id, allocator, out_blob, out_info,
+        out_error);
+  }
+
+  if (!CreateBuffer(api, device, BufferKind::context_private,
+                    kContextCommandBoSize, out_context_private_buffer,
+                    out_error)) {
+    return false;
+  }
+  if (BuildCompactContextPrivateDataFromXclbin(
+          xclbin, xclbin_size, process_id, *out_context_private_buffer,
+          allocator, out_blob, out_info, out_error)) {
+    return true;
+  }
+  DestroyBuffer(api, device, out_context_private_buffer);
   return false;
 }
 

@@ -25,6 +25,43 @@
 namespace iree::hal::amdxdna::mcdm {
 
 constexpr size_t kMaxRetainedAdapterHandles = 256;
+constexpr size_t kMaxMcdmPrivateDataSize = 0x280;
+constexpr size_t kMaxPathBBoTableEntries = 6;
+constexpr size_t kCompactPathBChainHandleSize = 0x120;
+
+// Miniport-facing runlist child record for the compact MCDM contract. The
+// semantics of the three observed state fields are not published, so retain
+// neutral names while making the captured byte layout explicit and checked.
+struct alignas(uint64_t) CompactPathBChainHandleV1 {
+  uint8_t reserved_00[0x18] = {};
+  uint64_t requested_size = 0;
+  uint64_t xcl_flags = 0;
+  uint8_t reserved_28[0x10] = {};
+  uint64_t allocation = 0;
+  uint8_t reserved_40[0x18] = {};
+  uint64_t page_count = 0;
+  uint64_t gpu_va = 0;
+  uint8_t reserved_68[0x08] = {};
+  uint64_t cpu_ptr = 0;
+  uint8_t reserved_78[0x08] = {};
+  uint64_t observed_state_80 = 0;
+  uint8_t reserved_88[0x40] = {};
+  uint64_t observed_state_c8 = 0;
+  uint64_t observed_state_d0 = 0;
+  uint8_t reserved_d8[0x48] = {};
+};
+
+static_assert(offsetof(CompactPathBChainHandleV1, requested_size) == 0x18);
+static_assert(offsetof(CompactPathBChainHandleV1, xcl_flags) == 0x20);
+static_assert(offsetof(CompactPathBChainHandleV1, allocation) == 0x38);
+static_assert(offsetof(CompactPathBChainHandleV1, page_count) == 0x58);
+static_assert(offsetof(CompactPathBChainHandleV1, gpu_va) == 0x60);
+static_assert(offsetof(CompactPathBChainHandleV1, cpu_ptr) == 0x70);
+static_assert(offsetof(CompactPathBChainHandleV1, observed_state_80) == 0x80);
+static_assert(offsetof(CompactPathBChainHandleV1, observed_state_c8) == 0xc8);
+static_assert(offsetof(CompactPathBChainHandleV1, observed_state_d0) == 0xd0);
+static_assert(sizeof(CompactPathBChainHandleV1) ==
+              kCompactPathBChainHandleSize);
 
 struct Error {
   char message[512] = {};
@@ -36,7 +73,33 @@ enum class BufferKind {
   host_only,
   cacheable,
   execbuf,
+  context_private,
 };
+
+enum class McdmAbi {
+  legacy,
+  compact,
+};
+
+struct McdmAbiInfo {
+  uint32_t status_private_type;
+  uint32_t status_policy;
+  uint32_t status_xcl_flags;
+  uint32_t submit_private_prefix_size;
+  uint32_t setup_private_size;
+  uint32_t pathb_private_size;
+  uint32_t pathb_packet_offset;
+  uint32_t chain_metadata_offset;
+  uint32_t pathb_bo_table_entry_count;
+  bool status_has_gpu_va;
+  bool sync_has_allocation_handle;
+  uint64_t command_aperture_code_slot_size;
+  uint64_t command_aperture_code_publish_granularity;
+  bool command_aperture_residency_after_bootstrap;
+  bool command_aperture_remap_after_write;
+};
+
+McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi);
 
 struct BufferKindInfo {
   const char* name;
@@ -74,6 +137,9 @@ struct KmtApi {
   bool Load(Error* out_error);
 };
 
+bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
+                  Error* out_error);
+
 struct Adapter {
   D3DKMT_HANDLE handle = 0;
   LUID luid = {};
@@ -89,12 +155,16 @@ struct Device {
   D3DKMT_HANDLE paging_queue = 0;
   D3DKMT_HANDLE paging_sync_object = 0;
   void* paging_fence_cpu = nullptr;
+  McdmAbi mcdm_abi = McdmAbi::legacy;
 };
 
 struct Buffer {
   BufferKind kind = BufferKind::host_only;
   // Logical BO size exposed to the HAL/runtime.
   uint64_t size = 0;
+  // Size requested from the miniport before page rounding. Compact exec BOs
+  // include the private-submit prefix in addition to the logical command page.
+  uint64_t requested_size = 0;
   // Actual GPU VA reservation size. XRT often requests a non-page-sized BO
   // and maps the page-rounded allocation returned by the driver.
   uint64_t mapped_size = 0;
@@ -103,6 +173,9 @@ struct Buffer {
   D3DGPU_VIRTUAL_ADDRESS gpu_va = 0;
   void* cpu_ptr = nullptr;
   UINT64 paging_fence_value = 0;
+  // The compact runlist ABI uses a miniport-facing BO record in each chain
+  // entry. Keep its representation owned by this DDI layer.
+  CompactPathBChainHandleV1 compact_chain_handle;
 };
 
 struct Context {
@@ -112,19 +185,18 @@ struct Context {
   void* progress_fence_cpu = nullptr;
   D3DGPU_VIRTUAL_ADDRESS progress_fence_gpu = 0;
   uint64_t next_fence_id = 1;
-  // Driver writeback at the primary context private blob +0x40. XRT folds this
-  // cookie into the 64 MiB command-aperture allocation private flags.
+  // Driver writeback in the context-private packet. XRT folds this cookie into
+  // the 64 MiB command-aperture allocation private flags.
   uint32_t command_aperture_cookie = 0;
-  // Path B (hwqueue_aie4-style per-dispatch submit) state. The completion ring
-  // is the firmware "status_bo": a 0x332b allocation (NOT a plain host BO) of
-  // 8-byte slots that the firmware writes command completion state into. It is
-  // allocated lazily on first Path B submit. Mirrors xrt_core's ring at
-  // hwqueue+0xa0 (FUN_1800261f0: 0x332b status_bo, CreateResource|CreateShared,
-  // Lock2). The 0x268/0x68 command carries this ring's ALLOCATION HANDLE at
-  // +0x28 and the CPU slot address at +0x38.
+  // Compact-context ABI storage referenced by the 160-byte private packet.
+  // It must remain alive until after the hardware queue is destroyed.
+  Buffer context_private_buffer;
+  // Path B (hwqueue_aie4-style per-dispatch submit) completion state. The
+  // negotiated MCDM ABI selects the status object type and submit layout.
   Buffer completion_ring;
   D3DKMT_HANDLE completion_ring_resource = 0;
   bool completion_ring_ready = false;
+  bool completion_ring_owned = false;
   uint32_t completion_ring_offset = 0;
   uint64_t next_command_id = 1;
 };
@@ -139,15 +211,17 @@ struct CommandAperture {
   D3DKMT_HANDLE cleanup_allocation = 0;
   D3DKMT_HANDLE resource = 0;
   D3DKMT_HANDLE gpu_resource = 0;
+  D3DGPU_VIRTUAL_ADDRESS status_gpu_va = 0;
   D3DGPU_VIRTUAL_ADDRESS gpu_va = 0;
   void* cpu_ptr = nullptr;
   void* gpu_cpu_ptr = nullptr;
   uint64_t cpu_ptr_size = 0;
-  // Control-code view inside the 64 MiB aperture BO at gpu_va + 0x80000. The
-  // working XRT path does not create a separate code allocation; it copies the
-  // transaction binary into the aperture allocation at this offset.
+  // Control-code view inside the 64 MiB aperture BO. The negotiated MCDM ABI
+  // determines its offset; callers consume this view without knowing the
+  // miniport-specific layout.
   D3DKMT_HANDLE code_allocation = 0;
   D3DKMT_HANDLE code_resource = 0;
+  uint64_t code_offset = 0;
   D3DGPU_VIRTUAL_ADDRESS code_gpu_va = 0;
   void* code_cpu_ptr = nullptr;
   uint64_t code_size = 0;
@@ -159,6 +233,24 @@ struct PathBChainSubmitInfo {
   uint32_t command_count = 0;
   uint32_t first_child_opcode = 0;
 };
+
+struct McdmPrivateData {
+  uint8_t data[kMaxMcdmPrivateDataSize] = {};
+  uint32_t size = 0;
+};
+
+McdmPrivateData BuildPathBSetupPrivateData(
+    McdmAbi abi, const CommandAperture& aperture);
+
+McdmPrivateData BuildPathBSyncPrivateData(McdmAbi abi,
+                                          const CommandAperture& aperture,
+                                          uint64_t offset);
+
+McdmPrivateData BuildPathBSubmitPrivateData(
+    McdmAbi abi, const Buffer& exec_buffer, const Buffer& completion_ring,
+    uint32_t completion_slot_offset, const void* completion_slot_cpu,
+    const void* ert_packet, uint32_t ert_bytes, uint32_t command_state,
+    const PathBChainSubmitInfo* chain_info);
 
 struct PathBPendingSubmit {
   uint64_t fence_id = 0;
@@ -179,12 +271,21 @@ void DestroyDevice(const KmtApi& api, Device* device);
 bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
                   uint64_t size, Buffer* out_buffer, Error* out_error);
 
+// Returns the miniport-facing child handle stored in an ERT_CMD_CHAIN entry.
+// The negotiated device contract selects the record shape inside this DDI.
+uint64_t GetPathBChainChildHandle(const Device& device, Buffer* buffer);
+
 bool SyncBuffer(const KmtApi& api, const Device& device, const Buffer& buffer,
                 uint64_t offset, uint64_t length, Error* out_error);
 
 bool SyncCommandApertureCode(const KmtApi& api, const Device& device,
                              const CommandAperture& aperture, uint64_t offset,
                              uint64_t length, Error* out_error);
+
+bool PopulatePathBBoTable(
+    const Device& device, void* command_bo, size_t command_bo_size,
+    const D3DGPU_VIRTUAL_ADDRESS* real_bo_gpu_vas,
+    size_t real_bo_entry_count, Error* out_error);
 
 bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
                                       CommandAperture* aperture,
@@ -217,6 +318,13 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
                            const Context& context,
                            CommandAperture* out_aperture, Error* out_error);
 
+// Configures the transaction-code view after reserving the setup payload in
+// the command aperture. Compact MCDM uses a context-local 0x8000-byte slot
+// allocator, while legacy MCDM retains its fixed code offset.
+bool ConfigurePathBCodeRangeForSetupPayload(
+    McdmAbi abi, size_t aperture_payload_size, CommandAperture* aperture,
+    Error* out_error);
+
 bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
                                   Context* context, CommandAperture* aperture,
                                   Error* out_error);
@@ -231,12 +339,40 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
                              uint64_t offset, bool wait_for_cpu,
                              Error* out_error);
 
-// Path B: per-dispatch hwqueue_aie4-style submit. Reproduces the xrt_core
-// submission recovered from disassembly: reserve an 8-byte completion-ring
-// slot, build the 0x268 private packet (state, completion slot, ERT packet
-// copied inline at +0x68), and submit the exec BO via SubmitCommandToHwQueue.
-// `ert_packet`/`ert_bytes` are the command BO's ERT packet; `packet_header` is
-// updated with the firmware completion state read back from the ring slot.
+// Code ranges have an ABI-owned lifetime independent of CPU write
+// publication. Compact MCDM acquires/releases 0x8000-byte code slots with
+// opcode 9 and publishes writes with CPU cache-line flushes. Legacy MCDM uses
+// cache invalidation followed by opcode-9 publication and retains its final
+// synchronous close marker. Keeping those details here lets the native layer
+// use one acquire/write/publish/release sequence for both ABIs.
+bool AcquirePathBCodeRange(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error);
+
+bool CommitPathBCodeWrite(const KmtApi& api, const Device& device,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error);
+
+bool RefreshPathBSingleCodeMappingAfterWrite(
+    const KmtApi& api, const Device& device, CommandAperture* aperture,
+    Error* out_error);
+
+bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error);
+
+bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error);
+
+// Path B: per-dispatch hwqueue_aie4-style submit. Reserve an 8-byte completion
+// slot, build the driver-negotiated private packet with the ERT packet inline,
+// and submit the exec BO via SubmitCommandToHwQueue. `ert_packet`/`ert_bytes`
+// are the command BO's ERT packet; `packet_header` is updated with the firmware
+// completion state read back from the ring slot.
 bool SubmitAndWaitPathB(const KmtApi& api, const Device& device,
                         Context* context, const Buffer& exec_buffer,
                         const void* ert_packet, uint32_t ert_bytes,
@@ -245,9 +381,7 @@ bool SubmitAndWaitPathB(const KmtApi& api, const Device& device,
 
 // Path B parent ERT_CMD_CHAIN submit. This is the same completion protocol as
 // SubmitAndWaitPathB, but uses the recovered xrt_core opcode-6 private
-// envelope: +0x48 points at the aperture-resident child descriptor block, +0x50
-// carries descriptor byte count, +0x54 child count, and +0x58 the first child
-// ERT opcode.
+// envelope. The negotiated ABI selects the descriptor metadata offsets.
 bool SubmitAndWaitPathBChain(const KmtApi& api, const Device& device,
                              Context* context, const Buffer& exec_buffer,
                              const void* ert_packet, uint32_t ert_bytes,

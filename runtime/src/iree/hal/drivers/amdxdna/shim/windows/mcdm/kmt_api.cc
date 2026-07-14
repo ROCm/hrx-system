@@ -6,6 +6,8 @@
 
 #include "kmt_api.h"
 
+#include <intrin.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -19,17 +21,16 @@ namespace iree::hal::amdxdna::mcdm {
 namespace {
 
 constexpr NTSTATUS kStatusPending = static_cast<NTSTATUS>(0x00000103);
+constexpr NTSTATUS kStatusBufferTooSmall =
+    static_cast<NTSTATUS>(0xC0000023);
 constexpr uint64_t kPageSize = 4096;
 constexpr uint64_t kCommandApertureAllocationSize = 0x1000;
 constexpr D3DGPU_VIRTUAL_ADDRESS kCommandApertureGpuVaBase = 0x04000000;
 constexpr uint64_t kCommandApertureGpuVaSize = 0x04000000;
-constexpr uint64_t kCommandApertureCodeOffset = 0x80000;
-constexpr uint32_t kCommandAperturePrivateType = 0x332b;
-constexpr uint32_t kQhdlSubmitPrivateSize = 0x268;
-constexpr uint32_t kQhdlSubmitPacketOffset = 0x68;
 constexpr uint32_t kQhdlCompletionSlotSize = 8;
-constexpr uint32_t kSubmitPrivateQwords = 13;  // 104 bytes on current driver.
-constexpr size_t kContextCommandApertureCookieOffset = 0x40;
+constexpr uint32_t kMaxSubmitPrivatePrefixSize = 0x78;
+constexpr size_t kLegacyContextCommandApertureCookieOffset = 0x40;
+constexpr size_t kCompactContextCommandApertureCookieOffset = 0x44;
 constexpr UINT kMaxComputeAdapters = 256;
 constexpr UINT kMaxDriverStorePathWarmupBytes = 4096;
 
@@ -78,6 +79,52 @@ bool CheckStatusOrPending(const char* call_name, NTSTATUS status,
                           Error* out_error) {
   if (status == 0 || status == kStatusPending) return true;
   return CheckStatus(call_name, status, out_error);
+}
+
+bool FlushCpuCacheRange(void* mapping, uint64_t mapping_size, uint64_t offset,
+                        uint64_t length, uint64_t granularity,
+                        Error* out_error) {
+  if (length == 0) return true;
+  if (!mapping || granularity == 0 ||
+      (granularity & (granularity - 1)) != 0) {
+    SetError(out_error, "invalid command-aperture CPU cache flush mapping");
+    return false;
+  }
+  if (offset > mapping_size || length > mapping_size - offset) {
+    SetError(out_error, "command-aperture CPU cache flush is out of bounds");
+    return false;
+  }
+
+  const uint64_t begin_offset = offset & ~(granularity - 1);
+  const uint64_t write_end = offset + length;
+  if (write_end >
+      std::numeric_limits<uint64_t>::max() - (granularity - 1)) {
+    SetError(out_error, "command-aperture CPU cache flush range overflows");
+    return false;
+  }
+  const uint64_t end_offset =
+      (write_end + granularity - 1) & ~(granularity - 1);
+  if (end_offset > mapping_size) {
+    SetError(out_error, "command-aperture CPU cache flush slot is out of bounds");
+    return false;
+  }
+
+  constexpr uintptr_t kCpuCacheLineSize = 64;
+  const uintptr_t mapping_address = reinterpret_cast<uintptr_t>(mapping);
+  if (end_offset > std::numeric_limits<uintptr_t>::max() - mapping_address) {
+    SetError(out_error, "command-aperture CPU cache flush address overflows");
+    return false;
+  }
+  uintptr_t line =
+      (mapping_address + static_cast<uintptr_t>(begin_offset)) &
+      ~(kCpuCacheLineSize - 1);
+  const uintptr_t end = mapping_address + static_cast<uintptr_t>(end_offset);
+  _mm_lfence();
+  while (line < end) {
+    _mm_clflush(reinterpret_cast<void const*>(line));
+    line += kCpuCacheLineSize;
+  }
+  return true;
 }
 
 uint32_t Flags32(const D3DKMT_CREATEALLOCATIONFLAGS& flags) {
@@ -277,17 +324,176 @@ void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
   api.query_adapter_info(&query);
 }
 
-void QueryUmdriverPrivateWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
-  uint64_t private_data = 0;
+}  // namespace
+
+bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
+                  Error* out_error) {
+  // Negotiate on both the accepted query shape and its returned protocol
+  // identity. Unknown identities fail closed instead of inheriting a packet
+  // layout from a driver-version heuristic.
+  constexpr uint32_t kLegacyIdentity[2] = {0, 2};
+  constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
+  uint32_t private_data[3] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
   query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
-  query.pPrivateDriverData = &private_data;
+  query.pPrivateDriverData = private_data;
+  query.PrivateDriverDataSize = 2 * sizeof(uint32_t);
+  NTSTATUS status = api.query_adapter_info(&query);
+  if (status == 0) {
+    if (std::memcmp(private_data, kLegacyIdentity, sizeof(kLegacyIdentity)) !=
+        0) {
+      SetErrorFormat(out_error,
+                     "unsupported two-dword MCDM identity {%u, %u}",
+                     private_data[0], private_data[1]);
+      return false;
+    }
+    *out_abi = McdmAbi::legacy;
+    return true;
+  }
+  if (status != kStatusBufferTooSmall) {
+    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)",
+                       status, out_error);
+  }
+
+  std::memset(private_data, 0, sizeof(private_data));
   query.PrivateDriverDataSize = sizeof(private_data);
-  api.query_adapter_info(&query);
+  status = api.query_adapter_info(&query);
+  if (!CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)", status,
+                   out_error)) {
+    return false;
+  }
+  if (std::memcmp(private_data, kCompactIdentity,
+                  sizeof(kCompactIdentity)) != 0) {
+    SetErrorFormat(out_error,
+                   "unsupported three-dword MCDM identity {%u, %u, %u}",
+                   private_data[0], private_data[1], private_data[2]);
+    return false;
+  }
+  *out_abi = McdmAbi::compact;
+  return true;
 }
 
-}  // namespace
+McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
+  if (abi == McdmAbi::compact) {
+    return {/*status_private_type=*/0x332c,
+            /*status_policy=*/2,
+            /*status_xcl_flags=*/0x02000000,
+            /*submit_private_prefix_size=*/0x78,
+            /*setup_private_size=*/0x280,
+            /*pathb_private_size=*/0x278,
+            /*pathb_packet_offset=*/0x78,
+            /*chain_metadata_offset=*/0x58,
+            /*pathb_bo_table_entry_count=*/6,
+            /*status_has_gpu_va=*/true,
+            /*sync_has_allocation_handle=*/false,
+            /*command_aperture_code_slot_size=*/0x8000,
+            /*command_aperture_code_publish_granularity=*/0x8000,
+            /*command_aperture_residency_after_bootstrap=*/true,
+            /*command_aperture_remap_after_write=*/false};
+  }
+  return {/*status_private_type=*/0x332b,
+          /*status_policy=*/0,
+          /*status_xcl_flags=*/0,
+          /*submit_private_prefix_size=*/0x68,
+          /*setup_private_size=*/0x270,
+          /*pathb_private_size=*/0x268,
+          /*pathb_packet_offset=*/0x68,
+          /*chain_metadata_offset=*/0x48,
+          /*pathb_bo_table_entry_count=*/5,
+          /*status_has_gpu_va=*/false,
+          /*sync_has_allocation_handle=*/true,
+          /*command_aperture_code_slot_size=*/0x8000,
+          /*command_aperture_code_publish_granularity=*/0,
+          /*command_aperture_residency_after_bootstrap=*/false,
+          /*command_aperture_remap_after_write=*/true};
+}
+
+McdmPrivateData BuildPathBSetupPrivateData(
+    McdmAbi mcdm_abi, const CommandAperture& aperture) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(mcdm_abi);
+  McdmPrivateData private_data = {};
+  private_data.size = abi.setup_private_size;
+  WriteU32(private_data.data, 0x00, 5);
+  WriteU64(private_data.data, 0x28, aperture.allocation);
+  if (abi.status_has_gpu_va) {
+    WriteU64(private_data.data, 0x30, aperture.status_gpu_va);
+    WriteU32(private_data.data, 0x38, 0);
+    WriteU32(private_data.data, 0x3c, kQhdlCompletionSlotSize);
+    WriteU64(private_data.data, 0x40,
+             reinterpret_cast<uint64_t>(aperture.cpu_ptr));
+  } else {
+    WriteU32(private_data.data, 0x30, 0);
+    WriteU32(private_data.data, 0x34, kQhdlCompletionSlotSize);
+    WriteU64(private_data.data, 0x38,
+             reinterpret_cast<uint64_t>(aperture.cpu_ptr));
+  }
+  WriteU32(private_data.data, abi.submit_private_prefix_size, 1);
+  WriteU64(private_data.data, abi.submit_private_prefix_size + 8,
+           aperture.gpu_va);
+  return private_data;
+}
+
+McdmPrivateData BuildPathBSyncPrivateData(McdmAbi mcdm_abi,
+                                          const CommandAperture& aperture,
+                                          uint64_t offset) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(mcdm_abi);
+  McdmPrivateData private_data = {};
+  private_data.size = abi.submit_private_prefix_size;
+  WriteU32(private_data.data, 0x00, 9);
+  if (abi.sync_has_allocation_handle) {
+    WriteU64(private_data.data, 0x08, aperture.gpu_allocation);
+  }
+  WriteU64(private_data.data, 0x10, offset);
+  return private_data;
+}
+
+McdmPrivateData BuildPathBSubmitPrivateData(
+    McdmAbi mcdm_abi, const Buffer& exec_buffer,
+    const Buffer& completion_ring, uint32_t completion_slot_offset,
+    const void* completion_slot_cpu, const void* ert_packet,
+    uint32_t ert_bytes, uint32_t command_state,
+    const PathBChainSubmitInfo* chain_info) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(mcdm_abi);
+  McdmPrivateData private_data = {};
+  if (!ert_packet || ert_bytes == 0 ||
+      ert_bytes > abi.pathb_private_size - abi.pathb_packet_offset) {
+    return private_data;
+  }
+
+  private_data.size = abi.pathb_private_size;
+  const uint32_t effective_command_state =
+      chain_info ? 6u : (command_state ? command_state : 3u);
+  WriteU32(private_data.data, 0x00, effective_command_state);
+  WriteU64(private_data.data, 0x08, exec_buffer.allocation);
+  WriteU64(private_data.data, 0x10, ert_bytes);
+  WriteU64(private_data.data, 0x28, completion_ring.allocation);
+  if (abi.status_has_gpu_va) {
+    WriteU64(private_data.data, 0x30, completion_ring.gpu_va);
+    WriteU32(private_data.data, 0x38, completion_slot_offset);
+    WriteU32(private_data.data, 0x3c, kQhdlCompletionSlotSize);
+    WriteU64(private_data.data, 0x40,
+             reinterpret_cast<uint64_t>(completion_slot_cpu));
+  } else {
+    WriteU32(private_data.data, 0x30, completion_slot_offset);
+    WriteU32(private_data.data, 0x34, kQhdlCompletionSlotSize);
+    WriteU64(private_data.data, 0x38,
+             reinterpret_cast<uint64_t>(completion_slot_cpu));
+  }
+  if (chain_info) {
+    WriteU64(private_data.data, abi.chain_metadata_offset,
+             chain_info->descriptor_gpu_va);
+    WriteU32(private_data.data, abi.chain_metadata_offset + 8,
+             chain_info->descriptor_bytes);
+    WriteU32(private_data.data, abi.chain_metadata_offset + 12,
+             chain_info->command_count);
+    WriteU32(private_data.data, abi.chain_metadata_offset + 16,
+             chain_info->first_child_opcode);
+  }
+  std::memcpy(private_data.data + abi.pathb_packet_offset, ert_packet,
+              ert_bytes);
+  return private_data;
+}
 
 BufferKindInfo GetBufferKindInfo(BufferKind kind) {
   switch (kind) {
@@ -297,8 +503,35 @@ BufferKindInfo GetBufferKindInfo(BufferKind kind) {
       return {"cacheable", 0x3323, 0x01000000};
     case BufferKind::execbuf:
       return {"execbuf", 0x3328, 0x80000000};
+    case BufferKind::context_private:
+      return {"context_private", 0x332c, 0x02000000};
   }
   return {"host_only", 0x3329, 0x20000000};
+}
+
+uint64_t GetPathBChainChildHandle(const Device& device, Buffer* buffer) {
+  if (!buffer) return 0;
+  if (device.mcdm_abi == McdmAbi::legacy) {
+    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buffer->cpu_ptr));
+  }
+
+  // The compact miniport resolves a runlist child through this observed DDI
+  // record. Do not expose the XRT C++ object whose stable prefix established
+  // the contract: vtables, device pointers, and synchronization members are
+  // deliberately absent here.
+  CompactPathBChainHandleV1& handle = buffer->compact_chain_handle;
+  handle = {};
+  handle.requested_size = buffer->requested_size;
+  handle.xcl_flags = GetBufferKindInfo(buffer->kind).xcl_flags;
+  handle.allocation = buffer->allocation;
+  handle.page_count = buffer->mapped_size / kPageSize;
+  handle.gpu_va = buffer->gpu_va;
+  handle.cpu_ptr =
+      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buffer->cpu_ptr));
+  handle.observed_state_80 = 2;
+  handle.observed_state_c8 = 0xffffffffu;
+  handle.observed_state_d0 = 1;
+  return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&handle));
 }
 
 const char* ErrorMessage(const Error* error) {
@@ -464,7 +697,10 @@ bool CreateDevice(const KmtApi& api, const Adapter& adapter, Device* out_device,
   device.paging_queue = paging.hPagingQueue;
   device.paging_sync_object = paging.hSyncObject;
   device.paging_fence_cpu = paging.FenceValueCPUVirtualAddress;
-  QueryUmdriverPrivateWarmup(api, device.adapter);
+  if (!QueryMcdmAbi(api, device.adapter, &device.mcdm_abi, out_error)) {
+    DestroyDevice(api, &device);
+    return false;
+  }
   *out_device = device;
   return true;
 }
@@ -522,20 +758,20 @@ bool WaitForPagingFenceCpu(const KmtApi& api, const Device& device,
 bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
                   uint64_t size, Buffer* out_buffer, Error* out_error) {
   BufferKindInfo kind_info = GetBufferKindInfo(kind);
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   // XRT's exec BO submit path asks the driver for the 4 KiB command BO plus
-  // the 0x68-byte private prefix used by SubmitCommandToHwQueue. The HAL still
-  // sees only the 4 KiB command capacity.
-  constexpr uint64_t kPathBSubmitPrivatePrefixSize = 0x68;
+  // the negotiated private prefix used by SubmitCommandToHwQueue. The HAL
+  // still sees only the 4 KiB command capacity.
   uint64_t requested_size = std::max<uint64_t>(size, 1);
   if (kind == BufferKind::execbuf) {
-    // Match XRT exactly: it allocates a full 4 KiB command page + the 0x68
-    // prefix (0x1068, 8 KiB aligned) for every exec BO, so each runlist BO
+    // Match XRT exactly: it allocates a full 4 KiB command page plus the ABI
+    // prefix for every exec BO, so each runlist BO
     // lands on its own page pair. We were allocating only the exact runlist
     // bytes (~0x148, single 4 KiB page), packing multiple parents' exec BOs
     // into one coherence granule and racing the firmware on multi-parent
     // re-runs. The HAL still sees only the logical command capacity.
     requested_size = std::max<uint64_t>(requested_size, 0x1000) +
-                     kPathBSubmitPrivatePrefixSize;
+                      abi.submit_private_prefix_size;
   }
   uint64_t aligned_size = AlignUpToPage(requested_size);
   uint64_t size_pages = aligned_size / 4096;
@@ -554,6 +790,10 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
 
   D3DKMT_CREATEALLOCATION create = {};
   create.hDevice = device.device;
+  if (kind == BufferKind::context_private) {
+    create.Flags.CreateResource = 1;
+    create.Flags.CreateShared = 1;
+  }
   create.NumAllocations = 1;
   create.pAllocationInfo2 = &alloc_info;
 
@@ -565,6 +805,7 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
   Buffer buffer = {};
   buffer.kind = kind;
   buffer.size = size;
+  buffer.requested_size = requested_size;
   buffer.mapped_size = aligned_size;
   buffer.allocation = alloc_info.hAllocation;
   buffer.resource = create.hResource;
@@ -593,11 +834,10 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
     DestroyBuffer(api, device, &buffer);
     return false;
   }
-  // XRT records the paging fence returned from MakeResident but does not block
-  // the CPU for every ordinary data/command BO before submit. Keep residency
-  // asynchronous here as well; the BO is submitted only after the KMD has
-  // accepted the make-resident request with MustSucceed|CantTrimFurther.
-  buffer.paging_fence_value = 0;
+  // Keep residency asynchronous, but preserve the paging fence so the target
+  // GPU context can depend on it before consuming this BO. Dropping the fence
+  // makes the first dispatch race STATUS_PENDING Map/MakeResident operations.
+  buffer.paging_fence_value = resident.PagingFenceValue;
 
   D3DKMT_LOCK2 lock = {};
   lock.hDevice = device.device;
@@ -611,7 +851,8 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
 
   // Exercise a minimal write to prove the mapping is CPU-accessible. The probe
   // syncs the range before teardown.
-  if (buffer.cpu_ptr && buffer.size >= sizeof(uint32_t)) {
+  if (kind != BufferKind::context_private && buffer.cpu_ptr &&
+      buffer.size >= sizeof(uint32_t)) {
     uint32_t pattern = 0xa11e0000u | kind_info.private_type;
     std::memcpy(buffer.cpu_ptr, &pattern, sizeof(pattern));
   }
@@ -651,6 +892,41 @@ bool SyncCommandApertureCode(const KmtApi& api, const Device& device,
   NTSTATUS status = api.invalidate_cache(&invalidate);
   return CheckStatus("D3DKMTInvalidateCache(command aperture code)", status,
                      out_error);
+}
+
+bool PopulatePathBBoTable(
+    const Device& device, void* command_bo, size_t command_bo_size,
+    const D3DGPU_VIRTUAL_ADDRESS* real_bo_gpu_vas,
+    size_t real_bo_entry_count, Error* out_error) {
+  constexpr size_t kBoTableWordOffset = 11;
+  constexpr size_t kBoTableWords = 2 * kMaxPathBBoTableEntries;
+  constexpr size_t kBoTableEndBytes =
+      (kBoTableWordOffset + kBoTableWords) * sizeof(uint32_t);
+  if (!command_bo || command_bo_size < kBoTableEndBytes ||
+      (real_bo_entry_count && !real_bo_gpu_vas)) {
+    SetError(out_error, "PopulatePathBBoTable called with invalid storage");
+    return false;
+  }
+  const size_t table_entry_count =
+      GetMcdmAbiInfo(device.mcdm_abi).pathb_bo_table_entry_count;
+  if (real_bo_entry_count > table_entry_count) {
+    SetErrorFormat(out_error,
+                   "path-B BO table has %zu real entries but ABI permits %zu",
+                   real_bo_entry_count, table_entry_count);
+    return false;
+  }
+  auto* words = static_cast<uint32_t*>(command_bo);
+  std::fill(words + kBoTableWordOffset,
+            words + kBoTableWordOffset + kBoTableWords, 0);
+  auto write_entry = [&](size_t index, D3DGPU_VIRTUAL_ADDRESS gpu_va) {
+    words[kBoTableWordOffset + 2 * index] = static_cast<uint32_t>(gpu_va);
+    words[kBoTableWordOffset + 2 * index + 1] =
+        static_cast<uint32_t>(gpu_va >> 32);
+  };
+  for (size_t i = 0; i < real_bo_entry_count; ++i) {
+    write_entry(i, real_bo_gpu_vas[i]);
+  }
+  return true;
 }
 
 bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
@@ -787,15 +1063,22 @@ void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer) {
   buffer->allocation = 0;
   buffer->resource = 0;
   buffer->size = 0;
+  buffer->requested_size = 0;
   buffer->mapped_size = 0;
+  buffer->compact_chain_handle = {};
 }
 
 void DestroyStatusRing(const KmtApi& api, const Device& device,
                        Context* context) {
   if (!context) return;
-  DestroyBuffer(api, device, &context->completion_ring);
+  if (context->completion_ring_owned) {
+    DestroyBuffer(api, device, &context->completion_ring);
+  } else {
+    context->completion_ring = {};
+  }
   context->completion_ring_resource = 0;
   context->completion_ring_ready = false;
+  context->completion_ring_owned = false;
   context->completion_ring_offset = 0;
 }
 
@@ -825,10 +1108,14 @@ bool CreateContext(const KmtApi& api, const Device& device,
     return false;
   }
   context.context = create_context.hContext;
-  if (private_data_size >= kContextCommandApertureCookieOffset +
-                               sizeof(context.command_aperture_cookie)) {
+  const size_t cookie_offset =
+      device.mcdm_abi == McdmAbi::compact
+          ? kCompactContextCommandApertureCookieOffset
+          : kLegacyContextCommandApertureCookieOffset;
+  if (private_data_size >=
+      cookie_offset + sizeof(context.command_aperture_cookie)) {
     std::memcpy(&context.command_aperture_cookie,
-                private_data + kContextCommandApertureCookieOffset,
+                private_data + cookie_offset,
                 sizeof(context.command_aperture_cookie));
   }
 
@@ -862,6 +1149,7 @@ void DestroyContext(const KmtApi& api, const Device& device, Context* context) {
     api.destroy_hw_queue(&destroy_queue);
     context->hw_queue = 0;
   }
+  DestroyBuffer(api, device, &context->context_private_buffer);
   if (context->context) {
     D3DKMT_DESTROYCONTEXT destroy_context = {};
     destroy_context.hContext = context->context;
@@ -882,11 +1170,13 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
     return false;
   }
 
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   AllocPrivate command_private = {};
   command_private.requested_size = kCommandApertureAllocationSize;
   command_private.aligned_size = kCommandApertureAllocationSize;
-  command_private.private_type = kCommandAperturePrivateType;
-  command_private.policy = 0;
+  command_private.private_type = abi.status_private_type;
+  command_private.policy = abi.status_policy;
+  command_private.xcl_flags = abi.status_xcl_flags;
 
   D3DDDI_ALLOCATIONINFO2 command_info = {};
   command_info.pPrivateDriverData = &command_private;
@@ -928,10 +1218,42 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
   aperture.cpu_ptr = lock.pData;
   aperture.cpu_ptr_size = kCommandApertureAllocationSize;
 
+  // The compact ABI exposes the status object to firmware by both allocation
+  // handle and GPU VA. The legacy ABI uses only the allocation handle.
+  if (abi.status_has_gpu_va) {
+    D3DDDI_MAPGPUVIRTUALADDRESS status_map = {};
+    status_map.hPagingQueue = device.paging_queue;
+    status_map.hAllocation = aperture.allocation;
+    status_map.SizeInPages = kCommandApertureAllocationSize / kPageSize;
+    status_map.Protection.Write = 1;
+    status = api.map_gpu_virtual_address(&status_map);
+    if (!CheckStatusOrPending("D3DKMTMapGpuVirtualAddress(status object)",
+                              status, out_error)) {
+      DestroyCommandAperture(api, device, &aperture);
+      return false;
+    }
+    aperture.status_gpu_va = status_map.VirtualAddress;
+
+    D3DKMT_HANDLE status_allocations[1] = {aperture.allocation};
+    D3DDDI_MAKERESIDENT status_resident = {};
+    status_resident.hPagingQueue = device.paging_queue;
+    status_resident.NumAllocations = 1;
+    status_resident.AllocationList = status_allocations;
+    status_resident.Flags.CantTrimFurther = 1;
+    status_resident.Flags.MustSucceed = 1;
+    status = api.make_resident(&status_resident);
+    if (!CheckStatusOrPending("D3DKMTMakeResident(status object)", status,
+                              out_error)) {
+      DestroyCommandAperture(api, device, &aperture);
+      return false;
+    }
+  }
+
   // XRT creates the 64 MiB command aperture as a separate cacheable allocation
   // and folds the driver context writeback cookie into xcl_flags:
   //   xcl_flags = 0x01000001 | (context_blob[0x40] << 16)
-  // The transaction instruction stream lives inside this same BO at +0x80000.
+  // The transaction instruction stream lives inside this same BO at the
+  // offset selected by the negotiated ABI.
   AllocPrivate gpu_private = {};
   gpu_private.requested_size = kCommandApertureGpuVaSize;
   gpu_private.aligned_size = kCommandApertureGpuVaSize;
@@ -978,42 +1300,93 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
     return false;
   }
 
-  if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
-    SetError(out_error,
-             "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture map) "
-             "failed");
-    DestroyCommandAperture(api, device, &aperture);
-    return false;
-  }
   aperture.gpu_va = map.VirtualAddress;
 
-  D3DKMT_HANDLE resident_allocs[1] = {aperture.gpu_allocation};
-  D3DDDI_MAKERESIDENT resident = {};
-  resident.hPagingQueue = device.paging_queue;
-  resident.NumAllocations = 1;
-  resident.AllocationList = resident_allocs;
-  resident.Flags.CantTrimFurther = 1;
-  resident.Flags.MustSucceed = 1;
-  status = api.make_resident(&resident);
-  if (!CheckStatusOrPending("D3DKMTMakeResident(command aperture)", status,
-                            out_error)) {
-    DestroyCommandAperture(api, device, &aperture);
-    return false;
-  }
-  if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
-    SetError(out_error,
-             "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture "
-             "resident) failed");
-    DestroyCommandAperture(api, device, &aperture);
-    return false;
+  if (!abi.command_aperture_residency_after_bootstrap) {
+    if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
+      SetError(
+          out_error,
+          "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture map) "
+          "failed");
+      DestroyCommandAperture(api, device, &aperture);
+      return false;
+    }
+
+    D3DKMT_HANDLE resident_allocs[1] = {aperture.gpu_allocation};
+    D3DDDI_MAKERESIDENT resident = {};
+    resident.hPagingQueue = device.paging_queue;
+    resident.NumAllocations = 1;
+    resident.AllocationList = resident_allocs;
+    resident.Flags.CantTrimFurther = 1;
+    resident.Flags.MustSucceed = 1;
+    status = api.make_resident(&resident);
+    if (!CheckStatusOrPending("D3DKMTMakeResident(command aperture)", status,
+                              out_error)) {
+      DestroyCommandAperture(api, device, &aperture);
+      return false;
+    }
+    if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
+      SetError(out_error,
+               "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture "
+               "resident) failed");
+      DestroyCommandAperture(api, device, &aperture);
+      return false;
+    }
   }
 
   aperture.code_allocation = aperture.gpu_allocation;
-  aperture.code_gpu_va =
-      kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
-  aperture.code_size = aperture.gpu_va_size - kCommandApertureCodeOffset;
+  // The final code range is selected from the context setup payload after the
+  // aperture bootstrap. Until then, expose the entire mapping.
+  aperture.code_offset = 0;
+  aperture.code_gpu_va = aperture.gpu_va + aperture.code_offset;
+  aperture.code_size = aperture.gpu_va_size - aperture.code_offset;
 
   *out_aperture = aperture;
+  return true;
+}
+
+bool ConfigurePathBCodeRangeForSetupPayload(
+    McdmAbi mcdm_abi, size_t aperture_payload_size,
+    CommandAperture* aperture, Error* out_error) {
+  if (!aperture) {
+    SetError(out_error,
+             "ConfigurePathBCodeRangeForSetupPayload called with null aperture");
+    return false;
+  }
+
+  const McdmAbiInfo abi = GetMcdmAbiInfo(mcdm_abi);
+  const uint64_t slot_size = abi.command_aperture_code_slot_size;
+  if (!slot_size || (slot_size & (slot_size - 1)) != 0) {
+    SetError(out_error, "invalid command-aperture slot size");
+    return false;
+  }
+  const uint64_t payload_size = static_cast<uint64_t>(aperture_payload_size);
+  if (payload_size >
+      std::numeric_limits<uint64_t>::max() - (slot_size - 1)) {
+    SetError(out_error, "command-aperture setup payload size overflows");
+    return false;
+  }
+  const uint64_t code_offset =
+      (payload_size + slot_size - 1) & ~(slot_size - 1);
+  if (code_offset >= aperture->gpu_va_size) {
+    SetError(out_error,
+             "command-aperture setup payload leaves no valid code range");
+    return false;
+  }
+  if (aperture->gpu_va >
+      std::numeric_limits<uint64_t>::max() - code_offset) {
+    SetError(out_error, "command-aperture code GPU address overflows");
+    return false;
+  }
+
+  aperture->code_allocation = aperture->gpu_allocation;
+  aperture->code_offset = code_offset;
+  aperture->code_gpu_va = aperture->gpu_va + code_offset;
+  aperture->code_cpu_ptr =
+      aperture->gpu_cpu_ptr
+          ? static_cast<uint8_t*>(aperture->gpu_cpu_ptr) + code_offset
+          : nullptr;
+  aperture->code_size = aperture->gpu_va_size - code_offset;
   return true;
 }
 
@@ -1052,8 +1425,8 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
       return false;
     }
     aperture->code_allocation = aperture->gpu_allocation;
-    aperture->code_gpu_va = kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
-    aperture->code_size = aperture->gpu_va_size - kCommandApertureCodeOffset;
+    aperture->code_gpu_va = aperture->gpu_va + aperture->code_offset;
+    aperture->code_size = aperture->gpu_va_size - aperture->code_offset;
     return true;
   }
 
@@ -1108,8 +1481,8 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
   }
 
   aperture->code_allocation = aperture->gpu_allocation;
-  aperture->code_gpu_va = kCommandApertureGpuVaBase + kCommandApertureCodeOffset;
-  aperture->code_size = aperture->gpu_va_size - kCommandApertureCodeOffset;
+  aperture->code_gpu_va = aperture->gpu_va + aperture->code_offset;
+  aperture->code_size = aperture->gpu_va_size - aperture->code_offset;
   return true;
 }
 
@@ -1136,7 +1509,7 @@ bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
   if (aperture->gpu_cpu_ptr) {
     aperture->code_cpu_ptr =
         static_cast<uint8_t*>(aperture->gpu_cpu_ptr) +
-        kCommandApertureCodeOffset;
+        aperture->code_offset;
   }
 
   D3DKMT_INVALIDATECACHE invalidate = {};
@@ -1161,10 +1534,11 @@ bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
     return false;
   }
 
-  uint64_t submit_private[kSubmitPrivateQwords] = {};
-  submit_private[0] = 2;
-  submit_private[1] = aperture->gpu_allocation;
-  submit_private[2] = aperture->gpu_va;
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  std::array<uint8_t, kMaxSubmitPrivatePrefixSize> submit_private = {};
+  WriteU32(submit_private.data(), 0x00, 2);
+  WriteU64(submit_private.data(), 0x08, aperture->gpu_allocation);
+  WriteU64(submit_private.data(), 0x10, aperture->gpu_va);
 
   uint64_t fence_id = context->next_fence_id++;
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
@@ -1172,16 +1546,16 @@ bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = aperture->gpu_va;
   submit.CommandLength = static_cast<UINT>(aperture->gpu_va_size);
-  submit.PrivateDriverDataSize = sizeof(submit_private);
-  submit.pPrivateDriverData = submit_private;
+  submit.PrivateDriverDataSize = abi.submit_private_prefix_size;
+  submit.pPrivateDriverData = submit_private.data();
   NTSTATUS status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue", status, out_error)) {
     return false;
   }
 
   // XRT locks and invalidates the 64 MiB aperture only after the opcode-2
-  // bootstrap submit. Do the same so later CPU writes to aperture+0x80000 use
-  // the same MCDM object state as the reference runtime.
+  // bootstrap submit. Do the same so later CPU writes to the negotiated code
+  // view use the same MCDM object state as the reference runtime.
   return LockCommandApertureGpuAfterBootstrap(api, device, aperture, out_error);
 }
 
@@ -1214,10 +1588,11 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
     return false;
   }
 
-  uint64_t bootstrap_private[kSubmitPrivateQwords] = {};
-  bootstrap_private[0] = 2;
-  bootstrap_private[1] = aperture->gpu_allocation;
-  bootstrap_private[2] = aperture->gpu_va;
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  std::array<uint8_t, kMaxSubmitPrivatePrefixSize> bootstrap_private = {};
+  WriteU32(bootstrap_private.data(), 0x00, 2);
+  WriteU64(bootstrap_private.data(), 0x08, aperture->gpu_allocation);
+  WriteU64(bootstrap_private.data(), 0x10, aperture->gpu_va);
 
   uint64_t fence_id = context->next_fence_id++;
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
@@ -1225,14 +1600,34 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = aperture->gpu_va;
   submit.CommandLength = static_cast<UINT>(aperture->gpu_va_size);
-  submit.PrivateDriverDataSize = sizeof(bootstrap_private);
-  submit.pPrivateDriverData = bootstrap_private;
+  submit.PrivateDriverDataSize = abi.submit_private_prefix_size;
+  submit.pPrivateDriverData = bootstrap_private.data();
   NTSTATUS status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb bootstrap)", status,
                    out_error)) {
     return false;
   }
+  D3DKMT_HANDLE resident_allocs[1] = {};
+  D3DDDI_MAKERESIDENT resident = {};
+  if (abi.command_aperture_residency_after_bootstrap) {
+    resident_allocs[0] = aperture->gpu_allocation;
+    resident.hPagingQueue = device.paging_queue;
+    resident.NumAllocations = 1;
+    resident.AllocationList = resident_allocs;
+    resident.Flags.CantTrimFurther = 1;
+    resident.Flags.MustSucceed = 1;
+    status = api.make_resident(&resident);
+    if (!CheckStatusOrPending(
+            "D3DKMTMakeResident(command aperture after bootstrap)", status,
+            out_error)) {
+      return false;
+    }
+  }
   if (!LockCommandApertureGpuAfterBootstrap(api, device, aperture, out_error)) {
+    return false;
+  }
+  if (!ConfigurePathBCodeRangeForSetupPayload(
+          device.mcdm_abi, aperture_payload_size, aperture, out_error)) {
     return false;
   }
   if (aperture_payload_size != 0) {
@@ -1253,14 +1648,8 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
     FlushProcessWriteBuffers();
   }
 
-  uint8_t setup_private[0x270] = {};
-  WriteU32(setup_private, 0x00, 5);
-  WriteU64(setup_private, 0x28, aperture->allocation);
-  WriteU32(setup_private, 0x30, 0);
-  WriteU32(setup_private, 0x34, kQhdlCompletionSlotSize);
-  WriteU64(setup_private, 0x38, reinterpret_cast<uint64_t>(aperture->cpu_ptr));
-  WriteU32(setup_private, 0x68, 1);
-  WriteU64(setup_private, 0x70, aperture->gpu_va);
+  McdmPrivateData setup_private =
+      BuildPathBSetupPrivateData(device.mcdm_abi, *aperture);
 
   fence_id = context->next_fence_id++;
   submit = {};
@@ -1268,8 +1657,8 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = 0;
   submit.CommandLength = 0;
-  submit.PrivateDriverDataSize = sizeof(setup_private);
-  submit.pPrivateDriverData = setup_private;
+  submit.PrivateDriverDataSize = setup_private.size;
+  submit.pPrivateDriverData = setup_private.data;
   status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb setup5)", status,
                    out_error)) {
@@ -1288,10 +1677,8 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
     SetError(out_error, "SubmitPathBApertureSync called before aperture setup");
     return false;
   }
-  uint64_t sync_private[kSubmitPrivateQwords] = {};
-  sync_private[0] = 9;
-  sync_private[1] = aperture.gpu_allocation;
-  sync_private[2] = offset;
+  McdmPrivateData sync_private =
+      BuildPathBSyncPrivateData(device.mcdm_abi, aperture, offset);
 
   uint64_t fence_id = context->next_fence_id++;
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
@@ -1299,8 +1686,8 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = 0;
   submit.CommandLength = 0;
-  submit.PrivateDriverDataSize = sizeof(sync_private);
-  submit.pPrivateDriverData = sync_private;
+  submit.PrivateDriverDataSize = sync_private.size;
+  submit.pPrivateDriverData = sync_private.data;
   NTSTATUS status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb sync9)", status,
                    out_error)) {
@@ -1312,20 +1699,146 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
       "D3DKMTWaitForSynchronizationObjectFromCpu(pathb sync9)", out_error);
 }
 
-// Allocate the firmware completion ring as a 0x332b status_bo (NOT a plain host
-// BO), mirroring xrt_core FUN_1800261f0: CreateAllocation2 with private type
-// 0x332b + CreateResource|CreateShared, then Lock2 for the CPU slot base. The
-// firmware writes completion state into this allocation; an ordinary host_only
-// BO is never touched, which is why earlier slots stayed 0.
+bool ValidatePathBCodeRange(const McdmAbiInfo& abi,
+                            const CommandAperture& aperture, uint64_t offset,
+                            uint64_t length, Error* out_error) {
+  if (!length || !abi.command_aperture_code_slot_size ||
+      (abi.command_aperture_code_slot_size &
+       (abi.command_aperture_code_slot_size - 1)) != 0 ||
+      offset < aperture.code_offset || offset > aperture.gpu_va_size ||
+      length > aperture.gpu_va_size - offset) {
+    SetError(out_error, "invalid command-aperture code range");
+    return false;
+  }
+  return true;
+}
+
+bool SubmitPathBCodeRangeEndMarkers(
+    const KmtApi& api, const Device& device, Context* context,
+    const CommandAperture& aperture, uint64_t offset, uint64_t length,
+    Error* out_error) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
+    return false;
+  }
+  const uint64_t slot_size = abi.command_aperture_code_slot_size;
+  const uint64_t range_end = offset + length;
+  uint64_t boundary = (offset + slot_size) & ~(slot_size - 1);
+  const uint64_t final_boundary =
+      (range_end + slot_size - 1) & ~(slot_size - 1);
+  for (; boundary <= final_boundary; boundary += slot_size) {
+    if (!SubmitPathBApertureSync(api, device, context, aperture, boundary,
+                                 /*wait_for_cpu=*/false, out_error)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool AcquirePathBCodeRange(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error) {
+  if (device.mcdm_abi != McdmAbi::compact) return true;
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
+    return false;
+  }
+  const uint64_t slot_size = abi.command_aperture_code_slot_size;
+  const uint64_t marker_end = offset + length;
+  uint64_t boundary = (offset + slot_size) & ~(slot_size - 1);
+  const uint64_t final_boundary =
+      (marker_end + slot_size - 1) & ~(slot_size - 1);
+  for (; boundary <= final_boundary; boundary += slot_size) {
+    // The final marker transfers all touched slots to the host. Do not write
+    // cacheable aperture memory until that ownership transfer has completed.
+    if (!SubmitPathBApertureSync(api, device, context, aperture, boundary,
+                                 /*wait_for_cpu=*/boundary == final_boundary,
+                                 out_error)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CommitPathBCodeWrite(const KmtApi& api, const Device& device,
+                          const CommandAperture& aperture, uint64_t offset,
+                          uint64_t length, Error* out_error) {
+  // Compact MCDM exposes instruction storage as cacheable 0x8000-byte slots.
+  // XRT publishes a write by flushing every CPU cache line in each touched
+  // slot after its pre-write marker. Legacy MCDM instead uses KMT cache
+  // invalidation before its post-write marker.
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (abi.command_aperture_code_publish_granularity) {
+    return FlushCpuCacheRange(
+        aperture.gpu_cpu_ptr, aperture.gpu_va_size, offset, length,
+        abi.command_aperture_code_publish_granularity, out_error);
+  }
+  return SyncCommandApertureCode(api, device, aperture, offset, length,
+                                 out_error);
+}
+
+bool RefreshPathBSingleCodeMappingAfterWrite(
+    const KmtApi& api, const Device& device, CommandAperture* aperture,
+    Error* out_error) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (!abi.command_aperture_remap_after_write) return true;
+  return RefreshCommandApertureGpuMapping(api, device, aperture, out_error);
+}
+
+bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error) {
+  if (device.mcdm_abi != McdmAbi::legacy) return true;
+  return SubmitPathBCodeRangeEndMarkers(api, device, context, aperture, offset,
+                                        length, out_error);
+}
+
+bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
+    return false;
+  }
+  if (device.mcdm_abi == McdmAbi::legacy) {
+    return SubmitPathBApertureSync(api, device, context, aperture, offset,
+                                   /*wait_for_cpu=*/true, out_error);
+  }
+
+  const uint64_t slot_size = abi.command_aperture_code_slot_size;
+  const uint64_t relative_begin = offset - aperture.code_offset;
+  const uint64_t first_slot =
+      aperture.code_offset + (relative_begin & ~(slot_size - 1));
+  uint64_t slot_start = aperture.code_offset +
+                        ((relative_begin + length - 1) & ~(slot_size - 1));
+  for (;;) {
+    if (!SubmitPathBApertureSync(api, device, context, aperture, slot_start,
+                                 /*wait_for_cpu=*/false, out_error)) {
+      return false;
+    }
+    if (slot_start <= first_slot) break;
+    slot_start -= slot_size;
+  }
+  return true;
+}
+
+// Allocate the firmware completion ring using the status object selected by
+// the negotiated MCDM ABI. The firmware writes completion state into this
+// allocation; an ordinary host-only BO is not part of this queue protocol.
 bool EnsureStatusRing(const KmtApi& api, const Device& device, Context* context,
                       Error* out_error) {
   if (context->completion_ring_ready) return true;
   constexpr uint32_t kRingSize = 4096;
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   AllocPrivate ring_private = {};
   ring_private.requested_size = kRingSize;
   ring_private.aligned_size = kRingSize;
-  ring_private.private_type = kCommandAperturePrivateType;  // 0x332b status_bo
-  ring_private.policy = 0;
+  ring_private.private_type = abi.status_private_type;
+  ring_private.policy = abi.status_policy;
+  ring_private.xcl_flags = abi.status_xcl_flags;
 
   D3DDDI_ALLOCATIONINFO2 ring_info = {};
   ring_info.pPrivateDriverData = &ring_private;
@@ -1360,52 +1873,53 @@ bool EnsureStatusRing(const KmtApi& api, const Device& device, Context* context,
   ring.cpu_ptr = lock.pData;
   if (ring.cpu_ptr) std::memset(ring.cpu_ptr, 0, kRingSize);
 
-  // Map to a GPU VA and make resident so the firmware/NPU can DMA completion
-  // state into the ring. Without this the BO is only host-side (Lock2) and the
-  // firmware can never write the completion -> command never completes.
-  D3DDDI_MAPGPUVIRTUALADDRESS map = {};
-  map.hPagingQueue = device.paging_queue;
-  map.hAllocation = ring.allocation;
-  map.SizeInPages = kRingSize / 4096;
-  map.Protection.Write = 1;
-  status = api.map_gpu_virtual_address(&map);
-  if (status != 0 && status != kStatusPending) {
-    CheckStatus("D3DKMTMapGpuVirtualAddress(status ring)", status, out_error);
-    DestroyBuffer(api, device, &ring);
-    return false;
-  }
-  ring.gpu_va = map.VirtualAddress;
+  if (abi.status_has_gpu_va) {
+    D3DDDI_MAPGPUVIRTUALADDRESS map = {};
+    map.hPagingQueue = device.paging_queue;
+    map.hAllocation = ring.allocation;
+    map.SizeInPages = kRingSize / 4096;
+    map.Protection.Write = 1;
+    status = api.map_gpu_virtual_address(&map);
+    if (!CheckStatusOrPending("D3DKMTMapGpuVirtualAddress(status ring)",
+                              status, out_error)) {
+      DestroyBuffer(api, device, &ring);
+      return false;
+    }
+    ring.gpu_va = map.VirtualAddress;
 
-  D3DKMT_HANDLE resident_allocs[1] = {ring.allocation};
-  D3DDDI_MAKERESIDENT resident = {};
-  resident.hPagingQueue = device.paging_queue;
-  resident.NumAllocations = 1;
-  resident.AllocationList = resident_allocs;
-  resident.Flags.CantTrimFurther = 1;
-  resident.Flags.MustSucceed = 1;
-  status = api.make_resident(&resident);
-  if (status != 0 && status != kStatusPending) {
-    CheckStatus("D3DKMTMakeResident(status ring)", status, out_error);
-    DestroyBuffer(api, device, &ring);
-    return false;
-  }
-  D3DKMT_HANDLE wait_objects[1] = {device.paging_sync_object};
-  UINT64 wait_values[1] = {resident.PagingFenceValue};
-  D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait = {};
-  wait.hContext = context->context;
-  wait.ObjectCount = 1;
-  wait.ObjectHandleArray = wait_objects;
-  wait.MonitoredFenceValueArray = wait_values;
-  status = api.wait_from_gpu(&wait);
-  if (!CheckStatus("D3DKMTWaitForSynchronizationObjectFromGpu(status ring)",
-                   status, out_error)) {
-    DestroyBuffer(api, device, &ring);
-    return false;
+    D3DKMT_HANDLE resident_allocs[1] = {ring.allocation};
+    D3DDDI_MAKERESIDENT resident = {};
+    resident.hPagingQueue = device.paging_queue;
+    resident.NumAllocations = 1;
+    resident.AllocationList = resident_allocs;
+    resident.Flags.CantTrimFurther = 1;
+    resident.Flags.MustSucceed = 1;
+    status = api.make_resident(&resident);
+    if (!CheckStatusOrPending("D3DKMTMakeResident(status ring)", status,
+                              out_error)) {
+      DestroyBuffer(api, device, &ring);
+      return false;
+    }
+    D3DKMT_HANDLE wait_objects[1] = {device.paging_sync_object};
+    UINT64 wait_values[1] = {resident.PagingFenceValue};
+    D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait = {};
+    wait.hContext = context->context;
+    wait.ObjectCount = 1;
+    wait.ObjectHandleArray = wait_objects;
+    wait.MonitoredFenceValueArray = wait_values;
+    status = api.wait_from_gpu(&wait);
+    if (!CheckStatus(
+            "D3DKMTWaitForSynchronizationObjectFromGpu(status ring)", status,
+            out_error)) {
+      DestroyBuffer(api, device, &ring);
+      return false;
+    }
   }
 
   context->completion_ring = ring;
   context->completion_ring_resource = ring.resource;
   context->completion_ring_ready = true;
+  context->completion_ring_owned = true;
   context->completion_ring_offset = kQhdlCompletionSlotSize;
   return true;
 }
@@ -1426,8 +1940,9 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
              "SubmitAndWaitPathB called with an invalid exec buffer");
     return false;
   }
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   if (ert_bytes == 0 ||
-      ert_bytes > kQhdlSubmitPrivateSize - kQhdlSubmitPacketOffset) {
+      ert_bytes > abi.pathb_private_size - abi.pathb_packet_offset) {
     SetErrorFormat(out_error, "SubmitAndWaitPathB invalid ert_bytes=%u",
                    ert_bytes);
     return false;
@@ -1463,27 +1978,9 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
   // queue protocol, not just host-side scratch space.
   InitializeCompletionSlot(slot_cpu);
 
-  // Build the 0x268 private packet (layout recovered from xrt_core
-  // hwqueue_aie4::submit_command / FUN_1800304c0).
-  const uint32_t effective_command_state =
-      chain_info ? 6u : (command_state ? command_state : 3u);
-  std::array<uint8_t, kQhdlSubmitPrivateSize> priv = {};
-  WriteU32(priv.data(), 0x00, effective_command_state);
-  WriteU64(priv.data(), 0x08, exec_buffer.allocation);
-  WriteU64(priv.data(), 0x10, ert_bytes);
-  WriteU64(priv.data(), 0x28, ring.allocation);  // status_bo allocation handle
-  WriteU32(priv.data(), 0x30, slot_offset);
-  WriteU32(priv.data(), 0x34, kQhdlCompletionSlotSize);
-  // +0x38 is the slot CPU pointer (XRT reads completion via *(uint*)slot); the
-  // firmware locates the slot from the ring device VA (+0x28) + offset (+0x30).
-  WriteU64(priv.data(), 0x38, reinterpret_cast<uint64_t>(slot_cpu));
-  if (chain_info) {
-    WriteU64(priv.data(), 0x48, chain_info->descriptor_gpu_va);
-    WriteU32(priv.data(), 0x50, chain_info->descriptor_bytes);
-    WriteU32(priv.data(), 0x54, chain_info->command_count);
-    WriteU32(priv.data(), 0x58, chain_info->first_child_opcode);
-  }
-  std::memcpy(priv.data() + kQhdlSubmitPacketOffset, ert_packet, ert_bytes);
+  McdmPrivateData private_data = BuildPathBSubmitPrivateData(
+      device.mcdm_abi, exec_buffer, ring, slot_offset, slot_cpu, ert_packet,
+      ert_bytes, command_state, chain_info);
 
   if (!WaitForBufferResidency(api, device, *context, exec_buffer, "pathb-exec",
                               out_error)) {
@@ -1506,9 +2003,9 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = exec_buffer.gpu_va;
   submit.CommandLength =
-      static_cast<UINT>(exec_buffer.size + kQhdlSubmitPacketOffset);
-  submit.PrivateDriverDataSize = static_cast<UINT>(priv.size());
-  submit.pPrivateDriverData = priv.data();
+      static_cast<UINT>(exec_buffer.size + abi.pathb_packet_offset);
+  submit.PrivateDriverDataSize = private_data.size;
+  submit.pPrivateDriverData = private_data.data;
   NTSTATUS status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb)", status, out_error)) {
     return false;
@@ -1600,8 +2097,9 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
     SetError(out_error, "SubmitPathB called with an invalid exec buffer");
     return false;
   }
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   if (ert_bytes == 0 ||
-      ert_bytes > kQhdlSubmitPrivateSize - kQhdlSubmitPacketOffset) {
+      ert_bytes > abi.pathb_private_size - abi.pathb_packet_offset) {
     SetErrorFormat(out_error, "SubmitPathB invalid ert_bytes=%u", ert_bytes);
     return false;
   }
@@ -1628,23 +2126,9 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
   uint8_t* slot_cpu = static_cast<uint8_t*>(ring.cpu_ptr) + slot_offset;
   InitializeCompletionSlot(slot_cpu);
 
-  const uint32_t effective_command_state =
-      chain_info ? 6u : (command_state ? command_state : 3u);
-  std::array<uint8_t, kQhdlSubmitPrivateSize> priv = {};
-  WriteU32(priv.data(), 0x00, effective_command_state);
-  WriteU64(priv.data(), 0x08, exec_buffer.allocation);
-  WriteU64(priv.data(), 0x10, ert_bytes);
-  WriteU64(priv.data(), 0x28, ring.allocation);
-  WriteU32(priv.data(), 0x30, slot_offset);
-  WriteU32(priv.data(), 0x34, kQhdlCompletionSlotSize);
-  WriteU64(priv.data(), 0x38, reinterpret_cast<uint64_t>(slot_cpu));
-  if (chain_info) {
-    WriteU64(priv.data(), 0x48, chain_info->descriptor_gpu_va);
-    WriteU32(priv.data(), 0x50, chain_info->descriptor_bytes);
-    WriteU32(priv.data(), 0x54, chain_info->command_count);
-    WriteU32(priv.data(), 0x58, chain_info->first_child_opcode);
-  }
-  std::memcpy(priv.data() + kQhdlSubmitPacketOffset, ert_packet, ert_bytes);
+  McdmPrivateData private_data = BuildPathBSubmitPrivateData(
+      device.mcdm_abi, exec_buffer, ring, slot_offset, slot_cpu, ert_packet,
+      ert_bytes, command_state, chain_info);
 
   if (!WaitForBufferResidency(api, device, *context, exec_buffer, "pathb-exec",
                               out_error)) {
@@ -1667,9 +2151,9 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
   submit.HwQueueProgressFenceId = fence_id;
   submit.CommandBuffer = exec_buffer.gpu_va;
   submit.CommandLength =
-      static_cast<UINT>(exec_buffer.size + kQhdlSubmitPacketOffset);
-  submit.PrivateDriverDataSize = static_cast<UINT>(priv.size());
-  submit.pPrivateDriverData = priv.data();
+      static_cast<UINT>(exec_buffer.size + abi.pathb_packet_offset);
+  submit.PrivateDriverDataSize = private_data.size;
+  submit.pPrivateDriverData = private_data.data;
   NTSTATUS status = api.submit_command_to_hw_queue(&submit);
   if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb nowait)", status,
                    out_error)) {
@@ -1834,6 +2318,14 @@ void DestroyCommandAperture(const KmtApi& api, const Device& device,
     free_va.Size = aperture->gpu_va_size;
     api.free_gpu_virtual_address(&free_va);
     aperture->gpu_va = 0;
+  }
+  if (aperture->status_gpu_va) {
+    D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
+    free_va.hAdapter = device.adapter;
+    free_va.BaseAddress = aperture->status_gpu_va;
+    free_va.Size = kCommandApertureAllocationSize;
+    api.free_gpu_virtual_address(&free_va);
+    aperture->status_gpu_va = 0;
   }
   if (aperture->gpu_cpu_ptr && aperture->gpu_allocation) {
     D3DKMT_UNLOCK2 unlock = {};

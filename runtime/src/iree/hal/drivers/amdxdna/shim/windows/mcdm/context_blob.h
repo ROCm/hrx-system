@@ -41,6 +41,19 @@ bool BuildContextPrivateDataFromXclbin(const uint8_t* xclbin,
                                        ContextBlobInfo* out_info,
                                        Error* out_error);
 
+bool BuildCompactContextPrivateDataFromXclbin(
+    const uint8_t* xclbin, size_t xclbin_size, uint32_t process_id,
+    const Buffer& context_private_buffer, iree_allocator_t allocator,
+    iree_byte_span_t* out_blob, ContextBlobInfo* out_info, Error* out_error);
+
+// Builds the context-private packet selected by the device's negotiated MCDM
+// contract. Any supporting BO remains owned by the caller on success.
+bool BuildContextPrivateDataForDevice(
+    const KmtApi& api, const Device& device, const uint8_t* xclbin,
+    size_t xclbin_size, uint32_t process_id, iree_allocator_t allocator,
+    iree_byte_span_t* out_blob, ContextBlobInfo* out_info,
+    Buffer* out_context_private_buffer, Error* out_error);
+
 const char* ContextBlobInfoKernelName(const ContextBlobInfo* info,
                                       uint32_t index);
 const char* ContextBlobInfoPdiName(const ContextBlobInfo* info, uint32_t index);
