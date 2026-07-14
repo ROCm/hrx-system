@@ -656,7 +656,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       baked_archive_index;
   OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
       baked_archive_provider;
-  if (uses_execution_layout) {
+  if (uses_execution_layout || materializes_parameter_domain) {
     IREE_ASSERT_OK(CreateBakedLayoutProvider(plan.get(), &baked_archive_bytes,
                                              baked_archive_index.out(),
                                              baked_archive_provider.out()));
@@ -812,28 +812,32 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                           id4_pipeline_parameter_materialization_query_binding(
                               materialization, &materialization_binding));
-    uint64_t copy_signal_value = 2;
-    iree_hal_semaphore_list_t copy_signal_list =
-        OneSemaphoreList(&timeline_semaphore, &copy_signal_value);
-    iree_hal_buffer_t* base_buffer = materialization_target.base_buffer;
+    uint64_t gather_signal_value = 2;
+    iree_hal_semaphore_list_t gather_signal_list =
+        OneSemaphoreList(&timeline_semaphore, &gather_signal_value);
     iree_hal_buffer_t* target_buffer = materialization_target.target_buffer;
-    ASSERT_NE(base_buffer, nullptr);
     ASSERT_NE(target_buffer, nullptr);
-    ASSERT_EQ(iree_hal_buffer_byte_length(base_buffer),
-              iree_hal_buffer_byte_length(target_buffer));
-    IREE_ASSERT_OK(iree_hal_device_queue_copy(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY,
-        materialization_target.readiness_semaphore_list, copy_signal_list,
-        base_buffer, /*source_offset=*/0, target_buffer,
-        /*target_offset=*/0, iree_hal_buffer_byte_length(base_buffer),
-        IREE_HAL_COPY_FLAG_NONE));
+    id4_pipeline_parameter_layout_load_options_t gather_options = {
+        /*.structure_size=*/sizeof(gather_options),
+        /*.next=*/nullptr,
+        /*.index=*/baked_archive_index.get(),
+        /*.provider=*/baked_archive_provider.get(),
+        /*.scope=*/IREE_SV("baked"),
+        /*.wait_semaphore_list=*/
+        materialization_target.readiness_semaphore_list,
+        /*.signal_semaphore_list=*/gather_signal_list,
+        /*.diagnostics_sink=*/&diagnostics_sink,
+    };
+    IREE_ASSERT_OK(id4_pipeline_parameter_layout_gather_slab(
+        plan.get(), &gather_options, materialization_target.slab_index,
+        target_buffer, iree_allocator_system()));
 
     const id4_pipeline_parameter_tensor_plan_t* first_parameter =
         FindParameterTensor(plan.get(), IREE_SV("first.bias"));
     ASSERT_NE(first_parameter, nullptr);
     ASSERT_EQ(first_parameter->parameter_slab_index, 0u);
     const float replacement_values[] = {20.0f, 20.0f, 20.0f, 20.0f};
-    uint64_t update_wait_value = copy_signal_value;
+    uint64_t update_wait_value = gather_signal_value;
     iree_hal_semaphore_list_t update_wait_list =
         OneSemaphoreList(&timeline_semaphore, &update_wait_value);
     uint64_t update_signal_value = 3;

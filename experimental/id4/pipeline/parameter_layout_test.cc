@@ -44,6 +44,8 @@ using ParameterSlabSetPtr =
                     decltype(&id4_pipeline_parameter_slab_set_release)>;
 using HalFilePtr =
     std::unique_ptr<iree_hal_file_t, decltype(&iree_hal_file_release)>;
+using BufferPtr =
+    std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>;
 using SemaphorePtr = std::unique_ptr<iree_hal_semaphore_t,
                                      decltype(&iree_hal_semaphore_release)>;
 
@@ -578,6 +580,77 @@ TEST(ParameterLayoutTest, LoadsBakedStorageWithoutReencoding) {
     EXPECT_EQ(std::memcmp(actual, expected, request->span.length), 0)
         << "request index " << i;
   }
+
+  const id4_pipeline_parameter_slab_plan_t* slab_plan =
+      id4_pipeline_plan_parameter_slab_at(plan.get(), 0);
+  ASSERT_NE(slab_plan, nullptr);
+  iree_hal_semaphore_t* gather_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gather_semaphore));
+  SemaphorePtr gather_semaphore_owner(gather_semaphore,
+                                      iree_hal_semaphore_release);
+  uint64_t allocation_payload_value = 1;
+  const iree_hal_semaphore_list_t allocation_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&gather_semaphore,
+      /*.payload_values=*/&allocation_payload_value,
+  };
+  iree_hal_buffer_t* gathered_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      allocation_signal_list, /*pool=*/nullptr, slab_plan->target_params,
+      slab_plan->byte_length, IREE_HAL_ALLOCA_FLAG_NONE, &gathered_buffer));
+  BufferPtr gathered_buffer_owner(gathered_buffer, iree_hal_buffer_release);
+  uint64_t gather_payload_value = 2;
+  const iree_hal_semaphore_list_t gather_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&gather_semaphore,
+      /*.payload_values=*/&gather_payload_value,
+  };
+  id4_pipeline_parameter_layout_load_options_t gather_options = {
+      /*.structure_size=*/sizeof(gather_options),
+      /*.next=*/nullptr,
+      /*.index=*/archive_index,
+      /*.provider=*/archive_provider,
+      /*.scope=*/IREE_SV("baked"),
+      /*.wait_semaphore_list=*/allocation_signal_list,
+      /*.signal_semaphore_list=*/gather_signal_list,
+      /*.diagnostics_sink=*/&diagnostics_sink,
+  };
+  IREE_ASSERT_OK(id4_pipeline_parameter_layout_gather_slab(
+      plan.get(), &gather_options, /*target_slab_index=*/0, gathered_buffer,
+      iree_allocator_system()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(gather_semaphore, gather_payload_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  std::vector<uint8_t> gathered_bytes(
+      iree_hal_buffer_byte_length(gathered_buffer));
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device, gathered_buffer, /*source_offset=*/0, gathered_bytes.data(),
+      gathered_bytes.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+      iree_infinite_timeout()));
+  for (iree_host_size_t i = 0; i < requests->count; ++i) {
+    const id4_pipeline_parameter_request_t* request = &requests->values[i];
+    EXPECT_EQ(std::memcmp(gathered_bytes.data() + request->span.buffer_offset,
+                          slab_bytes.data() + request->span.buffer_offset,
+                          request->span.length),
+              0)
+        << "gather request index " << i;
+  }
+  uint64_t deallocation_payload_value = 3;
+  const iree_hal_semaphore_list_t deallocation_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&gather_semaphore,
+      /*.payload_values=*/&deallocation_payload_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, gather_signal_list,
+      deallocation_signal_list, gathered_buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      gather_semaphore, deallocation_payload_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_io_parameter_archive_builder_t target_builder;
   IREE_ASSERT_OK(iree_io_parameter_archive_builder_initialize(

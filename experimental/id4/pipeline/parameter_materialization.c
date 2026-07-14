@@ -56,8 +56,6 @@ struct id4_pipeline_parameter_materialization_t {
   iree_hal_queue_affinity_t queue_affinity;
   // Optional allocation pool retained for the replacement lifetime.
   iree_hal_pool_t* allocation_pool;
-  // Canonical source buffer retained until publication or abort.
-  iree_hal_buffer_t* base_buffer;
   // Queue-allocated replacement buffer owned by this object.
   iree_hal_buffer_t* target_buffer;
   // Acquisition edge retained while the replacement may be populated.
@@ -194,7 +192,6 @@ static void id4_pipeline_parameter_materialization_destroy(
       &materialization->publication_edge, host_allocator);
   id4_pipeline_parameter_materialization_edge_deinitialize(
       &materialization->acquisition_edge, host_allocator);
-  iree_hal_buffer_release(materialization->base_buffer);
   iree_hal_buffer_release(materialization->target_buffer);
   id4_pipeline_parameter_slab_set_release(
       materialization->derived_parameter_slabs);
@@ -315,10 +312,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
   materialization->queue_affinity = placement->queue_affinity;
   materialization->allocation_pool = options->allocation_pool;
   iree_hal_pool_retain(materialization->allocation_pool);
-  materialization->base_buffer = id4_pipeline_parameter_slab_set_buffer_at(
-      options->base_parameter_slabs, options->target_slab_index);
-  iree_hal_buffer_retain(materialization->base_buffer);
-
   iree_status_t status = id4_pipeline_parameter_materialization_emit(
       materialization, IREE_SV("parameter.materialization.acquire"),
       IREE_SV("acquiring parameter-domain storage"), options->diagnostics_sink);
@@ -416,7 +409,6 @@ iree_status_t id4_pipeline_parameter_materialization_query_target(
         "parameter materialization target is no longer mutable");
   }
   out_target->slab_index = materialization->target_slab_index;
-  out_target->base_buffer = materialization->base_buffer;
   out_target->target_buffer = materialization->target_buffer;
   out_target->readiness_semaphore_list =
       id4_pipeline_parameter_materialization_edge_list(
@@ -460,8 +452,6 @@ iree_status_t id4_pipeline_parameter_materialization_abort(
 
   // A reached or failed wait is terminal for all operations represented by the
   // edge. Final buffer release may now reclaim the queue allocation directly.
-  iree_hal_buffer_release(materialization->base_buffer);
-  materialization->base_buffer = NULL;
   materialization->owns_target_allocation = false;
   materialization->state = ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_RETIRED;
   id4_pipeline_parameter_materialization_edge_deinitialize(
@@ -505,8 +495,6 @@ iree_status_t id4_pipeline_parameter_materialization_publish(
   if (iree_status_is_ok(status)) {
     materialization->state =
         ID4_PIPELINE_PARAMETER_MATERIALIZATION_STATE_PUBLISHED;
-    iree_hal_buffer_release(materialization->base_buffer);
-    materialization->base_buffer = NULL;
   } else {
     id4_pipeline_parameter_materialization_edge_deinitialize(
         &materialization->publication_edge, materialization->host_allocator);

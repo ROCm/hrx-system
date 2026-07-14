@@ -27,11 +27,9 @@ typedef struct id4_pipeline_plan_t id4_pipeline_plan_t;
 typedef struct id4_pipeline_parameter_materialization_target_t {
   // Plan-local slab index replaced by the materialization.
   iree_host_size_t slab_index;
-  // Canonical source buffer retained by the base parameter slab set.
-  iree_hal_buffer_t* base_buffer;
   // Undefined replacement buffer owned by the materialization.
   iree_hal_buffer_t* target_buffer;
-  // Edge that must be reached before either buffer is accessed.
+  // Edge that must be reached before the target buffer is accessed.
   iree_hal_semaphore_list_t readiness_semaphore_list;
 } id4_pipeline_parameter_materialization_target_t;
 
@@ -55,7 +53,7 @@ typedef struct id4_pipeline_parameter_materialization_acquire_options_t {
   const void* next;
   // Plan whose parameter-domain layout the materialization preserves.
   const id4_pipeline_plan_t* plan;
-  // Resident base slab set from which the derived domain is constructed.
+  // Resident base binding set whose selected domain will be replaced.
   id4_pipeline_parameter_slab_set_t* base_parameter_slabs;
   // Plan-local slab index replaced by the materialized domain.
   iree_host_size_t target_slab_index;
@@ -73,12 +71,12 @@ typedef struct id4_pipeline_parameter_materialization_acquire_options_t {
 
 // Acquires undefined queue-ordered storage matching one base parameter domain.
 // Both acquisition semaphore lists must be nonempty, and the wait list must
-// dominate every base slab that may be retained in the derived binding. The
-// returned materialization owns the asynchronous allocation. It directly
-// retains the replaced base buffer while target population may read from it;
-// the rest of the base slab set is borrowed only for this call. Callers must
-// populate the target buffer after the acquire-readiness edge, publish it, and
-// explicitly retire it before releasing their final reference.
+// dominate every base slab retained in the derived binding. The returned
+// materialization owns the asynchronous allocation. The base slab set is
+// borrowed only for this call; derived bindings retain the unchanged buffers
+// directly and never retain the replaced buffer. Callers must populate the
+// target buffer after the acquire-readiness edge, publish it, and explicitly
+// retire it before releasing their final reference.
 iree_status_t id4_pipeline_parameter_materialization_acquire(
     const id4_pipeline_parameter_materialization_acquire_options_t* options,
     iree_allocator_t host_allocator,
@@ -115,10 +113,8 @@ iree_status_t id4_pipeline_parameter_materialization_abort(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Publishes completely initialized replacement contents. |wait_semaphore_list|
-// must dominate every read of the base buffer and every write to the target
-// buffer. |signal_semaphore_list| is retained as the immutable readiness edge
-// for derived execution bundles. Successful publication releases the
-// materialization's base-buffer retain.
+// must dominate every write to the target buffer. |signal_semaphore_list| is
+// retained as the immutable readiness edge for derived execution bundles.
 iree_status_t id4_pipeline_parameter_materialization_publish(
     id4_pipeline_parameter_materialization_t* materialization,
     iree_hal_semaphore_list_t wait_semaphore_list,

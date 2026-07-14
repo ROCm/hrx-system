@@ -567,6 +567,10 @@ iree_status_t id4_pipeline_parameter_slab_set_create_uninitialized(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Validates that |buffer| satisfies one planned resident slab load.
+iree_status_t id4_pipeline_parameter_slab_validate_resident_buffer(
+    const id4_pipeline_parameter_slab_load_t* load, iree_hal_buffer_t* buffer);
+
 // Wraps caller-owned resident buffers in an immutable parameter slab set.
 // Each buffer must match the corresponding allocation plan exactly. The
 // returned set retains the buffer objects but does not acquire or release

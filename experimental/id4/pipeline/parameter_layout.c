@@ -956,13 +956,83 @@ static iree_status_t id4_pipeline_parameter_layout_validate_load_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter layout provider scope is unsupported");
   }
-  if (options->signal_semaphore_list.count == 0) {
+  const iree_hal_semaphore_list_t semaphore_lists[] = {
+      options->wait_semaphore_list,
+      options->signal_semaphore_list,
+  };
+  const iree_string_view_t semaphore_list_names[] = {
+      IREE_SVL("parameter layout wait"),
+      IREE_SVL("parameter layout signal"),
+  };
+  for (iree_host_size_t list_index = 0;
+       list_index < IREE_ARRAYSIZE(semaphore_lists); ++list_index) {
+    const iree_hal_semaphore_list_t list = semaphore_lists[list_index];
+    if (list.count != 0 && (!list.semaphores || !list.payload_values)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%.*s semaphore list is malformed",
+                              (int)semaphore_list_names[list_index].size,
+                              semaphore_list_names[list_index].data);
+    }
+    for (iree_host_size_t i = 0; i < list.count; ++i) {
+      if (!list.semaphores[i]) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "%.*s semaphore %" PRIhsz " is NULL",
+                                (int)semaphore_list_names[list_index].size,
+                                semaphore_list_names[list_index].data, i);
+      }
+    }
+  }
+  if (semaphore_lists[1].count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter layout loading requires a signal semaphore list");
   }
   return id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("parameter layout load"));
+}
+
+static iree_status_t id4_pipeline_parameter_layout_make_load(
+    const id4_pipeline_plan_t* plan, iree_host_size_t slab_index,
+    id4_pipeline_parameter_slab_load_t* out_load) {
+  memset(out_load, 0, sizeof(*out_load));
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      id4_pipeline_plan_parameter_slab_at(plan, slab_index);
+  const id4_pipeline_parameter_request_table_t* request_table =
+      id4_pipeline_plan_parameter_request_table_at(plan, slab_index);
+  iree_hal_device_group_t* device_group = id4_pipeline_plan_device_group(plan);
+  const id4_pipeline_device_placement_t* placement =
+      slab ? id4_pipeline_plan_placement_at(plan, slab->placement_id) : NULL;
+  iree_hal_device_t* device = placement
+                                  ? iree_hal_device_group_device_at(
+                                        device_group, placement->device_index)
+                                  : NULL;
+  if (!slab || !request_table || !placement || !device) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "parameter layout slab %" PRIhsz
+                            " placement is incomplete",
+                            slab_index);
+  }
+  if (request_table->count == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "parameter layout slab %" PRIhsz
+                            " has no parameter requests",
+                            slab_index);
+  }
+  *out_load = (id4_pipeline_parameter_slab_load_t){
+      // Plan-local slab index.
+      .slab_index = slab_index,
+      // Final resident allocation plan.
+      .slab = slab,
+      // Original request identity retained by the resident slab set.
+      .request_table = request_table,
+      // Device index selected by the plan placement.
+      .device_index = placement->device_index,
+      // Device selected by the plan placement.
+      .device = device,
+      // Queue affinity selected by the plan placement.
+      .queue_affinity = placement->queue_affinity,
+  };
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_parameter_layout_make_loads(
@@ -974,58 +1044,23 @@ static iree_status_t id4_pipeline_parameter_layout_make_loads(
   id4_pipeline_parameter_slab_load_t* loads = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, load_count, sizeof(loads[0]), (void**)&loads));
-  iree_hal_device_group_t* device_group = id4_pipeline_plan_device_group(plan);
   iree_hal_device_t* first_device = NULL;
   iree_hal_queue_affinity_t first_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
        ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(plan, i);
-    const id4_pipeline_parameter_request_table_t* request_table =
-        id4_pipeline_plan_parameter_request_table_at(plan, i);
-    const id4_pipeline_device_placement_t* placement =
-        slab ? id4_pipeline_plan_placement_at(plan, slab->placement_id) : NULL;
-    iree_hal_device_t* device = placement
-                                    ? iree_hal_device_group_device_at(
-                                          device_group, placement->device_index)
-                                    : NULL;
-    if (!slab || !request_table || !placement || !device) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "parameter layout slab %" PRIhsz " placement is incomplete", i);
-      break;
-    }
-    if (request_table->count == 0) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "parameter layout slab %" PRIhsz " has no parameter requests", i);
-      break;
-    }
+    status = id4_pipeline_parameter_layout_make_load(plan, i, &loads[i]);
+    if (!iree_status_is_ok(status)) break;
     if (!first_device) {
-      first_device = device;
-      first_queue_affinity = placement->queue_affinity;
-    } else if (first_device != device ||
-               first_queue_affinity != placement->queue_affinity) {
+      first_device = loads[i].device;
+      first_queue_affinity = loads[i].queue_affinity;
+    } else if (first_device != loads[i].device ||
+               first_queue_affinity != loads[i].queue_affinity) {
       status = iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "one baked parameter archive load cannot span device queues");
       break;
     }
-    loads[i] = (id4_pipeline_parameter_slab_load_t){
-        // Plan-local slab index.
-        .slab_index = i,
-        // Final resident allocation plan.
-        .slab = slab,
-        // Original request identity retained by the resident slab set.
-        .request_table = request_table,
-        // Device index selected by the plan placement.
-        .device_index = placement->device_index,
-        // Device selected by the plan placement.
-        .device = device,
-        // Queue affinity selected by the plan placement.
-        .queue_affinity = placement->queue_affinity,
-    };
   }
   if (iree_status_is_ok(status)) {
     *out_loads = loads;
@@ -1033,6 +1068,53 @@ static iree_status_t id4_pipeline_parameter_layout_make_loads(
     iree_allocator_free(host_allocator, loads);
   }
   return status;
+}
+
+static iree_status_t
+id4_pipeline_parameter_layout_populate_archive_tensor_requests(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_tensor_plan_t* parameter_tensor,
+    const id4_pipeline_parameter_slab_load_t* target_load,
+    id4_pipeline_parameter_request_table_t* archive_table) {
+  if (parameter_tensor->request_offset > archive_table->count ||
+      parameter_tensor->request_count >
+          archive_table->count - parameter_tensor->request_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter tensor %.*s request range exceeds slab %" PRIhsz,
+        (int)parameter_tensor->layout.name.size,
+        parameter_tensor->layout.name.data, target_load->slab_index);
+  }
+  const id4_pipeline_program_parameter_op_t* parameter_op = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_layout_parameter_op(
+      plan, parameter_tensor, &parameter_op));
+  const id4_pipeline_parameter_request_table_t* original_table =
+      target_load->request_table;
+  id4_pipeline_parameter_request_t* archive_values =
+      (id4_pipeline_parameter_request_t*)archive_table->values;
+  if (parameter_op->encoding ==
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+      parameter_op->source_span_count != 0) {
+    for (iree_host_size_t i = 0; i < parameter_tensor->request_count; ++i) {
+      archive_values[parameter_tensor->request_offset + i] =
+          original_table->values[parameter_tensor->request_offset + i];
+    }
+    return iree_ok_status();
+  }
+  if (parameter_tensor->request_count != 1) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "execution parameter %.*s must own one final-layout request",
+        (int)parameter_tensor->layout.name.size,
+        parameter_tensor->layout.name.data);
+  }
+  archive_values[parameter_tensor->request_offset] =
+      id4_pipeline_parameter_request(
+          parameter_tensor->layout.name,
+          id4_pipeline_parameter_span(
+              /*parameter_offset=*/0, parameter_tensor->offset,
+              parameter_tensor->layout.byte_length));
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_parameter_layout_make_archive_requests(
@@ -1089,10 +1171,6 @@ static iree_status_t id4_pipeline_parameter_layout_make_archive_requests(
        i < parameter_tensor_count && iree_status_is_ok(status); ++i) {
     const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
         id4_pipeline_plan_parameter_tensor_at(plan, i);
-    const id4_pipeline_program_parameter_op_t* parameter_op = NULL;
-    status = id4_pipeline_parameter_layout_parameter_op(plan, parameter_tensor,
-                                                        &parameter_op);
-    if (!iree_status_is_ok(status)) break;
     if (parameter_tensor->parameter_slab_index >= slab_count) {
       status =
           iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1101,35 +1179,11 @@ static iree_status_t id4_pipeline_parameter_layout_make_archive_requests(
                            parameter_tensor->layout.name.data);
       break;
     }
-    const id4_pipeline_parameter_request_table_t* original_table =
-        target_loads[parameter_tensor->parameter_slab_index].request_table;
     id4_pipeline_parameter_request_table_t* archive_table =
         &request_tables[parameter_tensor->parameter_slab_index];
-    id4_pipeline_parameter_request_t* archive_values =
-        (id4_pipeline_parameter_request_t*)archive_table->values;
-    if (parameter_op->encoding ==
-            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
-        parameter_op->source_span_count != 0) {
-      for (iree_host_size_t j = 0; j < parameter_tensor->request_count; ++j) {
-        archive_values[parameter_tensor->request_offset + j] =
-            original_table->values[parameter_tensor->request_offset + j];
-      }
-    } else {
-      if (parameter_tensor->request_count != 1) {
-        status = iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "execution parameter %.*s must own one final-layout request",
-            (int)parameter_tensor->layout.name.size,
-            parameter_tensor->layout.name.data);
-        break;
-      }
-      archive_values[parameter_tensor->request_offset] =
-          id4_pipeline_parameter_request(
-              parameter_tensor->layout.name,
-              id4_pipeline_parameter_span(
-                  /*parameter_offset=*/0, parameter_tensor->offset,
-                  parameter_tensor->layout.byte_length));
-    }
+    status = id4_pipeline_parameter_layout_populate_archive_tensor_requests(
+        plan, parameter_tensor,
+        &target_loads[parameter_tensor->parameter_slab_index], archive_table);
   }
   for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
        ++i) {
@@ -1148,6 +1202,107 @@ static iree_status_t id4_pipeline_parameter_layout_make_archive_requests(
     iree_allocator_free(host_allocator, requests);
     iree_allocator_free(host_allocator, request_tables);
   }
+  return status;
+}
+
+static iree_status_t id4_pipeline_parameter_layout_submit_slab_gather(
+    const id4_pipeline_parameter_layout_load_options_t* options,
+    const id4_pipeline_parameter_slab_load_t* archive_load,
+    iree_hal_buffer_t* target_buffer,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
+  id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
+      // Archive keys and final target spans for this slab.
+      .request_table = archive_load->request_table,
+      // First request in the slab table.
+      .request_offset = 0,
+      // All requests in the slab table.
+      .request_count = archive_load->request_table->count,
+      // Requests are contiguous in table order.
+      .request_indices = NULL,
+  };
+  return iree_io_parameter_provider_gather(
+      options->provider, archive_load->device, archive_load->queue_affinity,
+      wait_semaphore_list, signal_semaphore_list, options->scope, target_buffer,
+      archive_load->request_table->count,
+      id4_pipeline_parameter_slab_enumerator(&enumerator_state));
+}
+
+iree_status_t id4_pipeline_parameter_layout_gather_slab(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_layout_load_options_t* options,
+    iree_host_size_t target_slab_index, iree_hal_buffer_t* target_buffer,
+    iree_allocator_t host_allocator) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_layout_validate_plan(plan));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_layout_validate_load_options(options));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_layout_validate_index(plan, options->index));
+
+  const iree_host_size_t slab_count =
+      id4_pipeline_plan_parameter_slab_count(plan);
+  if (target_slab_index >= slab_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter layout target slab %" PRIhsz
+                            " is outside slab count %" PRIhsz,
+                            target_slab_index, slab_count);
+  }
+
+  id4_pipeline_parameter_slab_load_t target_load;
+  memset(&target_load, 0, sizeof(target_load));
+  id4_pipeline_parameter_request_t* archive_requests = NULL;
+  id4_pipeline_parameter_request_table_t archive_request_table;
+  memset(&archive_request_table, 0, sizeof(archive_request_table));
+  id4_pipeline_parameter_slab_load_t archive_load;
+  memset(&archive_load, 0, sizeof(archive_load));
+  iree_status_t status = id4_pipeline_parameter_layout_make_load(
+      plan, target_slab_index, &target_load);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        host_allocator, target_load.request_table->count,
+        sizeof(archive_requests[0]), (void**)&archive_requests);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(archive_requests, 0,
+           target_load.request_table->count * sizeof(archive_requests[0]));
+    archive_request_table = id4_pipeline_make_parameter_request_table(
+        target_load.request_table->count, archive_requests);
+    archive_load = target_load;
+    archive_load.request_table = &archive_request_table;
+    const iree_host_size_t parameter_tensor_count =
+        id4_pipeline_plan_parameter_tensor_count(plan);
+    for (iree_host_size_t i = 0;
+         i < parameter_tensor_count && iree_status_is_ok(status); ++i) {
+      const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
+          id4_pipeline_plan_parameter_tensor_at(plan, i);
+      if (parameter_tensor->parameter_slab_index != target_slab_index) continue;
+      status = id4_pipeline_parameter_layout_populate_archive_tensor_requests(
+          plan, parameter_tensor, &target_load, &archive_request_table);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < archive_request_table.count && iree_status_is_ok(status); ++i) {
+    if (iree_string_view_is_empty(archive_requests[i].key)) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "parameter layout slab request %" PRIhsz
+                                " is not owned by a tensor",
+                                i);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_slab_validate_resident_buffer(
+        &target_load, target_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_layout_submit_slab_gather(
+        options, &archive_load, target_buffer, options->wait_semaphore_list,
+        options->signal_semaphore_list);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_fail(options->signal_semaphore_list,
+                                 iree_status_clone(status));
+  }
+  iree_allocator_free(host_allocator, archive_requests);
   return status;
 }
 
@@ -1216,23 +1371,10 @@ iree_status_t id4_pipeline_parameter_layout_load(
         // Slab gather completion payload.
         .payload_values = &completion_payload_values[i],
     };
-    id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
-        // Archive keys and final target spans for this slab.
-        .request_table = archive_loads[i].request_table,
-        // First request in the slab table.
-        .request_offset = 0,
-        // All requests in the slab table.
-        .request_count = archive_loads[i].request_table->count,
-        // Requests are contiguous in table order.
-        .request_indices = NULL,
-    };
-    status = iree_io_parameter_provider_gather(
-        options->provider, archive_loads[i].device,
-        archive_loads[i].queue_affinity, options->wait_semaphore_list,
-        signal_list, options->scope,
+    status = id4_pipeline_parameter_layout_submit_slab_gather(
+        options, &archive_loads[i],
         id4_pipeline_parameter_slab_set_buffer_at(slab_set, i),
-        archive_loads[i].request_table->count,
-        id4_pipeline_parameter_slab_enumerator(&enumerator_state));
+        options->wait_semaphore_list, signal_list);
   }
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t completion_list = {

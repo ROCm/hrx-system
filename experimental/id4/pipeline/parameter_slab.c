@@ -4266,9 +4266,13 @@ iree_status_t id4_pipeline_parameter_slab_set_create_uninitialized(
   return status;
 }
 
-static iree_status_t id4_pipeline_parameter_slab_validate_resident_buffer(
-    const id4_pipeline_parameter_slab_load_t* load, iree_hal_buffer_t* buffer,
-    iree_host_size_t index) {
+iree_status_t id4_pipeline_parameter_slab_validate_resident_buffer(
+    const id4_pipeline_parameter_slab_load_t* load, iree_hal_buffer_t* buffer) {
+  if (!load) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "resident parameter slab load is required");
+  }
+  const iree_host_size_t index = load->slab_index;
   if (!load->slab) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -4309,13 +4313,15 @@ static iree_status_t id4_pipeline_parameter_slab_validate_resident_buffer(
 
   const iree_hal_buffer_placement_t placement =
       iree_hal_buffer_allocation_placement(buffer);
-  if (placement.device != load->device) {
+  if (!iree_hal_buffer_placement_is_undefined(placement) &&
+      placement.device != load->device) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "resident parameter slab %" PRIhsz
                             " is not allocated on the target device",
                             index);
   }
-  if (!iree_hal_queue_affinity_is_any(load->queue_affinity) &&
+  if (!iree_hal_buffer_placement_is_undefined(placement) &&
+      !iree_hal_queue_affinity_is_any(load->queue_affinity) &&
       !iree_all_bits_set(placement.queue_affinity, load->queue_affinity)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "resident parameter slab %" PRIhsz
@@ -4363,7 +4369,7 @@ iree_status_t id4_pipeline_parameter_slab_set_wrap_resident(
                               i, loads[i].slab_index);
     }
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_resident_buffer(
-        &loads[i], buffers[i], i));
+        &loads[i], buffers[i]));
   }
 
   id4_pipeline_parameter_slab_set_t* slab_set = NULL;

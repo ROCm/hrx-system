@@ -167,6 +167,16 @@ iree_status_t id4_pipeline_parameter_layout_load(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Asynchronously gathers one planned execution-layout slab into
+// caller-provided resident storage. The target buffer is not retained after
+// submission; the provider and HAL queue operations capture everything needed
+// until |options->signal_semaphore_list| is reached.
+iree_status_t id4_pipeline_parameter_layout_gather_slab(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_layout_load_options_t* options,
+    iree_host_size_t target_slab_index, iree_hal_buffer_t* target_buffer,
+    iree_allocator_t host_allocator);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
