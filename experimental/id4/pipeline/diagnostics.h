@@ -79,6 +79,8 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   iree_device_size_t slab_alignment;
   // Number of parameter requests in the slab.
   iree_host_size_t request_count;
+  // Semantic parameter domain; empty identifies the program default domain.
+  iree_string_view_t domain;
 } id4_pipeline_parameter_slab_diagnostic_t;
 
 // Parameter loading payload attached to parameter-slab diagnostic events.

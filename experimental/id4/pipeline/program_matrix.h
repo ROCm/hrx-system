@@ -85,6 +85,9 @@ typedef struct id4_pipeline_program_matrix_parameter_t {
   id4_pipeline_program_parameter_source_t scale;
   // Scale semantics applied to the provider weight tensor.
   id4_pipeline_program_matrix_scale_layout_t scale_layout;
+  // Semantic residency domain assigned to materialized weight and scale
+  // tensors.
+  iree_string_view_t domain;
 } id4_pipeline_program_matrix_parameter_t;
 
 // Selected execution storage for a prepared KxN weight matrix.

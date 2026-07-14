@@ -7,6 +7,7 @@
 #include "experimental/id4/pipeline/program.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 #include "iree/testing/gtest.h"
@@ -210,6 +211,79 @@ TEST(PipelineProgram, AuthorsDirectParameterFromDenseSourceSpans) {
             source_spans[0].source_offset);
   EXPECT_EQ(op->payload.parameter.source_spans[1].target_offset,
             source_spans[1].target_offset);
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgram, RetainsSemanticParameterDomainsInFirstUseOrder) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  char patchable_domain[] = "lora_patchable";
+  char patchable_key[] = "patchable.weight";
+  const id4_pipeline_program_parameter_source_t patchable_source = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/iree_make_cstring_view(patchable_key),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_parameter_options_t patchable_options = {
+      /*.structure_size=*/sizeof(patchable_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/1,
+      /*.sources=*/&patchable_source,
+      /*.key=*/iree_make_cstring_view(patchable_key),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      /*.source_span_count=*/0,
+      /*.source_spans=*/nullptr,
+      /*.domain=*/iree_make_cstring_view(patchable_domain),
+  };
+  id4_pipeline_program_tensor_t patchable =
+      id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(
+      id4_pipeline_program_parameter(builder, &patchable_options, &patchable));
+
+  const id4_pipeline_program_parameter_source_t shared_source = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.key=*/IREE_SV("shared.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_parameter_options_t shared_options = patchable_options;
+  shared_options.sources = &shared_source;
+  shared_options.key = shared_source.key;
+  shared_options.domain = iree_string_view_empty();
+  id4_pipeline_program_tensor_t shared = id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(
+      id4_pipeline_program_parameter(builder, &shared_options, &shared));
+
+  patchable_options.domain = IREE_SV("different_domain");
+  id4_pipeline_program_tensor_t incompatible =
+      id4_pipeline_program_tensor_invalid();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_program_parameter(
+                            builder, &patchable_options, &incompatible));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  memset(patchable_domain, 'x', sizeof(patchable_domain) - 1);
+  memset(patchable_key, 'y', sizeof(patchable_key) - 1);
+  builder_scope.DestroyBuilder();
+
+  ASSERT_EQ(id4_pipeline_program_parameter_domain_count(program), 2u);
+  ExpectStringViewEqual(id4_pipeline_program_parameter_domain_at(program, 0),
+                        IREE_SV("lora_patchable"));
+  EXPECT_TRUE(iree_string_view_is_empty(
+      id4_pipeline_program_parameter_domain_at(program, 1)));
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 2u);
+  const id4_pipeline_program_op_t* patchable_op =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(patchable_op, nullptr);
+  ExpectStringViewEqual(patchable_op->payload.parameter.domain,
+                        IREE_SV("lora_patchable"));
 
   id4_pipeline_program_release(program);
 }

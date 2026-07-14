@@ -20,6 +20,8 @@ typedef struct id4_pipeline_program_stage_counts_t {
   iree_host_size_t import_count;
   // Number of parameter operations in the program.
   iree_host_size_t parameter_count;
+  // Number of semantic parameter domains in the program.
+  iree_host_size_t parameter_domain_count;
   // Number of program-owned constant operations in the program.
   iree_host_size_t constant_count;
   // Number of diagnostic tap operations in the program.
@@ -27,8 +29,8 @@ typedef struct id4_pipeline_program_stage_counts_t {
 } id4_pipeline_program_stage_counts_t;
 
 typedef struct id4_pipeline_program_stage_binding_layout_t {
-  // Binding-table slot reserved for the packed parameter slab when present.
-  uint32_t parameter_slab_binding_slot;
+  // First binding-table slot assigned to semantic parameter domains.
+  uint32_t parameter_slab_binding_slot_base;
   // Binding-table slot reserved for the packed constant slab when present.
   uint32_t constant_slab_binding_slot;
   // First binding-table slot assigned to external boundary tensors.
@@ -179,6 +181,8 @@ static id4_pipeline_program_stage_counts_t id4_pipeline_program_stage_count_ops(
         break;
     }
   }
+  counts.parameter_domain_count =
+      id4_pipeline_program_parameter_domain_count(program);
   return counts;
 }
 
@@ -289,7 +293,16 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
 
   uint32_t next_binding_slot = 0;
   if (counts.parameter_count != 0) {
-    out_layout->parameter_slab_binding_slot = next_binding_slot++;
+    out_layout->parameter_slab_binding_slot_base = next_binding_slot;
+    if (counts.parameter_domain_count == 0 ||
+        counts.parameter_domain_count > UINT32_MAX ||
+        next_binding_slot >
+            UINT32_MAX - (uint32_t)counts.parameter_domain_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program stage parameter domain binding slot overflow");
+    }
+    next_binding_slot += (uint32_t)counts.parameter_domain_count;
   }
   if (counts.constant_count != 0) {
     out_layout->constant_slab_binding_slot = next_binding_slot++;
@@ -456,8 +469,8 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   plan_options.placements = &placement;
   plan_options.parameter_scope = options->parameter_scope;
   plan_options.parameter_slab_placement_id = 0;
-  plan_options.parameter_slab_binding_slot =
-      binding_layout.parameter_slab_binding_slot;
+  plan_options.parameter_slab_binding_slot_base =
+      binding_layout.parameter_slab_binding_slot_base;
   plan_options.parameter_slab_target_params = parameter_params;
   plan_options.parameter_slab_alignment = options->alignment;
   plan_options.parameter_request_alignment = options->alignment;

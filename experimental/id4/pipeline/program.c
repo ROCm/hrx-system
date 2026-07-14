@@ -59,6 +59,10 @@ struct id4_pipeline_program_t {
   iree_allocator_t host_allocator;
   // Program name copied into this immutable object.
   iree_string_view_t name;
+  // Number of semantic parameter domains in first-use order.
+  iree_host_size_t parameter_domain_count;
+  // Parameter domain views borrowed from owned parameter operations.
+  iree_string_view_t* parameter_domains;
   // Number of tensor records in this program.
   iree_host_size_t tensor_count;
   // Tensor records owned by this program.
@@ -1207,6 +1211,8 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
       id4_pipeline_program_free_string(&op->payload.fill.name, host_allocator);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
+      id4_pipeline_program_free_string(&op->payload.parameter.domain,
+                                       host_allocator);
       id4_pipeline_program_free_parameter_sources(
           op->payload.parameter.source_count, op->payload.parameter.sources,
           host_allocator);
@@ -1252,11 +1258,16 @@ static iree_status_t id4_pipeline_program_copy_op(
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
       target->payload.parameter.tensor = source->payload.parameter.tensor;
       target->payload.parameter.encoding = source->payload.parameter.encoding;
-      status = id4_pipeline_program_copy_parameter_sources(
-          source->payload.parameter.source_count,
-          source->payload.parameter.sources, host_allocator,
-          &target->payload.parameter.source_count,
-          &target->payload.parameter.sources);
+      status = id4_pipeline_program_copy_string(
+          source->payload.parameter.domain, host_allocator,
+          &target->payload.parameter.domain);
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_program_copy_parameter_sources(
+            source->payload.parameter.source_count,
+            source->payload.parameter.sources, host_allocator,
+            &target->payload.parameter.source_count,
+            &target->payload.parameter.sources);
+      }
       if (iree_status_is_ok(status)) {
         target->payload.parameter.source_span_count =
             source->payload.parameter.source_span_count;
@@ -1538,6 +1549,7 @@ static iree_status_t id4_pipeline_program_builder_validate_create_options(
 
 static void id4_pipeline_program_destroy(id4_pipeline_program_t* program) {
   iree_allocator_t host_allocator = program->host_allocator;
+  iree_allocator_free(host_allocator, program->parameter_domains);
   for (iree_host_size_t i = 0; i < program->operation_count; ++i) {
     id4_pipeline_program_free_op(&program->operations[i], host_allocator);
   }
@@ -1750,6 +1762,8 @@ iree_status_t id4_pipeline_program_parameter(
           (int)options->key.size, options->key.data);
     }
     if (producer->payload.parameter.encoding != options->encoding ||
+        !iree_string_view_equal(producer->payload.parameter.domain,
+                                options->domain) ||
         producer->payload.parameter.source_count != options->source_count ||
         producer->payload.parameter.source_span_count !=
             options->source_span_count) {
@@ -1793,6 +1807,7 @@ iree_status_t id4_pipeline_program_parameter(
       .ordinal = operation_ordinal,
       .payload.parameter =
           {
+              .domain = options->domain,
               .encoding = options->encoding,
               .source_count = options->source_count,
               .sources = options->sources,
@@ -2566,6 +2581,47 @@ iree_status_t id4_pipeline_program_builder_seal(
       }
     }
   }
+  iree_host_size_t parameter_domain_count = 0;
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < program->operation_count; ++i) {
+      const id4_pipeline_program_op_t* op = &program->operations[i];
+      if (op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+      bool found = false;
+      for (iree_host_size_t j = 0; j < i; ++j) {
+        const id4_pipeline_program_op_t* previous = &program->operations[j];
+        if (previous->kind == ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER &&
+            iree_string_view_equal(previous->payload.parameter.domain,
+                                   op->payload.parameter.domain)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) ++parameter_domain_count;
+    }
+  }
+  if (iree_status_is_ok(status) && parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, parameter_domain_count,
+                                         sizeof(program->parameter_domains[0]),
+                                         (void**)&program->parameter_domains);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < program->operation_count; ++i) {
+      const id4_pipeline_program_op_t* op = &program->operations[i];
+      if (op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+      bool found = false;
+      for (iree_host_size_t j = 0; j < program->parameter_domain_count; ++j) {
+        if (iree_string_view_equal(program->parameter_domains[j],
+                                   op->payload.parameter.domain)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        program->parameter_domains[program->parameter_domain_count++] =
+            op->payload.parameter.domain;
+      }
+    }
+  }
   if (iree_status_is_ok(status)) {
     *out_program = program;
   } else {
@@ -2588,6 +2644,19 @@ void id4_pipeline_program_release(id4_pipeline_program_t* program) {
 iree_string_view_t id4_pipeline_program_name(
     const id4_pipeline_program_t* program) {
   return program ? program->name : iree_string_view_empty();
+}
+
+iree_host_size_t id4_pipeline_program_parameter_domain_count(
+    const id4_pipeline_program_t* program) {
+  return program ? program->parameter_domain_count : 0;
+}
+
+iree_string_view_t id4_pipeline_program_parameter_domain_at(
+    const id4_pipeline_program_t* program, iree_host_size_t index) {
+  if (!program || index >= program->parameter_domain_count) {
+    return iree_string_view_empty();
+  }
+  return program->parameter_domains[index];
 }
 
 iree_host_size_t id4_pipeline_program_tensor_count(

@@ -53,8 +53,8 @@ typedef struct id4_pipeline_program_plan_options_t {
   iree_string_view_t parameter_scope;
   // Placement id used for the packed parameter slab.
   id4_pipeline_device_placement_id_t parameter_slab_placement_id;
-  // Binding-table slot used for the packed parameter slab.
-  uint32_t parameter_slab_binding_slot;
+  // First binding-table slot assigned to semantic parameter domains.
+  uint32_t parameter_slab_binding_slot_base;
   // HAL buffer parameters used for the packed parameter slab.
   iree_hal_buffer_params_t parameter_slab_target_params;
   // Required packed parameter slab base alignment.

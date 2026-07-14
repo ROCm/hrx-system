@@ -239,6 +239,8 @@ typedef struct id4_pipeline_program_parameter_op_t {
   const id4_pipeline_program_parameter_source_span_t* source_spans;
   // Initialized tensor whose record name is the provider key.
   id4_pipeline_program_tensor_t tensor;
+  // Semantic residency domain; empty identifies the program default domain.
+  iree_string_view_t domain;
 } id4_pipeline_program_parameter_op_t;
 
 // Constant tensor operation payload.
@@ -414,6 +416,8 @@ typedef struct id4_pipeline_program_parameter_options_t {
   iree_host_size_t source_span_count;
   // Explicit direct source spans borrowed for the call and copied by builder.
   const id4_pipeline_program_parameter_source_span_t* source_spans;
+  // Semantic residency domain; empty identifies the program default domain.
+  iree_string_view_t domain;
 } id4_pipeline_program_parameter_options_t;
 
 // Options for adding a program-owned constant tensor.
@@ -844,6 +848,15 @@ void id4_pipeline_program_release(id4_pipeline_program_t* program);
 // Returns the program name copied into |program|.
 iree_string_view_t id4_pipeline_program_name(
     const id4_pipeline_program_t* program);
+
+// Returns the number of semantic parameter domains in first-use order.
+iree_host_size_t id4_pipeline_program_parameter_domain_count(
+    const id4_pipeline_program_t* program);
+
+// Returns semantic parameter domain |index| or an empty view when out of range.
+// The empty view at a valid index identifies the program default domain.
+iree_string_view_t id4_pipeline_program_parameter_domain_at(
+    const id4_pipeline_program_t* program, iree_host_size_t index);
 
 // Returns the number of tensors in |program|.
 iree_host_size_t id4_pipeline_program_tensor_count(

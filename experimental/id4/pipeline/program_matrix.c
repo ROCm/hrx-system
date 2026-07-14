@@ -1727,6 +1727,7 @@ static iree_status_t id4_pipeline_program_matrix_materialize_parameter(
       .key = parameter->weight.key,
       .dtype = candidate->weight_dtype,
       .shape = id4_pipeline_program_make_shape_rank2(problem->n, problem->k),
+      .domain = parameter->domain,
   };
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_parameter(builder, &weight_options, out_weight));
@@ -1747,6 +1748,7 @@ static iree_status_t id4_pipeline_program_matrix_materialize_parameter(
         .key = parameter->scale.key,
         .dtype = parameter->scale.dtype,
         .shape = parameter->scale.shape,
+        .domain = parameter->domain,
     };
     IREE_RETURN_IF_ERROR(
         id4_pipeline_program_parameter(builder, &scale_options, out_scale));

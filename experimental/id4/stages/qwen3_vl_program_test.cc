@@ -292,7 +292,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       // Placement for the packed parameter slab.
       /*.parameter_slab_placement_id=*/0,
       // Binding table slot for the packed parameter slab.
-      /*.parameter_slab_binding_slot=*/0,
+      /*.parameter_slab_binding_slot_base=*/0,
       // HAL buffer parameters for the parameter slab.
       /*.parameter_slab_target_params=*/parameter_params,
       // Base alignment for the packed parameter slab.

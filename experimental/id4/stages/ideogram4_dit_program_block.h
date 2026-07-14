@@ -35,6 +35,8 @@ typedef struct id4_ideogram4_dit_program_dense_options_t {
   id4_ideogram4_dit_parameter_sources_t parameter_sources;
   // Parameter key prefix that owns ".weight" and ".bias" tensors.
   iree_string_view_t parameter_prefix;
+  // Semantic residency domain assigned to the dense weight and its scale.
+  iree_string_view_t parameter_domain;
   // Execution storage strategy selected for dense weights.
   id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Dense input vector.
@@ -54,6 +56,8 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   iree_string_view_t branch_name;
   // Parameter source policy used when loading DiT block parameters.
   id4_ideogram4_dit_parameter_sources_t parameter_sources;
+  // Semantic residency domain assigned to LoRA-influenced weights and scales.
+  iree_string_view_t lora_parameter_domain;
   // Transformer layer ordinal used for parameter keys and diagnostic names.
   uint32_t layer_ordinal;
   // AdaLN conditioning vector channel count.
@@ -103,24 +107,24 @@ bool id4_ideogram4_dit_program_has_diagnostic_tap(
 iree_status_t id4_ideogram4_dit_program_parameter(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t key, id4_pipeline_program_dtype_t dtype,
-    id4_pipeline_program_shape_t shape,
+    id4_pipeline_program_shape_t shape, iree_string_view_t domain,
     id4_pipeline_program_tensor_t* out_tensor);
 
 iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t* out_tensor);
+    iree_string_view_t domain, id4_pipeline_program_tensor_t* out_tensor);
 
 iree_status_t id4_ideogram4_dit_program_parameter_bf16_linear_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t* out_tensor);
+    iree_string_view_t domain, id4_pipeline_program_tensor_t* out_tensor);
 
 iree_status_t
 id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t* out_tensor);
+    iree_string_view_t domain, id4_pipeline_program_tensor_t* out_tensor);
 
 iree_status_t id4_ideogram4_dit_program_encode_fp8_e4m3_scaled_linear_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t weight_key,
@@ -132,12 +136,12 @@ iree_status_t id4_ideogram4_dit_program_encode_fp8_e4m3_scaled_linear_rhs_tile(
 iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_linear_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t* out_tensor);
+    iree_string_view_t domain, id4_pipeline_program_tensor_t* out_tensor);
 
 iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t* out_weight,
+    iree_string_view_t domain, id4_pipeline_program_tensor_t* out_weight,
     id4_pipeline_program_tensor_t* out_scale);
 
 iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(

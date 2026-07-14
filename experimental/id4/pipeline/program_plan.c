@@ -16,6 +16,8 @@ typedef struct id4_pipeline_program_plan_counts_t {
   iree_host_size_t import_count;
   // Number of parameter operations in the program.
   iree_host_size_t parameter_count;
+  // Number of semantic parameter domains in the program.
+  iree_host_size_t parameter_domain_count;
   // Number of provider gather requests produced by parameter operations.
   iree_host_size_t parameter_request_count;
   // Number of program-owned constant operations in the program.
@@ -35,7 +37,7 @@ typedef struct id4_pipeline_program_plan_counts_t {
 } id4_pipeline_program_plan_counts_t;
 
 typedef struct id4_pipeline_program_plan_parameter_request_range_t {
-  // First gather request ordinal backing a parameter tensor.
+  // First plan-global gather request ordinal backing a parameter tensor.
   iree_host_size_t request_offset;
   // Number of gather requests backing a parameter tensor.
   iree_host_size_t request_count;
@@ -48,11 +50,8 @@ typedef struct id4_pipeline_program_plan_lowering_context_t {
   const id4_pipeline_shared_tensor_plan_t* shared_tensors;
   // Number of shared tensor plans.
   iree_host_size_t shared_tensor_count;
-  // Parameter requests in provider gather enumeration order.
-  const id4_pipeline_parameter_request_t* parameter_requests;
-  // Parameter request ranges in program parameter-operation order.
-  const id4_pipeline_program_plan_parameter_request_range_t*
-      parameter_request_ranges;
+  // Parameter tensor plans in program parameter-operation order.
+  const id4_pipeline_parameter_tensor_plan_t* parameter_tensors;
   // Constant requests in program constant-operation order.
   const id4_pipeline_constant_request_t* constant_requests;
   // Boundary tensor plans in program import-operation order.
@@ -64,8 +63,12 @@ typedef struct id4_pipeline_program_plan_lowering_context_t {
 typedef struct id4_pipeline_program_plan_parameter_load_record_t {
   // Prepare-time source-to-execution transformation.
   id4_pipeline_program_parameter_encoding_t encoding;
-  // First request ordinal owned by this parameter.
+  // Target semantic parameter slab index.
+  iree_host_size_t target_slab_index;
+  // First request ordinal within the target slab.
   iree_host_size_t request_offset;
+  // First request ordinal in plan-global slab-major order.
+  iree_host_size_t global_request_offset;
   // Number of requests owned by this parameter.
   iree_host_size_t request_count;
   // Provider scope for direct gather records.
@@ -303,7 +306,21 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
         break;
     }
   }
+  counts.parameter_domain_count =
+      id4_pipeline_program_parameter_domain_count(options->program);
   return counts;
+}
+
+static bool id4_pipeline_program_plan_parameter_binding_slot_contains(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_plan_counts_t counts, uint32_t binding_slot) {
+  if (counts.parameter_domain_count == 0 ||
+      binding_slot < options->parameter_slab_binding_slot_base) {
+    return false;
+  }
+  return (iree_host_size_t)(binding_slot -
+                            options->parameter_slab_binding_slot_base) <
+         counts.parameter_domain_count;
 }
 
 static bool id4_pipeline_program_plan_op_is_region_operation(
@@ -767,6 +784,24 @@ static iree_status_t id4_pipeline_program_plan_make_parameter_load_source(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_plan_find_parameter_domain(
+    const id4_pipeline_program_t* program, iree_string_view_t domain,
+    iree_host_size_t* out_domain_index) {
+  *out_domain_index = IREE_HOST_SIZE_MAX;
+  const iree_host_size_t domain_count =
+      id4_pipeline_program_parameter_domain_count(program);
+  for (iree_host_size_t i = 0; i < domain_count; ++i) {
+    if (iree_string_view_equal(
+            id4_pipeline_program_parameter_domain_at(program, i), domain)) {
+      *out_domain_index = i;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_INTERNAL,
+                          "program parameter domain `%.*s` is not indexed",
+                          (int)domain.size, domain.data);
+}
+
 static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
@@ -775,18 +810,69 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     id4_pipeline_program_plan_parameter_request_range_t* request_ranges,
     id4_pipeline_program_plan_parameter_load_record_t* load_records,
     id4_pipeline_parameter_load_source_t* load_sources,
-    iree_device_size_t* out_parameter_slab_byte_length) {
-  *out_parameter_slab_byte_length = 0;
+    iree_host_size_t* slab_request_counts,
+    iree_host_size_t* slab_request_offsets,
+    iree_host_size_t* slab_request_cursors,
+    iree_device_size_t* slab_byte_lengths) {
   if (counts.parameter_count == 0) return iree_ok_status();
 
-  iree_host_size_t request_index = 0;
-  iree_host_size_t parameter_index = 0;
+  memset(slab_request_counts, 0,
+         counts.parameter_domain_count * sizeof(slab_request_counts[0]));
+  memset(slab_request_offsets, 0,
+         counts.parameter_domain_count * sizeof(slab_request_offsets[0]));
+  memset(slab_request_cursors, 0,
+         counts.parameter_domain_count * sizeof(slab_request_cursors[0]));
+  memset(slab_byte_lengths, 0,
+         counts.parameter_domain_count * sizeof(slab_byte_lengths[0]));
+
   const iree_host_size_t operation_count =
       id4_pipeline_program_operation_count(options->program);
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const id4_pipeline_program_op_t* op =
         id4_pipeline_program_operation_at(options->program, i);
     if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+    iree_host_size_t domain_index = IREE_HOST_SIZE_MAX;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_find_parameter_domain(
+        options->program, op->payload.parameter.domain, &domain_index));
+    const iree_host_size_t request_count =
+        op->payload.parameter.source_span_count == 0
+            ? 1
+            : op->payload.parameter.source_span_count;
+    if (!iree_host_size_checked_add(slab_request_counts[domain_index],
+                                    request_count,
+                                    &slab_request_counts[domain_index])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program parameter domain request count overflows");
+    }
+  }
+  iree_host_size_t global_request_count = 0;
+  for (iree_host_size_t i = 0; i < counts.parameter_domain_count; ++i) {
+    slab_request_offsets[i] = global_request_count;
+    if (!iree_host_size_checked_add(global_request_count,
+                                    slab_request_counts[i],
+                                    &global_request_count)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program global parameter request count overflows");
+    }
+  }
+  if (global_request_count != counts.parameter_request_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "program grouped parameter request count %" PRIhsz
+                            " does not match counted requests %" PRIhsz,
+                            global_request_count,
+                            counts.parameter_request_count);
+  }
+
+  iree_host_size_t parameter_index = 0;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+    iree_host_size_t domain_index = IREE_HOST_SIZE_MAX;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_find_parameter_domain(
+        options->program, op->payload.parameter.domain, &domain_index));
     const id4_pipeline_program_tensor_record_t* tensor =
         id4_pipeline_program_tensor_at(options->program,
                                        op->payload.parameter.tensor.ordinal);
@@ -798,12 +884,15 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     iree_io_parameter_span_t span;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_pack_span(
         tensor->byte_length, options->parameter_request_alignment,
-        out_parameter_slab_byte_length, &span));
+        &slab_byte_lengths[domain_index], &span));
     id4_pipeline_program_plan_parameter_load_record_t* load_record =
         &load_records[parameter_index];
     memset(load_record, 0, sizeof(*load_record));
     load_record->encoding = op->payload.parameter.encoding;
-    load_record->request_offset = request_index;
+    load_record->target_slab_index = domain_index;
+    load_record->request_offset = slab_request_cursors[domain_index];
+    load_record->global_request_offset =
+        slab_request_offsets[domain_index] + load_record->request_offset;
     load_record->request_count = op->payload.parameter.source_span_count == 0
                                      ? 1
                                      : op->payload.parameter.source_span_count;
@@ -823,8 +912,8 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     }
     request_ranges[parameter_index] =
         (id4_pipeline_program_plan_parameter_request_range_t){
-            // First gather request ordinal backing this parameter.
-            .request_offset = load_record->request_offset,
+            // First plan-global gather request backing this parameter.
+            .request_offset = load_record->global_request_offset,
             // Number of gather requests backing this parameter.
             .request_count = load_record->request_count,
         };
@@ -846,21 +935,21 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
             },
         // Semantic program tensor ordinal.
         .program_tensor_ordinal = op->payload.parameter.tensor.ordinal,
-        // Single parameter slab emitted below.
-        .parameter_slab_index = 0,
-        // First request in the single parameter slab.
+        // Semantic parameter slab containing this tensor.
+        .parameter_slab_index = domain_index,
+        // First request in the containing parameter slab.
         .request_offset = load_record->request_offset,
         // Number of requests populating this tensor.
         .request_count = load_record->request_count,
-        // Plan-global request ordinal matches the single-slab ordinal.
-        .global_request_offset = load_record->request_offset,
+        // First request in plan-global slab-major order.
+        .global_request_offset = load_record->global_request_offset,
         // Base byte offset of the tensor in the parameter slab.
         .offset = span.buffer_offset,
     };
+    iree_host_size_t request_index = load_record->global_request_offset;
     if (op->payload.parameter.source_span_count == 0) {
       requests[request_index] =
           id4_pipeline_parameter_request(tensor->name, span);
-      ++request_index;
     } else {
       for (iree_host_size_t j = 0; j < op->payload.parameter.source_span_count;
            ++j) {
@@ -882,13 +971,17 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
         ++request_index;
       }
     }
+    slab_request_cursors[domain_index] += load_record->request_count;
     ++parameter_index;
   }
-  if (request_index != counts.parameter_request_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "program parameter request count %" PRIhsz
-                            " does not match counted requests %" PRIhsz,
-                            request_index, counts.parameter_request_count);
+  for (iree_host_size_t i = 0; i < counts.parameter_domain_count; ++i) {
+    if (slab_request_cursors[i] != slab_request_counts[i]) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "program parameter domain %" PRIhsz " emitted %" PRIhsz
+          " requests but counted %" PRIhsz,
+          i, slab_request_cursors[i], slab_request_counts[i]);
+    }
   }
   if (parameter_index != counts.parameter_count) {
     return iree_make_status(
@@ -919,15 +1012,15 @@ id4_pipeline_program_plan_parameter_load_record_readiness_group_key(
   }
   if (record->request_count == 0) {
     return iree_make_status(IREE_STATUS_INTERNAL,
-                            "parameter load record at request %" PRIhsz
+                            "parameter load record at global request %" PRIhsz
                             " has no requests",
-                            record->request_offset);
+                            record->global_request_offset);
   }
   const iree_host_size_t readiness_group_key =
       id4_pipeline_program_plan_parameter_readiness_group_key(
-          request_readiness_group_keys, record->request_offset);
+          request_readiness_group_keys, record->global_request_offset);
   for (iree_host_size_t i = 1; i < record->request_count; ++i) {
-    const iree_host_size_t request_index = record->request_offset + i;
+    const iree_host_size_t request_index = record->global_request_offset + i;
     const iree_host_size_t span_readiness_group_key =
         id4_pipeline_program_plan_parameter_readiness_group_key(
             request_readiness_group_keys, request_index);
@@ -935,7 +1028,7 @@ id4_pipeline_program_plan_parameter_load_record_readiness_group_key(
       return iree_make_status(IREE_STATUS_INTERNAL,
                               "parameter load record at request %" PRIhsz
                               " has mixed readiness groups across source spans",
-                              record->request_offset);
+                              record->global_request_offset);
     }
   }
   *out_readiness_group_key = readiness_group_key;
@@ -1000,8 +1093,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
             id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
                 IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
                 record->source_count, record->sources,
-                /*target_slab_index=*/0,
-                /*request_offset=*/record->request_offset);
+                record->target_slab_index, record->request_offset);
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
@@ -1010,8 +1102,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
             id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
                 IREE_SV("parameters.encode_bf16_linear_rhs_tile"),
                 record->source_count, record->sources,
-                /*target_slab_index=*/0,
-                /*request_offset=*/record->request_offset);
+                record->target_slab_index, record->request_offset);
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
@@ -1021,8 +1112,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
                 IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16_linear_rhs_"
                         "tile"),
                 record->source_count, record->sources,
-                /*target_slab_index=*/0,
-                /*request_offset=*/record->request_offset);
+                record->target_slab_index, record->request_offset);
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
@@ -1031,8 +1121,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
             id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_load_step(
                 IREE_SV("parameters.encode_fp8_e4m3_linear_rhs_tile"),
                 record->source_count, record->sources,
-                /*target_slab_index=*/0,
-                /*request_offset=*/record->request_offset);
+                record->target_slab_index, record->request_offset);
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
@@ -1042,8 +1131,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
                 IREE_SV("parameters.encode_fp8_e4m3_block_scaled_to_bf16_"
                         "linear_rhs_tile"),
                 record->source_count, record->sources,
-                /*target_slab_index=*/0,
-                /*request_offset=*/record->request_offset);
+                record->target_slab_index, record->request_offset);
         load_steps[*out_load_step_count].readiness_group_key =
             readiness_group_key;
         break;
@@ -1075,6 +1163,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
               &previous_readiness_group_key));
       if (previous->encoding ==
               ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          previous->target_slab_index == record->target_slab_index &&
           previous_readiness_group_key == readiness_group_key &&
           iree_string_view_equal(previous->source_scope,
                                  record->source_scope)) {
@@ -1097,6 +1186,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
               &candidate_readiness_group_key));
       if (candidate->encoding ==
               ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          candidate->target_slab_index == record->target_slab_index &&
           candidate_readiness_group_key == readiness_group_key &&
           iree_string_view_equal(candidate->source_scope,
                                  record->source_scope)) {
@@ -1109,7 +1199,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
 
     load_steps[*out_load_step_count] = id4_pipeline_parameter_gather_load_step(
         IREE_SV("parameters.gather"), record->source_scope,
-        /*target_slab_index=*/0, direct_request_indices[request_index_start],
+        record->target_slab_index, direct_request_indices[request_index_start],
         direct_request_index_count - request_index_start);
     load_steps[*out_load_step_count].readiness_group_key = readiness_group_key;
     for (iree_host_size_t j = request_index_start;
@@ -1120,7 +1210,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_load_steps(
         load_steps[*out_load_step_count] =
             id4_pipeline_parameter_indexed_gather_load_step(
                 IREE_SV("parameters.gather"), record->source_scope,
-                /*target_slab_index=*/0,
+                record->target_slab_index,
                 direct_request_index_count - request_index_start,
                 &direct_request_indices[request_index_start]);
         load_steps[*out_load_step_count].readiness_group_key =
@@ -1305,6 +1395,9 @@ static iree_status_t id4_pipeline_program_plan_assign_request_load_group(
 
 static iree_status_t
 id4_pipeline_program_plan_build_parameter_request_load_groups(
+    iree_host_size_t parameter_slab_count,
+    const iree_host_size_t* slab_request_offsets,
+    const iree_host_size_t* slab_request_counts,
     iree_host_size_t parameter_request_count, iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
     iree_host_size_t* request_load_groups,
@@ -1325,11 +1418,27 @@ id4_pipeline_program_plan_build_parameter_request_load_groups(
          ++step_ordinal) {
       const id4_pipeline_parameter_load_step_t* step =
           &load_steps[group.step_offset + step_ordinal];
+      if (step->target_slab_index >= parameter_slab_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter load step target slab %" PRIhsz
+                                " exceeds parameter slab count %" PRIhsz,
+                                step->target_slab_index, parameter_slab_count);
+      }
       for (iree_host_size_t request_ordinal = 0;
            request_ordinal < step->request_count; ++request_ordinal) {
-        const iree_host_size_t request_index =
+        const iree_host_size_t slab_request_index =
             step->request_indices ? step->request_indices[request_ordinal]
                                   : step->request_offset + request_ordinal;
+        if (slab_request_index >=
+            slab_request_counts[step->target_slab_index]) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "parameter load step request %" PRIhsz
+                                  " exceeds target slab request count %" PRIhsz,
+                                  slab_request_index,
+                                  slab_request_counts[step->target_slab_index]);
+        }
+        const iree_host_size_t request_index =
+            slab_request_offsets[step->target_slab_index] + slab_request_index;
         IREE_RETURN_IF_ERROR(
             id4_pipeline_program_plan_assign_request_load_group(
                 parameter_request_count, request_index, group_index,
@@ -1623,11 +1732,11 @@ static iree_status_t id4_pipeline_program_plan_validate_boundary_slots(
                               "program boundary binding slot must not match "
                               "the local slab binding slot");
     }
-    if (counts.parameter_count != 0 &&
-        binding_slot == options->parameter_slab_binding_slot) {
+    if (id4_pipeline_program_plan_parameter_binding_slot_contains(
+            options, counts, binding_slot)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program boundary binding slot must not match "
-                              "the parameter slab binding slot");
+                              "a parameter domain binding slot");
     }
     if (counts.constant_count != 0 &&
         binding_slot == options->constant_slab_binding_slot) {
@@ -1665,11 +1774,11 @@ static iree_status_t id4_pipeline_program_plan_validate_diagnostic_tap_slots(
                               "program diagnostic tap binding slot must not "
                               "match the local slab binding slot");
     }
-    if (counts.parameter_count != 0 &&
-        binding_slot == options->parameter_slab_binding_slot) {
+    if (id4_pipeline_program_plan_parameter_binding_slot_contains(
+            options, counts, binding_slot)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program diagnostic tap binding slot must not "
-                              "match the parameter slab binding slot");
+                              "match a parameter domain binding slot");
     }
     if (counts.constant_count != 0 &&
         binding_slot == options->constant_slab_binding_slot) {
@@ -1708,11 +1817,11 @@ static iree_status_t id4_pipeline_program_plan_validate_shared_slot(
                             "program shared binding slot must not match the "
                             "local slab binding slot");
   }
-  if (counts.parameter_count != 0 &&
-      binding_slot == options->parameter_slab_binding_slot) {
+  if (id4_pipeline_program_plan_parameter_binding_slot_contains(options, counts,
+                                                                binding_slot)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program shared binding slot must not match the "
-                            "parameter slab binding slot");
+                            "parameter domain binding slots");
   }
   if (counts.constant_count != 0 &&
       binding_slot == options->constant_slab_binding_slot) {
@@ -1973,26 +2082,21 @@ static iree_status_t id4_pipeline_program_plan_resolve_parameter(
     id4_pipeline_tensor_import_t* out_import) {
   (void)segment_ordinal;
   (void)parameter_op;
+  (void)tensor;
   id4_pipeline_program_plan_lowering_context_t* context =
       (id4_pipeline_program_plan_lowering_context_t*)user_data;
-  const id4_pipeline_program_plan_parameter_request_range_t request_range =
-      context->parameter_request_ranges[parameter_ordinal];
-  const id4_pipeline_parameter_request_t* request =
-      &context->parameter_requests[request_range.request_offset];
-  out_import->layout = (id4_pipeline_tensor_layout_t){
-      // Parameter tensor diagnostic name.
-      .name = tensor->name,
-      // Parameter tensor element type.
-      .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
-      // Parameter tensor shape.
-      .shape = id4_pipeline_program_plan_convert_shape(tensor->shape),
-      // Dense parameter tensor byte length.
-      .byte_length = tensor->byte_length,
-      // Required subrange alignment in the packed slab.
-      .alignment = context->options->parameter_request_alignment,
-  };
-  out_import->binding_slot = context->options->parameter_slab_binding_slot;
-  out_import->offset = request->span.buffer_offset;
+  const id4_pipeline_parameter_tensor_plan_t* parameter =
+      &context->parameter_tensors[parameter_ordinal];
+  if (parameter->parameter_slab_index >
+      UINT32_MAX - context->options->parameter_slab_binding_slot_base) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program parameter binding slot overflows");
+  }
+  out_import->layout = parameter->layout;
+  out_import->binding_slot =
+      context->options->parameter_slab_binding_slot_base +
+      (uint32_t)parameter->parameter_slab_index;
+  out_import->offset = parameter->offset;
   out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
   return iree_ok_status();
 }
@@ -2073,9 +2177,7 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
     id4_pipeline_program_plan_counts_t counts,
     iree_host_size_t shared_tensor_count,
     const id4_pipeline_shared_tensor_plan_t* shared_tensors,
-    const id4_pipeline_parameter_request_t* parameter_requests,
-    const id4_pipeline_program_plan_parameter_request_range_t*
-        parameter_request_ranges,
+    const id4_pipeline_parameter_tensor_plan_t* parameter_tensors,
     const id4_pipeline_constant_request_t* constant_requests,
     const id4_pipeline_boundary_tensor_plan_t* boundary_tensors,
     const id4_pipeline_diagnostic_tap_plan_t* diagnostic_taps,
@@ -2118,10 +2220,8 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
       .shared_tensors = shared_tensors,
       // Number of shared tensor records.
       .shared_tensor_count = shared_tensor_count,
-      // Parameter request table.
-      .parameter_requests = parameter_requests,
-      // Parameter request ranges in program parameter-operation order.
-      .parameter_request_ranges = parameter_request_ranges,
+      // Parameter tensor plans in program parameter-operation order.
+      .parameter_tensors = parameter_tensors,
       // Constant request table.
       .constant_requests = constant_requests,
       // Boundary tensor table.
@@ -2260,19 +2360,34 @@ iree_status_t id4_pipeline_program_create_plan(
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_diagnostic_tap_names(options));
   if (counts.parameter_count != 0) {
-    if (options->parameter_slab_binding_slot >=
-        options->region_binding_capacity) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "program parameter slab binding slot %u exceeds "
-                              "region binding capacity %" PRIhsz,
-                              options->parameter_slab_binding_slot,
-                              options->region_binding_capacity);
+    if (counts.parameter_domain_count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "program parameters have no semantic parameter domain");
     }
-    if (options->parameter_slab_binding_slot ==
-        options->region_local_binding_slot) {
+    if (counts.parameter_domain_count > UINT32_MAX ||
+        options->parameter_slab_binding_slot_base >
+            UINT32_MAX - (uint32_t)(counts.parameter_domain_count - 1)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program parameter domain binding slot overflow");
+    }
+    const iree_host_size_t parameter_binding_slot_limit =
+        (iree_host_size_t)options->parameter_slab_binding_slot_base +
+        counts.parameter_domain_count;
+    if (parameter_binding_slot_limit > options->region_binding_capacity) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program parameter domain binding slots [%u, %" PRIhsz
+          ") exceed region "
+          "binding capacity %" PRIhsz,
+          options->parameter_slab_binding_slot_base,
+          parameter_binding_slot_limit, options->region_binding_capacity);
+    }
+    if (id4_pipeline_program_plan_parameter_binding_slot_contains(
+            options, counts, options->region_local_binding_slot)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "program parameter slab binding slot must not "
-                              "match the local slab binding slot");
+                              "program parameter domain binding slots must not "
+                              "contain the local slab binding slot");
     }
   }
   if (counts.constant_count != 0) {
@@ -2290,12 +2405,11 @@ iree_status_t id4_pipeline_program_create_plan(
                               "program constant slab binding slot must not "
                               "match the local slab binding slot");
     }
-    if (counts.parameter_count != 0 &&
-        options->constant_slab_binding_slot ==
-            options->parameter_slab_binding_slot) {
+    if (id4_pipeline_program_plan_parameter_binding_slot_contains(
+            options, counts, options->constant_slab_binding_slot)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program constant slab binding slot must not "
-                              "match the parameter slab binding slot");
+                              "match a parameter domain binding slot");
     }
   }
   IREE_RETURN_IF_ERROR(
@@ -2304,6 +2418,12 @@ iree_status_t id4_pipeline_program_create_plan(
       id4_pipeline_program_plan_validate_diagnostic_tap_slots(options, counts));
 
   id4_pipeline_parameter_request_t* parameter_requests = NULL;
+  id4_pipeline_parameter_slab_plan_t* parameter_slabs = NULL;
+  id4_pipeline_parameter_request_table_t* parameter_request_tables = NULL;
+  iree_host_size_t* parameter_slab_request_counts = NULL;
+  iree_host_size_t* parameter_slab_request_offsets = NULL;
+  iree_host_size_t* parameter_slab_request_cursors = NULL;
+  iree_device_size_t* parameter_slab_byte_lengths = NULL;
   id4_pipeline_parameter_tensor_plan_t* parameter_tensors = NULL;
   id4_pipeline_program_plan_parameter_load_record_t* parameter_load_records =
       NULL;
@@ -2372,6 +2492,40 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(
         host_allocator, counts.parameter_request_count,
         sizeof(parameter_requests[0]), (void**)&parameter_requests);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_domain_count,
+        sizeof(parameter_slabs[0]), (void**)&parameter_slabs);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_domain_count,
+        sizeof(parameter_request_tables[0]), (void**)&parameter_request_tables);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_domain_count,
+        sizeof(parameter_slab_request_counts[0]),
+        (void**)&parameter_slab_request_counts);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_domain_count,
+        sizeof(parameter_slab_request_offsets[0]),
+        (void**)&parameter_slab_request_offsets);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_domain_count,
+        sizeof(parameter_slab_request_cursors[0]),
+        (void**)&parameter_slab_request_cursors);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_domain_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator,
+                                         counts.parameter_domain_count,
+                                         sizeof(parameter_slab_byte_lengths[0]),
+                                         (void**)&parameter_slab_byte_lengths);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
@@ -2509,12 +2663,13 @@ iree_status_t id4_pipeline_program_create_plan(
            region_range_count * sizeof(local_slab_names[0]));
   }
 
-  iree_device_size_t parameter_slab_byte_length = 0;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_plan_build_parameter_requests(
         options, counts, parameter_requests, parameter_tensors,
         parameter_request_ranges, parameter_load_records,
-        parameter_load_sources, &parameter_slab_byte_length);
+        parameter_load_sources, parameter_slab_request_counts,
+        parameter_slab_request_offsets, parameter_slab_request_cursors,
+        parameter_slab_byte_lengths);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = id4_pipeline_program_plan_build_parameter_request_ranges_by_tensor(
@@ -2536,9 +2691,10 @@ iree_status_t id4_pipeline_program_create_plan(
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = id4_pipeline_program_plan_build_parameter_request_load_groups(
-        counts.parameter_request_count, parameter_load_step_count,
-        parameter_load_steps, parameter_load_groups_by_request,
-        &parameter_load_group_count);
+        counts.parameter_domain_count, parameter_slab_request_offsets,
+        parameter_slab_request_counts, counts.parameter_request_count,
+        parameter_load_step_count, parameter_load_steps,
+        parameter_load_groups_by_request, &parameter_load_group_count);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0 &&
       region_range_count != 0) {
@@ -2591,10 +2747,9 @@ iree_status_t id4_pipeline_program_create_plan(
          i < region_range_count && iree_status_is_ok(status); ++i) {
       status = id4_pipeline_program_plan_dry_run_region(
           options, &region_ranges[i], counts, shared_tensor_count,
-          shared_tensors, parameter_requests, parameter_request_ranges,
-          constant_requests, boundary_tensors, taps, host_allocator,
-          &region_statistics[i], &region_local_lifetime_counts[i],
-          &region_local_lifetimes[i]);
+          shared_tensors, parameter_tensors, constant_requests,
+          boundary_tensors, taps, host_allocator, &region_statistics[i],
+          &region_local_lifetime_counts[i], &region_local_lifetimes[i]);
     }
   } else if (iree_status_is_ok(status) && planned_tap_count != 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -2602,18 +2757,19 @@ iree_status_t id4_pipeline_program_create_plan(
                               "region operations");
   }
 
-  id4_pipeline_parameter_slab_plan_t parameter_slab;
-  id4_pipeline_parameter_request_table_t parameter_request_table;
-  memset(&parameter_slab, 0, sizeof(parameter_slab));
-  memset(&parameter_request_table, 0, sizeof(parameter_request_table));
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
-    parameter_slab = id4_pipeline_make_parameter_slab_plan(
-        options->parameter_slab_placement_id,
-        options->parameter_slab_binding_slot,
-        options->parameter_slab_target_params, parameter_slab_byte_length,
-        options->parameter_slab_alignment);
-    parameter_request_table = id4_pipeline_make_parameter_request_table(
-        counts.parameter_request_count, parameter_requests);
+    for (iree_host_size_t i = 0; i < counts.parameter_domain_count; ++i) {
+      parameter_slabs[i] = id4_pipeline_make_parameter_slab_plan(
+          options->parameter_slab_placement_id,
+          options->parameter_slab_binding_slot_base + (uint32_t)i,
+          options->parameter_slab_target_params, parameter_slab_byte_lengths[i],
+          options->parameter_slab_alignment);
+      parameter_slabs[i].domain =
+          id4_pipeline_program_parameter_domain_at(options->program, i);
+      parameter_request_tables[i] = id4_pipeline_make_parameter_request_table(
+          parameter_slab_request_counts[i],
+          &parameter_requests[parameter_slab_request_offsets[i]]);
+    }
   }
 
   iree_string_view_t constant_slab_name = iree_string_view_empty();
@@ -2739,11 +2895,9 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.device_group = options->device_group;
     create_options.placement_count = options->placement_count;
     create_options.placements = options->placements;
-    create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
-    create_options.parameter_slabs =
-        counts.parameter_count == 0 ? NULL : &parameter_slab;
-    create_options.parameter_request_tables =
-        counts.parameter_count == 0 ? NULL : &parameter_request_table;
+    create_options.parameter_slab_count = counts.parameter_domain_count;
+    create_options.parameter_slabs = parameter_slabs;
+    create_options.parameter_request_tables = parameter_request_tables;
     create_options.parameter_tensor_count = counts.parameter_count;
     create_options.parameter_tensors =
         counts.parameter_count == 0 ? NULL : parameter_tensors;
@@ -2813,6 +2967,12 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, parameter_load_sources);
   iree_allocator_free(host_allocator, parameter_load_records);
   iree_allocator_free(host_allocator, parameter_tensors);
+  iree_allocator_free(host_allocator, parameter_slab_byte_lengths);
+  iree_allocator_free(host_allocator, parameter_slab_request_cursors);
+  iree_allocator_free(host_allocator, parameter_slab_request_offsets);
+  iree_allocator_free(host_allocator, parameter_slab_request_counts);
+  iree_allocator_free(host_allocator, parameter_request_tables);
+  iree_allocator_free(host_allocator, parameter_slabs);
   iree_allocator_free(host_allocator, parameter_requests);
   return status;
 }

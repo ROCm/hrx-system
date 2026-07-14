@@ -25,6 +25,23 @@ static const id4_pipeline_program_op_t* FindDispatchByName(
   return nullptr;
 }
 
+static const id4_pipeline_program_parameter_op_t* FindParameterByName(
+    const id4_pipeline_program_t* program, iree_string_view_t name) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program,
+                                       op->payload.parameter.tensor.ordinal);
+    if (tensor && iree_string_view_equal(tensor->name, name)) {
+      return &op->payload.parameter;
+    }
+  }
+  return nullptr;
+}
+
 static iree_string_view_t FindSemanticAttribute(
     const id4_pipeline_program_dispatch_loom_op_t* dispatch,
     iree_string_view_t key) {
@@ -427,6 +444,25 @@ TEST_F(ProgramMatrixTest, AcceptsRowScaledParameterContraction) {
   id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
   IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
   SealAndRelease();
+}
+
+TEST_F(ProgramMatrixTest, PreservesParameterResidencyDomain) {
+  id4_pipeline_program_matrix_options_t options = MakeRowScaledOptions();
+  options.operands.parameter.domain = IREE_SV("patchable");
+  IREE_ASSERT_OK(id4_pipeline_program_matrix(builder_, &options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder_, iree_allocator_system(), &program));
+  const id4_pipeline_program_parameter_op_t* weight =
+      FindParameterByName(program, IREE_SV("transformer_weight"));
+  const id4_pipeline_program_parameter_op_t* scale =
+      FindParameterByName(program, IREE_SV("transformer_scale"));
+  ASSERT_NE(weight, nullptr);
+  ASSERT_NE(scale, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(weight->domain, IREE_SV("patchable")));
+  EXPECT_TRUE(iree_string_view_equal(scale->domain, IREE_SV("patchable")));
+  id4_pipeline_program_release(program);
 }
 
 TEST_F(ProgramMatrixTest, AcceptsBf16ParameterContractionToF32) {

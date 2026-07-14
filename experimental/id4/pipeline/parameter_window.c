@@ -1458,6 +1458,7 @@ static iree_status_t id4_pipeline_parameter_window_schedule_populate_slabs(
         original_slab->placement_id, window_slab->binding_slot,
         window_slab->target_params, window_slab->byte_length,
         window_slab->alignment);
+    schedule->slabs[compact_slab_index].domain = original_slab->domain;
     schedule->request_tables[compact_slab_index] =
         id4_pipeline_make_parameter_request_table(
             window_slab->request_count,

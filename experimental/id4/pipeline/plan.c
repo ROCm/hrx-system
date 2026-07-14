@@ -236,6 +236,8 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   }
   iree_allocator_free(host_allocator, plan->parameter_load_steps);
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    id4_pipeline_string_release(plan->parameter_slabs[i].domain,
+                                host_allocator);
     id4_pipeline_parameter_request_table_t* request_table =
         &plan->parameter_request_tables[i];
     id4_pipeline_parameter_request_t* requests =
@@ -337,6 +339,9 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
     }
     id4_pipeline_parameter_slab_plan_t* target = &plan->parameter_slabs[i];
     *target = *source;
+    target->domain = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->domain, plan->host_allocator, &target->domain));
     id4_pipeline_parameter_request_table_t* target_request_table =
         &plan->parameter_request_tables[i];
     target_request_table->count = source_request_table->count;
@@ -2385,7 +2390,8 @@ static bool id4_pipeline_buffer_params_equal(iree_hal_buffer_params_t lhs,
 static bool id4_pipeline_parameter_slab_metadata_equal(
     const id4_pipeline_parameter_slab_plan_t* lhs,
     const id4_pipeline_parameter_slab_plan_t* rhs) {
-  return lhs && rhs && lhs->placement_id == rhs->placement_id &&
+  return lhs && rhs && iree_string_view_equal(lhs->domain, rhs->domain) &&
+         lhs->placement_id == rhs->placement_id &&
          lhs->binding_slot == rhs->binding_slot &&
          id4_pipeline_buffer_params_equal(lhs->target_params,
                                           rhs->target_params) &&
@@ -2414,6 +2420,11 @@ static iree_status_t id4_pipeline_plan_validate_parameter_slab_metadata(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter slab %" PRIhsz " has no retained metadata", slab_index);
+  }
+  if (!iree_string_view_equal(plan_slab->domain, retained_slab->domain)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz " semantic domain mismatch", slab_index);
   }
   if (plan_slab->placement_id != retained_slab->placement_id) {
     return iree_make_status(
@@ -3482,10 +3493,12 @@ iree_status_t id4_pipeline_plan_format_json_fields(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder,
-        "{\"id\":%" PRIhsz
-        ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
-        i, slab->placement_id, slab->binding_slot));
+        builder, "{\"id\":%" PRIhsz ",\"domain\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, slab->domain));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
+        slab->placement_id, slab->binding_slot));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_buffer_params_json(
         builder, slab->target_params));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

@@ -87,6 +87,8 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
   iree_device_size_t byte_length;
   // Required slab base alignment in bytes.
   iree_device_size_t alignment;
+  // Semantic parameter domain; empty identifies the program default domain.
+  iree_string_view_t domain;
 } id4_pipeline_parameter_slab_plan_t;
 
 // Provider requests that populate one planned parameter slab.
@@ -401,6 +403,7 @@ id4_pipeline_make_parameter_slab_plan(
     iree_hal_buffer_params_t target_params, iree_device_size_t byte_length,
     iree_device_size_t alignment) {
   id4_pipeline_parameter_slab_plan_t plan;
+  plan.domain = iree_string_view_empty();
   plan.placement_id = placement_id;
   plan.binding_slot = binding_slot;
   plan.target_params = target_params;
@@ -494,6 +497,18 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
 typedef struct id4_pipeline_parameter_slab_set_t
     id4_pipeline_parameter_slab_set_t;
 
+// One physical slab replacement used to derive a resident parameter variant.
+typedef struct id4_pipeline_parameter_slab_replacement_t {
+  // Slab index in the base set replaced by this entry.
+  iree_host_size_t target_slab_index;
+  // Semantic domain expected on both the target and source slab plans.
+  iree_string_view_t expected_domain;
+  // Resident slab set retaining the replacement allocation.
+  id4_pipeline_parameter_slab_set_t* source_slab_set;
+  // Slab index in |source_slab_set| supplying the replacement buffer.
+  iree_host_size_t source_slab_index;
+} id4_pipeline_parameter_slab_replacement_t;
+
 // Issue-local context for deferred parameter load submissions.
 typedef struct id4_pipeline_parameter_slab_issue_context_t
     id4_pipeline_parameter_slab_issue_context_t;
@@ -549,6 +564,19 @@ iree_status_t id4_pipeline_parameter_slab_set_create_uninitialized(
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
+// Derives an immutable resident set by replacing selected physical slabs in
+// |base_slab_set|. The derived set retains the base and every source set so
+// asynchronously allocated slab ownership remains live. It preserves the base
+// plan and binding metadata and owns no loading schedule or readiness edges.
+// Callers must publish source contents through explicit semaphore dependencies
+// before issuing work that binds the derived set.
+iree_status_t id4_pipeline_parameter_slab_set_derive(
+    id4_pipeline_parameter_slab_set_t* base_slab_set,
+    iree_host_size_t replacement_count,
+    const id4_pipeline_parameter_slab_replacement_t* replacements,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 

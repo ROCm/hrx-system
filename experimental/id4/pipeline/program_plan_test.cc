@@ -174,7 +174,8 @@ static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
 }
 
 static id4_pipeline_program_tensor_t AddDirectBf16MatrixParameter(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t key) {
+    id4_pipeline_program_builder_t* builder, iree_string_view_t key,
+    iree_string_view_t domain) {
   const id4_pipeline_program_parameter_source_t sources[] = {
       {
           /*.source_scope=*/IREE_SV("model"),
@@ -192,6 +193,9 @@ static id4_pipeline_program_tensor_t AddDirectBf16MatrixParameter(
       /*.key=*/key,
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      /*.source_span_count=*/0,
+      /*.source_spans=*/nullptr,
+      /*.domain=*/domain,
   };
   id4_pipeline_program_tensor_t tensor = id4_pipeline_program_tensor_invalid();
   IREE_CHECK_OK(id4_pipeline_program_parameter(builder, &options, &tensor));
@@ -368,8 +372,8 @@ static id4_pipeline_program_t* CreateMultiSpanParameterProgram() {
   };
   IREE_CHECK_OK(id4_pipeline_program_parameter(builder, &row_options, &rows));
 
-  id4_pipeline_program_tensor_t weight =
-      AddDirectBf16MatrixParameter(builder, IREE_SV("next.weight"));
+  id4_pipeline_program_tensor_t weight = AddDirectBf16MatrixParameter(
+      builder, IREE_SV("next.weight"), iree_string_view_empty());
 
   id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
   id4_pipeline_program_import_tensor_options_t output_options = {
@@ -1446,9 +1450,11 @@ static id4_pipeline_program_t* CreateSameScopeDirectRegionDependencyProgram() {
       id4_pipeline_program_import_tensor(builder, &output_options, &output));
 
   id4_pipeline_program_tensor_t first = AddDirectBf16MatrixParameter(
-      builder, IREE_SV("model.layers.0.attn.q.weight"));
+      builder, IREE_SV("model.layers.0.attn.q.weight"),
+      iree_string_view_empty());
   id4_pipeline_program_tensor_t second = AddDirectBf16MatrixParameter(
-      builder, IREE_SV("model.layers.1.attn.q.weight"));
+      builder, IREE_SV("model.layers.1.attn.q.weight"),
+      iree_string_view_empty());
 
   id4_pipeline_program_dispatch_binding_t first_bindings[] = {
       id4_pipeline_program_read(input),
@@ -1529,7 +1535,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.placements=*/placement,
       /*.parameter_scope=*/IREE_SV("model"),
       /*.parameter_slab_placement_id=*/0,
-      /*.parameter_slab_binding_slot=*/0,
+      /*.parameter_slab_binding_slot_base=*/0,
       /*.parameter_slab_target_params=*/parameter_params,
       /*.parameter_slab_alignment=*/16,
       /*.parameter_request_alignment=*/16,
@@ -1552,6 +1558,114 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.diagnostics_sink=*/diagnostics_sink,
   };
   return options;
+}
+
+TEST(PipelineProgramPlan, LowersSemanticParameterDomainsToIndependentSlabs) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+  id4_pipeline_program_tensor_t patchable = AddDirectBf16MatrixParameter(
+      builder, IREE_SV("model.patchable.weight"), IREE_SV("lora_patchable"));
+  id4_pipeline_program_tensor_t shared = AddDirectBf16MatrixParameter(
+      builder, IREE_SV("model.shared.weight"), iree_string_view_empty());
+  const id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(patchable),
+      id4_pipeline_program_read(shared),
+  };
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+      /*.structure_size=*/sizeof(dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("consume.parameters"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/consume"), IREE_SV("consume")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(bindings),
+      /*.bindings=*/bindings,
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  const id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 2u);
+  const id4_pipeline_parameter_slab_plan_t* patchable_slab =
+      id4_pipeline_plan_parameter_slab_at(plan, 0);
+  const id4_pipeline_parameter_slab_plan_t* shared_slab =
+      id4_pipeline_plan_parameter_slab_at(plan, 1);
+  ASSERT_NE(patchable_slab, nullptr);
+  ASSERT_NE(shared_slab, nullptr);
+  ExpectStringViewEqual(patchable_slab->domain, IREE_SV("lora_patchable"));
+  EXPECT_TRUE(iree_string_view_is_empty(shared_slab->domain));
+  EXPECT_EQ(patchable_slab->binding_slot, 0u);
+  EXPECT_EQ(shared_slab->binding_slot, 1u);
+  EXPECT_EQ(patchable_slab->byte_length, 32u);
+  EXPECT_EQ(shared_slab->byte_length, 32u);
+
+  const id4_pipeline_parameter_request_table_t* patchable_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 0);
+  const id4_pipeline_parameter_request_table_t* shared_requests =
+      id4_pipeline_plan_parameter_request_table_at(plan, 1);
+  ASSERT_NE(patchable_requests, nullptr);
+  ASSERT_NE(shared_requests, nullptr);
+  ASSERT_EQ(patchable_requests->count, 1u);
+  ASSERT_EQ(shared_requests->count, 1u);
+  EXPECT_EQ(patchable_requests->values[0].span.buffer_offset, 0u);
+  EXPECT_EQ(shared_requests->values[0].span.buffer_offset, 0u);
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_tensor_count(plan), 2u);
+  const id4_pipeline_parameter_tensor_plan_t* patchable_tensor =
+      id4_pipeline_plan_parameter_tensor_at(plan, 0);
+  const id4_pipeline_parameter_tensor_plan_t* shared_tensor =
+      id4_pipeline_plan_parameter_tensor_at(plan, 1);
+  ASSERT_NE(patchable_tensor, nullptr);
+  ASSERT_NE(shared_tensor, nullptr);
+  EXPECT_EQ(patchable_tensor->parameter_slab_index, 0u);
+  EXPECT_EQ(patchable_tensor->request_offset, 0u);
+  EXPECT_EQ(patchable_tensor->global_request_offset, 0u);
+  EXPECT_EQ(shared_tensor->parameter_slab_index, 1u);
+  EXPECT_EQ(shared_tensor->request_offset, 0u);
+  EXPECT_EQ(shared_tensor->global_request_offset, 1u);
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 2u);
+  const id4_pipeline_parameter_load_step_t* patchable_load =
+      id4_pipeline_plan_parameter_load_step_at(plan, 0);
+  const id4_pipeline_parameter_load_step_t* shared_load =
+      id4_pipeline_plan_parameter_load_step_at(plan, 1);
+  ASSERT_NE(patchable_load, nullptr);
+  ASSERT_NE(shared_load, nullptr);
+  EXPECT_EQ(patchable_load->target_slab_index, 0u);
+  EXPECT_EQ(patchable_load->request_offset, 0u);
+  EXPECT_EQ(shared_load->target_slab_index, 1u);
+  EXPECT_EQ(shared_load->request_offset, 0u);
+
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &json_builder));
+  ExpectFinds(iree_string_builder_view(&json_builder),
+              IREE_SV("\"domain\":\"lora_patchable\""));
+  iree_string_builder_deinitialize(&json_builder);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
 }
 
 TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
@@ -2552,7 +2666,7 @@ TEST(PipelineProgramPlan, DerivesConstantSlabPlan) {
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   id4_pipeline_program_plan_options_t options =
       MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
-  options.parameter_slab_binding_slot = 0;
+  options.parameter_slab_binding_slot_base = 0;
   options.constant_slab_binding_slot = 1;
   options.region_boundary_binding_slot_base = 2;
   options.region_local_binding_slot = 4;
