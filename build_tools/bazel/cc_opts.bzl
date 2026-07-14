@@ -88,6 +88,7 @@ _GCC_CXXOPTS = [
 
 _MSVC_COPTS = [
     "/W3",
+    "/WX",
     "/DWIN32_LEAN_AND_MEAN",
     "/DNOMINMAX",
     "/D_USE_MATH_DEFINES",
@@ -116,6 +117,7 @@ _MSVC_CONLYOPTS = [
 _MSVC_CXXOPTS = [
     "/GR-",
     "/std:c++17",
+    "/Zc:__cplusplus",
 ]
 
 def _append(values, appended_values):
