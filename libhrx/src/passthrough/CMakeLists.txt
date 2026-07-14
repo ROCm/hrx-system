@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     hip_intercept
@@ -25,7 +26,9 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
   PUBLIC
 )
+endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     hip_logging
@@ -41,7 +44,9 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
   PUBLIC
 )
+endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     hip_noop
@@ -57,7 +62,9 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
   PUBLIC
 )
+endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     hip_buffer_tracer
@@ -73,6 +80,7 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
   PUBLIC
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
