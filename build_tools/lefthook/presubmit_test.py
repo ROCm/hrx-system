@@ -600,6 +600,23 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("[skip]", output.getvalue())
         self.assertIn("[fail]", output.getvalue())
 
+    def test_semgrep_is_explicitly_delegated_to_linux_on_windows(self):
+        output = io.StringIO()
+        inputs = input_scope(["runtime/src/iree/base/status.c"])
+        with (
+            contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "win32"),
+            mock.patch.object(presubmit, "require_static_tool") as require_tool,
+            mock.patch.object(presubmit, "run_command") as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_semgrep(inputs, profile="paranoid", verbose=False)
+            )
+
+        require_tool.assert_not_called()
+        run_command.assert_not_called()
+        self.assertIn("enforced by the Linux paranoid presubmit", output.getvalue())
+
     def test_requirements_files_trigger_root_devtools_tests(self):
         self.assertTrue(presubmit.is_root_devtools_trigger("requirements-analysis.in"))
         self.assertTrue(

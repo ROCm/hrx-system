@@ -58,6 +58,20 @@ class SetupPlanTest(unittest.TestCase):
                 any("--group bazel" in step.describe() for step in commands)
             )
 
+    def test_windows_venv_does_not_install_unusable_semgrep_package(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            venv_root = Path(temporary_directory) / "venv"
+            plan = setup_plan(
+                "bazel",
+                ToolEnvironment(ToolMode.VENV, venv_root),
+                None,
+                platform_name="win32",
+            )
+
+            description = plan.describe()
+            self.assertIn("requirements-dev.lock.txt", description)
+            self.assertNotIn("requirements-analysis.lock.txt", description)
+
 
 if __name__ == "__main__":
     unittest.main()

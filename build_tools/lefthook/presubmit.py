@@ -1404,6 +1404,12 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
     validate_config = SEMGREP_CONFIG in paths
     if not files and not validate_config:
         return skip_step("Semgrep", "no C/C++ runtime inputs")
+    if sys.platform == "win32":
+        return skip_step(
+            "Semgrep",
+            "semgrep-core.exe is not distributed for native Windows; "
+            "enforced by the Linux paranoid presubmit",
+        )
     if not require_static_tool("semgrep", "Semgrep", profile):
         return False
 
