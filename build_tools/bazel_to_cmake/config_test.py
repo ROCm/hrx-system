@@ -266,6 +266,26 @@ loom_check_test_suite(
         )
         self.assertEqual(
             functions._convert_select_condition(
+                "//build_tools/bazel:cc_compiler_clang"
+            ),
+            'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC',
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//build_tools/bazel:cc_compiler_clang_cl"
+            ),
+            'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC',
+        )
+        self.assertEqual(
+            functions._convert_select_condition("//build_tools/bazel:cc_compiler_gcc"),
+            'CMAKE_C_COMPILER_ID STREQUAL "GNU"',
+        )
+        self.assertEqual(
+            functions._convert_select_condition("//build_tools/bazel:cc_compiler_msvc"),
+            'CMAKE_C_COMPILER_ID STREQUAL "MSVC"',
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
                 "//loom/config/target:amdgpu_artifacts"
             ),
             "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU",
@@ -430,7 +450,7 @@ loom_check_test_suite(
 
         functions.iree_c_embed_data(
             name="elementwise_mul_source",
-            srcs=[":elementwise_mul.mlir"],
+            srcs=[":elementwise_mul_library.c"],
             c_file_output="elementwise_mul_source.c",
             h_file_output="elementwise_mul_source.h",
             testonly=True,
@@ -439,7 +459,7 @@ loom_check_test_suite(
 
         self.assertIn(
             '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/local/elf/testdata/'
-            'elementwise_mul.mlir"',
+            'elementwise_mul_library.c"',
             converter.body,
         )
         self.assertNotIn("$<TARGET_FILE:", converter.body)

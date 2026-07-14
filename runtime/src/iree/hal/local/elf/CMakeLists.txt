@@ -40,7 +40,7 @@ iree_cc_binary(
     ::elf_module
     iree::base
     iree::base::internal::cpu
-    iree::hal::local::elf::testdata::elementwise_mul
+    iree::hal::local::elf::testdata::elementwise_mul_compatibility
     iree::hal::local::executable_environment
     iree::hal::local::executable_library
   TESTONLY
@@ -52,6 +52,34 @@ iree_native_test(
   SRC
     ::elf_module_test_binary
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_binary(
+  NAME
+    elf_module_native_test_binary
+  SRCS
+    "elf_module_test_main.c"
+  DEFINES
+    "IREE_HAL_LOCAL_ELF_TEST_NATIVE_FIXTURE=1"
+  DEPS
+    ::elf_module
+    iree::base
+    iree::base::internal::cpu
+    iree::hal::local::elf::testdata::elementwise_mul_native
+    iree::hal::local::executable_environment
+    iree::hal::local::executable_library
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_native_test(
+  NAME
+    "elf_module_native_test"
+  SRC
+    ::elf_module_native_test_binary
+)
+endif()
 
 iree_cc_library(
   NAME

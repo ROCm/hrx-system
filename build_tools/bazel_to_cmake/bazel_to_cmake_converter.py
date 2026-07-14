@@ -52,6 +52,17 @@ _PLATFORM_CMAKE_SYSTEM_NAME = {
     "@platforms//cpu:wasm32": "wasm_32",
 }
 
+_COMPILER_CMAKE_OPTIONS = {
+    "//build_tools/bazel:cc_compiler_clang": (
+        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC'
+    ),
+    "//build_tools/bazel:cc_compiler_clang_cl": (
+        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC'
+    ),
+    "//build_tools/bazel:cc_compiler_gcc": 'CMAKE_C_COMPILER_ID STREQUAL "GNU"',
+    "//build_tools/bazel:cc_compiler_msvc": 'CMAKE_C_COMPILER_ID STREQUAL "MSVC"',
+}
+
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
     "//runtime/config/hal:driver_cuda": "IREE_HAL_DRIVER_CUDA",
@@ -257,9 +268,11 @@ class BuildFileFunctions(object):
         condition = self._convert_platform_condition(label)
         if condition:
             return condition
-        return _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS.get(
-            label
-        ) or _LOOM_CONFIG_CMAKE_OPTIONS.get(label)
+        return (
+            _COMPILER_CMAKE_OPTIONS.get(label)
+            or _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS.get(label)
+            or _LOOM_CONFIG_CMAKE_OPTIONS.get(label)
+        )
 
     def _condition_select_compatibility_condition(self, condition_select):
         compatible_conditions = []

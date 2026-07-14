@@ -59,13 +59,35 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/base/internal:cpu",
         "//runtime/src/iree/hal/local:executable_environment",
         "//runtime/src/iree/hal/local:executable_library",
-        "//runtime/src/iree/hal/local/elf/testdata:elementwise_mul",
+        "//runtime/src/iree/hal/local/elf/testdata:elementwise_mul_compatibility",
     ],
 )
 
 iree_executable_test(
     name = "elf_module_test",
     src = ":elf_module_test_binary",
+)
+
+iree_runtime_cc_binary(
+    name = "elf_module_native_test_binary",
+    testonly = True,
+    srcs = ["elf_module_test_main.c"],
+    defines = ["IREE_HAL_LOCAL_ELF_TEST_NATIVE_FIXTURE=1"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":elf_module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:cpu",
+        "//runtime/src/iree/hal/local:executable_environment",
+        "//runtime/src/iree/hal/local:executable_library",
+        "//runtime/src/iree/hal/local/elf/testdata:elementwise_mul_native",
+    ],
+)
+
+iree_executable_test(
+    name = "elf_module_native_test",
+    src = ":elf_module_native_test_binary",
+    target_compatible_with = ["@platforms//os:linux"],
 )
 
 #===------------------------------------------------------------------------===#
