@@ -12,6 +12,7 @@
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/pipeline/program_plan.h"
 #include "experimental/id4/stages/test_util.h"
+#include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -366,6 +367,46 @@ TEST(Ideogram4LoraBakePlan, PlansBoundedCompactTargetWindows) {
   EXPECT_LE(target->scale_range.offset + target->scale_range.length,
             id4_ideogram4_lora_bake_plan_patchable_slab_byte_length(bake_plan));
   EXPECT_EQ(id4_ideogram4_lora_bake_plan_target_at(bake_plan, 1), nullptr);
+
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  IREE_ASSERT_OK(
+      id4_ideogram4_lora_bake_plan_format_json(bake_plan, &json_builder));
+  iree_string_view_t json_cursor = iree_string_builder_view(&json_builder);
+  iree_string_view_t json_object = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_consume_object(&json_cursor, &json_object));
+  IREE_ASSERT_OK(iree_json_consume_insignificant(&json_cursor));
+  EXPECT_TRUE(iree_string_view_is_empty(json_cursor));
+  iree_string_view_t target_count_json = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_lookup_object_value(
+      json_object, IREE_SV("target_count"), &target_count_json));
+  uint64_t target_count = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(target_count_json, &target_count));
+  EXPECT_EQ(target_count, 1u);
+  iree_string_view_t working_set_high_water_json = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_lookup_object_value(
+      json_object, IREE_SV("working_set_high_water_mark"),
+      &working_set_high_water_json));
+  uint64_t working_set_high_water = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(working_set_high_water_json,
+                                        &working_set_high_water));
+  EXPECT_EQ(
+      working_set_high_water,
+      id4_ideogram4_lora_bake_plan_working_set_high_water_mark(bake_plan));
+  iree_string_view_t targets_json = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_lookup_object_value(json_object, IREE_SV("targets"),
+                                               &targets_json));
+  iree_host_size_t target_array_length = 0;
+  IREE_ASSERT_OK(iree_json_array_length(targets_json, &target_array_length));
+  EXPECT_EQ(target_array_length, 1u);
+  iree_string_view_t target_json = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_array_get(targets_json, 0, &target_json));
+  iree_string_view_t parameter_key = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_lookup_object_value(
+      target_json, IREE_SV("parameter"), &parameter_key));
+  EXPECT_TRUE(iree_string_view_equal(parameter_key,
+                                     IREE_SV("layers.0.attention.qkv.weight")));
+  iree_string_builder_deinitialize(&json_builder);
 
   id4_ideogram4_lora_bake_plan_release(bake_plan);
 }

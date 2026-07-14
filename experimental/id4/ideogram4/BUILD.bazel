@@ -54,6 +54,7 @@ iree_runtime_cc_library(
     hdrs = ["lora_bake_plan.h"],
     deps = [
         ":lora",
+        "//experimental/id4/pipeline:json",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:program",
         "//experimental/id4/stages:ideogram4_dit_program",
@@ -71,6 +72,7 @@ iree_runtime_cc_test(
         "//experimental/id4/pipeline:program_plan",
         "//experimental/id4/stages:test_util",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

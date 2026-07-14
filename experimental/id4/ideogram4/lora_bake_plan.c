@@ -6,8 +6,10 @@
 
 #include "experimental/id4/ideogram4/lora_bake_plan.h"
 
+#include <inttypes.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/pipeline/program.h"
 #include "iree/base/internal/atomics.h"
 
@@ -584,4 +586,109 @@ const id4_ideogram4_lora_bake_target_t* id4_ideogram4_lora_bake_plan_target_at(
     const id4_ideogram4_lora_bake_plan_t* plan, iree_host_size_t index) {
   if (!plan || index >= plan->target_count) return NULL;
   return &plan->targets[index];
+}
+
+static iree_status_t id4_ideogram4_lora_bake_plan_append_range_json(
+    iree_string_builder_t* builder,
+    id4_ideogram4_lora_bake_parameter_range_t range) {
+  return iree_string_builder_append_format(
+      builder, "{\"offset\":%" PRIu64 ",\"length\":%" PRIu64 "}",
+      (uint64_t)range.offset, (uint64_t)range.length);
+}
+
+iree_status_t id4_ideogram4_lora_bake_plan_format_json(
+    const id4_ideogram4_lora_bake_plan_t* plan,
+    iree_string_builder_t* builder) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "{\"base_stage\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
+      builder, id4_pipeline_plan_stage_name(plan->base_plan)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"patchable_slab_index\":%" PRIhsz
+      ",\"patchable_slab_byte_length\":%" PRIu64
+      ",\"adapter_source_byte_length\":%" PRIu64
+      ",\"working_set_high_water_mark\":%" PRIu64 ",\"target_count\":%" PRIhsz
+      ",\"targets\":[",
+      plan->patchable_slab_index, (uint64_t)plan->patchable_slab_byte_length,
+      (uint64_t)plan->adapter_byte_length,
+      (uint64_t)plan->working_set_high_water_mark, plan->target_count));
+  for (iree_host_size_t i = 0; i < plan->target_count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    const id4_ideogram4_lora_bake_target_t* target = &plan->targets[i];
+    const id4_ideogram4_dit_lora_target_t* source_target =
+        id4_ideogram4_lora_topology_target_at(plan->topology, i);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "{\"ordinal\":%" PRIhsz ",\"parameter\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_json_append_string(builder, target->base_parameter_key));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"input_size\":%" PRIu32 ",\"output_size\":%" PRIu32
+        ",\"total_rank\":%" PRIu32 ",\"maximum_segment_rank\":%" PRIu32
+        ",\"weight_range\":",
+        target->input_size, target->output_size, target->total_rank,
+        target->maximum_segment_rank));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->weight_range));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"scale_range\":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->scale_range));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"output_rows_per_window\":%" PRIu32 ",\"window_count\":%" PRIu32
+        ",\"working_set\":{\"byte_length\":%" PRIu64 ",\"strengths\":",
+        target->output_rows_per_window, target->window_count,
+        (uint64_t)target->working_set.byte_length));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->working_set.strengths));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"down_source\":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->working_set.down_source));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"down\":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->working_set.down));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"up\":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->working_set.up));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"effective_weight\":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_plan_append_range_json(
+        builder, target->working_set.effective_weight));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, "},\"segments\":["));
+    for (iree_host_size_t j = 0; j < source_target->segment_count; ++j) {
+      if (j != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+      }
+      const id4_ideogram4_dit_lora_segment_t* segment =
+          &source_target->segments[j];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "{\"adapter_ordinal\":%" PRIhsz ",\"rank\":%" PRIu32
+          ",\"source_scope\":",
+          segment->adapter_ordinal, segment->rank));
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_json_append_string(builder, segment->source_scope));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, ",\"down_parameter\":"));
+      IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
+          builder, segment->down_parameter_key));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, ",\"up_parameter\":"));
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_json_append_string(builder, segment->up_parameter_key));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
 }

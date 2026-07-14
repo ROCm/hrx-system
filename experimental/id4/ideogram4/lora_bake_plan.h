@@ -128,6 +128,11 @@ iree_host_size_t id4_ideogram4_lora_bake_plan_target_count(
 const id4_ideogram4_lora_bake_target_t* id4_ideogram4_lora_bake_plan_target_at(
     const id4_ideogram4_lora_bake_plan_t* plan, iree_host_size_t index);
 
+// Appends a deterministic JSON description of target ranges, adapter inputs,
+// windowing, and bounded working-set storage.
+iree_status_t id4_ideogram4_lora_bake_plan_format_json(
+    const id4_ideogram4_lora_bake_plan_t* plan, iree_string_builder_t* builder);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
