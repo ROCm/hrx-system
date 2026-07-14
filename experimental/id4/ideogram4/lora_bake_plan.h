@@ -36,7 +36,7 @@ typedef struct id4_ideogram4_lora_bake_working_set_t {
   id4_ideogram4_lora_bake_parameter_range_t down;
   // Reusable BF16 up-projection window [output_rows, maximum_segment_rank].
   id4_ideogram4_lora_bake_parameter_range_t up;
-  // BF16 effective base-plus-adapter weight window [output_rows, input].
+  // F32 effective base-plus-adapter weight window [output_rows, input].
   id4_ideogram4_lora_bake_parameter_range_t effective_weight;
   // Total bytes required by the packed working set.
   iree_device_size_t byte_length;

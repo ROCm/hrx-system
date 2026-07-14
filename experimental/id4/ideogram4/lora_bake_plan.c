@@ -275,7 +275,7 @@ static iree_status_t id4_ideogram4_lora_bake_calculate_working_set(
       !iree_device_size_checked_mul(up_element_count, sizeof(uint16_t),
                                     &up_byte_length) ||
       !iree_device_size_checked_mul(effective_weight_element_count,
-                                    sizeof(uint16_t),
+                                    sizeof(float),
                                     &effective_weight_byte_length) ||
       !iree_device_size_checked_mul(adapter_count, sizeof(float),
                                     &strength_byte_length)) {

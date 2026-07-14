@@ -2249,10 +2249,10 @@ iree_c_embed_data(
 
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_decode_fp8_bf16_small_plan_test"
+    "ideogram4_lora_bake_decode_fp8_f32_small_plan_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_lora_bake_decode_fp8_bf16_small"
+    "--benchmark=@id4_ideogram4_lora_bake_decode_fp8_f32_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
@@ -2283,10 +2283,10 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_update_bf16_small_plan_test"
+    "ideogram4_lora_bake_update_bf16_f32_small_plan_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_lora_bake_update_bf16_small"
+    "--benchmark=@id4_ideogram4_lora_bake_update_bf16_f32_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
@@ -2300,10 +2300,27 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_update_bf16_wmma_small_plan_test"
+    "ideogram4_lora_bake_update_bf16_f32_composed_plan_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_lora_bake_update_bf16_wmma_small"
+    "--benchmark=@id4_ideogram4_lora_bake_update_bf16_f32_composed"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.lora_bake.output_row_count=16"
+    "--config=id4.ideogram4.lora_bake.input_size=16"
+    "--config=id4.ideogram4.lora_bake.rank=3"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_lora_bake_update_bf16_f32_wmma_small_plan_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
+    "--benchmark=@id4_ideogram4_lora_bake_update_bf16_f32_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
@@ -2317,10 +2334,10 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_scale_bf16_fp8_small_plan_test"
+    "ideogram4_lora_bake_scale_f32_fp8_small_plan_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--benchmark=@id4_ideogram4_lora_bake_scale_bf16_fp8_small"
+    "--benchmark=@id4_ideogram4_lora_bake_scale_f32_fp8_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
@@ -14441,10 +14458,10 @@ iree_native_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_decode_fp8_bf16_small_hal_test"
+    "ideogram4_lora_bake_decode_fp8_f32_small_hal_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--case=@id4_ideogram4_lora_bake_decode_fp8_bf16_small_case"
+    "--case=@id4_ideogram4_lora_bake_decode_fp8_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
     "--config=id4.ideogram4.lora_bake.input_size=16"
@@ -14483,10 +14500,10 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_update_bf16_small_hal_test"
+    "ideogram4_lora_bake_update_bf16_f32_small_hal_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--case=@id4_ideogram4_lora_bake_update_bf16_small_case"
+    "--case=@id4_ideogram4_lora_bake_update_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
     "--config=id4.ideogram4.lora_bake.input_size=16"
@@ -14504,10 +14521,31 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_update_bf16_wmma_small_hal_test"
+    "ideogram4_lora_bake_update_bf16_f32_composed_hal_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--case=@id4_ideogram4_lora_bake_update_bf16_wmma_small_case"
+    "--case=@id4_ideogram4_lora_bake_update_bf16_f32_composed_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.lora_bake.output_row_count=16"
+    "--config=id4.ideogram4.lora_bake.input_size=16"
+    "--config=id4.ideogram4.lora_bake.rank=3"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_lora_bake_update_bf16_f32_wmma_small_hal_test"
+  ARGS
+    "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
+    "--case=@id4_ideogram4_lora_bake_update_bf16_f32_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
     "--config=id4.ideogram4.lora_bake.input_size=16"
@@ -14525,10 +14563,10 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_lora_bake_scale_bf16_fp8_small_hal_test"
+    "ideogram4_lora_bake_scale_f32_fp8_small_hal_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/ideogram4_lora_bake_bf16_test_module.loom}}"
-    "--case=@id4_ideogram4_lora_bake_scale_bf16_fp8_small_case"
+    "--case=@id4_ideogram4_lora_bake_scale_f32_fp8_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.lora_bake.output_row_count=16"
     "--config=id4.ideogram4.lora_bake.input_size=16"

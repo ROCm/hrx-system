@@ -73,9 +73,9 @@ kernel.def export("id4_ideogram4_lora_bake_pack_down_bf16") @id4_ideogram4_lora_
 }
 
 // Decodes one contiguous output-row window from the compact FP8 RHS tile into
-// a row-major BF16 effective-weight window. Binding offsets select the source
+// a row-major F32 effective-weight window. Binding offsets select the source
 // row window; all indices here are relative to that window.
-kernel.def export("id4_ideogram4_lora_bake_decode_fp8_bf16") @id4_ideogram4_lora_bake_decode_fp8_bf16() {
+kernel.def export("id4_ideogram4_lora_bake_decode_fp8_f32") @id4_ideogram4_lora_bake_decode_fp8_f32() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 16 : index
@@ -106,7 +106,7 @@ kernel.def export("id4_ideogram4_lora_bake_decode_fp8_bf16") @id4_ideogram4_lora
   %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_schema : encoding<schema>} : encoding<storage>
   %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%element_count]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
-  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
   %input_tile_count = index.div %input_size, %sixteen : index
   %input = index.mul %input_tile, %sixteen : index
   %output_row = index.madd %output_tile, %sixteen, %lane : index
@@ -119,16 +119,15 @@ kernel.def export("id4_ideogram4_lora_bake_decode_fp8_bf16") @id4_ideogram4_lora
   %scale_f32 = view.load %scale_view[%output_row] : view<[%output_row_count]xf32, #dense> -> f32
   %scale_vector = vector.splat %scale_f32 : vector<16xf32>
   %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_vector : vector<16xf32>
-  %rounded = vector.fptrunc %scaled : vector<16xf32> to vector<16xbf16>
-  vector.store %rounded, %effective_weight_view[%output_row, %input] : vector<16xbf16>, view<[%output_row_count]x[%input_size]xbf16, #dense>
+  vector.store %scaled, %effective_weight_view[%output_row, %input] : vector<16xf32>, view<[%output_row_count]x[%input_size]xf32, #dense>
   kernel.return
 }
 
-// Applies one BF16 LoRA segment to an effective-weight window. The Down matrix
-// remains resident across windows; binding offsets select this segment's Down,
-// current Up window, and one issue-time strength. The output is rounded to BF16
-// after each adapter so adapter order remains deterministic.
-kernel.def export("id4_ideogram4_lora_bake_update_bf16") @id4_ideogram4_lora_bake_update_bf16() {
+// Applies one BF16 LoRA segment to an F32 effective-weight window. The Down
+// matrix remains resident across windows; binding offsets select this segment's
+// Down, current Up window, and one issue-time strength. Ordered adapters
+// accumulate without an intermediate rounding boundary.
+kernel.def export("id4_ideogram4_lora_bake_update_bf16_f32") @id4_ideogram4_lora_bake_update_bf16_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %workgroup_rounding = index.constant 255 : index
@@ -166,7 +165,7 @@ kernel.def export("id4_ideogram4_lora_bake_update_bf16") @id4_ideogram4_lora_bak
   %down_view = buffer.view %down_global[%base] : buffer -> view<[%packed_element_count]xbf16, #dense>
   %up_view = buffer.view %up_global[%base] : buffer -> view<[%output_row_count]x[%rank]xbf16, #dense>
   %strength_view = buffer.view %strength_global[%base] : buffer -> view<1xf32, #dense>
-  %effective_weight_view = buffer.view %effective_weight_global[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %effective_weight_view = buffer.view %effective_weight_global[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
   %input_valid = index.cmp ult, %input, %input_size : index
   scf.if %input_valid {
     %delta = scf.for %rank_index = [%zero to %rank step %one](%acc = %zero_f32 : f32) -> (f32) {
@@ -189,19 +188,17 @@ kernel.def export("id4_ideogram4_lora_bake_update_bf16") @id4_ideogram4_lora_bak
     }
     %strength_f32 = view.load %strength_view[%zero] : view<1xf32, #dense> -> f32
     %scaled_delta = scalar.mulf<reassoc|nnan|ninf|nsz> %delta, %strength_f32 : f32
-    %base_bf16 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
-    %base_f32 = scalar.extf %base_bf16 : bf16 to f32
+    %base_f32 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xf32, #dense> -> f32
     %updated = scalar.addf<reassoc|nnan|ninf|nsz> %base_f32, %scaled_delta : f32
-    %rounded = scalar.fptrunc %updated : f32 to bf16
-    view.store %rounded, %effective_weight_view[%output_row, %input] : bf16, view<[%output_row_count]x[%input_size]xbf16, #dense>
+    view.store %updated, %effective_weight_view[%output_row, %input] : f32, view<[%output_row_count]x[%input_size]xf32, #dense>
   }
   kernel.return
 }
 
 // Applies one BF16 LoRA segment with one 16x16 WMMA output tile per workgroup.
 // The rank must be a multiple of 16. This preserves the scalar kernel's F32
-// accumulation and rounds the updated effective weight once per adapter.
-kernel.def export("id4_ideogram4_lora_bake_update_bf16_wmma") @id4_ideogram4_lora_bake_update_bf16_wmma() {
+// accumulation directly in the effective-weight window.
+kernel.def export("id4_ideogram4_lora_bake_update_bf16_f32_wmma") @id4_ideogram4_lora_bake_update_bf16_f32_wmma() {
   %unit = index.constant 1 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
@@ -244,7 +241,7 @@ kernel.def export("id4_ideogram4_lora_bake_update_bf16_wmma") @id4_ideogram4_lor
   %down_view = buffer.view %down_aligned[%base] : buffer -> view<[%packed_element_count]x16xbf16, %down_layout>
   %up_view = buffer.view %up_aligned[%base] : buffer -> view<[%output_row_count]x[%rank]xbf16, #dense>
   %strength_view = buffer.view %strength_global[%base] : buffer -> view<1xf32, #dense>
-  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -265,11 +262,9 @@ kernel.def export("id4_ideogram4_lora_bake_update_bf16_wmma") @id4_ideogram4_lor
     %output_row = index.add %output_origin, %local_row : index
     %value = vector.extract %result[%register_index] : vector<8xf32> -> f32
     %scaled_delta = scalar.mulf<reassoc|nnan|ninf|nsz> %value, %strength_f32 : f32
-    %base_bf16 = view.load %effective_weight_view[%output_row, %input_column] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
-    %base_f32 = scalar.extf %base_bf16 : bf16 to f32
+    %base_f32 = view.load %effective_weight_view[%output_row, %input_column] : view<[%output_row_count]x[%input_size]xf32, #dense> -> f32
     %updated = scalar.addf<reassoc|nnan|ninf|nsz> %base_f32, %scaled_delta : f32
-    %rounded = scalar.fptrunc %updated : f32 to bf16
-    view.store %rounded, %effective_weight_view[%output_row, %input_column] : bf16, view<[%output_row_count]x[%input_size]xbf16, #dense>
+    view.store %updated, %effective_weight_view[%output_row, %input_column] : f32, view<[%output_row_count]x[%input_size]xf32, #dense>
   }
   kernel.return
 }
@@ -277,7 +272,7 @@ kernel.def export("id4_ideogram4_lora_bake_update_bf16_wmma") @id4_ideogram4_lor
 // Derives the finite E4M3 scale for each effective-weight row. The minimum
 // magnitude matches the reference quantizer and keeps an all-zero row
 // representable without dividing by zero in the encoding pass.
-kernel.def export("id4_ideogram4_lora_bake_scale_bf16_fp8") @id4_ideogram4_lora_bake_scale_bf16_fp8() {
+kernel.def export("id4_ideogram4_lora_bake_scale_f32_fp8") @id4_ideogram4_lora_bake_scale_f32_fp8() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
@@ -299,11 +294,10 @@ kernel.def export("id4_ideogram4_lora_bake_scale_bf16_fp8") @id4_ideogram4_lora_
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
   %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
-  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xbf16, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
   %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
   %lane_amax = scf.for %input = [%lane to %input_size step %workgroup_size](%current = %zero_f32 : f32) -> (f32) {
-    %value_bf16 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xbf16, #dense> -> bf16
-    %value_f32 = scalar.extf %value_bf16 : bf16 to f32
+    %value_f32 = view.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xf32, #dense> -> f32
     %magnitude = scalar.absf %value_f32 : f32
     %next = scalar.maxnumf %current, %magnitude : f32
     scf.yield %next : f32
