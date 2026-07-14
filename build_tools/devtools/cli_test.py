@@ -323,6 +323,11 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         self.assertIn("bazel info execution_root", normalized_plan_description(plan))
 
+        args = cli.parse_arguments(["bazel", "shutdown"])
+
+        plan = args.handler(args)
+        self.assertIn("bazel shutdown", normalized_plan_description(plan))
+
     def test_bazel_run_builds_and_resolves_binary_before_exec(self):
         args = cli.parse_arguments(
             [
@@ -752,6 +757,10 @@ class CliTest(unittest.TestCase):
             aliases.BAZEL_ALIASES["iree-bazel-cquery"], ["bazel", "cquery"]
         )
         self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-info"], ["bazel", "info"])
+        self.assertEqual(
+            aliases.BAZEL_ALIASES["iree-bazel-shutdown"],
+            ["bazel", "shutdown"],
+        )
         self.assertNotIn("iree-bazel-compile-commands", aliases.BAZEL_ALIASES)
 
     def test_cmake_aliases_include_fuzz(self):

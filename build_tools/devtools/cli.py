@@ -44,6 +44,7 @@ PASSTHROUGH_COMMANDS = {
             "query",
             "cquery",
             "info",
+            "shutdown",
             "run",
             "try",
             "fuzz",
@@ -677,7 +678,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     test_parser.set_defaults(handler=handle_test, lane=lane)
 
     if lane == "bazel":
-        for command_name in ("query", "cquery", "info"):
+        for command_name in ("query", "cquery", "info", "shutdown"):
             command_help = help_text.lane_command_help(lane, command_name)
             command_parser = add_subparser(
                 lane_subparsers,

@@ -253,6 +253,16 @@ cquery evaluates select(), platform constraints, and configured target state."""
   python dev.py bazel info execution_root
   python dev.py bazel info bazel-bin""",
         )
+    if command == "shutdown" and lane == "bazel":
+        return CommandHelp(
+            description="Stop the Bazel server for this checkout.",
+            arguments="Native bazel shutdown options.",
+            epilog="""Examples:
+  python dev.py bazel shutdown
+
+Use this after changing host policies or startup options that Bazel and its
+child processes may have cached.""",
+        )
     if command == "compile-commands":
         if lane == "bazel":
             return CommandHelp(

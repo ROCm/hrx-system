@@ -95,6 +95,18 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
     if lane:
         if lane == "bazel" and sys.platform == "win32":
             plan.add(
+                CommandStep(
+                    [
+                        tool_env.python,
+                        str(REPO_ROOT / "build_tools/bazel/configure.py"),
+                        "--check-windows-host",
+                    ],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    label="check Windows long-path policy",
+                )
+            )
+            plan.add(
                 CheckCommandStep(
                     [env.get(BAZEL_SH_ENV, "bash"), "--version"],
                     cwd=REPO_ROOT,
