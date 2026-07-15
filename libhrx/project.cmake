@@ -26,6 +26,8 @@ if(LIBHRX_BUILD AND LIBHRX_BUILD_PASSTHROUGH AND
     "LIBHRX_BUILD_PASSTHROUGH=ON currently requires Linux because the "
     "passthrough loader and export controls have not been ported yet.")
 endif()
+option(LIBHRX_BUILD_HIP_BINDING
+  "Build libhrx HIP runtime API compatibility binding." ON)
 option(LIBHRX_BUILD_CUDA_BINDING
   "Build libhrx CUDA runtime/driver API compatibility binding." OFF)
 set(_LIBHRX_BUILD_CTS_DEFAULT OFF)

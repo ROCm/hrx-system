@@ -870,6 +870,74 @@ class CiTest(unittest.TestCase):
             r"\s+- \"\$\{\{ inputs\.runner_label \}\}\"",
         )
 
+    def test_core_windows_workflow_uses_generic_windows_runner(self):
+        build_block = self.workflow_job_block(
+            ".github/workflows/build_core_windows.yml", "build_core_windows"
+        )
+        self.assertIn("runs-on: azure-windows-scale-rocm", build_block)
+        self.assertIn("python build_tools/ci_core_windows.py fetch-rocm", build_block)
+        self.assertIn("python build_tools/ci_core_windows.py build", build_block)
+        self.assertIn("python build_tools/ci_core_windows.py test", build_block)
+        self.assertIn("python build_tools/ci_core_windows.py package", build_block)
+        self.assertIn(
+            "python build_tools/ci_core_windows.py extract-packages", build_block
+        )
+        self.assertIn(
+            "HRX_ROCM_ROOT: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/rocm-root",
+            build_block,
+        )
+        self.assertIn(
+            "HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/downloads",
+            build_block,
+        )
+        self.assertIn(
+            "PIP_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/caches/pip",
+            build_block,
+        )
+        self.assertIn('python -m venv "$relocated/python-venv"', build_block)
+        self.assertIn(
+            '$env:HRX_TEST_PYTHON = "$relocated/python-venv/Scripts/python.exe"',
+            build_block,
+        )
+        self.assertIn("--no-prepare-public-deps", build_block)
+        self.assertIn('Move-Item -LiteralPath "$env:HRX_BUILD_DIR"', build_block)
+        self.assertIn(
+            "hrx-public-windows-${{ inputs.windows_toolchain }}-x86_64", build_block
+        )
+        self.assertIn(
+            "hrx-public-deps-windows-${{ inputs.windows_toolchain }}-x86_64",
+            build_block,
+        )
+        self.assertIn(
+            "hrx-tests-windows-${{ inputs.windows_toolchain }}-x86_64", build_block
+        )
+        self.assertNotIn("windows-gfx1151-gpu-rocm", build_block)
+        self.assertNotIn("runtime-resource=amd-npu", build_block)
+
+        ci_block = self.workflow_job_block(
+            ".github/workflows/ci_core_windows.yml", "cmake_windows"
+        )
+        self.assertIn("name: Windows / CMake / ${{ matrix.toolchain }}", ci_block)
+        self.assertIn("variant: windows-msvc", ci_block)
+        self.assertIn("toolchain: msvc", ci_block)
+        self.assertRegex(
+            ci_block,
+            r"variant: windows-msvc\n\s+toolchain: msvc\n"
+            r"\s+assertions: false\n\s+run_tests: true\n"
+            r"\s+ctest_exclude_regex: \"\"\n\s+package: true",
+        )
+        self.assertIn("variant: windows-clang-cl", ci_block)
+        self.assertIn("toolchain: clang-cl", ci_block)
+        self.assertRegex(
+            ci_block,
+            r"variant: windows-clang-cl\n\s+toolchain: clang-cl\n"
+            r"\s+assertions: true\n\s+run_tests: true\n"
+            r"\s+ctest_exclude_regex: \"\"\n\s+package: false",
+        )
+        self.assertIn("windows_toolchain: ${{ matrix.toolchain }}", ci_block)
+        self.assertIn("uses: ./.github/workflows/build_core_windows.yml", ci_block)
+        self.assertIn('ctest_label_exclude_regex: "runtime-resource=|manual"', ci_block)
+
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
         for path in (
             ".github/workflows/ci_iree_bazel.yml",

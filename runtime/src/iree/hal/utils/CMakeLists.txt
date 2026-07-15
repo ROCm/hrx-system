@@ -288,6 +288,7 @@ iree_cc_library(
     "statistics_sink.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::hal
   PUBLIC
 )

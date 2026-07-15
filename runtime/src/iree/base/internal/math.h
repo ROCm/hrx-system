@@ -20,10 +20,13 @@
 #include <x86intrin.h>
 #endif
 
-// Clang on Windows has __builtin_clzll; otherwise we need to use the
-// windows intrinsic functions.
-#if defined(IREE_COMPILER_MSVC)
+// Clang on Windows has __builtin_clzll; otherwise we need to use the Windows
+// intrinsic functions. Include <intrin.h> for all MSVC-compatible frontends so
+// clang-cl can use intrinsics such as _umul128 without compiler-rt helper
+// calls.
+#if defined(IREE_COMPILER_MSVC_COMPAT)
 #include <intrin.h>
+#if defined(IREE_COMPILER_MSVC)
 #if defined(IREE_ARCH_ARM_64) || defined(IREE_ARCH_X86_64)
 #pragma intrinsic(_BitScanReverse64)
 #pragma intrinsic(_BitScanForward64)
@@ -31,6 +34,7 @@
 #pragma intrinsic(_BitScanReverse)
 #pragma intrinsic(_BitScanForward)
 #endif  // IREE_COMPILER_MSVC
+#endif  // IREE_COMPILER_MSVC_COMPAT
 
 #define iree_shr(value, shamt) \
   (((shamt) < sizeof(value) * 8) ? ((value) >> (shamt)) : 0)
@@ -416,6 +420,111 @@ static inline uint64_t iree_math_round_up_to_pow2_u64(uint64_t n) {
   n |= n >> 32;
   return n + 1;
 #endif  // 1
+}
+
+static inline void iree_math_mul_u64_to_u128(uint64_t lhs, uint64_t rhs,
+                                             uint64_t* out_high,
+                                             uint64_t* out_low) {
+  const uint64_t lhs_low = (uint32_t)lhs;
+  const uint64_t lhs_high = lhs >> 32;
+  const uint64_t rhs_low = (uint32_t)rhs;
+  const uint64_t rhs_high = rhs >> 32;
+
+  const uint64_t low_low = lhs_low * rhs_low;
+  const uint64_t low_high = lhs_low * rhs_high;
+  const uint64_t high_low = lhs_high * rhs_low;
+  const uint64_t high_high = lhs_high * rhs_high;
+
+  uint64_t low = low_low;
+  uint64_t high = high_high;
+
+  uint64_t addend = low_high << 32;
+  low += addend;
+  high += (low < addend) + (low_high >> 32);
+
+  addend = high_low << 32;
+  low += addend;
+  high += (low < addend) + (high_low >> 32);
+
+  *out_high = high;
+  *out_low = low;
+}
+
+// Divides a 128-bit unsigned integer by a 64-bit unsigned integer. Returns
+// false if the denominator is zero or if the quotient does not fit in uint64_t.
+static inline bool iree_math_div_u128_by_u64_to_u64(uint64_t high, uint64_t low,
+                                                    uint64_t denominator,
+                                                    uint64_t* out_quotient) {
+  *out_quotient = 0;
+  if (denominator == 0 || high >= denominator) return false;
+
+  uint64_t quotient = 0;
+  uint64_t remainder = high;
+  for (int bit_index = 63; bit_index >= 0; --bit_index) {
+    const uint64_t next_bit = (low >> bit_index) & 1u;
+    const bool shifted_remainder_high = (remainder >> 63) != 0;
+    const uint64_t shifted_remainder = (remainder << 1) | next_bit;
+    if (shifted_remainder_high || shifted_remainder >= denominator) {
+      remainder = shifted_remainder - denominator;
+      quotient |= UINT64_C(1) << bit_index;
+    } else {
+      remainder = shifted_remainder;
+    }
+  }
+
+  *out_quotient = quotient;
+  return true;
+}
+
+static inline bool iree_math_round_mul_div_u64_portable(uint64_t value,
+                                                        uint64_t numerator,
+                                                        uint64_t denominator,
+                                                        uint64_t* out_result) {
+  *out_result = 0;
+  if (denominator == 0) return false;
+  if (value == 0 || numerator == 0) return true;
+
+  uint64_t product_high = 0;
+  uint64_t product_low = 0;
+  iree_math_mul_u64_to_u128(value, numerator, &product_high, &product_low);
+
+  const uint64_t rounding_bias = denominator / 2;
+  product_low += rounding_bias;
+  if (product_low < rounding_bias) ++product_high;
+
+  return iree_math_div_u128_by_u64_to_u64(product_high, product_low,
+                                          denominator, out_result);
+}
+
+// Computes round(value * numerator / denominator), returning false if the
+// denominator is zero or the rounded result does not fit in uint64_t.
+static inline bool iree_math_round_mul_div_u64(uint64_t value,
+                                               uint64_t numerator,
+                                               uint64_t denominator,
+                                               uint64_t* out_result) {
+  *out_result = 0;
+  if (denominator == 0) return false;
+  if (value == 0 || numerator == 0) return true;
+
+#if defined(IREE_COMPILER_MSVC_COMPAT) && defined(IREE_ARCH_X86_64)
+  uint64_t product_high = 0;
+  uint64_t product_low = _umul128(value, numerator, &product_high);
+  const uint64_t rounding_bias = denominator / 2;
+  product_low += rounding_bias;
+  if (product_low < rounding_bias) ++product_high;
+  return iree_math_div_u128_by_u64_to_u64(product_high, product_low,
+                                          denominator, out_result);
+#elif defined(__SIZEOF_INT128__) && !defined(IREE_COMPILER_MSVC_COMPAT)
+  __uint128_t product = (__uint128_t)value * (__uint128_t)numerator;
+  product += denominator / 2;
+  __uint128_t quotient = product / denominator;
+  if (quotient > UINT64_MAX) return false;
+  *out_result = (uint64_t)quotient;
+  return true;
+#else
+  return iree_math_round_mul_div_u64_portable(value, numerator, denominator,
+                                              out_result);
+#endif  // IREE_COMPILER_MSVC_COMPAT && IREE_ARCH_X86_64
 }
 
 //==============================================================================

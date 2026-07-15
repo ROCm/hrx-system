@@ -6,11 +6,19 @@
 
 from __future__ import annotations
 
+import argparse
 import io
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools import ci_core_linux
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakeS3:
@@ -22,6 +30,20 @@ class FakeS3:
 
 
 class CiCoreLinuxTest(unittest.TestCase):
+    def test_script_runs_by_path_without_pythonpath(self):
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        result = subprocess.run(
+            [sys.executable, "build_tools/ci_core_linux.py", "--help"],
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+        )
+        self.assertIn("fetch-rocm", result.stdout)
+
     def test_rocm_artifact_variant_from_configure_log(self):
         self.assertEqual(
             ci_core_linux.rocm_artifact_variant_from_configure_log(""),
@@ -104,6 +126,45 @@ class CiCoreLinuxTest(unittest.TestCase):
                 "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/tmp/rocm-root",
             ],
         )
+
+    def test_build_core_preserves_linux_ci_feature_defaults(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rocm_root = root / "rocm"
+            llvm_bin = rocm_root / "lib" / "llvm" / "bin"
+            llvm_bin.mkdir(parents=True)
+            for tool in ["clang", "clang++", "llvm-ar", "llvm-ranlib"]:
+                (llvm_bin / tool).touch()
+
+            parser = argparse.ArgumentParser()
+            with mock.patch.dict(os.environ, {}, clear=True):
+                ci_core_linux.add_shared_args(parser)
+                args = parser.parse_args([])
+
+            args.rocm_root = rocm_root
+            args.build_dir = root / "build"
+            args.public_install_dir = root / "public"
+            args.tests_install_dir = root / "tests"
+
+            commands = []
+            old_run = ci_core_linux.run
+            try:
+                ci_core_linux.run = lambda cmd, **_kwargs: commands.append(
+                    [os.fspath(arg) for arg in cmd]
+                )
+
+                ci_core_linux.build_core(args)
+            finally:
+                ci_core_linux.run = old_run
+
+        configure_cmd = commands[0]
+        self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
+        self.assertIn("-DIREE_BUILD_BENCHMARKS=ON", configure_cmd)
+        self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
+        self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
+        self.assertIn("-DHRX_INSTALL_TESTS=ON", configure_cmd)
+        self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
+        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
 
 
 if __name__ == "__main__":

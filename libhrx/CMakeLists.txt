@@ -43,7 +43,9 @@ endfunction()
 
 add_subdirectory(src/libhrx)
 add_subdirectory(src/binding/common)
-add_subdirectory(src/binding/hip)
+if(LIBHRX_BUILD_HIP_BINDING)
+  add_subdirectory(src/binding/hip)
+endif()
 add_subdirectory(tools)
 
 if(LIBHRX_BUILD_CUDA_BINDING)
