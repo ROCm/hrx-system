@@ -1025,8 +1025,9 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 //===----------------------------------------------------------------------===//
 
 // Memory-maps the archive at |path|. The mapping owns the bytes and the spans
-// parsed from it stay valid until it is freed. Fails if |path| cannot be mapped
-// (caller skips the path) or is larger than KPACK_MAX_FILE_SIZE.
+// parsed from it stay valid until it is freed; the file must not change size
+// while mapped. Fails if |path| cannot be mapped (caller skips the path) or is
+// larger than KPACK_MAX_FILE_SIZE.
 static iree_status_t kpack_map_file(const char* path,
                                     iree_allocator_t host_allocator,
                                     iree_io_file_contents_t** out_mapping) {

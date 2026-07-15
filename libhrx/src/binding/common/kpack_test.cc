@@ -964,8 +964,8 @@ TEST(KpackArchive, BlobOffsetPastEof) {
 
 TEST(KpackArchive, TocOffsetInsideHeader) {
   auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1}).Build();
-  // A TOC offset (u64 at byte 8) that points inside the 16-byte header is below
-  // the lower bound (existing coverage only exercises the >= EOF upper bound).
+  // A TOC offset (u64 at byte 8) pointing inside the 16-byte header is below
+  // the valid range [16, EOF) and must be rejected.
   for (int i = 0; i < 8; ++i) bytes[8 + i] = 0;
   bytes[8] = 8;
   iree_hal_streaming_kpack_archive_t archive;
@@ -1186,6 +1186,49 @@ TEST(KpackResolve, AbsoluteSearchPath) {
   ASSERT_EQ(out_size, elf.size());
   EXPECT_EQ(0, memcmp(out, elf.data(), elf.size()));
   FreeBuffer(out);
+}
+
+// Resolution probes every archive on the search path and returns the first that
+// holds the requested code object.
+TEST(KpackResolve, SearchesMultipleArchives) {
+  auto other =
+      KpackBuilder(false).Add("lib/y.so#0", "gfx900", MakeMinimalAmdgpuElf());
+  auto elf = MakeMinimalAmdgpuElf();
+  auto match = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf);
+  std::string p_other = WriteTempFile("multi_other.kpack", other.Build());
+  std::string p_match = WriteTempFile("multi_match.kpack", match.Build());
+  auto metadata = MakeMetadata("lib/x.so", {p_other, p_match});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  IREE_ASSERT_OK(Resolve(metadata, 0, {"gfx900"}, &out, &out_size));
+  ASSERT_EQ(out_size, elf.size());
+  EXPECT_EQ(0, memcmp(out, elf.data(), elf.size()));
+  FreeBuffer(out);
+}
+
+// A file that maps but is not a valid archive is skipped, not fatal: a valid
+// archive later on the search path still resolves, and with no valid archive
+// the result is NOT_FOUND.
+TEST(KpackResolve, SkipsUnparseableArchive) {
+  std::vector<uint8_t> garbage(32, 0xAB);  // maps, but not a "KPAK" archive
+  std::string p_bad = WriteTempFile("multi_bad.kpack", garbage);
+  auto elf = MakeMinimalAmdgpuElf();
+  auto good = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string p_good = WriteTempFile("multi_good.kpack", good);
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  auto with_good = MakeMetadata("lib/x.so", {p_bad, p_good});
+  IREE_ASSERT_OK(Resolve(with_good, 0, {"gfx900"}, &out, &out_size));
+  ASSERT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+
+  out = nullptr;
+  out_size = 0;
+  auto only_bad = MakeMetadata("lib/x.so", {p_bad});
+  EXPECT_THAT(iree::Status(Resolve(only_bad, 0, {"gfx900"}, &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
 }
 
 TEST(KpackResolve, GfxArchPlaceholderExpansion) {
