@@ -423,55 +423,9 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_executables(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const iree_hal_amdgpu_target_id_t* exact_target_id =
-      &params->physical_devices[0].target_id;
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_lookup_code_object_target(
-      exact_target_id, &code_object_target_id));
-
-  char exact_format_storage[128] = {0};
-  iree_host_size_t exact_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      exact_target_id, sizeof(exact_format_storage), exact_format_storage,
-      &exact_format_length));
-
-  char code_object_format_storage[128] = {0};
-  iree_host_size_t code_object_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      &code_object_target_id, sizeof(code_object_format_storage),
-      code_object_format_storage, &code_object_format_length));
-
-  iree_hal_executable_format_spec_t executable_formats[2] = {
-      {
-          .format =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  iree_host_size_t format_count = 1;
-  if (!iree_string_view_equal(
-          executable_formats[0].format,
-          iree_make_string_view(code_object_format_storage,
-                                code_object_format_length))) {
-    executable_formats[format_count++] = (iree_hal_executable_format_spec_t){
-        .format = iree_make_string_view(code_object_format_storage,
-                                        code_object_format_length),
-        .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-        .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-    };
-  }
-
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = format_count,
-      .formats = executable_formats,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_builder_set_executables(builder, &executables));
-
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
-    exact_target_id = &params->physical_devices[i].target_id;
+    const iree_hal_amdgpu_target_id_t* exact_target_id =
+        &params->physical_devices[i].target_id;
     const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_device_spec_builder_add_executable_targets(

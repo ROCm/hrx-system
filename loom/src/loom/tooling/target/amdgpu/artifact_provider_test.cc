@@ -126,8 +126,6 @@ static iree_status_t CreateAmdgpuExecutableDeviceSpec(
       },
   };
   const iree_hal_device_executable_spec_t executables = {
-      /*.format_count=*/0,
-      /*.formats=*/nullptr,
       /*.target_count=*/IREE_ARRAYSIZE(executable_targets),
       /*.targets=*/executable_targets,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,

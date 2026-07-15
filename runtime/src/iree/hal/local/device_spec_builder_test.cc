@@ -40,13 +40,6 @@ static bool test_executable_loader_query_support(
 static void test_executable_loader_query_spec(
     iree_hal_executable_loader_t* base_executable_loader,
     iree_hal_device_executable_spec_t* out_executable_spec) {
-  static const iree_hal_executable_format_spec_t executable_formats[] = {
-      {
-          /*.format=*/IREE_SVL("test-loader"),
-          /*.caching_modes=*/IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          /*.flags=*/IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
   static const iree_hal_executable_target_t executable_targets[] = {
       {
           /*.family=*/IREE_SVL("test-family"),
@@ -58,8 +51,6 @@ static void test_executable_loader_query_spec(
       },
   };
   *out_executable_spec = {
-      /*.format_count=*/IREE_ARRAYSIZE(executable_formats),
-      /*.formats=*/executable_formats,
       /*.target_count=*/IREE_ARRAYSIZE(executable_targets),
       /*.targets=*/executable_targets,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
@@ -140,9 +131,6 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(spec);
   ASSERT_NE(executables, nullptr);
-  ASSERT_EQ(executables->format_count, 1);
-  EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
-                                     IREE_SV("test-loader")));
   iree_hal_executable_target_selection_t target_selection = {
       /*.family=*/IREE_SV("test-family"),
       /*.target_key=*/IREE_SV("test-target"),

@@ -12,7 +12,6 @@
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
 #include "iree/hal/buffer.h"
-#include "iree/hal/executable_cache.h"
 #include "iree/hal/memory/asan.h"
 #include "iree/hal/semaphore.h"
 #include "iree/hal/topology.h"
@@ -611,23 +610,6 @@ typedef struct iree_hal_device_sanitizer_spec_t {
 // Executable target facts
 //===----------------------------------------------------------------------===//
 
-// Stable executable format flags.
-typedef uint32_t iree_hal_executable_format_spec_flags_t;
-typedef enum iree_hal_executable_format_spec_flag_bits_e {
-  // No executable format flags are present.
-  IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE = 0u,
-} iree_hal_executable_format_spec_flag_bits_t;
-
-// Stable executable artifact format accepted by a device executable cache.
-typedef struct iree_hal_executable_format_spec_t {
-  // Artifact format string.
-  iree_string_view_t format;
-  // Caching modes supported for this format.
-  iree_hal_executable_caching_mode_t caching_modes;
-  // Stable executable format flags.
-  iree_hal_executable_format_spec_flags_t flags;
-} iree_hal_executable_format_spec_t;
-
 // Executable target kind.
 typedef uint32_t iree_hal_executable_target_kind_t;
 typedef enum iree_hal_executable_target_kind_e {
@@ -701,10 +683,6 @@ typedef enum iree_hal_device_executable_spec_flag_bits_e {
 
 // Stable executable facts for the device.
 typedef struct iree_hal_device_executable_spec_t {
-  // Number of executable format records.
-  iree_host_size_t format_count;
-  // Executable format records.
-  const iree_hal_executable_format_spec_t* formats;
   // Number of executable target records.
   iree_host_size_t target_count;
   // Executable target records.

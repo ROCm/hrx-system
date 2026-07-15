@@ -483,26 +483,6 @@ static iree_status_t iree_hal_hip_device_spec_populate_timing(
 static iree_status_t iree_hal_hip_device_spec_populate_executables(
     const iree_hal_hip_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  iree_hal_executable_format_spec_t executable_formats[2] = {
-      {
-          .format = IREE_SV("rocm-hsaco-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-      {
-          .format = IREE_SV("rocm-spirv-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = IREE_ARRAYSIZE(executable_formats),
-      .formats = executable_formats,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_builder_set_executables(builder, &executables));
-
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
     const iree_string_view_t gcn_arch_name = iree_make_cstring_view(
         params->physical_devices[i].facts.architecture.gcn_arch_name);

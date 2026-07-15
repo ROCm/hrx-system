@@ -504,11 +504,6 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
           IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
     return iree_ok_status();
   }
-  iree_hal_executable_format_spec_t executable_format = {
-      .format = IREE_SV("vulkan-spirv-bda"),
-      .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-      .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-  };
   iree_hal_executable_target_t executable_target = {
       .family = IREE_SV("spirv"),
       .target_key = IREE_SV("vulkan1.3+bda"),
@@ -517,13 +512,6 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
       .physical_device_affinity = 1ull,
       .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = 1,
-      .formats = &executable_format,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_builder_set_executables(builder, &executables));
   return iree_hal_device_spec_builder_add_executable_target(builder,
                                                             &executable_target);
 }

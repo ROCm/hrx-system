@@ -130,9 +130,6 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(device_spec);
   ASSERT_NE(executables, nullptr);
-  ASSERT_EQ(executables->format_count, 2);
-  EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
-                                     IREE_SV("rocm-hsaco-fb")));
   ASSERT_EQ(executables->target_count, 2);
 
   iree_hal_executable_target_selection_t selection = {

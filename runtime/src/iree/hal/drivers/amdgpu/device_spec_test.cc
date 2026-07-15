@@ -100,9 +100,6 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(device_spec);
   ASSERT_NE(executables, nullptr);
-  ASSERT_GE(executables->format_count, 1);
-  EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
-                                     IREE_SV("gfx1100")));
   ASSERT_GE(executables->target_count, 1);
   EXPECT_TRUE(iree_string_view_equal(executables->targets[0].family,
                                      IREE_SV("amdgpu")));

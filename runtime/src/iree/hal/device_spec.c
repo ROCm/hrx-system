@@ -44,8 +44,6 @@ struct iree_hal_device_spec_t {
   iree_hal_queue_family_spec_t* queue_families;
   // Owned external timepoint handle records.
   iree_hal_external_timepoint_handle_spec_t* external_timepoint_handles;
-  // Owned executable format records.
-  iree_hal_executable_format_spec_t* executable_formats;
   // Owned executable target records.
   iree_hal_executable_target_t* executable_targets;
   // Owned driver-local extension facet records.
@@ -254,9 +252,6 @@ static iree_status_t iree_hal_device_spec_validate_params(
   const iree_hal_device_executable_spec_t* executables = params->executables;
   if (executables) {
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
-        executables->format_count, executables->formats,
-        "executables.formats"));
-    IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         executables->target_count, executables->targets,
         "executables.targets"));
     for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
@@ -390,10 +385,6 @@ static iree_status_t iree_hal_device_spec_count_strings_and_payloads(
   }
   const iree_hal_device_executable_spec_t* executables = params->executables;
   if (executables) {
-    for (iree_host_size_t i = 0; i < executables->format_count; ++i) {
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          executables->formats[i].format, &string_table_length));
-    }
     for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
       const iree_hal_executable_target_t* target = &executables->targets[i];
       IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
@@ -423,7 +414,6 @@ static void iree_hal_device_spec_destroy(iree_hal_device_spec_t* spec) {
   iree_allocator_free(host_allocator, spec->virtual_memory_classes);
   iree_allocator_free(host_allocator, spec->queue_families);
   iree_allocator_free(host_allocator, spec->external_timepoint_handles);
-  iree_allocator_free(host_allocator, spec->executable_formats);
   iree_allocator_free(host_allocator, spec->executable_targets);
   iree_allocator_free(host_allocator, spec->facets);
   iree_allocator_free(host_allocator, spec->facet_payload_storage);
@@ -578,22 +568,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_spec_create(
   if (iree_status_is_ok(status) && params && params->executables) {
     spec->executables = *params->executables;
     status = iree_hal_device_spec_clone_array(
-        host_allocator, params->executables->format_count,
-        sizeof(*spec->executable_formats), params->executables->formats,
-        (void**)&spec->executable_formats);
-    spec->executables.formats = spec->executable_formats;
-    for (iree_host_size_t i = 0;
-         i < spec->executables.format_count && iree_status_is_ok(status); ++i) {
-      spec->executable_formats[i].format = iree_hal_device_spec_copy_string(
-          params->executables->formats[i].format, string_storage,
-          &string_offset);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_clone_array(
-          host_allocator, params->executables->target_count,
-          sizeof(*spec->executable_targets), params->executables->targets,
-          (void**)&spec->executable_targets);
-    }
+        host_allocator, params->executables->target_count,
+        sizeof(*spec->executable_targets), params->executables->targets,
+        (void**)&spec->executable_targets);
     spec->executables.targets = spec->executable_targets;
     for (iree_host_size_t i = 0;
          i < spec->executables.target_count && iree_status_is_ok(status); ++i) {

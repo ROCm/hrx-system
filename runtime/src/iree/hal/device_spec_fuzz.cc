@@ -235,11 +235,6 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
                    IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
                    IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS;
 
-    iree_hal_executable_format_spec_t executable_format = {};
-    executable_format.format = iree_make_cstring_view("fuzz-elf");
-    executable_format.caching_modes =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-
     iree_hal_executable_target_t executable_target = {};
     executable_target.family = iree_make_cstring_view("amdgpu");
     executable_target.target_key = iree_make_cstring_view("gfx1100:xnack-");
@@ -248,8 +243,6 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
     executable_target.physical_device_affinity = 1;
 
     iree_hal_device_executable_spec_t executables = {};
-    executables.format_count = 1;
-    executables.formats = &executable_format;
     executables.target_count = 1;
     executables.targets = &executable_target;
 

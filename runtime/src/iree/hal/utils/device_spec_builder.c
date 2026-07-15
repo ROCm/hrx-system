@@ -45,8 +45,6 @@ struct iree_hal_device_spec_builder_storage_t {
   iree_hal_queue_family_spec_t* queue_families;
   // Builder-owned external timepoint handle records.
   iree_hal_external_timepoint_handle_spec_t* external_timepoint_handles;
-  // Builder-owned executable format records.
-  iree_hal_executable_format_spec_t* executable_formats;
   // Builder-owned executable target records.
   iree_hal_executable_target_t* executable_targets;
   // Builder-owned driver-local extension facets.
@@ -217,13 +215,6 @@ static void iree_hal_device_spec_builder_reset_executables(
     iree_hal_device_spec_builder_t* builder) {
   if (!builder->storage) return;
   iree_allocator_t host_allocator = builder->host_allocator;
-  if (builder->storage->executable_formats) {
-    for (iree_host_size_t i = 0; i < builder->storage->executables.format_count;
-         ++i) {
-      iree_hal_device_spec_builder_free_string(
-          host_allocator, builder->storage->executable_formats[i].format);
-    }
-  }
   if (builder->storage->executable_targets) {
     for (iree_host_size_t i = 0; i < builder->storage->executables.target_count;
          ++i) {
@@ -234,9 +225,7 @@ static void iree_hal_device_spec_builder_reset_executables(
                                                target->target_key);
     }
   }
-  iree_allocator_free(host_allocator, builder->storage->executable_formats);
   iree_allocator_free(host_allocator, builder->storage->executable_targets);
-  builder->storage->executable_formats = NULL;
   builder->storage->executable_targets = NULL;
   memset(&builder->storage->executables, 0,
          sizeof(builder->storage->executables));
@@ -508,22 +497,9 @@ iree_status_t iree_hal_device_spec_builder_set_executables(
   iree_status_t status = iree_ok_status();
   builder->storage->executables = *executables;
   status = iree_hal_device_spec_builder_copy_array(
-      builder->host_allocator, executables->format_count,
-      sizeof(*builder->storage->executable_formats), executables->formats,
-      (void**)&builder->storage->executable_formats);
-  builder->storage->executables.formats = builder->storage->executable_formats;
-  for (iree_host_size_t i = 0;
-       i < executables->format_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_device_spec_builder_copy_string(
-        builder->host_allocator, executables->formats[i].format,
-        &builder->storage->executable_formats[i].format);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_device_spec_builder_copy_array(
-        builder->host_allocator, executables->target_count,
-        sizeof(*builder->storage->executable_targets), executables->targets,
-        (void**)&builder->storage->executable_targets);
-  }
+      builder->host_allocator, executables->target_count,
+      sizeof(*builder->storage->executable_targets), executables->targets,
+      (void**)&builder->storage->executable_targets);
   builder->storage->executables.targets = builder->storage->executable_targets;
   for (iree_host_size_t i = 0;
        i < executables->target_count && iree_status_is_ok(status); ++i) {

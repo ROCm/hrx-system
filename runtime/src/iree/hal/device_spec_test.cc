@@ -69,7 +69,6 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
     iree_hal_device_dispatch_spec_t* out_dispatch,
     iree_hal_device_timing_spec_t* out_timing,
     iree_hal_device_executable_spec_t* out_executables,
-    iree_hal_executable_format_spec_t* out_executable_formats,
     iree_hal_executable_target_t* out_executable_targets,
     iree_hal_device_sanitizer_spec_t* out_sanitizer,
     iree_hal_device_spec_facet_t* out_facets,
@@ -197,11 +196,6 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
       /*.flags=*/IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS,
   };
 
-  out_executable_formats[0] = {
-      /*.format=*/iree_make_cstring_view("test-elf"),
-      /*.caching_modes=*/IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
-      /*.flags=*/IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-  };
   out_executable_targets[0] = {
       /*.family=*/iree_make_cstring_view("amdgpu"),
       /*.target_key=*/iree_make_cstring_view("gfx1100:xnack-"),
@@ -219,8 +213,6 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   out_executable_targets[2].target_key =
       iree_make_cstring_view("gfx11-generic-alt");
   *out_executables = {
-      /*.format_count=*/1,
-      /*.formats=*/out_executable_formats,
       /*.target_count=*/3,
       /*.targets=*/out_executable_targets,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
@@ -273,14 +265,13 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   iree_hal_device_dispatch_spec_t dispatch;
   iree_hal_device_timing_spec_t timing;
   iree_hal_device_executable_spec_t executables;
-  iree_hal_executable_format_spec_t executable_formats[1];
   iree_hal_executable_target_t executable_targets[3];
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
-      queue_families, &dispatch, &timing, &executables, executable_formats,
-      executable_targets, &sanitizer, facets,
+      queue_families, &dispatch, &timing, &executables, executable_targets,
+      &sanitizer, facets,
       iree_make_const_byte_span(facet_payload_storage,
                                 sizeof(facet_payload_storage)));
 
@@ -365,7 +356,7 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
   static const uint8_t kExpectedHeaderPrefix[] = {
-      'D', 'S', 'P', 'C', 5, 0, 0, 0,
+      'D', 'S', 'P', 'C', 6, 0, 0, 0,
   };
   ASSERT_GE(serialized_bytes.data_length, sizeof(kExpectedHeaderPrefix));
   EXPECT_EQ(memcmp(serialized_bytes.data, kExpectedHeaderPrefix,
@@ -409,7 +400,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   }
 
   const std::vector<uint8_t> canonical_bytes = SerializeEmptySpec();
-  ASSERT_EQ(canonical_bytes.size(), 364u);
+  ASSERT_EQ(canonical_bytes.size(), 356u);
 
   {
     SCOPED_TRACE("invalid magic");
@@ -420,7 +411,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("unsupported version");
     std::vector<uint8_t> bytes = canonical_bytes;
-    StoreU32Le(&bytes, 4, 6);
+    StoreU32Le(&bytes, 4, 7);
     ExpectParseFails(bytes);
   }
   {
@@ -452,15 +443,15 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("impossible string length");
     std::vector<uint8_t> bytes = canonical_bytes;
-    StoreU64Le(&bytes, 96, UINT64_MAX);
+    StoreU64Le(&bytes, 88, UINT64_MAX);
     ExpectParseFails(bytes);
   }
   {
     SCOPED_TRACE("invalid ASAN mode");
     std::vector<uint8_t> bytes = canonical_bytes;
-    // The empty v5 body places the sanitizer flags at byte 324 and its mode at
-    // byte 328.
-    StoreU32Le(&bytes, 328, UINT32_MAX);
+    // The empty v6 body places the sanitizer flags at byte 316 and its mode at
+    // byte 320.
+    StoreU32Le(&bytes, 320, UINT32_MAX);
     ExpectParseFails(bytes);
   }
 }
@@ -538,8 +529,6 @@ TEST(DeviceSpecTest, RejectsInvalidPhysicalDeviceAffinityFacts) {
       /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   iree_hal_device_executable_spec_t executables = {
-      /*.format_count=*/0,
-      /*.formats=*/nullptr,
       /*.target_count=*/1,
       /*.targets=*/&target,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
@@ -629,14 +618,13 @@ TEST(DeviceObservationTest, MemoryTotalFromSpecSumsKnownHeaps) {
   iree_hal_device_dispatch_spec_t dispatch;
   iree_hal_device_timing_spec_t timing;
   iree_hal_device_executable_spec_t executables;
-  iree_hal_executable_format_spec_t executable_formats[1];
   iree_hal_executable_target_t executable_targets[3];
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
-      queue_families, &dispatch, &timing, &executables, executable_formats,
-      executable_targets, &sanitizer, facets,
+      queue_families, &dispatch, &timing, &executables, executable_targets,
+      &sanitizer, facets,
       iree_make_const_byte_span(facet_payload_storage,
                                 sizeof(facet_payload_storage)));
 
@@ -671,14 +659,13 @@ TEST(DeviceObservationTest, MemoryTotalFromSpecSkipsUnknownCapacity) {
   iree_hal_device_dispatch_spec_t dispatch;
   iree_hal_device_timing_spec_t timing;
   iree_hal_device_executable_spec_t executables;
-  iree_hal_executable_format_spec_t executable_formats[1];
   iree_hal_executable_target_t executable_targets[3];
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
-      queue_families, &dispatch, &timing, &executables, executable_formats,
-      executable_targets, &sanitizer, facets,
+      queue_families, &dispatch, &timing, &executables, executable_targets,
+      &sanitizer, facets,
       iree_make_const_byte_span(facet_payload_storage,
                                 sizeof(facet_payload_storage)));
   memory_heaps[0].flags = IREE_HAL_MEMORY_HEAP_SPEC_FLAG_CAPACITY_UNKNOWN;

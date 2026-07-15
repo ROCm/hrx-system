@@ -827,18 +827,7 @@ static bool iree_hal_vmvx_module_loader_query_support(
 static void iree_hal_vmvx_module_loader_query_spec(
     iree_hal_executable_loader_t* base_executable_loader,
     iree_hal_device_executable_spec_t* out_executable_spec) {
-  static const iree_hal_executable_format_spec_t executable_formats[] = {
-      {
-          .format = IREE_SVL("vmvx-bytecode-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  *out_executable_spec = (iree_hal_device_executable_spec_t){
-      .format_count = IREE_ARRAYSIZE(executable_formats),
-      .formats = executable_formats,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
+  *out_executable_spec = (iree_hal_device_executable_spec_t){0};
 }
 
 static iree_status_t iree_hal_vmvx_module_loader_try_load(
