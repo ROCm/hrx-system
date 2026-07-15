@@ -342,6 +342,15 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   ASSERT_NE(selection_result.target, nullptr);
   EXPECT_EQ(selection_result.target_ordinal, 2u);
   ExpectStringViewEq(selection_result.target->target_key, "gfx11-generic-alt");
+  EXPECT_EQ(iree_hal_device_spec_executable_target_ordinal(
+                spec, selection_result.target),
+            2u);
+  iree_hal_executable_target_t copied_target = *selection_result.target;
+  EXPECT_EQ(
+      iree_hal_device_spec_executable_target_ordinal(spec, &copied_target),
+      IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(iree_hal_device_spec_executable_target_ordinal(spec, nullptr),
+            IREE_HOST_SIZE_MAX);
 
   key_selection.target_key = iree_string_view_empty();
   key_selection.physical_device_affinity = 1u << 1;
@@ -564,6 +573,95 @@ TEST(DeviceSpecTest, RejectsInvalidPhysicalDeviceAffinityFacts) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
   EXPECT_EQ(spec, nullptr);
+}
+
+TEST(DeviceSpecTest,
+     ExecutableTargetSelectionRequiresFullPhysicalDeviceCoverage) {
+  iree_hal_physical_device_spec_t physical_devices[2] = {
+      {
+          /*.identity=*/{},
+          /*.physical_ordinal=*/0,
+          /*.partition_ordinal=*/0,
+          /*.partition_count=*/1,
+          /*.physical_device_affinity=*/1u << 0,
+      },
+      {
+          /*.identity=*/{},
+          /*.physical_ordinal=*/1,
+          /*.partition_ordinal=*/0,
+          /*.partition_count=*/1,
+          /*.physical_device_affinity=*/1u << 1,
+      },
+  };
+  iree_hal_device_identity_spec_t identity = {
+      /*.logical_device_id=*/iree_make_cstring_view("test-device"),
+      /*.display_name=*/iree_make_cstring_view("Test Device"),
+      /*.driver_id=*/iree_make_cstring_view("test"),
+      /*.driver_version=*/iree_string_view_empty(),
+      /*.backend_id=*/iree_make_cstring_view("test"),
+      /*.device_path=*/iree_string_view_empty(),
+      /*.vendor_name=*/iree_string_view_empty(),
+      /*.vendor_id=*/0,
+      /*.device_id=*/0,
+      /*.revision_id=*/0,
+      /*.logical_ordinal=*/0,
+      /*.physical_device_count=*/IREE_ARRAYSIZE(physical_devices),
+      /*.physical_devices=*/physical_devices,
+      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  iree_hal_executable_target_t targets[2] = {
+      {
+          /*.family=*/iree_make_cstring_view("test"),
+          /*.target_key=*/iree_make_cstring_view("device-0"),
+          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+          /*.priority=*/100,
+          /*.physical_device_affinity=*/1u << 0,
+          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      },
+      {
+          /*.family=*/iree_make_cstring_view("test"),
+          /*.target_key=*/iree_make_cstring_view("both-devices"),
+          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+          /*.priority=*/10,
+          /*.physical_device_affinity=*/(1u << 0) | (1u << 1),
+          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      },
+  };
+  iree_hal_device_executable_spec_t executables = {
+      /*.target_count=*/IREE_ARRAYSIZE(targets),
+      /*.targets=*/targets,
+      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/&identity,
+      /*.memory=*/nullptr,
+      /*.virtual_memory=*/nullptr,
+      /*.queues=*/nullptr,
+      /*.dispatch=*/nullptr,
+      /*.timing=*/nullptr,
+      /*.executables=*/&executables,
+      /*.sanitizer=*/nullptr,
+      /*.facet_count=*/0,
+      /*.facets=*/nullptr,
+  };
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+
+  iree_hal_executable_target_selection_t selection = {
+      /*.family=*/iree_make_cstring_view("test"),
+      /*.target_key=*/iree_string_view_empty(),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_NONE,
+      /*.physical_device_affinity=*/(1u << 0) | (1u << 1),
+  };
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(spec, &selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            result.outcome);
+  ASSERT_NE(nullptr, result.target);
+  ExpectStringViewEq(result.target->target_key, "both-devices");
+
+  iree_hal_device_spec_release(spec);
 }
 
 TEST(DeviceSpecTest, RejectsInvalidExtensionFacets) {

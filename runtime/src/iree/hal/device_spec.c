@@ -849,11 +849,22 @@ static bool iree_hal_device_spec_target_matches_selection(
     return false;
   }
   if (selection->physical_device_affinity &&
-      (selection->physical_device_affinity &
-       target->physical_device_affinity) == 0) {
+      !iree_all_bits_set(target->physical_device_affinity,
+                         selection->physical_device_affinity)) {
     return false;
   }
   return true;
+}
+
+IREE_API_EXPORT iree_host_size_t iree_hal_device_spec_executable_target_ordinal(
+    const iree_hal_device_spec_t* spec,
+    const iree_hal_executable_target_t* target) {
+  IREE_ASSERT_ARGUMENT(spec);
+  for (iree_host_size_t i = 0; target && i < spec->executables.target_count;
+       ++i) {
+    if (target == &spec->executables.targets[i]) return i;
+  }
+  return IREE_HOST_SIZE_MAX;
 }
 
 IREE_API_EXPORT iree_hal_executable_target_selection_result_t

@@ -703,7 +703,7 @@ typedef struct iree_hal_executable_target_selection_t {
   iree_string_view_t target_key;
   // Acceptable executable target kinds.
   iree_hal_executable_target_kind_flags_t kind_flags;
-  // Optional physical-device affinity overlap filter.
+  // Optional physical-device set the selected target must fully cover.
   iree_hal_physical_device_affinity_t physical_device_affinity;
 } iree_hal_executable_target_selection_t;
 
@@ -883,6 +883,15 @@ IREE_API_EXPORT iree_hal_executable_target_selection_result_t
 iree_hal_device_spec_select_executable_target(
     const iree_hal_device_spec_t* spec,
     const iree_hal_executable_target_selection_t* selection);
+
+// Returns the ordinal of |target| when it is an exact borrowed row from
+// |spec|, or IREE_HOST_SIZE_MAX when it is NULL, foreign, or a copied value.
+//
+// This provides a status-free ownership check for APIs that require target
+// identity instead of merely equivalent target contents.
+IREE_API_EXPORT iree_host_size_t iree_hal_device_spec_executable_target_ordinal(
+    const iree_hal_device_spec_t* spec,
+    const iree_hal_executable_target_t* target);
 
 #ifdef __cplusplus
 }  // extern "C"
