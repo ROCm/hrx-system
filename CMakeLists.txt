@@ -10,7 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # HRX is the top-level build/product. The runtime subtree is still the IREE
 # runtime subsystem, and intentionally keeps IREE_* options and iree:: targets.
-project(HRX VERSION 0.1.0 LANGUAGES C CXX ASM)
+project(HRX VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
