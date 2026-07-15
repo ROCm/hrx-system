@@ -470,11 +470,6 @@ static void hrx_hip_stream_callback_host_fn(void* user_data) {
   callback(stream, hipSuccess, callback_user_data);
 }
 
-HIPAPI const char* hipApiName(uint32_t id) {
-  (void)id;
-  return NULL;
-}
-
 HIPAPI hipError_t hipBindTexture(size_t* offset, const textureReference* tex,
                                  const void* devPtr,
                                  const hipChannelFormatDesc* desc,

@@ -141,6 +141,7 @@ iree_cc_library(
   SRCS
     "abi_stubs.c"
     "api.c"
+    "api_metadata.c"
   DEPS
     ::blocking_printf_provider
     ::launch_params
@@ -171,6 +172,24 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   SOVERSION 7
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_api_name_test
+  SRCS
+    "hip_api_name_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
 )
 endif()
 

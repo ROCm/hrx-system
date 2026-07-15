@@ -111,6 +111,7 @@ hrx_cc_shared_library(
     srcs = [
         "abi_stubs.c",
         "api.c",
+        "api_metadata.c",
     ],
     hdrs = [
         "api.h",
@@ -157,6 +158,21 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
 endif()
 """,
     inline = True,
+)
+
+hrx_cc_test(
+    name = "hip_api_name_test",
+    srcs = ["hip_api_name_test.cc"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 hrx_cc_test(
