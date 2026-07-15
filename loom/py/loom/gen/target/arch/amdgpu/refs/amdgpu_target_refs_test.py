@@ -14,6 +14,7 @@ from pathlib import Path
 from loom.gen.target.arch.amdgpu.refs import amdgpu_target_refs
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FIELD_IDS,
+    AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_MUBUF,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
 )
@@ -26,6 +27,8 @@ from loom.target.low_descriptors import (
     IssueUse,
     LatencyKind,
     ModelQuality,
+    Operand,
+    OperandRole,
     Resource,
     ResourceKind,
     ScheduleClass,
@@ -56,12 +59,13 @@ def _descriptor(
     schedule_class: str = _SCHEDULE_NONE,
     encoding_format_id: int = 0,
     immediates: tuple[Immediate, ...] = (),
+    operands: tuple[Operand, ...] = (),
 ) -> Descriptor:
     return Descriptor(
         key=key,
         mnemonic=None,
         semantic_tag=None,
-        operands=(),
+        operands=operands,
         schedule_class=schedule_class,
         asm_forms=asm_forms,
         encoding_format_id=encoding_format_id,
@@ -187,6 +191,36 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE",
     )
+
+
+def test_vmem_result_order_classes_distinguish_memory_families() -> None:
+    result = Operand("dst", OperandRole.RESULT, ())
+    non_memory = _descriptor("amdgpu.v_mov_b32", operands=(result,))
+    buffer_load = _descriptor(
+        "amdgpu.buffer_load_dword",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_MUBUF,
+        operands=(result,),
+    )
+    flat_load = _descriptor(
+        "amdgpu.flat_load_dword",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_IDS["ENC_FLAT"],
+        operands=(result,),
+    )
+    image_load = _descriptor(
+        "amdgpu.image_load",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_IDS["ENC_MIMG"],
+        operands=(result,),
+    )
+    buffer_store = _descriptor(
+        "amdgpu.buffer_store_dword",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_MUBUF,
+    )
+
+    assert amdgpu_target_refs._descriptor_vmem_result_order_class_name(non_memory) == "LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE"
+    assert amdgpu_target_refs._descriptor_vmem_result_order_class_name(buffer_load) == "LOOM_AMDGPU_VMEM_RESULT_ORDER_NOSAMPLER"
+    assert amdgpu_target_refs._descriptor_vmem_result_order_class_name(flat_load) == "LOOM_AMDGPU_VMEM_RESULT_ORDER_NOSAMPLER"
+    assert amdgpu_target_refs._descriptor_vmem_result_order_class_name(image_load) == "LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN"
+    assert amdgpu_target_refs._descriptor_vmem_result_order_class_name(buffer_store) == "LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE"
 
 
 def test_reg_class_trait_names_classify_special_register_files() -> None:

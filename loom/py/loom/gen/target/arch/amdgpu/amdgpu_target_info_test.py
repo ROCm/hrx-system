@@ -20,6 +20,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
+    AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
     AMDGPU_WAVEFRONT_SIZE_FLAG_32,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
@@ -144,6 +145,39 @@ def test_target_info_flag_expressions_validate_known_bits() -> None:
     assert amdgpu_target_info._wavefront_size_flags_expr(AMDGPU_WAVEFRONT_SIZE_FLAG_32) == "LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32"
     assert amdgpu_target_info._kernel_descriptor_abi_flags_expr(AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID) == "LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID"
     assert amdgpu_target_info._processor_scheduling_bits_expr(AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU) == "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU"
+    assert amdgpu_target_info._processor_scheduling_bits_expr(AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER) == "LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER"
+
+
+def test_vmem_result_write_ordering_matches_processor_families() -> None:
+    processors = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
+    ordered_processors = (
+        "gfx900",
+        "gfx942",
+        "gfx950",
+        "gfx1010",
+        "gfx1036",
+        "gfx1100",
+        "gfx1172",
+        "gfx9-generic",
+        "gfx10-1-generic",
+        "gfx10-3-generic",
+        "gfx11-generic",
+        "gfx9-4-generic",
+    )
+    unordered_processors = (
+        "gfx1200",
+        "gfx1201",
+        "gfx1250",
+        "gfx1251",
+        "gfx1310",
+        "gfx12-generic",
+        "gfx12-5-generic",
+    )
+
+    for processor in ordered_processors:
+        assert processors[processor].features.scheduling & AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
+    for processor in unordered_processors:
+        assert not processors[processor].features.scheduling & AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
 
 
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:

@@ -36,6 +36,12 @@ typedef enum loom_amdgpu_wait_plan_action_kind_e {
   LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED = 2,
 } loom_amdgpu_wait_plan_action_kind_t;
 
+typedef enum loom_amdgpu_wait_plan_action_flag_bits_e {
+  // Action was derived from an allocation storage-release record.
+  LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE = 1u << 0,
+} loom_amdgpu_wait_plan_action_flag_bits_t;
+typedef uint8_t loom_amdgpu_wait_plan_action_flags_t;
+
 typedef enum loom_amdgpu_wait_plan_reason_e {
   // Unknown or uninitialized wait reason.
   LOOM_AMDGPU_WAIT_PLAN_REASON_UNKNOWN = 0,
@@ -76,6 +82,8 @@ typedef enum loom_amdgpu_wait_plan_residual_action_e {
 typedef struct loom_amdgpu_wait_plan_action_t {
   // Whether the action is present in the IR or must be inserted.
   loom_amdgpu_wait_plan_action_kind_t kind;
+  // Internal origin and materialization flags.
+  loom_amdgpu_wait_plan_action_flags_t flags;
   // Why this wait action exists.
   loom_amdgpu_wait_plan_reason_t reason;
   // AMDGPU wait counter affected by the action.

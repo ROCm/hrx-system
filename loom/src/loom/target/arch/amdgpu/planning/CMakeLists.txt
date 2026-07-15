@@ -166,17 +166,19 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
-    wait_memory_frontier
+    wait_frontier
   HDRS
-    "wait_memory_frontier.h"
+    "wait_frontier.h"
   SRCS
-    "wait_memory_frontier.c"
+    "wait_frontier.c"
   DEPS
     ::wait_counters
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::allocation::table
     loom::codegen::low::memory_access
     loom::codegen::low::schedule
+    loom::target::arch::amdgpu::refs::target_refs
     loom::util::cfg_graph
   PUBLIC
 )
@@ -194,7 +196,7 @@ loom_cc_library(
     ::descriptor_semantics
     ::structural_packet
     ::wait_counters
-    ::wait_memory_frontier
+    ::wait_frontier
     ::wait_packet_tables
     iree::base
     iree::base::internal

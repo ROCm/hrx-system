@@ -72,9 +72,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx11Processor) {
   EXPECT_EQ(processor->wavefront.default_size, 32u);
   ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
                          8, 4, kRdna3DescriptorFlags);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
@@ -90,9 +92,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
             LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
@@ -210,7 +214,8 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx942Processor) {
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
@@ -228,7 +233,8 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
@@ -392,9 +398,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1170Processor) {
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
             LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
@@ -411,7 +419,8 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, ParsesAmdhsaTargetIdWithFeatureSuffix) {

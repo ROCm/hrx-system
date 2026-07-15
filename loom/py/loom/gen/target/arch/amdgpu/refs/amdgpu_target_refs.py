@@ -55,6 +55,7 @@ from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
     Immediate,
+    OperandRole,
     Resource,
     ResourceKind,
     ScheduleClass,
@@ -71,6 +72,7 @@ _SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS = ("amdgpu.flat_load_u8",)
 _VECTOR_MEMORY_ENCODING_FORMAT_IDS = frozenset(
     (
         AMDGPU_ENCODING_FORMAT_MUBUF,
+        AMDGPU_ENCODING_FORMAT_IDS["ENC_MTBUF"],
         AMDGPU_ENCODING_FORMAT_VBUFFER,
         AMDGPU_ENCODING_FORMAT_FLAT,
         AMDGPU_ENCODING_FORMAT_IDS["ENC_FLAT_GLBL"],
@@ -79,6 +81,17 @@ _VECTOR_MEMORY_ENCODING_FORMAT_IDS = frozenset(
         AMDGPU_ENCODING_FORMAT_VFLAT,
         AMDGPU_ENCODING_FORMAT_VGLOBAL,
         AMDGPU_ENCODING_FORMAT_VSCRATCH,
+    )
+)
+
+_IMAGE_MEMORY_ENCODING_FORMAT_IDS = frozenset(
+    (
+        AMDGPU_ENCODING_FORMAT_IDS["ENC_MIMG"],
+        AMDGPU_ENCODING_FORMAT_IDS["ENC_VIMAGE"],
+        AMDGPU_ENCODING_FORMAT_IDS["ENC_VSAMPLE"],
+        AMDGPU_ENCODING_FORMAT_IDS["MIMG_NSA1"],
+        AMDGPU_ENCODING_FORMAT_IDS["MIMG_NSA2"],
+        AMDGPU_ENCODING_FORMAT_IDS["MIMG_NSA3"],
     )
 )
 
@@ -119,6 +132,7 @@ class _DescriptorSetRefTable:
     descriptor_ordinals: list[int | None]
     descriptor_refs: list[str | None]
     descriptor_traits: list[tuple[str, ...]]
+    vmem_result_order_classes: list[str]
     sdwa_dst_sel_immediate_slots: list[int | None]
     literal_immediate_slots: list[int | None]
     reg_class_traits: list[tuple[str, ...]]
@@ -193,6 +207,12 @@ def _descriptor_set_trait_table_name(key: str) -> str:
     suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
     c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
     return f"kAmdgpu{c_suffix}DescriptorTraits"
+
+
+def _descriptor_set_vmem_result_order_class_table_name(key: str) -> str:
+    suffix = target_relative_name("amdgpu", key.removesuffix(".core"))
+    c_suffix = "".join(part[:1].upper() + part[1:] for part in suffix.split(".") if part)
+    return f"kAmdgpu{c_suffix}DescriptorVmemResultOrderClasses"
 
 
 def _descriptor_set_immediate_slot_table_name(key: str) -> str:
@@ -282,6 +302,17 @@ def _descriptor_trait_names(
     if descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VOP1_SDWA:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA")
     return tuple(trait_names)
+
+
+def _descriptor_vmem_result_order_class_name(descriptor: Descriptor) -> str:
+    has_result = any(operand.role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT) for operand in descriptor.operands)
+    if not has_result:
+        return "LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE"
+    if descriptor.encoding_format_id in _IMAGE_MEMORY_ENCODING_FORMAT_IDS:
+        return "LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN"
+    if descriptor.encoding_format_id in _VECTOR_MEMORY_ENCODING_FORMAT_IDS:
+        return "LOOM_AMDGPU_VMEM_RESULT_ORDER_NOSAMPLER"
+    return "LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE"
 
 
 def _descriptor_immediate_slot(
@@ -378,6 +409,7 @@ def _materialize_descriptor_ref_tables(
         descriptor_refs = [_descriptor_ref_constant_name(descriptor.key) if descriptor.key in descriptor_ref_key_set else None for descriptor in descriptor_set.descriptors]
         trait_context = _descriptor_trait_context(descriptor_set)
         descriptor_traits = [_descriptor_trait_names(trait_context, descriptor) for descriptor in descriptor_set.descriptors]
+        vmem_result_order_classes = [_descriptor_vmem_result_order_class_name(descriptor) for descriptor in descriptor_set.descriptors]
         sdwa_dst_sel_immediate_slots = [
             _descriptor_sdwa_dst_sel_immediate_slot(
                 descriptor_set,
@@ -398,6 +430,7 @@ def _materialize_descriptor_ref_tables(
                 descriptor_ordinals=[descriptor_ordinals.get(key) for key in descriptor_ref_keys],
                 descriptor_refs=descriptor_refs,
                 descriptor_traits=descriptor_traits,
+                vmem_result_order_classes=vmem_result_order_classes,
                 sdwa_dst_sel_immediate_slots=sdwa_dst_sel_immediate_slots,
                 literal_immediate_slots=literal_immediate_slots,
                 reg_class_traits=[_reg_class_trait_names(reg_class.name) for reg_class in descriptor_set.reg_classes],
@@ -489,6 +522,11 @@ def _emit_source(
                 lines.append("    0,")
         lines.append("};")
         lines.append("")
+        vmem_result_order_class_table_name = _descriptor_set_vmem_result_order_class_table_name(descriptor_set_table.descriptor_set_key)
+        lines.append(f"static const uint8_t {vmem_result_order_class_table_name}[] = {{")
+        lines.extend(f"    {order_class}," for order_class in descriptor_set_table.vmem_result_order_classes)
+        lines.append("};")
+        lines.append("")
         immediate_slot_table_name = _descriptor_set_immediate_slot_table_name(descriptor_set_table.descriptor_set_key)
         lines.append(f"static const loom_amdgpu_descriptor_immediate_slots_t {immediate_slot_table_name}[] = {{")
         for sdwa_dst_sel_slot, literal_slot in zip(
@@ -527,6 +565,12 @@ def _emit_source(
     lines.append("const loom_amdgpu_descriptor_traits_t* const kLoomAmdgpuDescriptorTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
     for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
         table_expr = _descriptor_set_trait_table_name(descriptor_set_key)
+        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    lines.append("};")
+    lines.append("")
+    lines.append("const uint8_t* const kLoomAmdgpuDescriptorVmemResultOrderClassTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
+    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
+        table_expr = _descriptor_set_vmem_result_order_class_table_name(descriptor_set_key)
         lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
     lines.append("};")
     lines.append("")
