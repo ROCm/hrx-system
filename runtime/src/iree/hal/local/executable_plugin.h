@@ -41,6 +41,7 @@
 // NOTE: this file is designed to be a standalone header: it is intended to be
 // used by external projects that may build without the IREE source code.
 // Include nothing but headers always available on all platforms/toolchains.
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -182,7 +183,12 @@ typedef struct iree_hal_executable_plugin_header_t {
 // The provided |max_version| is the maximum version the caller supports;
 // callees must return NULL if their lowest available version is greater
 // than the max version supported by the caller.
-typedef const iree_hal_executable_plugin_header_t** (
+//
+// On success the function returns the address of the initial |header| member
+// in the selected versioned plugin structure. The header pointer must be
+// non-NULL. Callers inspect the header to validate the version before
+// recovering the corresponding plugin structure.
+typedef const iree_hal_executable_plugin_header_t* const* (
     *iree_hal_executable_plugin_query_fn_t)(
     iree_hal_executable_plugin_version_t max_version, void* reserved);
 
@@ -459,6 +465,16 @@ typedef struct iree_hal_executable_plugin_v0_t {
   // avoid big switch tables.
   iree_hal_executable_plugin_resolve_fn_v0_t resolve;
 } iree_hal_executable_plugin_v0_t;
+
+static_assert(offsetof(iree_hal_executable_plugin_v0_t, header) == 0,
+              "the query result must address the initial header member");
+
+// Recovers a v0 plugin after its query result header has been validated.
+static inline const iree_hal_executable_plugin_v0_t*
+iree_hal_executable_plugin_v0_from_query_result(
+    const iree_hal_executable_plugin_header_t* const* query_result) {
+  return (const iree_hal_executable_plugin_v0_t*)query_result;
+}
 
 #ifdef __cplusplus
 }  // extern "C"

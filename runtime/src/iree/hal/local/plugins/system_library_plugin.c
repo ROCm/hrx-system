@@ -35,7 +35,7 @@ static iree_status_t iree_hal_system_library_executable_plugin_create(
 
   // Query the plugin interface.
   // This may fail if the version cannot be satisfied.
-  const iree_hal_executable_plugin_header_t** header_ptr =
+  const iree_hal_executable_plugin_header_t* const* query_result =
       query_fn(IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST, /*reserved=*/NULL);
 
   iree_hal_system_library_executable_plugin_t* plugin = NULL;
@@ -48,8 +48,8 @@ static iree_status_t iree_hal_system_library_executable_plugin_create(
 
   iree_status_t status = iree_hal_executable_plugin_initialize(
       &iree_hal_system_library_executable_plugin_vtable,
-      IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_NONE, header_ptr, param_count, params,
-      /*resolve_thunk=*/NULL, host_allocator, &plugin->base);
+      IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_NONE, query_result, param_count,
+      params, /*resolve_thunk=*/NULL, host_allocator, &plugin->base);
 
   if (iree_status_is_ok(status)) {
     *out_plugin = (iree_hal_executable_plugin_t*)plugin;

@@ -100,18 +100,25 @@ STATIC_ASSERT_EQ(sizeof(iree_hal_executable_plugin_string_pair_t),
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_executable_plugin_load(
-    const iree_hal_executable_plugin_header_t** header_ptr,
+    const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_plugin_t* plugin) {
-  // The header may be NULL if the plugin API used isn't compatible.
-  if (!header_ptr) {
+  // The query result may be NULL if the plugin API used isn't compatible.
+  if (!query_result || !*query_result) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "plugin does not support this version of the runtime (%08X)",
         IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST);
   }
-  plugin->library.header = header_ptr;
-  const iree_hal_executable_plugin_header_t* header = *plugin->library.header;
+  const iree_hal_executable_plugin_header_t* header = *query_result;
+  if (header->version != IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable plugin version %u is not supported by runtime version %u",
+        header->version, IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST);
+  }
+  plugin->library =
+      iree_hal_executable_plugin_v0_from_query_result(query_result);
 
   plugin->identifier = iree_make_cstring_view(header->name);
 
@@ -183,14 +190,14 @@ static iree_status_t iree_hal_executable_plugin_load(
 
   // Plugin is probably good - let's try loading it! It could fail for any
   // reason and the caller will clean up.
-  return (iree_status_t)plugin->library.v0->load(
+  return (iree_status_t)plugin->library->load(
       &environment, (size_t)param_count,
       (const iree_hal_executable_plugin_string_pair_t*)params, &plugin->self);
 }
 
 iree_status_t iree_hal_executable_plugin_initialize(
     const void* vtable, iree_hal_executable_plugin_features_t required_features,
-    const iree_hal_executable_plugin_header_t** header_ptr,
+    const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_hal_executable_plugin_resolve_thunk_t resolve_thunk,
     iree_allocator_t host_allocator,
@@ -201,18 +208,19 @@ iree_status_t iree_hal_executable_plugin_initialize(
   // properly initialized.
   iree_atomic_ref_count_init(&out_base_plugin->ref_count);
   out_base_plugin->vtable = vtable;
-  memset(&out_base_plugin->library, 0, sizeof(out_base_plugin->library));
+  out_base_plugin->library = NULL;
   out_base_plugin->self = NULL;
+  out_base_plugin->identifier = iree_string_view_empty();
   out_base_plugin->resolve_thunk = resolve_thunk;
 
   // Try to load the plugin; this may fail if the plugin is not supported
   // (version, features, etc) or the plugin decides it doesn't like Tuesdays.
   iree_status_t status = iree_hal_executable_plugin_load(
-      header_ptr, param_count, params, host_allocator, out_base_plugin);
+      query_result, param_count, params, host_allocator, out_base_plugin);
   if (iree_status_is_ok(status)) {
     IREE_TRACE({
       const iree_hal_executable_plugin_header_t* header =
-          out_base_plugin->library.v0->header;
+          out_base_plugin->library->header;
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->name);
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->description);
     });
@@ -229,10 +237,10 @@ void iree_hal_executable_plugin_destroy(iree_hal_executable_plugin_t* plugin) {
                               plugin->identifier.size);
 
   // Unload the plugin, if it has an unload method.
-  if (plugin->library.v0 && plugin->library.v0->unload) {
-    plugin->library.v0->unload(plugin->self);
+  if (plugin->library && plugin->library->unload) {
+    plugin->library->unload(plugin->self);
   }
-  memset(&plugin->library, 0, sizeof(plugin->library));
+  plugin->library = NULL;
   plugin->self = NULL;
 
   plugin->vtable->destroy(plugin);
@@ -276,10 +284,10 @@ static iree_status_t iree_hal_executable_plugin_resolve(
   iree_hal_executable_plugin_resolution_t resolution = 0;
   iree_status_t status =
       plugin->resolve_thunk
-          ? plugin->resolve_thunk(plugin->library.v0->resolve, plugin->self,
+          ? plugin->resolve_thunk(plugin->library->resolve, plugin->self,
                                   &params, &resolution)
-          : (iree_status_t)plugin->library.v0->resolve(plugin->self, &params,
-                                                       &resolution);
+          : (iree_status_t)plugin->library->resolve(plugin->self, &params,
+                                                    &resolution);
   *out_resolution = (iree_hal_executable_import_resolution_t)resolution;
 
   IREE_TRACE_ZONE_END(z0);
