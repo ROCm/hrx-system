@@ -1533,8 +1533,9 @@ static void publish_kernel_dispatch_packet(hsa_kernel_dispatch_packet_t* packet,
                                            uint16_t header, uint16_t setup) {
   const uint32_t header_setup = (uint32_t)header | ((uint32_t)setup << 16);
 #if defined(_WIN32)
-  (void)InterlockedExchange((volatile LONG*)&packet->full_header,
-                            (LONG)header_setup);
+  volatile uint32_t* full_header = &packet->full_header;
+  MemoryBarrier();
+  *full_header = header_setup;
 #else
   __atomic_store_n(&packet->full_header, header_setup, __ATOMIC_RELEASE);
 #endif  // defined(_WIN32)
