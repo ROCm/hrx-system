@@ -245,6 +245,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "executable_target",
+    srcs = ["executable_target.c"],
+    hdrs = ["executable_target.h"],
+    deps = [
+        ":target_id",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "code_object_target",
     srcs = ["code_object_target.c"],
     hdrs = ["code_object_target.h"],

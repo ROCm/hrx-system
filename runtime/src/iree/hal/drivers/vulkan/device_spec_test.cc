@@ -31,19 +31,24 @@ static iree_hal_vulkan_device_spec_t MakeTestSpec() {
 
 TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
-  std::vector<uint8_t> payload_storage(
-      iree_hal_vulkan_device_spec_payload_size());
-  IREE_ASSERT_OK(iree_hal_vulkan_device_spec_encode(
-      &source,
-      iree_make_byte_span(payload_storage.data(), payload_storage.size())));
-  static const uint8_t kExpectedPayload[] = {
-      'V', 'V', 'D', 'S', 2, 0, 0,    0,    0x00, 0x30, 0x40, 0x00, 0xd2, 0x04,
-      0,   0,   2,   0,   0, 0, 0xc0, 0x27, 0,    0,    0,    0,    0,    0,
+  iree_hal_vulkan_cooperative_matrix_property_t source_property = {
+      /*.m_size=*/16,
+      /*.n_size=*/8,
+      /*.k_size=*/16,
+      /*.a_type=*/1,
+      /*.b_type=*/2,
+      /*.c_type=*/3,
+      /*.result_type=*/4,
+      /*.saturating_accumulation=*/1,
+      /*.scope=*/5,
   };
-  ASSERT_EQ(payload_storage.size(), sizeof(kExpectedPayload));
-  EXPECT_EQ(memcmp(payload_storage.data(), kExpectedPayload,
-                   sizeof(kExpectedPayload)),
-            0);
+  iree_host_size_t payload_size = 0;
+  IREE_ASSERT_OK(
+      iree_hal_vulkan_device_spec_calculate_payload_size(1, &payload_size));
+  std::vector<uint8_t> payload_storage(payload_size);
+  IREE_ASSERT_OK(iree_hal_vulkan_device_spec_encode(
+      &source, 1, &source_property,
+      iree_make_byte_span(payload_storage.data(), payload_storage.size())));
 
   iree_hal_vulkan_device_spec_t decoded = {0};
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_decode(
@@ -54,22 +59,34 @@ TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   EXPECT_EQ(decoded.physical_device_type, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
   EXPECT_EQ(decoded.enabled_features, source.enabled_features);
   EXPECT_EQ(decoded.flags, source.flags);
+  ASSERT_EQ(decoded.cooperative_matrix.count, 1);
+  iree_hal_vulkan_cooperative_matrix_property_t decoded_property = {};
+  ASSERT_TRUE(iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+      &decoded, 0, &decoded_property));
+  EXPECT_EQ(decoded_property.m_size, source_property.m_size);
+  EXPECT_EQ(decoded_property.k_size, source_property.k_size);
+  EXPECT_EQ(decoded_property.result_type, source_property.result_type);
+  EXPECT_EQ(decoded_property.scope, source_property.scope);
+  EXPECT_FALSE(iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+      &decoded, 1, &decoded_property));
 }
 
 TEST(DeviceSpecTest, RejectsMalformedPayloads) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
-  std::vector<uint8_t> canonical_payload(
-      iree_hal_vulkan_device_spec_payload_size());
+  iree_host_size_t payload_size = 0;
+  IREE_ASSERT_OK(
+      iree_hal_vulkan_device_spec_calculate_payload_size(0, &payload_size));
+  std::vector<uint8_t> canonical_payload(payload_size);
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_encode(
-      &source,
+      &source, 0, nullptr,
       iree_make_byte_span(canonical_payload.data(), canonical_payload.size())));
 
   iree_hal_vulkan_device_spec_t decoded = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_vulkan_device_spec_encode(
-          &source, iree_make_byte_span(canonical_payload.data(),
-                                       canonical_payload.size() - 1)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_vulkan_device_spec_encode(
+                            &source, 0, nullptr,
+                            iree_make_byte_span(canonical_payload.data(),
+                                                canonical_payload.size() - 1)));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_vulkan_device_spec_decode(
@@ -96,23 +113,31 @@ TEST(DeviceSpecTest, RejectsMalformedPayloads) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_vulkan_device_spec_encode(
-          &source, iree_make_byte_span(
-                       NULL, iree_hal_vulkan_device_spec_payload_size())));
+          &source, 0, nullptr, iree_make_byte_span(NULL, payload_size)));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_vulkan_device_spec_decode(
-          iree_make_const_byte_span(NULL,
-                                    iree_hal_vulkan_device_spec_payload_size()),
-          &decoded));
+          iree_make_const_byte_span(NULL, payload_size), &decoded));
 }
 
 TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
+  iree_hal_vulkan_cooperative_matrix_property_t source_property = {
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/8,
+      /*.a_type=*/1,
+      /*.b_type=*/1,
+      /*.c_type=*/2,
+      /*.result_type=*/2,
+      /*.saturating_accumulation=*/0,
+      /*.scope=*/3,
+  };
 
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
-  IREE_ASSERT_OK(
-      iree_hal_vulkan_device_spec_builder_add_facet(&builder, &source));
+  IREE_ASSERT_OK(iree_hal_vulkan_device_spec_builder_add_facet(
+      &builder, &source, 1, &source_property));
 
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_ASSERT_OK(iree_hal_device_spec_builder_finalize(&builder, &device_spec));
@@ -124,6 +149,7 @@ TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_decode_facet(facet, &decoded));
   EXPECT_EQ(decoded.enabled_features, source.enabled_features);
   EXPECT_EQ(decoded.physical_device_type, source.physical_device_type);
+  ASSERT_EQ(decoded.cooperative_matrix.count, 1);
 
   iree_hal_device_spec_release(device_spec);
   iree_hal_device_spec_builder_deinitialize(&builder);
@@ -175,12 +201,27 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   physical_device.calibrated_timestamp_time_domains =
       IREE_HAL_VULKAN_TIME_DOMAIN_DEVICE |
       IREE_HAL_VULKAN_TIME_DOMAIN_CLOCK_MONOTONIC;
+  VkCooperativeMatrixPropertiesKHR cooperative_matrix_property = {};
+  cooperative_matrix_property.sType =
+      VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+  cooperative_matrix_property.MSize = 16;
+  cooperative_matrix_property.NSize = 16;
+  cooperative_matrix_property.KSize = 16;
+  cooperative_matrix_property.AType = VK_COMPONENT_TYPE_FLOAT16_KHR;
+  cooperative_matrix_property.BType = VK_COMPONENT_TYPE_FLOAT16_KHR;
+  cooperative_matrix_property.CType = VK_COMPONENT_TYPE_FLOAT32_KHR;
+  cooperative_matrix_property.ResultType = VK_COMPONENT_TYPE_FLOAT32_KHR;
+  cooperative_matrix_property.scope = VK_SCOPE_SUBGROUP_KHR;
+  physical_device.cooperative_matrix_property_count = 1;
+  physical_device.cooperative_matrix_property_rows =
+      &cooperative_matrix_property;
 
   iree_hal_vulkan_device_plan_t device_plan = {};
   device_plan.request_flags = IREE_HAL_VULKAN_REQUEST_FLAG_TRACING;
   device_plan.enabled_features =
       IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
       IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |
       IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL;
   device_plan.enabled_extensions =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
@@ -245,7 +286,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   iree_hal_executable_target_selection_t target_selection = {
       /*.family=*/IREE_SV("spirv"),
       /*.target_key=*/IREE_SV("vulkan1.3+bda"),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
       /*.physical_device_affinity=*/0,
   };
   const iree_hal_executable_target_selection_result_t selection_result =
@@ -263,6 +304,13 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   EXPECT_EQ(decoded.api_version, VK_MAKE_API_VERSION(0, 1, 3, 0));
   EXPECT_EQ(decoded.enabled_features, device_plan.enabled_features);
   EXPECT_EQ(decoded.physical_device_type, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+  ASSERT_EQ(decoded.cooperative_matrix.count, 1);
+  iree_hal_vulkan_cooperative_matrix_property_t decoded_property = {};
+  ASSERT_TRUE(iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+      &decoded, 0, &decoded_property));
+  EXPECT_EQ(decoded_property.m_size, cooperative_matrix_property.MSize);
+  EXPECT_EQ(decoded_property.a_type, cooperative_matrix_property.AType);
+  EXPECT_EQ(decoded_property.scope, cooperative_matrix_property.scope);
 
   iree_hal_device_spec_release(device_spec);
   iree_hal_allocator_release(allocator);

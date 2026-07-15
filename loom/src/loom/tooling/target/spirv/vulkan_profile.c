@@ -203,27 +203,41 @@ iree_status_t loom_spirv_vulkan_hal_query_cooperative_matrix_properties(
 
   *out_properties = NULL;
   *out_property_count = 0;
-  iree_host_size_t property_count = 0;
+
+  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  if (device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device does not expose immutable device facts");
+  }
+  const iree_hal_device_spec_facet_t* vulkan_facet =
+      iree_hal_vulkan_device_spec_find_facet(device_spec);
+  if (vulkan_facet == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device spec does not expose Vulkan device facts");
+  }
+  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
   IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_device_query_cooperative_matrix_properties(
-          device, /*property_capacity=*/0, &property_count,
-          /*out_properties=*/NULL));
+      iree_hal_vulkan_device_spec_decode_facet(vulkan_facet, &vulkan_spec));
+
+  const iree_host_size_t property_count = vulkan_spec.cooperative_matrix.count;
   if (property_count == 0) {
     return iree_ok_status();
   }
   iree_hal_vulkan_cooperative_matrix_property_t* properties = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      allocator, property_count * sizeof(*properties), (void**)&properties));
-  iree_status_t status =
-      iree_hal_vulkan_device_query_cooperative_matrix_properties(
-          device, property_count, &property_count, properties);
-  if (iree_status_is_ok(status)) {
-    *out_properties = properties;
-    *out_property_count = property_count;
-  } else {
-    iree_allocator_free(allocator, properties);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      allocator, property_count, sizeof(*properties), (void**)&properties));
+  for (iree_host_size_t i = 0; i < property_count; ++i) {
+    const bool property_read =
+        iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+            &vulkan_spec, i, &properties[i]);
+    IREE_ASSERT_TRUE(property_read);
+    (void)property_read;
   }
-  return status;
+  *out_properties = properties;
+  *out_property_count = property_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_spirv_vulkan_hal_profile_require_flag(

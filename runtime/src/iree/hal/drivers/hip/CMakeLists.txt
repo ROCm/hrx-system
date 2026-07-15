@@ -97,6 +97,7 @@ iree_cc_library(
     iree::base
     iree::base::core_headers
     iree::hal
+    iree::hal::drivers::amdgpu::util::executable_target
     iree::hal::utils::device_spec_builder
   PUBLIC
 )

@@ -327,6 +327,22 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    executable_target
+  HDRS
+    "executable_target.h"
+  SRCS
+    "executable_target.c"
+  DEPS
+    ::target_id
+    iree::hal
+    iree::hal::utils::device_spec_builder
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     code_object_target
   HDRS
     "code_object_target.h"

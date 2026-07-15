@@ -10,18 +10,23 @@
 
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_builder_add_facet(
     iree_hal_device_spec_builder_t* builder,
-    const iree_hal_vulkan_device_spec_t* spec) {
+    const iree_hal_vulkan_device_spec_t* spec,
+    iree_host_size_t cooperative_matrix_property_count,
+    const iree_hal_vulkan_cooperative_matrix_property_t*
+        cooperative_matrix_properties) {
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(spec);
 
-  const iree_host_size_t payload_size =
-      iree_hal_vulkan_device_spec_payload_size();
+  iree_host_size_t payload_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_calculate_payload_size(
+      cooperative_matrix_property_count, &payload_size));
   uint8_t* payload_storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       builder->host_allocator, payload_size, (void**)&payload_storage));
 
   iree_status_t status = iree_hal_vulkan_device_spec_encode(
-      spec, iree_make_byte_span(payload_storage, payload_size));
+      spec, cooperative_matrix_property_count, cooperative_matrix_properties,
+      iree_make_byte_span(payload_storage, payload_size));
   if (iree_status_is_ok(status)) {
     iree_hal_device_spec_facet_t facet = {
         .schema_id =
@@ -507,34 +512,80 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
   iree_hal_executable_target_t executable_target = {
       .family = IREE_SV("spirv"),
       .target_key = IREE_SV("vulkan1.3+bda"),
-      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      .priority = 100,
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+      .priority = 50,
       .physical_device_affinity = 1ull,
       .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   iree_hal_device_executable_spec_t executables = {
       .format_count = 1,
       .formats = &executable_format,
-      .target_count = 1,
-      .targets = &executable_target,
       .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_builder_set_executables(builder, &executables));
+  return iree_hal_device_spec_builder_add_executable_target(builder,
+                                                            &executable_target);
 }
 
 static iree_status_t iree_hal_vulkan_device_spec_populate_facet(
     const iree_hal_vulkan_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const VkPhysicalDeviceProperties* properties =
+  const VkPhysicalDeviceProperties* physical_device_properties =
       &params->physical_device->properties2.properties;
   iree_hal_vulkan_device_spec_t vulkan_spec = {
-      .api_version = properties->apiVersion,
-      .driver_version = properties->driverVersion,
-      .physical_device_type = properties->deviceType,
+      .api_version = physical_device_properties->apiVersion,
+      .driver_version = physical_device_properties->driverVersion,
+      .physical_device_type = physical_device_properties->deviceType,
       .enabled_features = params->device_plan->enabled_features,
       .flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
   };
-  return iree_hal_vulkan_device_spec_builder_add_facet(builder, &vulkan_spec);
+
+  iree_host_size_t property_count = 0;
+  const VkCooperativeMatrixPropertiesKHR* source_properties = NULL;
+  if (iree_all_bits_set(params->device_plan->enabled_features,
+                        IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX)) {
+    property_count = params->physical_device->cooperative_matrix_property_count;
+    source_properties =
+        params->physical_device->cooperative_matrix_property_rows;
+    if (IREE_UNLIKELY(property_count != 0 && !source_properties)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "Vulkan cooperative matrix support has %" PRIhsz
+                              " property rows but no retained row storage",
+                              property_count);
+    }
+  }
+
+  iree_hal_vulkan_cooperative_matrix_property_t* cooperative_matrix_properties =
+      NULL;
+  iree_status_t status = iree_ok_status();
+  if (property_count != 0) {
+    status =
+        iree_allocator_malloc_array(builder->host_allocator, property_count,
+                                    sizeof(*cooperative_matrix_properties),
+                                    (void**)&cooperative_matrix_properties);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < property_count; ++i) {
+      cooperative_matrix_properties[i] =
+          (iree_hal_vulkan_cooperative_matrix_property_t){
+              .m_size = source_properties[i].MSize,
+              .n_size = source_properties[i].NSize,
+              .k_size = source_properties[i].KSize,
+              .a_type = source_properties[i].AType,
+              .b_type = source_properties[i].BType,
+              .c_type = source_properties[i].CType,
+              .result_type = source_properties[i].ResultType,
+              .saturating_accumulation =
+                  source_properties[i].saturatingAccumulation,
+              .scope = source_properties[i].scope,
+          };
+    }
+    status = iree_hal_vulkan_device_spec_builder_add_facet(
+        builder, &vulkan_spec, property_count, cooperative_matrix_properties);
+  }
+  iree_allocator_free(builder->host_allocator, cooperative_matrix_properties);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_create(

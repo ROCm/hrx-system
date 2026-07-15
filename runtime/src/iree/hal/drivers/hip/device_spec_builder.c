@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/util/executable_target.h"
+
 static iree_status_t iree_hal_hip_device_spec_verify_params(
     const iree_hal_hip_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
@@ -481,37 +483,6 @@ static iree_status_t iree_hal_hip_device_spec_populate_timing(
 static iree_status_t iree_hal_hip_device_spec_populate_executables(
     const iree_hal_hip_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  iree_hal_executable_target_t executable_targets[64] = {{0}};
-  iree_host_size_t target_count = 0;
-  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
-    const iree_string_view_t gcn_arch_name = iree_make_cstring_view(
-        params->physical_devices[i].facts.architecture.gcn_arch_name);
-    if (iree_string_view_is_empty(gcn_arch_name)) continue;
-    const iree_hal_physical_device_affinity_t physical_device_affinity = 1ull
-                                                                         << i;
-    iree_host_size_t existing_target_index = target_count;
-    for (iree_host_size_t j = 0; j < target_count; ++j) {
-      if (iree_string_view_equal(executable_targets[j].target_key,
-                                 gcn_arch_name)) {
-        existing_target_index = j;
-        break;
-      }
-    }
-    if (existing_target_index < target_count) {
-      executable_targets[existing_target_index].physical_device_affinity |=
-          physical_device_affinity;
-      continue;
-    }
-    executable_targets[target_count++] = (iree_hal_executable_target_t){
-        .family = IREE_SV("amdgpu"),
-        .target_key = gcn_arch_name,
-        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-        .priority = 100,
-        .physical_device_affinity = physical_device_affinity,
-        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-    };
-  }
-
   iree_hal_executable_format_spec_t executable_formats[2] = {
       {
           .format = IREE_SV("rocm-hsaco-fb"),
@@ -527,11 +498,35 @@ static iree_status_t iree_hal_hip_device_spec_populate_executables(
   iree_hal_device_executable_spec_t executables = {
       .format_count = IREE_ARRAYSIZE(executable_formats),
       .formats = executable_formats,
-      .target_count = target_count,
-      .targets = target_count ? executable_targets : NULL,
       .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_spec_builder_set_executables(builder, &executables));
+
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    const iree_string_view_t gcn_arch_name = iree_make_cstring_view(
+        params->physical_devices[i].facts.architecture.gcn_arch_name);
+    if (iree_string_view_is_empty(gcn_arch_name)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "HIP physical device %" PRIhsz
+                              " did not report a GCN architecture",
+                              i);
+    }
+    iree_hal_amdgpu_target_id_t exact_target_id;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_target_id_parse(
+            gcn_arch_name,
+            IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
+                IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
+            &exact_target_id),
+        "parsing HIP physical device %" PRIhsz " target ID '%.*s'", i,
+        (int)gcn_arch_name.size, gcn_arch_name.data);
+    const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_device_spec_builder_add_executable_targets(
+            builder, &exact_target_id, target_affinity));
+  }
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_hip_device_spec_create(

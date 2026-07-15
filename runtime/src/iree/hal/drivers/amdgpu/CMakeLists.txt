@@ -20,6 +20,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::util::executable_target
     iree::hal::drivers::amdgpu::util::target_id
     iree::hal::utils::device_spec_builder
   PUBLIC

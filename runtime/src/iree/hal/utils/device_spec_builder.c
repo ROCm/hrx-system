@@ -545,6 +545,81 @@ iree_status_t iree_hal_device_spec_builder_set_executables(
   return status;
 }
 
+iree_status_t iree_hal_device_spec_builder_add_executable_target(
+    iree_hal_device_spec_builder_t* builder,
+    const iree_hal_executable_target_t* target) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_builder_ensure_storage(builder));
+
+  iree_hal_device_executable_spec_t* executables =
+      &builder->storage->executables;
+  for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
+    iree_hal_executable_target_t* existing_target =
+        &builder->storage->executable_targets[i];
+    if (existing_target->kind != target->kind ||
+        !iree_string_view_equal(existing_target->family, target->family) ||
+        !iree_string_view_equal(existing_target->target_key,
+                                target->target_key)) {
+      continue;
+    }
+    if (existing_target->priority != target->priority) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate executable target '%.*s:%.*s' has priorities %" PRIu32
+          " and %" PRIu32,
+          (int)target->family.size, target->family.data,
+          (int)target->target_key.size, target->target_key.data,
+          existing_target->priority, target->priority);
+    }
+    existing_target->physical_device_affinity |=
+        target->physical_device_affinity;
+    existing_target->flags |= target->flags;
+    return iree_ok_status();
+  }
+
+  if (executables->target_count == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "device spec executable target count overflow");
+  }
+  const iree_host_size_t new_target_count = executables->target_count + 1;
+  iree_hal_executable_target_t* new_targets = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_array(builder->host_allocator, new_target_count,
+                                  sizeof(*new_targets), (void**)&new_targets));
+  if (executables->target_count != 0) {
+    memcpy(new_targets, builder->storage->executable_targets,
+           executables->target_count * sizeof(*new_targets));
+  }
+
+  iree_hal_executable_target_t* new_target =
+      &new_targets[executables->target_count];
+  *new_target = *target;
+  new_target->family = iree_string_view_empty();
+  new_target->target_key = iree_string_view_empty();
+  iree_status_t status = iree_hal_device_spec_builder_copy_string(
+      builder->host_allocator, target->family, &new_target->family);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_copy_string(
+        builder->host_allocator, target->target_key, &new_target->target_key);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_allocator_free(builder->host_allocator,
+                        builder->storage->executable_targets);
+    builder->storage->executable_targets = new_targets;
+    executables->target_count = new_target_count;
+    executables->targets = new_targets;
+    builder->storage->params.executables = executables;
+  } else {
+    iree_hal_device_spec_builder_free_string(builder->host_allocator,
+                                             new_target->family);
+    iree_hal_device_spec_builder_free_string(builder->host_allocator,
+                                             new_target->target_key);
+    iree_allocator_free(builder->host_allocator, new_targets);
+  }
+  return status;
+}
+
 iree_status_t iree_hal_device_spec_builder_set_sanitizer(
     iree_hal_device_spec_builder_t* builder,
     const iree_hal_device_sanitizer_spec_t* sanitizer) {
