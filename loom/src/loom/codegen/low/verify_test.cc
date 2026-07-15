@@ -71,15 +71,15 @@ class LowVerifyTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  static loom_target_bundle_storage_t CopyTargetBundle(
-      const loom_target_bundle_t* bundle) {
-    loom_target_bundle_storage_t storage = {};
-    storage.snapshot = *bundle->snapshot;
-    storage.export_plan = *bundle->export_plan;
-    storage.config = *bundle->config;
-    storage.bundle = *bundle;
-    loom_target_bundle_storage_rebind(&storage);
-    return storage;
+  static void InitializeTargetBundleStorage(
+      const loom_target_bundle_t* bundle,
+      loom_target_bundle_storage_t* out_storage) {
+    *out_storage = {};
+    out_storage->snapshot = *bundle->snapshot;
+    out_storage->export_plan = *bundle->export_plan;
+    out_storage->config = *bundle->config;
+    out_storage->bundle = *bundle;
+    loom_target_bundle_storage_rebind(out_storage);
   }
 
   void VerifyModule(loom_module_t* module, loom_target_selection_t selection,
@@ -126,10 +126,10 @@ low.func.def target(@target) @uses_workgroup_storage() {
 }
 )");
   ASSERT_GT(loom_test_target_bundles.count, 1u);
-  loom_target_bundle_storage_t selected_storage =
-      CopyTargetBundle(loom_test_target_bundles.values[1]);
+  loom_target_bundle_storage_t selected_storage;
+  InitializeTargetBundleStorage(loom_test_target_bundles.values[1],
+                                &selected_storage);
   selected_storage.snapshot.max_workgroup_storage_bytes = 64;
-  loom_target_bundle_storage_rebind(&selected_storage);
   const loom_target_selection_t selection = {
       /*.bundle=*/&selected_storage.bundle,
       /*.data=*/nullptr,
