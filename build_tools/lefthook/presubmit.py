@@ -30,7 +30,8 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -1476,7 +1477,7 @@ def bazel_file_uri_to_path(uri: str) -> Path:
         raise ValueError(f"expected file URI for Bazel output, got {uri}")
     if parsed.netloc:
         raise ValueError(f"file URI has unsupported host component: {uri}")
-    return Path(unquote(parsed.path))
+    return Path(url2pathname(parsed.path))
 
 
 def bazel_output_paths_from_bep(
