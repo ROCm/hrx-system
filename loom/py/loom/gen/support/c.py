@@ -63,3 +63,14 @@ def c_string_arg(value: str) -> str:
 def c_string_view(value: str, *, macro: str = "IREE_SVL") -> str:
     """Returns a C string-view literal expression."""
     return f'{macro}("{c_string_literal(value)}")'
+
+
+def c_i64_literal(value: int) -> str:
+    """Returns a portable C expression for a signed 64-bit integer."""
+    if value < -(1 << 63) or value > (1 << 63) - 1:
+        raise ValueError(f"signed 64-bit integer literal out of range: {value}")
+    if value == -(1 << 63):
+        return "INT64_MIN"
+    if value < 0:
+        return f"(-INT64_C({abs(value)}))"
+    return f"INT64_C({value})"

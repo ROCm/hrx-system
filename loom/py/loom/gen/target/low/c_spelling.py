@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from loom.gen.support.c import CIdentifierCase
+from loom.gen.support.c import c_i64_literal as _c_i64_literal
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
@@ -37,11 +38,7 @@ def optional_string_expr(string_pool: CStringPool, label: str | None) -> str:
 
 
 def i64_literal(value: int) -> str:
-    if value == -(1 << 63):
-        return "INT64_MIN"
-    if value < 0:
-        return f"(-INT64_C({abs(value)}))"
-    return f"INT64_C({value})"
+    return _c_i64_literal(value)
 
 
 def u64_literal(value: int) -> str:

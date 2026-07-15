@@ -10,6 +10,7 @@ import pytest
 
 from loom.gen.support.c import (
     CIdentifierCase,
+    c_i64_literal,
     c_identifier,
     c_identifier_parts,
     c_pascal_identifier,
@@ -53,3 +54,23 @@ def test_c_string_literal_escapes_c_control_characters() -> None:
     assert c_string_arg("hello") == '"hello"'
     assert c_string_view("hello") == 'IREE_SVL("hello")'
     assert c_string_view("hello", macro="LOOM_SV") == 'LOOM_SV("hello")'
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0, "INT64_C(0)"),
+        (1 << 31, "INT64_C(2147483648)"),
+        (-1, "(-INT64_C(1))"),
+        (-(1 << 31), "(-INT64_C(2147483648))"),
+        (-(1 << 63), "INT64_MIN"),
+    ],
+)
+def test_c_i64_literal(value: int, expected: str) -> None:
+    assert c_i64_literal(value) == expected
+
+
+@pytest.mark.parametrize("value", [-(1 << 63) - 1, 1 << 63])
+def test_c_i64_literal_rejects_out_of_range(value: int) -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        c_i64_literal(value)

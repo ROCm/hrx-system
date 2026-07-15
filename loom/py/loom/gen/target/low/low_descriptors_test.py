@@ -1518,6 +1518,7 @@ def test_generator_emits_sliced_immediate_encoding_rows() -> None:
     assert ".encoding_slice_count = 2," in generated.source
     assert ".encoding_field_id = 7," in generated.source
     assert ".source_bit_offset = 16," in generated.source
+    assert ".signed_min = (-INT64_C(2147483648))," in generated.source
 
 
 def test_generator_rejects_immediate_with_direct_and_sliced_encoding() -> None:
