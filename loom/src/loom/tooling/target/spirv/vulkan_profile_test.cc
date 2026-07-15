@@ -66,19 +66,17 @@ static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
 static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
     MakeFakeExecutableCacheVtable();
 
-static fake_hal_device_t FakeDevice(const iree_hal_device_spec_t* device_spec) {
-  fake_hal_device_t device = {};
-  device.device_spec = device_spec;
-  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
-  return device;
+static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
+                                    fake_hal_device_t* out_device) {
+  out_device->device_spec = device_spec;
+  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
 }
 
-static fake_executable_cache_t FakeExecutableCache(bool raw_bda_supported) {
-  fake_executable_cache_t executable_cache = {};
-  executable_cache.raw_bda_supported = raw_bda_supported;
+static void InitializeFakeExecutableCache(
+    bool raw_bda_supported, fake_executable_cache_t* out_executable_cache) {
+  out_executable_cache->raw_bda_supported = raw_bda_supported;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
-                               &executable_cache.resource);
-  return executable_cache;
+                               &out_executable_cache->resource);
 }
 
 static iree_hal_vulkan_features_t BaselineVulkanFeatures() {
@@ -249,8 +247,10 @@ static iree_hal_vulkan_cooperative_matrix_property_t U8DeviceMatrixRow() {
 TEST(VulkanProfileTest, QueryReadsHalDeviceAndExecutableCacheFacts) {
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_ASSERT_OK(CreateDeviceSpec(BaselineVulkanFeatures(), &device_spec));
-  fake_hal_device_t device = FakeDevice(device_spec);
-  fake_executable_cache_t executable_cache = FakeExecutableCache(true);
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  fake_executable_cache_t executable_cache = {};
+  InitializeFakeExecutableCache(true, &executable_cache);
 
   loom_spirv_vulkan_hal_profile_facts_t facts = {};
   IREE_ASSERT_OK(loom_spirv_vulkan_hal_profile_query(
@@ -312,8 +312,10 @@ TEST(VulkanProfileTest, QueryReadsHalDeviceAndExecutableCacheFacts) {
 TEST(VulkanProfileTest, QueryKeepsRawBdaExecutableSupportSeparate) {
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_ASSERT_OK(CreateDeviceSpec(BaselineVulkanFeatures(), &device_spec));
-  fake_hal_device_t device = FakeDevice(device_spec);
-  fake_executable_cache_t executable_cache = FakeExecutableCache(false);
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  fake_executable_cache_t executable_cache = {};
+  InitializeFakeExecutableCache(false, &executable_cache);
 
   loom_spirv_vulkan_hal_profile_facts_t facts = {};
   IREE_ASSERT_OK(loom_spirv_vulkan_hal_profile_query(
