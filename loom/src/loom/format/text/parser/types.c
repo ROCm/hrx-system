@@ -531,33 +531,29 @@ static iree_status_t loom_intern_shaped_type(
 // Shaped type parsing
 //===----------------------------------------------------------------------===//
 
-// Parses a shaped type (tile, tensor, vector, or view) from the token stream.
-// Called after LANGLE has been consumed. Consumes tokens through RANGLE.
-//
-// Grammar: dim (x dim)* x element_type [, encoding] >
-//
-// The tokenizer's in_dim_list flag is managed here: set after the
-// first dim is consumed, cleared before scanning what follows each
-// DIM_X separator. This ensures element types and encoding params
-// are always scanned in normal (non-dim) mode.
-static iree_status_t loom_parse_shaped_type(loom_parser_t* parser,
-                                            loom_type_kind_t kind,
+// Parses the dimension prefix of a shaped type while keeping the tokenizer in
+// dimension mode. The token after a DIM_X separator must be scanned in that
+// mode to distinguish a zero extent from the start of a hexadecimal literal.
+// The element-type token may be cached by the final lookahead, but dimension
+// mode is always cleared before returning so parser recovery cannot inherit it.
+static iree_status_t loom_parse_shaped_dims(loom_parser_t* parser,
                                             loom_type_parse_mode_t mode,
-                                            loom_type_t* out_type) {
-  uint64_t dims[16];
+                                            uint64_t* dims, uint8_t* out_rank) {
+  iree_status_t status = iree_ok_status();
   uint8_t rank = 0;
+  const uint32_t errors_before = parser->error_count;
 
-  // Parse dimensions. in_dim_list must be true from the start so
-  // that '0x' in '0xf32' is scanned as INTEGER(0) + DIM_X(x) +
-  // BARE_IDENT(f32), not as hex INTEGER(0xf32).
   parser->tokenizer.in_dim_list = true;
   loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
   if (token.kind == LOOM_TOKEN_INTEGER || token.kind == LOOM_TOKEN_LBRACKET) {
-    IREE_RETURN_IF_ERROR(loom_parse_dim(parser, mode, &dims[rank++]));
+    status = loom_parse_dim(parser, mode, &dims[rank]);
+    if (iree_status_is_ok(status) && parser->error_count == errors_before) {
+      ++rank;
+    }
 
-    while (loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_DIM_X)) {
+    while (iree_status_is_ok(status) && parser->error_count == errors_before &&
+           loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_DIM_X)) {
       loom_tokenizer_next(&parser->tokenizer);  // consume 'x'
-      parser->tokenizer.in_dim_list = false;
 
       token = loom_tokenizer_peek(&parser->tokenizer);
       if (token.kind != LOOM_TOKEN_INTEGER &&
@@ -565,19 +561,37 @@ static iree_status_t loom_parse_shaped_type(loom_parser_t* parser,
         break;  // element type follows
       }
       if (rank >= 16) {
-        return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
-                                                 token);
+        status = loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
+                                                   token);
+        break;
       }
-      parser->tokenizer.in_dim_list = true;
-      IREE_RETURN_IF_ERROR(loom_parse_dim(parser, mode, &dims[rank++]));
+      status = loom_parse_dim(parser, mode, &dims[rank]);
+      if (iree_status_is_ok(status) && parser->error_count == errors_before) {
+        ++rank;
+      }
     }
-  } else {
-    // Rank 0 — no dims. Clear in_dim_list before element type.
-    parser->tokenizer.in_dim_list = false;
   }
+  parser->tokenizer.in_dim_list = false;
+  *out_rank = rank;
+  return status;
+}
+
+// Parses a shaped type (tile, tensor, vector, or view) from the token stream.
+// Called after LANGLE has been consumed. Consumes tokens through RANGLE.
+//
+// Grammar: dim (x dim)* x element_type [, encoding] >
+static iree_status_t loom_parse_shaped_type(loom_parser_t* parser,
+                                            loom_type_kind_t kind,
+                                            loom_type_parse_mode_t mode,
+                                            loom_type_t* out_type) {
+  uint64_t dims[16];
+  uint8_t rank = 0;
+  const uint32_t errors_before = parser->error_count;
+  IREE_RETURN_IF_ERROR(loom_parse_shaped_dims(parser, mode, dims, &rank));
+  if (parser->error_count > errors_before) return iree_ok_status();
 
   if (kind == LOOM_TYPE_VECTOR && rank == 0) {
-    token = loom_tokenizer_peek(&parser->tokenizer);
+    loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(
         parser, token, IREE_SV("vector types must have rank >= 1"));
   }

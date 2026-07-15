@@ -1102,10 +1102,10 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
     return loom_tokenizer_scan_block_label(t, out_token);
   }
 
-  // Dimension separator: in a dim list, 'x' is a single-character
-  // separator token rather than an identifier start. The parser sets
-  // in_dim_list during shaped type dim parsing and clears it before
-  // scanning element types or encoding parameters.
+  // Dimension separator: in a dim list, 'x' is a single-character separator
+  // token rather than an identifier start. The parser keeps in_dim_list set
+  // through the element-type lookahead and clears it before consuming the
+  // element type or encoding parameters.
   if (t->in_dim_list && c == 'x') {
     ++t->position;
     ++t->column;

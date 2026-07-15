@@ -1204,19 +1204,30 @@ TEST(Tokenizer, DimXZeroDimNotHex) {
   EXPECT_TRUE(iree_string_view_equal(t2.text, IREE_SV("f32")));
 }
 
-TEST(Tokenizer, DimXClearedBeforeElementType) {
-  // Simulates the parser lifecycle: set in_dim_list for dims, clear
-  // before scanning element type. Verifies that clearing mid-stream
-  // produces BARE_IDENT for the element type.
-  ScopedTokenizer t("4xf32");
+TEST(Tokenizer, DimXRemainsActiveWhileFindingElementType) {
+  // The parser cannot leave dimension mode until it has distinguished the
+  // next dimension from the element type. In particular, disabling it after
+  // the first separator would scan the second zero extent as hex integer
+  // literal "0x" instead of INTEGER(0) + DIM_X(x).
+  ScopedTokenizer t("4x0xi32");
   t.get()->in_dim_list = true;
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);  // 4
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_DIM_X);    // x
-  // Parser clears in_dim_list after consuming DIM_X.
+  loom_token_t zero_extent = t.next();
+  EXPECT_EQ(zero_extent.kind, LOOM_TOKEN_INTEGER);
+  EXPECT_TRUE(iree_string_view_equal(zero_extent.text, IREE_SV("0")));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_DIM_X);  // x
+
+  // Peeking under dimension mode identifies the element type without changing
+  // its token kind. The parser can then leave dimension mode before consuming
+  // the cached token.
+  loom_token_t element = loom_tokenizer_peek(t.get());
+  EXPECT_EQ(element.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(element.text, IREE_SV("i32")));
   t.get()->in_dim_list = false;
-  loom_token_t elem = t.next();  // f32
-  EXPECT_EQ(elem.kind, LOOM_TOKEN_BARE_IDENT);
-  EXPECT_TRUE(iree_string_view_equal(elem.text, IREE_SV("f32")));
+  element = t.next();
+  EXPECT_EQ(element.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(element.text, IREE_SV("i32")));
 }
 
 }  // namespace

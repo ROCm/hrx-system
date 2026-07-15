@@ -2073,8 +2073,10 @@ TEST_F(ParserTest, VectorRequiresRank) {
 
 TEST_F(ParserTest, VectorZeroExtentIsNotRankZero) {
   loom_module_t* module = ParseOk(
-      "test.func @empty(%v: vector<0xf32>, %m: vector<4x0xi32>) {\n"
-      "  test.use %v, %m : vector<0xf32>, vector<4x0xi32>\n"
+      "test.func @empty(%v: vector<0xf32>, %m: vector<4x0xi32>, "
+      "%f: vector<4x0xf32>) {\n"
+      "  test.use %v, %m, %f : vector<0xf32>, vector<4x0xi32>, "
+      "vector<4x0xf32>\n"
       "  test.yield\n"
       "}\n");
   loom_module_free(module);
@@ -2475,6 +2477,16 @@ TEST_F(ParserTest, RecoverySkipsToNextOp) {
   EXPECT_NE(FindDiagnostic(capture_,
                            loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6)),
             nullptr);
+}
+
+TEST_F(ParserTest, ShapedTypeRecoveryRestoresIntegerTokenization) {
+  const auto& diagnostics = ParseExpectErrors(
+      "%bad = test.constant 0 : vector<[%missing]xf32>\n"
+      "%good = test.constant 0xf32 : i32\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  for (const auto& diagnostic : diagnostics) {
+    EXPECT_EQ(diagnostic.origin_line, 1u);
+  }
 }
 
 TEST_F(ParserTest, MaxErrorsLimit) {
