@@ -184,7 +184,7 @@ if(LOOM_EMIT_WASM AND NOT LOOM_TARGET_ARCH_WASM)
 endif()
 
 function(loom_configure_project)
-  if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
     iree_configure_rocm_hsa_runtime_headers()
   endif()
 endfunction()

@@ -23,6 +23,11 @@ namespace {
 constexpr NTSTATUS kStatusPending = static_cast<NTSTATUS>(0x00000103);
 constexpr NTSTATUS kStatusBufferTooSmall =
     static_cast<NTSTATUS>(0xC0000023);
+// Windows SDK 10.0.26100 names client hint 25 as VITIS, but older SDK
+// headers stop before that enumerator. The D3DKMT ABI field is unchanged.
+static_assert(sizeof(D3DKMT_CLIENTHINT) == sizeof(uint32_t));
+constexpr D3DKMT_CLIENTHINT kClientHintVitis =
+    static_cast<D3DKMT_CLIENTHINT>(25);
 constexpr uint64_t kPageSize = 4096;
 constexpr uint64_t kCommandApertureAllocationSize = 0x1000;
 constexpr D3DGPU_VIRTUAL_ADDRESS kCommandApertureGpuVaBase = 0x04000000;
@@ -331,7 +336,8 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   // Negotiate on both the accepted query shape and its returned protocol
   // identity. Unknown identities fail closed instead of inheriting a packet
   // layout from a driver-version heuristic.
-  constexpr uint32_t kLegacyIdentity[2] = {0, 2};
+  constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
+  constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
   constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
   uint32_t private_data[3] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
@@ -341,8 +347,13 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   query.PrivateDriverDataSize = 2 * sizeof(uint32_t);
   NTSTATUS status = api.query_adapter_info(&query);
   if (status == 0) {
-    if (std::memcmp(private_data, kLegacyIdentity, sizeof(kLegacyIdentity)) !=
-        0) {
+    const bool is_legacy_v2 =
+        std::memcmp(private_data, kLegacyV2Identity,
+                    sizeof(kLegacyV2Identity)) == 0;
+    const bool is_legacy_v3 =
+        std::memcmp(private_data, kLegacyV3Identity,
+                    sizeof(kLegacyV3Identity)) == 0;
+    if (!is_legacy_v2 && !is_legacy_v3) {
       SetErrorFormat(out_error,
                      "unsupported two-dword MCDM identity {%u, %u}",
                      private_data[0], private_data[1]);
@@ -1102,7 +1113,7 @@ bool CreateContext(const KmtApi& api, const Device& device,
   create_context.Flags.HwQueueSupported = 1;
   create_context.pPrivateDriverData = const_cast<uint8_t*>(private_data);
   create_context.PrivateDriverDataSize = static_cast<UINT>(private_data_size);
-  create_context.ClientHint = D3DKMT_CLIENTHINT_VITIS;
+  create_context.ClientHint = kClientHintVitis;
   NTSTATUS status = api.create_context_virtual(&create_context);
   if (!CheckStatus("D3DKMTCreateContextVirtual", status, out_error)) {
     return false;
