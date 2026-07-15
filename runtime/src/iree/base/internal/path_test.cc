@@ -206,6 +206,36 @@ TEST(FilePathTest, IsDynamicLibrary) {
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
+typedef struct counting_allocator_t {
+  // Allocator receiving forwarded commands.
+  iree_allocator_t delegate;
+  // Number of allocation or reallocation commands received.
+  int allocation_count;
+  // Number of free commands received.
+  int free_count;
+} counting_allocator_t;
+
+static iree_status_t counting_allocator_ctl(void* self,
+                                            iree_allocator_command_t command,
+                                            const void* params,
+                                            void** inout_ptr) {
+  counting_allocator_t* allocator = (counting_allocator_t*)self;
+  switch (command) {
+    case IREE_ALLOCATOR_COMMAND_MALLOC:
+    case IREE_ALLOCATOR_COMMAND_CALLOC:
+    case IREE_ALLOCATOR_COMMAND_REALLOC:
+      ++allocator->allocation_count;
+      break;
+    case IREE_ALLOCATOR_COMMAND_FREE:
+      ++allocator->free_count;
+      break;
+    default:
+      break;
+  }
+  return allocator->delegate.ctl(allocator->delegate.self, command, params,
+                                 inout_ptr);
+}
+
 TEST(FilePathTest, ToWin32ConvertsRelativeUtf8Path) {
   wchar_t* converted_path = NULL;
   IREE_ASSERT_OK(
@@ -249,10 +279,46 @@ TEST(FilePathTest, ToWin32PreservesNamespacePaths) {
   expect_preserved(IREE_SV("\\\\.\\pipe\\device"), L"\\\\.\\pipe\\device");
 }
 
+TEST(FilePathTest, ToWin32ConvertsPathBeyondCommonLimit) {
+  std::string input = "C:\\";
+  while (input.size() <= IREE_MAX_PATH + 64) {
+    input.append("segment\\");
+  }
+  input.append("file.bin");
+  ASSERT_GT(input.size(), IREE_MAX_PATH);
+
+  counting_allocator_t allocator_state = {
+      /*.delegate=*/iree_allocator_system(),
+      /*.allocation_count=*/0,
+      /*.free_count=*/0,
+  };
+  iree_allocator_t allocator = {
+      /*.self=*/&allocator_state,
+      /*.ctl=*/counting_allocator_ctl,
+  };
+  wchar_t* converted_path = NULL;
+  IREE_ASSERT_OK(
+      iree_file_path_to_win32(iree_make_string_view(input.data(), input.size()),
+                              allocator, &converted_path));
+  ASSERT_NE(converted_path, nullptr);
+  EXPECT_EQ(allocator_state.allocation_count, 1);
+
+  std::wstring path(converted_path);
+  iree_allocator_free(allocator, converted_path);
+  EXPECT_EQ(allocator_state.free_count, 1);
+  EXPECT_EQ(path.substr(0, 7), L"\\\\?\\C:\\");
+  EXPECT_EQ(path.size(), input.size() + 4);
+}
+
 TEST(FilePathTest, ToWin32RejectsInvalidUtf8AndEmbeddedNul) {
   wchar_t* converted_path = NULL;
   EXPECT_THAT(iree_file_path_to_win32(IREE_SV(""), iree_allocator_system(),
                                       &converted_path),
+              StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_EQ(converted_path, nullptr);
+
+  EXPECT_THAT(iree_file_path_to_win32(iree_make_string_view(nullptr, 1),
+                                      iree_allocator_system(), &converted_path),
               StatusIs(StatusCode::kInvalidArgument));
   EXPECT_EQ(converted_path, nullptr);
 
