@@ -521,6 +521,45 @@ static inline void iree_unaligned_store_le_f64(double* ptr, double value) {
 // Dereferences |ptr| and returns the value.
 // Automatically handles unaligned accesses on architectures that may not
 // support them natively (or efficiently). Memory is treated as little-endian.
+#if defined(__cplusplus)
+
+extern "C++" {
+
+static inline uint8_t iree_unaligned_load_le(const int8_t* ptr) {
+  return iree_unaligned_load_le_u8((const uint8_t*)ptr);
+}
+static inline uint8_t iree_unaligned_load_le(const uint8_t* ptr) {
+  return iree_unaligned_load_le_u8(ptr);
+}
+static inline uint16_t iree_unaligned_load_le(const int16_t* ptr) {
+  return iree_unaligned_load_le_u16((const uint16_t*)ptr);
+}
+static inline uint16_t iree_unaligned_load_le(const uint16_t* ptr) {
+  return iree_unaligned_load_le_u16(ptr);
+}
+static inline uint32_t iree_unaligned_load_le(const int32_t* ptr) {
+  return iree_unaligned_load_le_u32((const uint32_t*)ptr);
+}
+static inline uint32_t iree_unaligned_load_le(const uint32_t* ptr) {
+  return iree_unaligned_load_le_u32(ptr);
+}
+static inline uint64_t iree_unaligned_load_le(const int64_t* ptr) {
+  return iree_unaligned_load_le_u64((const uint64_t*)ptr);
+}
+static inline uint64_t iree_unaligned_load_le(const uint64_t* ptr) {
+  return iree_unaligned_load_le_u64(ptr);
+}
+static inline float iree_unaligned_load_le(const float* ptr) {
+  return iree_unaligned_load_le_f32(ptr);
+}
+static inline double iree_unaligned_load_le(const double* ptr) {
+  return iree_unaligned_load_le_f64(ptr);
+}
+
+}  // extern "C++"
+
+#else
+
 #define iree_unaligned_load_le(ptr)                                            \
   _Generic((ptr),                                                              \
         int8_t*: iree_unaligned_load_le_u8((const uint8_t*)(ptr)),             \
@@ -545,9 +584,50 @@ const uint64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
   const double*: iree_unaligned_load_le_f64((const double*)(ptr))              \
   )
 
+#endif  // defined(__cplusplus)
+
 // Dereferences |ptr| and writes the given |value|.
 // Automatically handles unaligned accesses on architectures that may not
 // support them natively (or efficiently). Memory is treated as little-endian.
+#if defined(__cplusplus)
+
+extern "C++" {
+
+static inline void iree_unaligned_store_le(int8_t* ptr, uint8_t value) {
+  iree_unaligned_store_le_u8((uint8_t*)ptr, value);
+}
+static inline void iree_unaligned_store_le(uint8_t* ptr, uint8_t value) {
+  iree_unaligned_store_le_u8(ptr, value);
+}
+static inline void iree_unaligned_store_le(int16_t* ptr, uint16_t value) {
+  iree_unaligned_store_le_u16((uint16_t*)ptr, value);
+}
+static inline void iree_unaligned_store_le(uint16_t* ptr, uint16_t value) {
+  iree_unaligned_store_le_u16(ptr, value);
+}
+static inline void iree_unaligned_store_le(int32_t* ptr, uint32_t value) {
+  iree_unaligned_store_le_u32((uint32_t*)ptr, value);
+}
+static inline void iree_unaligned_store_le(uint32_t* ptr, uint32_t value) {
+  iree_unaligned_store_le_u32(ptr, value);
+}
+static inline void iree_unaligned_store_le(int64_t* ptr, uint64_t value) {
+  iree_unaligned_store_le_u64((uint64_t*)ptr, value);
+}
+static inline void iree_unaligned_store_le(uint64_t* ptr, uint64_t value) {
+  iree_unaligned_store_le_u64(ptr, value);
+}
+static inline void iree_unaligned_store_le(float* ptr, float value) {
+  iree_unaligned_store_le_f32(ptr, value);
+}
+static inline void iree_unaligned_store_le(double* ptr, double value) {
+  iree_unaligned_store_le_f64(ptr, value);
+}
+
+}  // extern "C++"
+
+#else
+
 #define iree_unaligned_store_le(ptr, value)                                    \
   _Generic((ptr),                                                              \
         int8_t*: iree_unaligned_store_le_u8((uint8_t*)(ptr), value),           \
@@ -561,6 +641,8 @@ const uint64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
          float*: iree_unaligned_store_le_f32((float*)(ptr), value),            \
         double*: iree_unaligned_store_le_f64((double*)(ptr), value)            \
   )
+
+#endif  // defined(__cplusplus)
 
 // clang-format on
 
