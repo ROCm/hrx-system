@@ -203,12 +203,31 @@ set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
   EXPORT_NAME hrx
   POSITION_INDEPENDENT_CODE ON
 )
-if(NOT WIN32)
+if(APPLE)
+  set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path"
+    C_VISIBILITY_PRESET hidden
+  )
+  set(_hrx_export_file "${LIBHRX_SOURCE_DIR}/cmake/hrx_exports_macos.txt")
+  target_link_options(libhrx_src_libhrx_hrx PRIVATE
+    "-Wl,-exported_symbols_list,${_hrx_export_file}"
+  )
+  set_property(TARGET libhrx_src_libhrx_hrx APPEND PROPERTY
+    LINK_DEPENDS "${_hrx_export_file}"
+  )
+elseif(UNIX)
   set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
     C_VISIBILITY_PRESET hidden
-    LINK_FLAGS "-Wl,--version-script=${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds"
+  )
+  set(_hrx_export_file "${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds")
+  target_link_options(libhrx_src_libhrx_hrx PRIVATE
+    "-Wl,--version-script=${_hrx_export_file}"
+  )
+  set_property(TARGET libhrx_src_libhrx_hrx APPEND PROPERTY
+    LINK_DEPENDS "${_hrx_export_file}"
   )
 endif()
 set_property(TARGET libhrx_src_libhrx_hrx PROPERTY
