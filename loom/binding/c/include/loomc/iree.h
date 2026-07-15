@@ -52,21 +52,6 @@ extern "C" {
 #define LOOMC_IREE_STATIC_ASSERT _Static_assert
 #endif
 
-// MSVC emits C5287 for comparisons between distinct enum types even when both
-// operands have explicit integer casts. Alias both values into one anonymous
-// enum so the equality check remains compile-time and warning-free.
-#define LOOMC_IREE_CONCAT_INNER_(lhs, rhs) lhs##rhs
-#define LOOMC_IREE_CONCAT_(lhs, rhs) LOOMC_IREE_CONCAT_INNER_(lhs, rhs)
-#define LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message)       \
-  enum {                                                          \
-    LOOMC_IREE_CONCAT_(loomc_iree_assert_lhs_, __LINE__) = (lhs), \
-    LOOMC_IREE_CONCAT_(loomc_iree_assert_rhs_, __LINE__) = (rhs), \
-  };                                                              \
-  LOOMC_IREE_STATIC_ASSERT(                                       \
-      LOOMC_IREE_CONCAT_(loomc_iree_assert_lhs_, __LINE__) ==     \
-          LOOMC_IREE_CONCAT_(loomc_iree_assert_rhs_, __LINE__),   \
-      message)
-
 LOOMC_IREE_STATIC_ASSERT(sizeof(loomc_string_view_t) ==
                              sizeof(iree_string_view_t),
                          "loomc_string_view_t must match iree_string_view_t");
@@ -85,71 +70,68 @@ LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_byte_span_t, data) ==
 LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_byte_span_t, data_length) ==
                              offsetof(iree_const_byte_span_t, data_length),
                          "byte span length fields must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_OK, IREE_STATUS_OK,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INVALID_ARGUMENT,
-                                 IREE_STATUS_INVALID_ARGUMENT,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DEADLINE_EXCEEDED,
-                                 IREE_STATUS_DEADLINE_EXCEEDED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_ALREADY_EXISTS,
-                                 IREE_STATUS_ALREADY_EXISTS,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_PERMISSION_DENIED,
-                                 IREE_STATUS_PERMISSION_DENIED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_RESOURCE_EXHAUSTED,
-                                 IREE_STATUS_RESOURCE_EXHAUSTED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_FAILED_PRECONDITION,
-                                 IREE_STATUS_FAILED_PRECONDITION,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_ABORTED, IREE_STATUS_ABORTED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_OUT_OF_RANGE,
-                                 IREE_STATUS_OUT_OF_RANGE,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNIMPLEMENTED,
-                                 IREE_STATUS_UNIMPLEMENTED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNAVAILABLE,
-                                 IREE_STATUS_UNAVAILABLE,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DATA_LOSS, IREE_STATUS_DATA_LOSS,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNAUTHENTICATED,
-                                 IREE_STATUS_UNAUTHENTICATED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DEFERRED, IREE_STATUS_DEFERRED,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INCOMPATIBLE,
-                                 IREE_STATUS_INCOMPATIBLE,
-                                 "status code values must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_CODE_MASK, IREE_STATUS_CODE_MASK,
-                                 "status code masks must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_OK, IREE_STATUS_OK,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INVALID_ARGUMENT,
+                           IREE_STATUS_INVALID_ARGUMENT,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DEADLINE_EXCEEDED,
+                           IREE_STATUS_DEADLINE_EXCEEDED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_ALREADY_EXISTS,
+                           IREE_STATUS_ALREADY_EXISTS,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_PERMISSION_DENIED,
+                           IREE_STATUS_PERMISSION_DENIED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                           IREE_STATUS_RESOURCE_EXHAUSTED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_FAILED_PRECONDITION,
+                           IREE_STATUS_FAILED_PRECONDITION,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_ABORTED, IREE_STATUS_ABORTED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNIMPLEMENTED,
+                           IREE_STATUS_UNIMPLEMENTED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DATA_LOSS, IREE_STATUS_DATA_LOSS,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_UNAUTHENTICATED,
+                           IREE_STATUS_UNAUTHENTICATED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_DEFERRED, IREE_STATUS_DEFERRED,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_INCOMPATIBLE, IREE_STATUS_INCOMPATIBLE,
+                           "status code values must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_STATUS_CODE_MASK, IREE_STATUS_CODE_MASK,
+                           "status code masks must match");
 LOOMC_IREE_STATIC_ASSERT(LOOMC_STATUS_FEATURES == IREE_STATUS_FEATURES,
                          "status feature modes must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_MALLOC,
-                                 IREE_ALLOCATOR_COMMAND_MALLOC,
-                                 "allocator malloc commands must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_CALLOC,
-                                 IREE_ALLOCATOR_COMMAND_CALLOC,
-                                 "allocator calloc commands must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_REALLOC,
-                                 IREE_ALLOCATOR_COMMAND_REALLOC,
-                                 "allocator realloc commands must match");
-LOOMC_IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_FREE,
-                                 IREE_ALLOCATOR_COMMAND_FREE,
-                                 "allocator free commands must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_MALLOC,
+                           IREE_ALLOCATOR_COMMAND_MALLOC,
+                           "allocator malloc commands must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_CALLOC,
+                           IREE_ALLOCATOR_COMMAND_CALLOC,
+                           "allocator calloc commands must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_REALLOC,
+                           IREE_ALLOCATOR_COMMAND_REALLOC,
+                           "allocator realloc commands must match");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_ALLOCATOR_COMMAND_FREE,
+                           IREE_ALLOCATOR_COMMAND_FREE,
+                           "allocator free commands must match");
 LOOMC_IREE_STATIC_ASSERT(sizeof(loomc_allocator_alloc_params_t) ==
                              sizeof(iree_allocator_alloc_params_t),
                          "allocator parameter structures must match");
@@ -268,9 +250,6 @@ static inline iree_allocator_t iree_allocator_from_loomc(
   return value;
 }
 
-#undef LOOMC_IREE_STATIC_ASSERT_ENUM_EQ
-#undef LOOMC_IREE_CONCAT_
-#undef LOOMC_IREE_CONCAT_INNER_
 #undef LOOMC_IREE_STATIC_ASSERT
 
 #ifdef __cplusplus

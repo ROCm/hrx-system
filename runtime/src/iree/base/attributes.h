@@ -34,6 +34,16 @@
 //   iree_status_t(IREE_API_PTR* some_callback)(int value);
 #define IREE_API_PTR
 
+// Statically asserts that constants from distinct enum types have the same
+// integer value.
+#if defined(__cplusplus)
+#define IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
+  static_assert(((lhs) + 0) == ((rhs) + 0), message)
+#else
+#define IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
+  _Static_assert(((lhs) + 0) == ((rhs) + 0), message)
+#endif  // defined(__cplusplus)
+
 //===----------------------------------------------------------------------===//
 // IREE_HAVE_ATTRIBUTE
 //===----------------------------------------------------------------------===//
