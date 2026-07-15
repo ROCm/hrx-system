@@ -67,11 +67,6 @@ class LowTextAsmTypeInferenceHarness {
       uint16_t result_index, loom_type_t type,
       iree_string_view_t* out_diagnostic_detail) const;
 
-  // Returns true when |type| is a register of |reg_class_name| and
-  // |unit_count| allocation units in the harness module.
-  bool RegisterTypeEquals(loom_type_t type, iree_string_view_t reg_class_name,
-                          uint32_t unit_count) const;
-
  private:
   // Arena block pool backing the temporary module.
   iree_arena_block_pool_t block_pool_ = {};

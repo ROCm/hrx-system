@@ -130,29 +130,4 @@ iree_status_t LowTextAsmTypeInferenceHarness::ValidateResultType(
       module_, type, out_diagnostic_detail);
 }
 
-bool LowTextAsmTypeInferenceHarness::RegisterTypeEquals(
-    loom_type_t type, iree_string_view_t reg_class_name,
-    uint32_t unit_count) const {
-  if (!loom_type_is_register(type)) return false;
-  const loom_low_descriptor_set_t* descriptor_set = descriptor_set_provider_();
-  const loom_text_low_asm_descriptor_set_t* descriptor_set_handle = nullptr;
-  if (!iree_status_is_ok(environment_.vtable->lookup_descriptor_set(
-          environment_.state,
-          loom_low_descriptor_set_string(descriptor_set,
-                                         descriptor_set->key_string_offset),
-          &descriptor_set_handle))) {
-    return false;
-  }
-  iree_string_view_t actual_class_name = iree_string_view_empty();
-  uint32_t actual_unit_count = 0;
-  bool found = false;
-  if (!iree_status_is_ok(environment_.vtable->describe_register_type(
-          environment_.state, descriptor_set_handle, type, &actual_class_name,
-          &actual_unit_count, &found))) {
-    return false;
-  }
-  return found && actual_unit_count == unit_count &&
-         iree_string_view_equal(actual_class_name, reg_class_name);
-}
-
 }  // namespace loom::testing
