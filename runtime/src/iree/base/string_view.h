@@ -29,10 +29,15 @@ typedef struct iree_status_handle_t* iree_status_t;
 // String views are empty when size is zero. Empty views may have NULL or
 // non-NULL data pointers. A view with non-zero size and NULL data is malformed
 // and must be rejected at API boundaries before data is accessed.
+#if !defined(IREE_STRING_VIEW_T_DEFINED_)
+#define IREE_STRING_VIEW_T_DEFINED_
 typedef struct iree_string_view_t {
   const char* data;
   iree_host_size_t size;
 } iree_string_view_t;
+#else
+typedef struct iree_string_view_t iree_string_view_t;
+#endif  // !IREE_STRING_VIEW_T_DEFINED_
 
 // Returns an empty string view ("").
 static inline iree_string_view_t iree_string_view_empty(void) {
@@ -96,6 +101,8 @@ static inline iree_string_view_t iree_make_const_string_view(
 }
 
 // A pair of strings.
+#if !defined(IREE_STRING_PAIR_T_DEFINED_)
+#define IREE_STRING_PAIR_T_DEFINED_
 typedef struct iree_string_pair_t {
   union {
     iree_string_view_t first;
@@ -106,6 +113,9 @@ typedef struct iree_string_pair_t {
     iree_string_view_t value;
   };
 } iree_string_pair_t;
+#else
+typedef struct iree_string_pair_t iree_string_pair_t;
+#endif  // !IREE_STRING_PAIR_T_DEFINED_
 
 // Returns an empty string pair ("", "").
 static inline iree_string_pair_t iree_string_pair_empty(void) {

@@ -331,10 +331,15 @@ enum {
 };
 
 /// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
-typedef struct loomc_allocator_alloc_params_t {
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
+typedef struct iree_allocator_alloc_params_t {
   /// Minimum allocation size in bytes.
   loomc_host_size_t byte_length;
 } loomc_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t loomc_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 /// Host allocation control callback.
 ///

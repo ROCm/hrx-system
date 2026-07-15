@@ -189,8 +189,7 @@ static iree_status_t iree_hal_executable_plugin_load(
       .host_allocator =
           {
               .self = host_allocator.self,
-              .ctl = (iree_hal_executable_plugin_allocator_ctl_fn_t)
-                         host_allocator.ctl,
+              .ctl = host_allocator.ctl,
           },
   };
 
@@ -198,9 +197,8 @@ static iree_status_t iree_hal_executable_plugin_load(
   // reason and the caller will clean up.
   plugin->library =
       iree_hal_executable_plugin_v0_from_query_result(query_result);
-  return (iree_status_t)plugin->library->load(
-      &environment, (size_t)param_count,
-      (const iree_hal_executable_plugin_string_pair_t*)params, &plugin->self);
+  return plugin->library->load(&environment, (size_t)param_count, params,
+                               &plugin->self);
 }
 
 iree_status_t iree_hal_executable_plugin_initialize(
@@ -295,8 +293,7 @@ static iree_status_t iree_hal_executable_plugin_resolve(
       plugin->resolve_thunk
           ? plugin->resolve_thunk(plugin->library->resolve, plugin->self,
                                   &params, &resolution)
-          : (iree_status_t)plugin->library->resolve(plugin->self, &params,
-                                                    &resolution);
+          : plugin->library->resolve(plugin->self, &params, &resolution);
   *out_resolution = (iree_hal_executable_import_resolution_t)resolution;
 
   IREE_TRACE_ZONE_END(z0);
@@ -522,10 +519,12 @@ iree_status_t iree_hal_executable_plugin_manager_register_plugin(
 // NOTE: this matches the iree_hal_executable_import_provider_t.resolve
 // function signature so that it can be directly used as a provider.
 static iree_status_t iree_hal_executable_plugin_manager_resolve(
-    iree_hal_executable_plugin_manager_t* manager, iree_host_size_t count,
-    const char* const* symbol_names, void** out_fn_ptrs, void** out_fn_contexts,
+    void* self, iree_host_size_t count, const char* const* symbol_names,
+    void** out_fn_ptrs, void** out_fn_contexts,
     iree_hal_executable_import_resolution_t* out_resolution) {
   if (!count) return iree_ok_status();
+  iree_hal_executable_plugin_manager_t* manager =
+      (iree_hal_executable_plugin_manager_t*)self;
   IREE_ASSERT_ARGUMENT(manager);
   IREE_ASSERT_ARGUMENT(out_fn_ptrs);
   IREE_ASSERT_ARGUMENT(out_fn_contexts);
@@ -617,8 +616,6 @@ iree_hal_executable_plugin_manager_provider(
     iree_hal_executable_plugin_manager_t* manager) {
   return (iree_hal_executable_import_provider_t){
       .self = manager,
-      .resolve = manager ? (iree_hal_executable_import_provider_resolve_fn_t)
-                               iree_hal_executable_plugin_manager_resolve
-                         : NULL,
+      .resolve = manager ? iree_hal_executable_plugin_manager_resolve : NULL,
   };
 }

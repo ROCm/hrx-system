@@ -524,11 +524,16 @@ enum {
 };
 
 // Parameters for various allocation commands.
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 typedef struct iree_allocator_alloc_params_t {
   // Minimum size, in bytes, of the allocation. The underlying allocator may
   // pad the length out if needed.
   iree_host_size_t byte_length;
 } iree_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t iree_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 // Function pointer for an iree_allocator_t control function.
 // |command| provides the operation to perform. Optionally some commands may use
