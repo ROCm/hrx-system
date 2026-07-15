@@ -405,8 +405,8 @@ typedef struct iree_hal_mock_device_t {
   // Status returned by assign_topology_info.
   iree_status_code_t assign_topology_info_status_code;
 
-  // True when create_executable_cache returns mock executable caches.
-  bool executable_cache_enabled;
+  // True when metadata-only mock executable loading is enabled.
+  bool executable_loading_enabled;
 
   // Immutable device facts captured at creation time.
   iree_hal_device_spec_t* device_spec;
@@ -429,6 +429,51 @@ void iree_hal_mock_device_options_initialize(
   memset(out_options, 0, sizeof(*out_options));
 }
 
+static iree_status_t iree_hal_mock_device_default_spec_create(
+    const iree_hal_mock_device_options_t* options,
+    iree_allocator_t host_allocator, iree_hal_device_spec_t** out_spec) {
+  const iree_hal_physical_device_spec_t physical_device = {
+      .identity =
+          {
+              .display_name = options->identifier,
+              .backend_path = options->identifier,
+          },
+      .partition_count = 1,
+      .physical_device_affinity = 1ull,
+  };
+  const iree_hal_device_identity_spec_t identity = {
+      .logical_device_id = options->identifier,
+      .display_name = options->identifier,
+      .driver_id = IREE_SV("mock"),
+      .backend_id = IREE_SV("mock"),
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  const iree_hal_executable_target_t executable_target = {
+      .family = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      .target_key = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+      .priority = 100,
+      .physical_device_affinity = 1ull,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_hal_device_spec_builder_set_identity(&builder, &identity);
+  if (iree_status_is_ok(status) && options->executable_loading_enabled) {
+    status = iree_hal_device_spec_builder_add_executable_target(
+        &builder, &executable_target);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_finalize(&builder, out_spec);
+  }
+  iree_hal_device_spec_builder_deinitialize(&builder);
+  return status;
+}
+
 iree_status_t iree_hal_mock_device_create(
     const iree_hal_mock_device_options_t* options,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
@@ -445,7 +490,7 @@ iree_status_t iree_hal_mock_device_create(
   device->host_allocator = host_allocator;
   device->assign_topology_info_status_code =
       options->assign_topology_info_status_code;
-  device->executable_cache_enabled = options->executable_cache_enabled;
+  device->executable_loading_enabled = options->executable_loading_enabled;
 
   // Copy identifier into trailing storage.
   iree_string_view_append_to_buffer(
@@ -457,9 +502,8 @@ iree_status_t iree_hal_mock_device_create(
     device->device_spec = options->device_spec;
     iree_hal_device_spec_retain(device->device_spec);
   } else {
-    status = iree_hal_device_spec_create_minimal(
-        device->identifier, device->identifier, IREE_SV("mock"),
-        IREE_SV("mock"), host_allocator, &device->device_spec);
+    status = iree_hal_mock_device_default_spec_create(options, host_allocator,
+                                                      &device->device_spec);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_device_release((iree_hal_device_t*)device);
@@ -588,7 +632,7 @@ static iree_status_t iree_hal_mock_device_create_executable_cache(
     iree_hal_device_t* base_device, iree_string_view_t identifier,
     iree_hal_executable_cache_t** out_executable_cache) {
   iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
-  if (device->executable_cache_enabled) {
+  if (device->executable_loading_enabled) {
     (void)identifier;
     return iree_hal_mock_executable_cache_create(device->host_allocator,
                                                  out_executable_cache);

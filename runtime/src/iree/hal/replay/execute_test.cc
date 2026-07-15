@@ -90,7 +90,7 @@ static iree_hal_device_group_t* CreateMockExecutableDeviceGroup() {
   iree_hal_mock_device_options_t options;
   iree_hal_mock_device_options_initialize(&options);
   options.identifier = iree_make_cstring_view("mock-executable-device");
-  options.executable_cache_enabled = true;
+  options.executable_loading_enabled = true;
 
   iree_hal_device_t* device = nullptr;
   IREE_CHECK_OK(

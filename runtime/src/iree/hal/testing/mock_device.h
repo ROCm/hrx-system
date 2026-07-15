@@ -9,8 +9,8 @@
 //
 // The mock device implements the topology-related vtable methods (id,
 // device_spec, topology_info, refine_topology_edge, and assign_topology_info)
-// with configurable behavior. It can optionally expose a tiny metadata-only
-// executable cache for tests that need executable objects without real compiled
+// with configurable behavior. It can optionally load tiny metadata-only
+// executables for tests that need executable objects without real compiled
 // kernels. All other vtable methods return IREE_STATUS_UNIMPLEMENTED or
 // zero/NULL as appropriate.
 //
@@ -28,6 +28,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Stable virtual target advertised for metadata-only mock executables.
+#define IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY "mock"
+#define IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY "metadata"
+
 // Options for creating a mock device.
 typedef struct iree_hal_mock_device_options_t {
   // Identifier returned by iree_hal_device_id(). The default mock spec uses
@@ -35,15 +39,17 @@ typedef struct iree_hal_mock_device_options_t {
   iree_string_view_t identifier;
 
   // Optional immutable spec returned by iree_hal_device_spec().
-  // Retained by the mock when provided; otherwise a minimal spec is created.
+  // Retained by the mock when provided; otherwise a default spec is created.
+  // Callers enabling executable support with a custom spec must advertise the
+  // mock:metadata executable target themselves.
   iree_hal_device_spec_t* device_spec;
 
   // Optional status returned by assign_topology_info. IREE_STATUS_OK means the
   // mock accepts the assignment normally.
   iree_status_code_t assign_topology_info_status_code;
 
-  // Enables create_executable_cache for metadata-only mock executables.
-  bool executable_cache_enabled;
+  // Enables metadata-only mock executable target advertisement and loading.
+  bool executable_loading_enabled;
 } iree_hal_mock_device_options_t;
 
 // Initializes |out_options| with safe defaults and an empty identifier.
