@@ -35,7 +35,7 @@ std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-std::string ToString(const loom_llvm_tool_output_t& output) {
+std::string ToString(const loom_tool_output_t& output) {
   return output.data ? std::string(output.data, output.length) : std::string();
 }
 
@@ -121,7 +121,7 @@ loom_llvm_toolchain_t ToolchainFromEnvironment() {
 
 TEST(LlvmIrToolTest, QueriesVersion) {
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t version_text = {};
+  loom_tool_output_t version_text = {};
   iree_status_t status =
       loom_llvm_tool_query_version(&toolchain, LOOM_LLVM_TOOL_LLVM_DIS,
                                    iree_allocator_system(), &version_text);
@@ -133,7 +133,7 @@ TEST(LlvmIrToolTest, QueriesVersion) {
 
   std::string version = ToString(version_text);
   EXPECT_NE(version.find("LLVM"), std::string::npos);
-  loom_llvm_tool_output_deinitialize(&version_text, iree_allocator_system());
+  loom_tool_output_deinitialize(&version_text, iree_allocator_system());
 }
 
 TEST(LlvmIrToolTest, AssemblesTextAndVerifiesBitcode) {
@@ -170,7 +170,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcode) {
   IREE_ASSERT_OK(WriteTempFile(bitcode_file.path(), bitcode));
 
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t text = {};
+  loom_tool_output_t text = {};
   iree_status_t status = loom_llvm_tool_disassemble_bitcode_file(
       &toolchain, StringView(bitcode_file.path()), iree_allocator_system(),
       &text);
@@ -183,7 +183,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcode) {
   std::string disassembly = ToString(text);
   EXPECT_NE(disassembly.find("define dso_local void @vadd4_object"),
             std::string::npos);
-  loom_llvm_tool_output_deinitialize(&text, iree_allocator_system());
+  loom_tool_output_deinitialize(&text, iree_allocator_system());
 }
 
 TEST(LlvmIrToolTest, DisassemblesBitcodeBytes) {
@@ -192,7 +192,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcodeBytes) {
       BuildBitcodeFixture(LOOM_LLVMIR_TEST_MODULE_OBJECT_VADD4, &bitcode));
 
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t text = {};
+  loom_tool_output_t text = {};
   iree_status_t status = loom_llvm_tool_disassemble_bitcode(
       &toolchain, iree_make_const_byte_span(bitcode.data(), bitcode.size()),
       iree_allocator_system(), &text);
@@ -205,7 +205,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcodeBytes) {
   std::string disassembly = ToString(text);
   EXPECT_NE(disassembly.find("define dso_local void @vadd4_object"),
             std::string::npos);
-  loom_llvm_tool_output_deinitialize(&text, iree_allocator_system());
+  loom_tool_output_deinitialize(&text, iree_allocator_system());
 }
 
 TEST(LlvmIrToolTest, DisassemblesAndVerifiesCastsBitcode) {
@@ -215,7 +215,7 @@ TEST(LlvmIrToolTest, DisassemblesAndVerifiesCastsBitcode) {
   IREE_ASSERT_OK(WriteTempFile(bitcode_file.path(), bitcode));
 
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t text = {};
+  loom_tool_output_t text = {};
   iree_status_t status = loom_llvm_tool_disassemble_bitcode_file(
       &toolchain, StringView(bitcode_file.path()), iree_allocator_system(),
       &text);
@@ -229,7 +229,7 @@ TEST(LlvmIrToolTest, DisassemblesAndVerifiesCastsBitcode) {
   EXPECT_NE(disassembly.find("ptrtoaddr ptr %pointer to i64"),
             std::string::npos)
       << disassembly;
-  loom_llvm_tool_output_deinitialize(&text, iree_allocator_system());
+  loom_tool_output_deinitialize(&text, iree_allocator_system());
 
   status = loom_llvm_tool_verify_bitcode_file(
       &toolchain, StringView(bitcode_file.path()), iree_allocator_system());
@@ -270,7 +270,7 @@ TEST(LlvmIrToolTest, CompilesX86ObjectBytes) {
       BuildBitcodeFixture(LOOM_LLVMIR_TEST_MODULE_OBJECT_VADD4, &bitcode));
 
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t object = {};
+  loom_tool_output_t object = {};
   iree_status_t status = loom_llvm_tool_compile_object(
       &toolchain, iree_make_const_byte_span(bitcode.data(), bitcode.size()),
       NULL, 0, iree_allocator_system(), &object);
@@ -281,7 +281,7 @@ TEST(LlvmIrToolTest, CompilesX86ObjectBytes) {
   IREE_ASSERT_OK(status);
 
   EXPECT_GT(object.length, 0u);
-  loom_llvm_tool_output_deinitialize(&object, iree_allocator_system());
+  loom_tool_output_deinitialize(&object, iree_allocator_system());
 }
 
 TEST(LlvmIrToolTest, CompilesX86Assembly) {
@@ -316,7 +316,7 @@ TEST(LlvmIrToolTest, CompilesX86AssemblyBytes) {
       BuildBitcodeFixture(LOOM_LLVMIR_TEST_MODULE_OBJECT_VADD4, &bitcode));
 
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t assembly = {};
+  loom_tool_output_t assembly = {};
   iree_status_t status = loom_llvm_tool_compile_assembly(
       &toolchain, iree_make_const_byte_span(bitcode.data(), bitcode.size()),
       NULL, 0, iree_allocator_system(), &assembly);
@@ -329,12 +329,12 @@ TEST(LlvmIrToolTest, CompilesX86AssemblyBytes) {
   std::string assembly_text = ToString(assembly);
   EXPECT_NE(assembly_text.find("vadd4_object"), std::string::npos)
       << assembly_text;
-  loom_llvm_tool_output_deinitialize(&assembly, iree_allocator_system());
+  loom_tool_output_deinitialize(&assembly, iree_allocator_system());
 }
 
 TEST(LlvmIrToolTest, CompilesAmdgpuObjectWhenTargetIsRegistered) {
   loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
-  loom_llvm_tool_output_t version_text = {};
+  loom_tool_output_t version_text = {};
   iree_status_t status = loom_llvm_tool_query_version(
       &toolchain, LOOM_LLVM_TOOL_LLC, iree_allocator_system(), &version_text);
   if (IsToolUnavailable(iree_status_code(status))) {
@@ -343,7 +343,7 @@ TEST(LlvmIrToolTest, CompilesAmdgpuObjectWhenTargetIsRegistered) {
   }
   IREE_ASSERT_OK(status);
   std::string version = ToString(version_text);
-  loom_llvm_tool_output_deinitialize(&version_text, iree_allocator_system());
+  loom_tool_output_deinitialize(&version_text, iree_allocator_system());
   if (version.find("amdgcn") == std::string::npos &&
       version.find("AMDGPU") == std::string::npos) {
     GTEST_SKIP() << "installed llc does not advertise an AMDGPU target";

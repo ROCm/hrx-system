@@ -50,6 +50,7 @@ loom_cc_library(
     hdrs = ["llvm.h"],
     visibility = _LLVM_TOOL_VISIBILITY,
     deps = [
+        ":process",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/io:file_handle",

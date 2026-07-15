@@ -39,6 +39,7 @@ loom_cc_library(
   SRCS
     "llvm.c"
   DEPS
+    ::process
     iree::base
     iree::base::internal::path
     iree::io::file_handle

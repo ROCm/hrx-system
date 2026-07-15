@@ -129,11 +129,6 @@ iree_status_t loom_spirv_tool_run(const loom_spirv_toolchain_t* toolchain,
   return status;
 }
 
-void loom_spirv_tool_output_deinitialize(loom_spirv_tool_output_t* output,
-                                         iree_allocator_t allocator) {
-  loom_tool_output_deinitialize(output, allocator);
-}
-
 static iree_status_t loom_spirv_tool_checked_status(
     loom_spirv_tool_kind_t tool_kind, const loom_tool_process_result_t* result,
     iree_string_view_t action) {
@@ -161,10 +156,10 @@ static iree_status_t loom_spirv_tool_checked_status(
 
 iree_status_t loom_spirv_tool_query_version(
     const loom_spirv_toolchain_t* toolchain, loom_spirv_tool_kind_t tool_kind,
-    iree_allocator_t allocator, loom_spirv_tool_output_t* out_version_text) {
+    iree_allocator_t allocator, loom_tool_output_t* out_version_text) {
   IREE_ASSERT_ARGUMENT(toolchain);
   IREE_ASSERT_ARGUMENT(out_version_text);
-  *out_version_text = (loom_spirv_tool_output_t){0};
+  *out_version_text = (loom_tool_output_t){0};
 
   const iree_string_view_t arguments[] = {IREE_SV("--version")};
   loom_tool_process_result_t result = {0};
@@ -200,10 +195,10 @@ static iree_status_t loom_spirv_tool_write_temp_binary(
 
 iree_status_t loom_spirv_tool_disassemble_binary(
     const loom_spirv_toolchain_t* toolchain, iree_const_byte_span_t binary,
-    iree_allocator_t allocator, loom_spirv_tool_output_t* out_text) {
+    iree_allocator_t allocator, loom_tool_output_t* out_text) {
   IREE_ASSERT_ARGUMENT(toolchain);
   IREE_ASSERT_ARGUMENT(out_text);
-  *out_text = (loom_spirv_tool_output_t){0};
+  *out_text = (loom_tool_output_t){0};
 
   loom_tool_temp_file_t input_file = {0};
   iree_status_t status =
