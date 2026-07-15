@@ -19,6 +19,7 @@ DEFAULT_DRIVERS = [
 
 SUPPORTED_DRIVERS = [
     "amdgpu",
+    "amdxdna",
     "cuda",
     "hip",
     "local-sync",

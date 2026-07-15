@@ -1,0 +1,55 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+namespace iree.hal.amdxdna.xclbin;
+
+file_identifier "XADX";
+file_extension "xadx";
+
+// Source code location denoted by a file name and line within that file.
+table FileLineLocDef {
+  filename:string;
+  line:int32;
+}
+
+// One AXLF/xclbin context container. Native backends may consume this directly
+// for context creation or extract the referenced PDI image from its
+// AIE_PARTITION section, depending on the driver ABI they target.
+table XclbinDef {
+  xclbin:string;
+}
+
+// One executable run. `control_code` is an XAie transaction ("TXN") stream.
+// `data_payload`, when present, is the control-packet payload passed to a
+// reconfiguration run. `patch_table` is a flat list of
+// (offset, arg_idx, arg_plus) triples used by the ERT_CMD_CHAIN path.
+table RunDef {
+  control_code:[uint32];
+  data_payload:[uint32];
+  patch_table:[uint32];
+}
+
+// One dispatchable entry point. `xclbin_index` references the context
+// container. `pdi_index` references a PDI record inside that xclbin's
+// AIE_PARTITION section. Negative indices mean the entry point reuses a context
+// loaded by another entry point in the executable.
+table EntryPointDef {
+  name:string;
+  pdi_index:int32;
+  xclbin_index:int32;
+  runs:[RunDef];
+  source_location:FileLineLocDef;
+}
+
+// An amdxdna executable with AXLF/xclbin context containers. This keeps the
+// HAL-facing artifact common across OSes while allowing each native driver path
+// to consume the representation its kernel ABI accepts.
+table ExecutableDef {
+  xclbins:[XclbinDef];
+  entry_points:[EntryPointDef];
+}
+
+root_type ExecutableDef;

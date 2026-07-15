@@ -15,6 +15,15 @@ static iree_status_t hrx_buffer_unmap_internal(hrx_buffer_t buffer) {
   return status;
 }
 
+static bool hrx_mapping_mode_is_valid(hrx_mapping_mode_t mapping_mode) {
+  return mapping_mode == HRX_MAPPING_MODE_SCOPED ||
+         mapping_mode == HRX_MAPPING_MODE_PERSISTENT;
+}
+
+static iree_hal_memory_access_t hrx_map_flags_to_access(hrx_map_flags_t flags) {
+  return (iree_hal_memory_access_t)flags;
+}
+
 hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
                                  hrx_memory_type_t mem_type,
                                  hrx_buffer_usage_t usage,
@@ -140,25 +149,46 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
 
 hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
                             size_t offset, size_t size, void** mapped_ptr) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_map");
+  return hrx_buffer_map_with_mode(buffer, HRX_MAPPING_MODE_SCOPED, flags,
+                                  offset, size, mapped_ptr);
+}
+
+hrx_status_t hrx_buffer_map_with_mode(hrx_buffer_t buffer,
+                                      hrx_mapping_mode_t mapping_mode,
+                                      hrx_map_flags_t flags, size_t offset,
+                                      size_t size, void** mapped_ptr) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_map_with_mode");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!buffer || !mapped_ptr) {
     HRX_RETURN_AND_END_ZONE(z0,
                             hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                             "buffer or mapped_ptr is NULL"));
   }
+  if (!hrx_mapping_mode_is_valid(mapping_mode)) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "mapping_mode must be SCOPED or PERSISTENT"));
+  }
   if (buffer->is_mapped) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
                                                 "buffer is already mapped"));
   }
 
-  iree_hal_memory_access_t access = 0;
-  if (flags & HRX_MAP_READ) access |= IREE_HAL_MEMORY_ACCESS_READ;
-  if (flags & HRX_MAP_WRITE) access |= IREE_HAL_MEMORY_ACCESS_WRITE;
-  if (flags & HRX_MAP_DISCARD) access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
+  const hrx_map_flags_t known_flags =
+      HRX_MAP_READ | HRX_MAP_WRITE | HRX_MAP_DISCARD;
+  if ((flags & (hrx_map_flags_t)~known_flags) != 0) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "unknown map flags"));
+  }
+  if ((flags & HRX_MAP_DISCARD) != 0 && (flags & HRX_MAP_WRITE) == 0) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "HRX_MAP_DISCARD requires HRX_MAP_WRITE"));
+  }
+  iree_hal_memory_access_t access = hrx_map_flags_to_access(flags);
 
   iree_status_t status = iree_hal_buffer_map_range(
-      buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
+      buffer->hal_buffer, (iree_hal_mapping_mode_t)mapping_mode, access,
       (iree_device_size_t)offset, (iree_device_size_t)size, &buffer->mapping);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
@@ -185,6 +215,32 @@ hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
 
   iree_status_t status = hrx_buffer_unmap_internal(buffer);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+}
+
+hrx_status_t hrx_buffer_flush_range(hrx_buffer_t buffer, size_t offset,
+                                    size_t size) {
+  if (!buffer) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "buffer is NULL");
+  }
+  if (!buffer->is_mapped) {
+    return hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
+                           "buffer is not mapped");
+  }
+  return hrx_status_from_iree(iree_hal_buffer_mapping_flush_range(
+      &buffer->mapping, (iree_device_size_t)offset, (iree_device_size_t)size));
+}
+
+hrx_status_t hrx_buffer_invalidate_range(hrx_buffer_t buffer, size_t offset,
+                                         size_t size) {
+  if (!buffer) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "buffer is NULL");
+  }
+  if (!buffer->is_mapped) {
+    return hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
+                           "buffer is not mapped");
+  }
+  return hrx_status_from_iree(iree_hal_buffer_mapping_invalidate_range(
+      &buffer->mapping, (iree_device_size_t)offset, (iree_device_size_t)size));
 }
 
 hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {

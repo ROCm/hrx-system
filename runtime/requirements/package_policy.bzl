@@ -16,7 +16,9 @@ load(
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
+    "AMD_NPU_RESOURCE",
     "HAL_AMDGPU",
+    "HAL_AMDXDNA",
     "HAL_CUDA",
     "HAL_HIP",
     "HAL_VULKAN",
@@ -35,6 +37,15 @@ PACKAGE_POLICIES = [
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
         run_requirements = [AMDGPU_RESOURCE],
         resource_group = "iree-hal-drivers-amdgpu-tests",
+    ),
+    package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amdxdna/..."],
+        build_requirements = [HAL_AMDXDNA],
+    ),
+    package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amdxdna/cts/..."],
+        run_requirements = [AMD_NPU_RESOURCE],
+        resource_group = "iree-hal-drivers-amdxdna-tests",
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/cuda/..."],

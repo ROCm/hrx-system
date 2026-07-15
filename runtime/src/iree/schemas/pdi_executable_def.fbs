@@ -1,0 +1,60 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+namespace iree.hal.amdxdna;
+
+file_identifier "PDIX";
+file_extension "pdix";
+
+// Optional source code location denoted by a file name and line.
+table FileLineLocDef {
+  filename:string;
+  line:int32;
+}
+
+// One binary PDI image. FlatBuffers does not have vector-of-vectors, so this
+// wrapper lets entry points share PDI images through `pdi_index`.
+table PdiDef {
+  pdi:[uint8];
+}
+
+// One executable run. A run with `data_payload` reconfigures the array by
+// streaming that control-packet payload; a run without `data_payload` executes
+// the entry point using the dispatch I/O bindings. `patch_table` contains
+// (offset, arg_idx, arg_plus) triples used only by the ERT_CMD_CHAIN path.
+table RunDef {
+  // XAie transaction ("TXN") control-code stream.
+  control_code:[uint32];
+
+  // Optional control-packet payload for a reconfiguration run.
+  data_payload:[uint32];
+
+  // Optional host patch table for ERT_CMD_CHAIN. Length must be a multiple of
+  // 3. The HAL writes `args[arg_idx] + arg_plus + aperture` into the buffer-
+  // descriptor address words at byte `offset`.
+  patch_table:[uint32];
+}
+
+// One dispatchable entry point. The PDI index names `ExecutableDef.pdis`; -1
+// means this entry point reuses a context loaded by a sibling entry point.
+table EntryPointDef {
+  name:string;
+  pdi_index:int32;
+  runs:[RunDef];
+  source_location:FileLineLocDef;
+}
+
+// An amdxdna executable: a shared PDI pool plus ordered per-entry-point runs.
+// Producers may emit one PDI-carrying entry point for the initial array load
+// and PDI-less control-packet entry points that reuse that context. The shared
+// pool also supports executables where multiple entry points intentionally
+// reference the same PDI.
+table ExecutableDef {
+  pdis:[PdiDef];
+  entry_points:[EntryPointDef];
+}
+
+root_type ExecutableDef;

@@ -220,6 +220,10 @@ _Static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
                "map flags mismatch");
 _Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
                "map flags mismatch");
+_Static_assert(HRX_MAPPING_MODE_SCOPED == IREE_HAL_MAPPING_MODE_SCOPED,
+               "mapping mode mismatch");
+_Static_assert(HRX_MAPPING_MODE_PERSISTENT == IREE_HAL_MAPPING_MODE_PERSISTENT,
+               "mapping mode mismatch");
 
 #undef HRX_STATIC_ASSERT_ENUM_EQ
 

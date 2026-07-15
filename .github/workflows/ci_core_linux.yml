@@ -52,7 +52,20 @@ jobs:
             assertions: false
             run_tests: true
             ctest_exclude_regex: ""
+            cmake_options: |
+              -DIREE_HAL_DRIVER_AMDXDNA=ON
             package: true
+          - variant: AMDXDNA Host
+            sanitizer: none
+            assertions: false
+            run_tests: true
+            ctest_exclude_regex: ""
+            cmake_options: |
+              -DIREE_HAL_DRIVER_AMDGPU=OFF
+              -DIREE_HAL_DRIVER_AMDXDNA=ON
+              -DLIBHRX_BUILD_PASSTHROUGH=OFF
+              -DIREE_HAL_AMDGPU_TARGETS=
+            package: false
           - variant: ASAN
             sanitizer: asan
             assertions: true
@@ -91,6 +104,7 @@ jobs:
       ctest_label_exclude_regex: "runtime-resource=|manual"
       cmake_options: |
         -DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201
+        ${{ matrix.cmake_options }}
       package: ${{ matrix.package }}
 
   gpu_linux:
@@ -104,11 +118,19 @@ jobs:
           - name: Linux / CMake / GPU gfx942
             chip: gfx942
             runner_label: linux-gfx942-1gpu-core42-ossci-rocm
+            ctest_label_regex: runtime-resource=amd-gpu
             ctest_exclude_regex: ""
             experimental: false
           - name: Linux / CMake / GPU gfx1201
             chip: gfx1201
             runner_label: gpu_navi4x
+            ctest_label_regex: runtime-resource=amd-gpu
+            ctest_exclude_regex: ""
+            experimental: false
+          - name: Linux / CMake / AMDXDNA gfx1151
+            chip: gfx1151
+            runner_label: linux-gfx1151-gpu-rocm
+            ctest_label_regex: runtime-resource=amd-npu
             ctest_exclude_regex: ""
             experimental: false
     uses: ./.github/workflows/test_core_linux_gpu.yml
@@ -121,7 +143,7 @@ jobs:
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
-      ctest_label_regex: runtime-resource=amd-gpu
+      ctest_label_regex: ${{ matrix.ctest_label_regex }}
       ctest_label_exclude_regex: manual
       ctest_parallelism: 1
       experimental: ${{ matrix.experimental }}

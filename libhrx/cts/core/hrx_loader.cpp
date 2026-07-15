@@ -156,6 +156,7 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_retain);
   LOAD(buffer_release);
   LOAD(buffer_map);
+  LOAD(buffer_map_with_mode);
   LOAD(buffer_unmap);
   LOAD(buffer_get_device_ptr);
   LOAD(buffer_get_size);
