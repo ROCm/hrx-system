@@ -7,8 +7,6 @@ iree_add_all_subdirs()
 iree_cc_library(
   NAME
     common
-  COPTS
-    "-Wno-unused-variable"
   HDRS
     "fat_binary.h"
     "graph.h"
@@ -105,6 +103,16 @@ iree_cc_binary_benchmark(
     libhrx_defs
   TESTONLY
 )
+
+if(WIN32)
+  set_tests_properties(
+    "libhrx/src/binding/common/buffer_table_test"
+    "libhrx/src/binding/common/buffer_table_benchmark_test"
+    PROPERTIES
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:libhrx_src_libhrx_hrx>"
+  )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 

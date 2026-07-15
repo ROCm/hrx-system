@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <stdatomic.h>
-
 #include "common/graph.h"
 #include "common/internal.h"
 #include "iree/hal/buffer_transfer.h"
@@ -206,7 +204,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
         IREE_STATUS_UNAVAILABLE,
         "registered host allocation did not export a device-visible pointer");
   } else if (!have_device_ptr) {
-    static atomic_uintptr_t g_next_synthetic = 0xDEAD000000000000ULL;
+    static iree_atomic_uint64_t g_next_synthetic =
+        IREE_ATOMIC_VAR_INIT(0xDEAD000000000000ULL);
     iree_device_size_t aligned_size = 0;
     if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(wrapper->size, 1, 255,
                                                         &aligned_size))) {
@@ -214,7 +213,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
                                 "buffer size overflows synthetic alignment");
     } else {
       aligned_size &= ~(iree_device_size_t)255;
-      uintptr_t synthetic = atomic_fetch_add(&g_next_synthetic, aligned_size);
+      uint64_t synthetic = iree_atomic_fetch_add(
+          &g_next_synthetic, aligned_size, iree_memory_order_relaxed);
       wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
       have_device_ptr = true;
     }
