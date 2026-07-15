@@ -134,6 +134,10 @@ iree_status_t iree_hal_null_device_create(
   iree_status_t status =
       iree_async_proactor_pool_get(device->proactor_pool, 0, &device->proactor);
   if (iree_status_is_ok(status)) {
+    // The null driver has no executable implementation and intentionally
+    // advertises no executable targets. A real driver should use
+    // iree_hal_device_spec_builder_t to capture physical device facts and add
+    // one row for each native artifact target it can load.
     status = iree_hal_device_spec_create_minimal(
         identifier, identifier, IREE_SV("null"), IREE_SV("null"),
         host_allocator, &device->device_spec);
@@ -354,8 +358,13 @@ static iree_status_t iree_hal_null_device_load_executable(
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_hal_executable_t** out_executable) {
+  // No public load reaches this stub because the null device spec advertises no
+  // executable targets. A real driver resolves |queue_affinity| to its physical
+  // devices here, verifies that |target->physical_device_affinity| covers them,
+  // and passes the selected native resources to executable construction.
   return iree_hal_null_executable_create(
-      load_params, iree_hal_device_host_allocator(base_device), out_executable);
+      target, load_params, iree_hal_device_host_allocator(base_device),
+      out_executable);
 }
 
 static iree_status_t iree_hal_null_device_import_file(
