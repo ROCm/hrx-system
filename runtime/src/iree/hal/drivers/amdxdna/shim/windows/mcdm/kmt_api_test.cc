@@ -481,6 +481,30 @@ TEST(KmtApiTest, NegotiatesCompactAbiAfterLegacyShapeIsTooSmall) {
   EXPECT_TRUE(g_query_data_was_zero[1]);
 }
 
+TEST(KmtApiTest, NegotiatesCompactV3AbiAfterLegacyShapeIsTooSmall) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_statuses[1] = 0;
+  g_query_outputs[1][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::compact);
+  ASSERT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_sizes[0], 2u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_sizes[1], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_adapters[0], 0x5678u);
+  EXPECT_EQ(g_query_adapters[1], 0x5678u);
+  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_TRUE(g_query_data_was_zero[1]);
+}
+
 TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
   ResetFakes();
   g_query_statuses[0] = 0;

@@ -339,6 +339,7 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
   constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
   constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
+  constexpr uint32_t kCompactV3Identity[3] = {0, 3, 0};
   uint32_t private_data[3] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
@@ -374,8 +375,13 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
                    out_error)) {
     return false;
   }
-  if (std::memcmp(private_data, kCompactIdentity,
-                  sizeof(kCompactIdentity)) != 0) {
+  const bool is_compact_v2 =
+      std::memcmp(private_data, kCompactIdentity, sizeof(kCompactIdentity)) ==
+      0;
+  const bool is_compact_v3 =
+      std::memcmp(private_data, kCompactV3Identity,
+                  sizeof(kCompactV3Identity)) == 0;
+  if (!is_compact_v2 && !is_compact_v3) {
     SetErrorFormat(out_error,
                    "unsupported three-dword MCDM identity {%u, %u, %u}",
                    private_data[0], private_data[1], private_data[2]);
