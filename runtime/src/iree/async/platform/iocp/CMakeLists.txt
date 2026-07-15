@@ -34,6 +34,7 @@ iree_cc_library(
     iree::base::internal
     iree::base::internal::atomic_slist
     iree::base::internal::memory
+    iree::base::internal::path
   PUBLIC
 )
 endif()
