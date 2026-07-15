@@ -685,6 +685,20 @@ static iree_status_t iree_hal_device_spec_reader_read_u64(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_device_spec_reader_read_device_size(
+    iree_hal_device_spec_reader_t* reader, const char* field_name,
+    iree_device_size_t* out_value) {
+  uint64_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(reader, &value));
+  if (IREE_UNLIKELY(value > (uint64_t)IREE_DEVICE_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device spec %s exceeds the device size limit",
+                            field_name);
+  }
+  *out_value = (iree_device_size_t)value;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_device_spec_reader_read_size(
     iree_hal_device_spec_reader_t* reader, const char* field_name,
     iree_host_size_t* out_value) {
@@ -1058,14 +1072,14 @@ static iree_status_t iree_hal_device_spec_decode_sanitizer(
                               mode);
   }
   pool_options->mode = (iree_hal_asan_pool_mode_t)mode;
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
-      reader, &pool_options->shadow_granule_size));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
-      reader, &pool_options->redzone_size));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
-      reader, &pool_options->backing_alignment));
-  return iree_hal_device_spec_reader_read_u64(reader,
-                                              &pool_options->quarantine_size);
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_device_size(
+      reader, "ASAN shadow granule size", &pool_options->shadow_granule_size));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_device_size(
+      reader, "ASAN redzone size", &pool_options->redzone_size));
+  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_device_size(
+      reader, "ASAN backing alignment", &pool_options->backing_alignment));
+  return iree_hal_device_spec_reader_read_device_size(
+      reader, "ASAN quarantine size", &pool_options->quarantine_size);
 }
 
 static iree_status_t iree_hal_device_spec_decode_facet(
