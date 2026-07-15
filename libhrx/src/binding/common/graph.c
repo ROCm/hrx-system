@@ -1602,7 +1602,7 @@ iree_status_t iree_hal_streaming_graph_add_memset_node(
         z0,
         iree_hal_streaming_memory_lookup_range(graph->context, dst, total_size,
                                                &dst_ref),
-        "resolving `dst` buffer ref %p with size %" PRIu64, (void*)dst,
+        "resolving `dst` buffer ref %p with size %" PRIdsz, (void*)dst,
         total_size);
   } else {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(

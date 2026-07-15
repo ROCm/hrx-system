@@ -34,6 +34,9 @@ iree_cc_library(
     "event.c"
     "executable.c"
     "fence.c"
+    "graph.c"
+    "graph_analysis.c"
+    "graph_exec.c"
     "host_allocator.c"
     "mem_pool.c"
     "module.c"
@@ -51,6 +54,7 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::core_headers
+    iree::base::internal
     iree::base::internal::arena
     iree::base::threading
     iree::hal
@@ -100,6 +104,9 @@ iree_cc_library(
     "event.c"
     "executable.c"
     "fence.c"
+    "graph.c"
+    "graph_analysis.c"
+    "graph_exec.c"
     "host_allocator.c"
     "mem_pool.c"
     "module.c"
@@ -117,6 +124,7 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::core_headers
+    iree::base::internal
     iree::base::internal::arena
     iree::base::threading
     iree::hal
