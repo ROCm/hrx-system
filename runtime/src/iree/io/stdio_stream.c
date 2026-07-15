@@ -235,7 +235,7 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open_fd(
     } else if (handle) {
       // NOTE: closes the dup_fd.
       fclose(handle);
-    } else if (dup_fd > 0) {
+    } else if (dup_fd >= 0) {
       iree_close(dup_fd);
     }
   }

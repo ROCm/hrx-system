@@ -265,8 +265,9 @@ static iree_status_t iree_io_file_handle_platform_open(
     file_size.QuadPart = initial_size;
     if (!SetFilePointerEx(handle, file_size, NULL, FILE_BEGIN) ||
         !SetEndOfFile(handle)) {
+      DWORD resize_error = GetLastError();
       CloseHandle(handle);
-      return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+      return iree_make_status(iree_status_code_from_win32_error(resize_error),
                               "failed to extend file '%.*s' to %" PRIu64
                               " bytes (out of disk space or permission denied)",
                               (int)path.size, path.data, initial_size);
@@ -383,7 +384,9 @@ static iree_status_t iree_io_file_handle_platform_open(
     // Zero-extend the file up to the total file size specified by the
     // caller. Note that `ftruncate` extends too.
     if (ftruncate(fd, (off_t)initial_size) == -1) {
-      return iree_make_status(iree_status_code_from_errno(errno),
+      int truncate_error = errno;
+      iree_close(fd);
+      return iree_make_status(iree_status_code_from_errno(truncate_error),
                               "failed to extend file '%.*s' to %" PRIu64
                               " bytes (out of disk space or permission denied)",
                               (int)path.size, path.data, initial_size);
@@ -851,9 +854,10 @@ static iree_status_t iree_io_platform_map_file_view(
                               offset_li.LowPart, (SIZE_T)adjusted_length,
                               /*lpBaseAddress=*/NULL);
   if (!ptr) {
+    DWORD map_error = GetLastError();
     CloseHandle(mapping);
     return iree_make_status(
-        iree_status_code_from_win32_error(GetLastError()),
+        iree_status_code_from_win32_error(map_error),
         "failed to map file handle range %" PRIu64 "-%" PRIu64 " (%" PRIhsz
         " bytes) from file of %" PRIu64 " total bytes",
         offset, offset + adjusted_length, adjusted_length, file_size);
