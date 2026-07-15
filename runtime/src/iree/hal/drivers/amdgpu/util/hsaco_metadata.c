@@ -36,15 +36,15 @@
 #define IREE_HAL_AMDGPU_ELF64_SYMBOL_SIZE 24
 
 static uint16_t iree_hal_amdgpu_hsaco_metadata_load_le_u16(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint16_t*)ptr);
+  return iree_unaligned_load_le_u16(ptr);
 }
 
 static uint32_t iree_hal_amdgpu_hsaco_metadata_load_le_u32(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint32_t*)ptr);
+  return iree_unaligned_load_le_u32(ptr);
 }
 
 static uint64_t iree_hal_amdgpu_hsaco_metadata_load_le_u64(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint64_t*)ptr);
+  return iree_unaligned_load_le_u64(ptr);
 }
 
 static bool iree_hal_amdgpu_hsaco_metadata_range_in_bounds(

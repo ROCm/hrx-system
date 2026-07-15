@@ -168,13 +168,13 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
   }
 
   const uint16_t e_machine = iree_unaligned_load_le_u16(
-      (const uint16_t*)(header + IREE_HAL_AMDGPU_ELF_HEADER_E_MACHINE_OFFSET));
+      header + IREE_HAL_AMDGPU_ELF_HEADER_E_MACHINE_OFFSET);
   if (e_machine != IREE_HAL_AMDGPU_ELF_MACHINE_AMDGPU) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ELF machine %u is not AMDGPU", e_machine);
   }
   const uint32_t e_version = iree_unaligned_load_le_u32(
-      (const uint32_t*)(header + IREE_HAL_AMDGPU_ELF_HEADER_E_VERSION_OFFSET));
+      header + IREE_HAL_AMDGPU_ELF_HEADER_E_VERSION_OFFSET);
   if (e_version != IREE_HAL_AMDGPU_ELF_VERSION_CURRENT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported AMDGPU code object e_version %u",
@@ -182,7 +182,7 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
   }
 
   const uint32_t e_flags = iree_unaligned_load_le_u32(
-      (const uint32_t*)(header + IREE_HAL_AMDGPU_ELF64_HEADER_E_FLAGS_OFFSET));
+      header + IREE_HAL_AMDGPU_ELF64_HEADER_E_FLAGS_OFFSET);
   const iree_hal_amdgpu_elf_machine_target_t* machine_target =
       iree_hal_amdgpu_lookup_elf_machine_target(e_flags &
                                                 IREE_HAL_AMDGPU_EF_MACH);

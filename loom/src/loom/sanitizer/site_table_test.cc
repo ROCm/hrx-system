@@ -19,11 +19,11 @@ namespace loom {
 namespace {
 
 static uint16_t ReadU16(iree_const_byte_span_t data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint16_t*)(data.data + offset));
+  return iree_unaligned_load_le_u16(data.data + offset);
 }
 
 static uint32_t ReadU32(iree_const_byte_span_t data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint32_t*)(data.data + offset));
+  return iree_unaligned_load_le_u32(data.data + offset);
 }
 
 static iree_const_byte_span_t Record(iree_const_byte_span_t table,

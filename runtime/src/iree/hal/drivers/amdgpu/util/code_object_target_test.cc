@@ -48,10 +48,10 @@ static std::array<uint8_t, 64> MakeElf64AmdgpuHsa(uint8_t abi_version,
   elf[6] = kElfVersionCurrent;
   elf[7] = kElfOsAbiAmdgpuHsa;
   elf[8] = abi_version;
-  iree_unaligned_store_le_u16((uint16_t*)&elf[18], machine);
-  iree_unaligned_store_le_u32((uint32_t*)&elf[20], kElfVersionCurrent);
-  iree_unaligned_store_le_u32((uint32_t*)&elf[48], e_flags);
-  iree_unaligned_store_le_u16((uint16_t*)&elf[52], (uint16_t)elf.size());
+  iree_unaligned_store_le_u16(&elf[18], machine);
+  iree_unaligned_store_le_u32(&elf[20], kElfVersionCurrent);
+  iree_unaligned_store_le_u32(&elf[48], e_flags);
+  iree_unaligned_store_le_u16(&elf[52], (uint16_t)elf.size());
   return elf;
 }
 

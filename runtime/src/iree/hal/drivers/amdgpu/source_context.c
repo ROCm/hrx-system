@@ -86,12 +86,12 @@ static uint8_t iree_hal_amdgpu_source_context_load_u8(const uint8_t* data,
 
 static uint16_t iree_hal_amdgpu_source_context_load_u16(
     const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le_u16((const uint16_t*)(data + offset));
+  return iree_unaligned_load_le_u16(data + offset);
 }
 
 static uint32_t iree_hal_amdgpu_source_context_load_u32(
     const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le_u32((const uint32_t*)(data + offset));
+  return iree_unaligned_load_le_u32(data + offset);
 }
 
 static bool iree_hal_amdgpu_source_context_span_in_bounds(

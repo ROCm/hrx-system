@@ -38,13 +38,13 @@ static void loom_sanitizer_site_table_write_u8(uint8_t* data,
 static void loom_sanitizer_site_table_write_u16(uint8_t* data,
                                                 iree_host_size_t offset,
                                                 uint16_t value) {
-  iree_unaligned_store_le((uint16_t*)(data + offset), value);
+  iree_unaligned_store_le_u16(data + offset, value);
 }
 
 static void loom_sanitizer_site_table_write_u32(uint8_t* data,
                                                 iree_host_size_t offset,
                                                 uint32_t value) {
-  iree_unaligned_store_le((uint32_t*)(data + offset), value);
+  iree_unaligned_store_le_u32(data + offset, value);
 }
 
 static iree_status_t loom_sanitizer_site_table_find_file_location(

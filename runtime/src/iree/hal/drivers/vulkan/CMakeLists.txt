@@ -33,6 +33,7 @@ iree_cc_library(
   DEPS
     ::api
     iree::base
+    iree::base::core_headers
     iree::hal
   PUBLIC
 )

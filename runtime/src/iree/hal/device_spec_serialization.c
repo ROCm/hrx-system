@@ -83,33 +83,24 @@ static iree_status_t iree_hal_device_spec_writer_write_u8(
 
 static iree_status_t iree_hal_device_spec_writer_write_u16(
     iree_hal_device_spec_writer_t* writer, uint16_t value) {
-  const uint8_t storage[2] = {
-      (uint8_t)(value >> 0),
-      (uint8_t)(value >> 8),
-  };
+  uint8_t storage[sizeof(value)];
+  iree_unaligned_store_le_u16(storage, value);
   return iree_hal_device_spec_writer_write_bytes(writer, storage,
                                                  sizeof(storage));
 }
 
 static iree_status_t iree_hal_device_spec_writer_write_u32(
     iree_hal_device_spec_writer_t* writer, uint32_t value) {
-  const uint8_t storage[4] = {
-      (uint8_t)(value >> 0),
-      (uint8_t)(value >> 8),
-      (uint8_t)(value >> 16),
-      (uint8_t)(value >> 24),
-  };
+  uint8_t storage[sizeof(value)];
+  iree_unaligned_store_le_u32(storage, value);
   return iree_hal_device_spec_writer_write_bytes(writer, storage,
                                                  sizeof(storage));
 }
 
 static iree_status_t iree_hal_device_spec_writer_write_u64(
     iree_hal_device_spec_writer_t* writer, uint64_t value) {
-  const uint8_t storage[8] = {
-      (uint8_t)(value >> 0),  (uint8_t)(value >> 8),  (uint8_t)(value >> 16),
-      (uint8_t)(value >> 24), (uint8_t)(value >> 32), (uint8_t)(value >> 40),
-      (uint8_t)(value >> 48), (uint8_t)(value >> 56),
-  };
+  uint8_t storage[sizeof(value)];
+  iree_unaligned_store_le_u64(storage, value);
   return iree_hal_device_spec_writer_write_bytes(writer, storage,
                                                  sizeof(storage));
 }
@@ -672,8 +663,7 @@ static iree_status_t iree_hal_device_spec_reader_read_u16(
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_bytes(reader, 2, &bytes));
-  *out_value =
-      (uint16_t)((uint16_t)bytes.data[0] << 0 | (uint16_t)bytes.data[1] << 8);
+  *out_value = iree_unaligned_load_le_u16(bytes.data);
   return iree_ok_status();
 }
 
@@ -682,8 +672,7 @@ static iree_status_t iree_hal_device_spec_reader_read_u32(
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_bytes(reader, 4, &bytes));
-  *out_value = (uint32_t)bytes.data[0] << 0 | (uint32_t)bytes.data[1] << 8 |
-               (uint32_t)bytes.data[2] << 16 | (uint32_t)bytes.data[3] << 24;
+  *out_value = iree_unaligned_load_le_u32(bytes.data);
   return iree_ok_status();
 }
 
@@ -692,10 +681,7 @@ static iree_status_t iree_hal_device_spec_reader_read_u64(
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_bytes(reader, 8, &bytes));
-  *out_value = (uint64_t)bytes.data[0] << 0 | (uint64_t)bytes.data[1] << 8 |
-               (uint64_t)bytes.data[2] << 16 | (uint64_t)bytes.data[3] << 24 |
-               (uint64_t)bytes.data[4] << 32 | (uint64_t)bytes.data[5] << 40 |
-               (uint64_t)bytes.data[6] << 48 | (uint64_t)bytes.data[7] << 56;
+  *out_value = iree_unaligned_load_le_u64(bytes.data);
   return iree_ok_status();
 }
 
