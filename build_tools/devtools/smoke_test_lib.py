@@ -124,7 +124,10 @@ def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
                 "Git Bash is required to run the build_tools/bin wrappers on "
                 "Windows; install Git for Windows or set BAZEL_SH"
             )
+        # Generated Windows aliases invoke the selected tool-environment Python.
+        # Mirror that contract when exercising the POSIX source wrappers.
         env[environment.BAZEL_SH_ENV] = bazel_sh
+        env["PYTHON"] = sys.executable
         command = [bazel_sh, str(wrapper_path), *args]
     run_command(
         checkout,
