@@ -61,6 +61,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "iree_adapter_test",
+    srcs = ["iree_adapter_test.cc"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "artifact_test",
     srcs = ["artifact_test.cc"],
     deps = [
