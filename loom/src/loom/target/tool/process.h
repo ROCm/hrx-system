@@ -61,7 +61,7 @@ bool loom_tool_process_result_succeeded(
 // Invokes |executable_path| with argv-style |arguments| and captures both
 // stdout and stderr.
 //
-// |search_path| controls PATH lookup on POSIX. On Windows, CreateProcessA with
+// |search_path| controls PATH lookup on POSIX. On Windows, CreateProcessW with
 // a NULL application name applies the platform command search behavior.
 //
 // A nonzero child exit code is represented in |out_result| and still returns

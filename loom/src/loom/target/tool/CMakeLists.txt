@@ -29,7 +29,6 @@ loom_cc_test(
   DEPS
     ::process
     iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_library(

@@ -7,6 +7,7 @@
 #include "loom/target/tool/process.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -196,7 +197,7 @@ typedef struct loom_tool_capture_file_t {
   // Capturing file handle passed to the child process.
   HANDLE handle;
   // Temporary filesystem path backing |handle|.
-  char path[4096];
+  wchar_t path[4096];
 } loom_tool_capture_file_t;
 
 static iree_status_t loom_tool_win32_status(DWORD error, const char* message) {
@@ -205,19 +206,99 @@ static iree_status_t loom_tool_win32_status(DWORD error, const char* message) {
                           (unsigned long)error);
 }
 
+static iree_status_t loom_tool_win32_utf8_to_wide(iree_string_view_t value,
+                                                  iree_allocator_t allocator,
+                                                  wchar_t** out_value) {
+  *out_value = NULL;
+  if (value.size > INT_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "UTF-8 value exceeds Win32 character limits");
+  }
+  if (loom_tool_string_view_contains_nul(value)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "UTF-8 value contains an embedded NUL byte");
+  }
+
+  int wide_length = 0;
+  if (!iree_string_view_is_empty(value)) {
+    wide_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data,
+                                      (int)value.size, NULL, 0);
+    if (wide_length == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "value is not valid UTF-8 (Win32 error %lu)",
+                              (unsigned long)GetLastError());
+    }
+  }
+
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)wide_length + 1,
+                                  sizeof(wchar_t), &allocation_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "UTF-16 allocation size overflow");
+  }
+  wchar_t* wide_value = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, allocation_size, (void**)&wide_value));
+  if (wide_length != 0 &&
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data,
+                          (int)value.size, wide_value, wide_length) == 0) {
+    DWORD error = GetLastError();
+    iree_allocator_free(allocator, wide_value);
+    return loom_tool_win32_status(error, "failed to convert UTF-8 to UTF-16");
+  }
+  wide_value[wide_length] = L'\0';
+  *out_value = wide_value;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_tool_win32_wide_to_utf8(const wchar_t* value,
+                                                  iree_host_size_t capacity,
+                                                  char* out_value) {
+  if (capacity > INT_MAX) {
+    capacity = INT_MAX;
+  }
+  int utf8_length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value,
+                                        -1, NULL, 0, NULL, NULL);
+  if (utf8_length == 0) {
+    return loom_tool_win32_status(GetLastError(),
+                                  "failed to measure UTF-16 path");
+  }
+  if ((iree_host_size_t)utf8_length > capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "UTF-8 path exceeds storage capacity");
+  }
+  if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, -1, out_value,
+                          (int)capacity, NULL, NULL) == 0) {
+    return loom_tool_win32_status(GetLastError(),
+                                  "failed to convert UTF-16 path to UTF-8");
+  }
+  return iree_ok_status();
+}
+
+static void loom_tool_win32_delete_utf8_file(const char* path) {
+  wchar_t wide_path[4096];
+  int wide_length =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide_path,
+                          (int)IREE_ARRAYSIZE(wide_path));
+  IREE_ASSERT(wide_length != 0);
+  if (wide_length != 0) {
+    DeleteFileW(wide_path);
+  }
+}
+
 static iree_status_t loom_tool_capture_file_open(
-    const char* prefix, loom_tool_capture_file_t* out_file) {
+    const wchar_t* prefix, loom_tool_capture_file_t* out_file) {
   memset(out_file, 0, sizeof(*out_file));
-  char temp_directory[4096] = {0};
+  wchar_t temp_directory[4096] = {0};
   DWORD temp_directory_length =
-      GetTempPathA(IREE_ARRAYSIZE(temp_directory), temp_directory);
+      GetTempPathW(IREE_ARRAYSIZE(temp_directory), temp_directory);
   if (temp_directory_length == 0 ||
       temp_directory_length >= IREE_ARRAYSIZE(temp_directory)) {
     return loom_tool_win32_status(GetLastError(),
                                   "failed to resolve temporary directory");
   }
 
-  if (GetTempFileNameA(temp_directory, prefix, 0, out_file->path) == 0) {
+  if (GetTempFileNameW(temp_directory, prefix, 0, out_file->path) == 0) {
     return loom_tool_win32_status(GetLastError(),
                                   "failed to allocate temporary file path");
   }
@@ -227,14 +308,14 @@ static iree_status_t loom_tool_capture_file_open(
   security_attributes.nLength = sizeof(security_attributes);
   security_attributes.bInheritHandle = TRUE;
 
-  HANDLE handle = CreateFileA(
+  HANDLE handle = CreateFileW(
       out_file->path, GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
       &security_attributes, CREATE_ALWAYS,
       FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, NULL);
   if (handle == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
-    DeleteFileA(out_file->path);
+    DeleteFileW(out_file->path);
     memset(out_file, 0, sizeof(*out_file));
     return loom_tool_win32_status(error, "failed to open capture file");
   }
@@ -247,8 +328,8 @@ static void loom_tool_capture_file_deinitialize(
   if (file->handle != NULL && file->handle != INVALID_HANDLE_VALUE) {
     CloseHandle(file->handle);
   }
-  if (file->path[0] != '\0') {
-    DeleteFileA(file->path);
+  if (file->path[0] != L'\0') {
+    DeleteFileW(file->path);
   }
   memset(file, 0, sizeof(*file));
 }
@@ -357,7 +438,7 @@ static iree_status_t loom_tool_win32_append_quoted_arg(
 }
 
 static iree_status_t loom_tool_win32_make_command_line(
-    char** argv, iree_allocator_t allocator, char** out_command_line) {
+    char** argv, iree_allocator_t allocator, wchar_t** out_command_line) {
   *out_command_line = NULL;
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator, &builder);
@@ -372,7 +453,8 @@ static iree_status_t loom_tool_win32_make_command_line(
     }
   }
   if (iree_status_is_ok(status)) {
-    *out_command_line = iree_string_builder_take_storage(&builder);
+    status = loom_tool_win32_utf8_to_wide(iree_string_builder_view(&builder),
+                                          allocator, out_command_line);
   }
   iree_string_builder_deinitialize(&builder);
   return status;
@@ -386,17 +468,17 @@ static iree_status_t loom_tool_process_run_argv(
 
   loom_tool_capture_file_t stdout_file;
   loom_tool_capture_file_t stderr_file;
-  IREE_RETURN_IF_ERROR(loom_tool_capture_file_open("out", &stdout_file));
-  iree_status_t status = loom_tool_capture_file_open("err", &stderr_file);
+  IREE_RETURN_IF_ERROR(loom_tool_capture_file_open(L"out", &stdout_file));
+  iree_status_t status = loom_tool_capture_file_open(L"err", &stderr_file);
 
-  char* command_line = NULL;
+  wchar_t* command_line = NULL;
   PROCESS_INFORMATION process_info;
   memset(&process_info, 0, sizeof(process_info));
   if (iree_status_is_ok(status)) {
     status = loom_tool_win32_make_command_line(argv, allocator, &command_line);
   }
   if (iree_status_is_ok(status)) {
-    STARTUPINFOA startup_info;
+    STARTUPINFOW startup_info;
     memset(&startup_info, 0, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESTDHANDLES;
@@ -404,14 +486,24 @@ static iree_status_t loom_tool_process_run_argv(
     startup_info.hStdOutput = stdout_file.handle;
     startup_info.hStdError = stderr_file.handle;
 
-    if (!CreateProcessA(NULL, command_line, NULL, NULL, TRUE, 0, NULL, NULL,
+    if (!CreateProcessW(NULL, command_line, NULL, NULL, TRUE, 0, NULL, NULL,
                         &startup_info, &process_info)) {
       status = loom_tool_win32_status(GetLastError(),
                                       "failed to spawn tool process");
     }
   }
   if (iree_status_is_ok(status)) {
-    WaitForSingleObject(process_info.hProcess, INFINITE);
+    DWORD wait_result = WaitForSingleObject(process_info.hProcess, INFINITE);
+    if (wait_result == WAIT_FAILED) {
+      status = loom_tool_win32_status(GetLastError(),
+                                      "failed to wait for tool process");
+    } else if (wait_result != WAIT_OBJECT_0) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "unexpected tool process wait result %lu",
+                                (unsigned long)wait_result);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     DWORD exit_code = 1;
     if (!GetExitCodeProcess(process_info.hProcess, &exit_code)) {
       status = loom_tool_win32_status(GetLastError(),
@@ -702,22 +794,33 @@ iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
   char stem_buffer[32] = {0};
   IREE_RETURN_IF_ERROR(loom_tool_temp_file_copy_stem(
       stem, stem_buffer, IREE_ARRAYSIZE(stem_buffer)));
+  wchar_t stem_wide[IREE_ARRAYSIZE(stem_buffer)] = {0};
+  for (iree_host_size_t i = 0; stem_buffer[i] != '\0'; ++i) {
+    stem_wide[i] = (wchar_t)stem_buffer[i];
+  }
 
-  char temp_directory[4096] = {0};
+  wchar_t temp_directory[4096] = {0};
   DWORD temp_directory_length =
-      GetTempPathA(IREE_ARRAYSIZE(temp_directory), temp_directory);
+      GetTempPathW(IREE_ARRAYSIZE(temp_directory), temp_directory);
   if (temp_directory_length == 0 ||
       temp_directory_length >= IREE_ARRAYSIZE(temp_directory)) {
     return loom_tool_win32_status(GetLastError(),
                                   "failed to resolve temporary directory");
   }
 
-  if (GetTempFileNameA(temp_directory, stem_buffer, 0, out_file->path) == 0) {
+  wchar_t temp_path[4096] = {0};
+  if (GetTempFileNameW(temp_directory, stem_wide, 0, temp_path) == 0) {
     memset(out_file, 0, sizeof(*out_file));
     return loom_tool_win32_status(GetLastError(),
                                   "failed to allocate temporary file path");
   }
-  return iree_ok_status();
+  iree_status_t status = loom_tool_win32_wide_to_utf8(
+      temp_path, IREE_ARRAYSIZE(out_file->path), out_file->path);
+  if (!iree_status_is_ok(status)) {
+    DeleteFileW(temp_path);
+    memset(out_file, 0, sizeof(*out_file));
+  }
+  return status;
 }
 
 void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
@@ -725,7 +828,7 @@ void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
     return;
   }
   if (file->path[0] != '\0') {
-    DeleteFileA(file->path);
+    loom_tool_win32_delete_utf8_file(file->path);
   }
   memset(file, 0, sizeof(*file));
 }

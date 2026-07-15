@@ -41,7 +41,6 @@ loom_cc_test(
     deps = [
         ":process",
         "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
