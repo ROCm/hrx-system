@@ -866,17 +866,17 @@ static bool loom_amdgpu_fragment_memory_fill_view_strides(
   if (role_layout->elements_per_register > 1) {
     uint8_t packed_axis = UINT8_MAX;
     switch (role_layout->map_kind) {
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION:
         packed_axis = 1;
         break;
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION:
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION:
         packed_axis = 0;
         break;
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD:
-      case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN:
+      case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD:
+      case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN:
         return true;
       default:
         return loom_amdgpu_fragment_memory_reject(
@@ -1533,20 +1533,20 @@ static bool loom_amdgpu_fragment_memory_register_terms(
     return false;
   }
   switch (role_layout->map_kind) {
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
       *out_lane_mod_stride = plan->axis_byte_strides[0];
       *out_static_byte_offset = (uint64_t)register_index *
                                 plan->elements_per_register *
                                 plan->axis_byte_strides[1];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION:
       *out_lane_mod_stride = plan->axis_byte_strides[1];
       *out_static_byte_offset = (uint64_t)register_index *
                                 plan->elements_per_register *
                                 plan->axis_byte_strides[0];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN:
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
+    case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN:
+    case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
       *out_lane_mod_stride = plan->axis_byte_strides[1];
       *out_lane_div_stride = plan->axis_byte_strides[0];
       *out_static_byte_offset =
@@ -1554,7 +1554,7 @@ static bool loom_amdgpu_fragment_memory_register_terms(
           (shape.result_row_count / plan->register_count) *
           plan->axis_byte_strides[0];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION:
       *out_lane_mod_stride = plan->axis_byte_strides[0];
       if (!loom_amdgpu_fragment_memory_scale_stride_u32(
               (uint32_t)plan->register_count * plan->elements_per_register,
@@ -1565,7 +1565,7 @@ static bool loom_amdgpu_fragment_memory_register_terms(
                                 plan->elements_per_register *
                                 plan->axis_byte_strides[1];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION:
       *out_lane_mod_stride = plan->axis_byte_strides[1];
       if (!loom_amdgpu_fragment_memory_scale_stride_u32(
               (uint32_t)plan->register_count * plan->elements_per_register,
@@ -1576,8 +1576,8 @@ static bool loom_amdgpu_fragment_memory_register_terms(
                                 plan->elements_per_register *
                                 plan->axis_byte_strides[0];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN:
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD:
       *out_lane_mod_stride = plan->axis_byte_strides[1];
       if (!loom_amdgpu_fragment_memory_scale_stride_u32(
               plan->register_count, plan->axis_byte_strides[0],
@@ -1587,7 +1587,7 @@ static bool loom_amdgpu_fragment_memory_register_terms(
       *out_static_byte_offset =
           (uint64_t)register_index * plan->axis_byte_strides[0];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN:
       *out_lane_mod_stride = plan->axis_byte_strides[1];
       if (!loom_amdgpu_fragment_memory_scale_stride_u32(
               (uint32_t)plan->register_count * plan->elements_per_register,
@@ -1598,7 +1598,7 @@ static bool loom_amdgpu_fragment_memory_register_terms(
                                 plan->elements_per_register *
                                 plan->axis_byte_strides[0];
       return true;
-    case LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_UNKNOWN:
+    case LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN:
     default:
       return false;
   }

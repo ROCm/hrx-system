@@ -89,23 +89,17 @@ static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable = {
     /*.can_prepare_format=*/FakeExecutableCacheCanPrepareFormat,
 };
 
-FakeHalDevice MakeFakeDevice(const iree_hal_device_spec_t* device_spec) {
-  FakeHalDevice device = {
-      /*.resource=*/{},
-      /*.device_spec=*/device_spec,
-  };
-  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
-  return device;
+void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
+                          FakeHalDevice* out_device) {
+  out_device->device_spec = device_spec;
+  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
 }
 
-FakeExecutableCache MakeFakeExecutableCache(bool raw_bda_supported) {
-  FakeExecutableCache executable_cache = {
-      /*.resource=*/{},
-      /*.raw_bda_supported=*/raw_bda_supported,
-  };
+void InitializeFakeExecutableCache(bool raw_bda_supported,
+                                   FakeExecutableCache* out_executable_cache) {
+  out_executable_cache->raw_bda_supported = raw_bda_supported;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
-                               &executable_cache.resource);
-  return executable_cache;
+                               &out_executable_cache->resource);
 }
 
 iree_hal_vulkan_features_t RequiredVulkanFeatures() {
@@ -241,8 +235,10 @@ TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
       RequiredVulkanFeatures() | IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
           IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS,
       /*include_dispatch=*/true, &device_spec));
-  FakeHalDevice device = MakeFakeDevice(device_spec.get());
-  FakeExecutableCache executable_cache = MakeFakeExecutableCache(true);
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  FakeExecutableCache executable_cache = {};
+  InitializeFakeExecutableCache(true, &executable_cache);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   loomc_result_t* result = nullptr;
   TargetProfilePtr profile = CreateProfileFromHal(
@@ -267,8 +263,10 @@ TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
 }
 
 TEST(LoomcSpirvIreeHalTargetTest, MissingExecutableFormatFailsResult) {
-  FakeHalDevice device = MakeFakeDevice(nullptr);
-  FakeExecutableCache executable_cache = MakeFakeExecutableCache(false);
+  FakeHalDevice device = {};
+  InitializeFakeDevice(nullptr, &device);
+  FakeExecutableCache executable_cache = {};
+  InitializeFakeExecutableCache(false, &executable_cache);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   loomc_result_t* result = nullptr;
   TargetProfilePtr profile = CreateProfileFromHal(
@@ -284,8 +282,10 @@ TEST(LoomcSpirvIreeHalTargetTest, MissingRequiredHalFactFailsResult) {
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(RequiredVulkanFeatures(),
                                         /*include_dispatch=*/false,
                                         &device_spec));
-  FakeHalDevice device = MakeFakeDevice(device_spec.get());
-  FakeExecutableCache executable_cache = MakeFakeExecutableCache(true);
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  FakeExecutableCache executable_cache = {};
+  InitializeFakeExecutableCache(true, &executable_cache);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   loomc_result_t* result = nullptr;
   TargetProfilePtr profile = CreateProfileFromHal(
@@ -301,8 +301,10 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
   IREE_ASSERT_OK(CreateVulkanDeviceSpec(RequiredVulkanFeatures(),
                                         /*include_dispatch=*/true,
                                         &device_spec));
-  FakeHalDevice device = MakeFakeDevice(device_spec.get());
-  FakeExecutableCache executable_cache = MakeFakeExecutableCache(true);
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  FakeExecutableCache executable_cache = {};
+  InitializeFakeExecutableCache(true, &executable_cache);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   iree_hal_device_t* hal_device = reinterpret_cast<iree_hal_device_t*>(&device);
   iree_hal_executable_cache_t* hal_executable_cache =
@@ -333,8 +335,10 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
 }
 
 TEST(LoomcSpirvIreeHalTargetTest, ProviderMissLetsRouterReportUnsupported) {
-  FakeHalDevice device = MakeFakeDevice(nullptr);
-  FakeExecutableCache executable_cache = MakeFakeExecutableCache(true);
+  FakeHalDevice device = {};
+  InitializeFakeDevice(nullptr, &device);
+  FakeExecutableCache executable_cache = {};
+  InitializeFakeExecutableCache(true, &executable_cache);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   iree_hal_device_t* hal_device = reinterpret_cast<iree_hal_device_t*>(&device);
   iree_hal_executable_cache_t* hal_executable_cache =

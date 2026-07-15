@@ -265,7 +265,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   IREE_ASSERT_OK(
       loom_pass_registry_lookup(registry, IREE_SV("target-beta"), &descriptor));
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(descriptor->info, TargetBetaPassInfo);
+  EXPECT_EQ(descriptor->info, &TargetBetaPassInfo);
 
   loom_target_environment_deinitialize(&environment);
 }

@@ -533,7 +533,7 @@ static inline hrx_device_t iree_hip_hrx_device_from_context(
 //===----------------------------------------------------------------------===//
 
 // Thread-local error state for HIP.
-static iree_thread_local struct {
+static IREE_THREAD_LOCAL struct {
   hipError_t last_error;
   bool sticky;
 } iree_hip_thread_error = {hipSuccess, false};
@@ -22578,7 +22578,7 @@ typedef struct iree_hip_call_configuration_t {
   hipStream_t stream;
   bool valid;  // true if configuration has been pushed
 } iree_hip_call_configuration_t;
-static iree_thread_local iree_hip_call_configuration_t iree_hip_call_config = {
+static IREE_THREAD_LOCAL iree_hip_call_configuration_t iree_hip_call_config = {
     0};
 
 // Pushes kernel launch configuration onto the call stack.

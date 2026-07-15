@@ -24,6 +24,11 @@ from build_tools.devtools import (
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
+def normalized_plan_description(plan) -> str:
+    """Returns a host-neutral rendering for semantic plan assertions."""
+    return plan.describe().replace("\\", "/").replace(".exe", "")
+
+
 class CMakeTest(unittest.TestCase):
     def test_local_tmp_root_defaults_to_repo_tmp(self):
         self.assertEqual(
@@ -32,11 +37,12 @@ class CMakeTest(unittest.TestCase):
         )
 
     def test_local_tmp_root_uses_environment_override(self):
+        absolute_path = Path(tempfile.gettempdir()) / "iree-x"
         self.assertEqual(
             environment.local_tmp_root(
-                environ={environment.DEVTOOLS_TMP_ENV: "/tmp/iree-x"}
+                environ={environment.DEVTOOLS_TMP_ENV: str(absolute_path)}
             ),
-            Path("/tmp/iree-x"),
+            absolute_path,
         )
         self.assertEqual(
             environment.local_tmp_root(
@@ -61,7 +67,8 @@ class CMakeTest(unittest.TestCase):
         )
 
     def test_build_dir_preserves_absolute_paths(self):
-        self.assertEqual(cmake_dev.build_dir(Path("/tmp/cmake")), Path("/tmp/cmake"))
+        absolute_path = Path(tempfile.gettempdir()) / "cmake"
+        self.assertEqual(cmake_dev.build_dir(absolute_path), absolute_path)
 
     def test_build_dir_prefers_environment_over_recorded_state(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -164,7 +171,7 @@ class CMakeTest(unittest.TestCase):
             configured_build_dir=Path("build/cmake-debug"),
             backend_args=["-DIREE_HAL_DRIVER_AMDGPU=OFF"],
         )
-        configure_description = configure_plan.describe()
+        configure_description = normalized_plan_description(configure_plan)
         self.assertIn("build/cmake-debug", configure_description)
         self.assertIn("codemodel-v2", configure_description)
         self.assertIn("record CMake build directory", configure_description)
@@ -193,11 +200,12 @@ class CMakeTest(unittest.TestCase):
             configured_build_dir=Path("build/cmake-debug"),
             backend_args=["iree-run-module", "--", "--help"],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# cmake run iree-run-module", description)
         self.assertIn("CMake File API", description)
-        self.assertIn("exec '<built executable>' --help", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--help", description)
 
     def test_run_parse_supports_print_path(self):
         command = cmake_dev.parse_run_args(["-p", "iree-run-module"])
@@ -214,7 +222,7 @@ class CMakeTest(unittest.TestCase):
             backend_args=[],
         )
 
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("# cmake compile-commands", description)
         self.assertIn("build/cmake-debug/compile_commands.json", description)
         self.assertIn("print", description)
@@ -287,12 +295,13 @@ class CMakeTest(unittest.TestCase):
                 "-max_total_time=1",
             ],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--parallel 8", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
 
     def test_fuzz_requires_fuzz_enabled_cache(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -352,7 +361,7 @@ class CMakeTest(unittest.TestCase):
                 "int main() { return 0; }",
             ],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn(".tmp/iree-cmake-try/run-<pid>/try.cmake", description)
         self.assertIn("-DIREE_CMAKE_TRY_FILE=", description)

@@ -25,7 +25,13 @@ class Step(Protocol):
     def run(self, verbose: bool = False) -> int: ...
 
 
+def is_windows() -> bool:
+    return os.name == "nt"
+
+
 def quote_command(argv: list[str]) -> str:
+    if is_windows():
+        return subprocess.list2cmdline(argv)
     return shlex.join(argv)
 
 
@@ -52,14 +58,24 @@ class CommandStep:
                     and value.endswith(os.pathsep + old_value)
                 ):
                     prefix = value[: -(len(old_value) + 1)]
-                    env_prefix.append(f"PATH={shlex.quote(prefix)}:$PATH")
+                    if is_windows():
+                        env_prefix.append(f'set "PATH={prefix};%PATH%"')
+                    else:
+                        env_prefix.append(f"PATH={shlex.quote(prefix)}:$PATH")
                 else:
-                    env_prefix.append(f"{key}={shlex.quote(value)}")
+                    if is_windows():
+                        env_prefix.append(f'set "{key}={value}"')
+                    else:
+                        env_prefix.append(f"{key}={shlex.quote(value)}")
             if env_prefix:
-                pieces.append(" ".join(env_prefix))
+                separator = "\n" if is_windows() else " "
+                pieces.append(separator.join(env_prefix))
         command = quote_command(self.argv)
         if self.cwd != Path.cwd():
-            pieces.append(f"(cd {shlex.quote(str(self.cwd))} && {command})")
+            if is_windows():
+                pieces.append(f"cd /d {quote_command([str(self.cwd)])} && {command}")
+            else:
+                pieces.append(f"(cd {shlex.quote(str(self.cwd))} && {command})")
         else:
             pieces.append(command)
         return "\n".join(pieces)
@@ -93,6 +109,11 @@ class ExecCommandStep:
             print("  " + quote_command(self.argv))
             sys.stdout.flush()
         try:
+            # Windows does not provide the POSIX process-overlay contract this
+            # terminal step relies on. Run synchronously so child output and
+            # the terminal exit code are propagated to the caller.
+            if is_windows():
+                return subprocess.run(self.argv, cwd=self.cwd, env=self.env).returncode
             os.chdir(self.cwd)
             os.execvpe(self.argv[0], self.argv, self.env or os.environ)
         except OSError as exc:
@@ -117,6 +138,8 @@ class CheckCommandStep:
         if self.expected_pattern:
             command += f"  # expect /{self.expected_pattern}/"
         if self.cwd != Path.cwd():
+            if is_windows():
+                return f"cd /d {quote_command([str(self.cwd)])} && {command}"
             return f"(cd {shlex.quote(str(self.cwd))} && {command})"
         return command
 
@@ -125,14 +148,21 @@ class CheckCommandStep:
             print(f"dev.py: {self.label or quote_command(self.argv)}")
             print("  " + quote_command(self.argv))
             sys.stdout.flush()
-        result = subprocess.run(
-            self.argv,
-            cwd=self.cwd,
-            env=self.env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                self.argv,
+                cwd=self.cwd,
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except OSError as exc:
+            print(
+                f"dev.py: failed to run {quote_command(self.argv)}: {exc}",
+                file=sys.stderr,
+            )
+            return 127
         output = result.stdout.rstrip()
         if output:
             print(output)
@@ -164,6 +194,8 @@ class OptionalCheckCommandStep:
         else:
             command += "  # optional"
         if self.cwd != Path.cwd():
+            if is_windows():
+                return f"cd /d {quote_command([str(self.cwd)])} && {command}"
             return f"(cd {shlex.quote(str(self.cwd))} && {command})"
         return command
 
@@ -215,6 +247,8 @@ class EnsureDirectoryStep:
     path: Path
 
     def describe(self) -> str:
+        if is_windows():
+            return f"mkdir {quote_command([str(self.path)])}"
         return f"mkdir -p {shlex.quote(str(self.path))}"
 
     def run(self, verbose: bool = False) -> int:
@@ -257,6 +291,11 @@ class CopyFileStep:
     label: str | None = None
 
     def describe(self) -> str:
+        if is_windows():
+            return (
+                f"copy /Y {quote_command([str(self.source)])} "
+                f"{quote_command([str(self.destination)])}"
+            )
         return (
             f"cp {shlex.quote(str(self.source))} {shlex.quote(str(self.destination))}"
         )

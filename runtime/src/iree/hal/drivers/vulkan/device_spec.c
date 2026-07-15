@@ -6,22 +6,14 @@
 
 #include "iree/hal/drivers/vulkan/device_spec.h"
 
-#include <string.h>
+#include "iree/base/alignment.h"
 
-#define IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC 0x53445656u  // VVDS
-
-typedef struct iree_hal_vulkan_device_spec_payload_t {
-  // Magic value identifying the Vulkan device spec payload.
-  uint32_t magic;
-  // Encoded payload version.
-  uint32_t version;
-  // Pointer-free Vulkan device facts.
-  iree_hal_vulkan_device_spec_t spec;
-} iree_hal_vulkan_device_spec_payload_t;
+#define IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC UINT32_C(0x53445656)  // VVDS
+#define IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_SIZE 28u
 
 IREE_API_EXPORT iree_host_size_t
 iree_hal_vulkan_device_spec_payload_size(void) {
-  return sizeof(iree_hal_vulkan_device_spec_payload_t);
+  return IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_SIZE;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_encode(
@@ -34,12 +26,19 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_encode(
         " bytes; got %" PRIhsz,
         iree_hal_vulkan_device_spec_payload_size(), payload.data_length);
   }
-  iree_hal_vulkan_device_spec_payload_t encoded_payload = {
-      .magic = IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC,
-      .version = IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION,
-      .spec = *spec,
-  };
-  memcpy(payload.data, &encoded_payload, sizeof(encoded_payload));
+  if (IREE_UNLIKELY(!payload.data)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan device spec payload storage is NULL");
+  }
+  iree_unaligned_store_le_u32(payload.data + 0,
+                              IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC);
+  iree_unaligned_store_le_u32(payload.data + 4,
+                              IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION);
+  iree_unaligned_store_le_u32(payload.data + 8, spec->api_version);
+  iree_unaligned_store_le_u32(payload.data + 12, spec->driver_version);
+  iree_unaligned_store_le_u32(payload.data + 16, spec->physical_device_type);
+  iree_unaligned_store_le_u32(payload.data + 20, spec->enabled_features);
+  iree_unaligned_store_le_u32(payload.data + 24, spec->flags);
   return iree_ok_status();
 }
 
@@ -54,19 +53,27 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_decode(
         " bytes; got %" PRIhsz,
         iree_hal_vulkan_device_spec_payload_size(), payload.data_length);
   }
-  iree_hal_vulkan_device_spec_payload_t decoded_payload;
-  memcpy(&decoded_payload, payload.data, sizeof(decoded_payload));
-  if (decoded_payload.magic != IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC) {
+  if (IREE_UNLIKELY(!payload.data)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan device spec payload storage is NULL");
+  }
+  const uint32_t magic = iree_unaligned_load_le_u32(payload.data + 0);
+  if (magic != IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Vulkan device spec payload has invalid magic");
   }
-  if (decoded_payload.version != IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION) {
+  const uint32_t version = iree_unaligned_load_le_u32(payload.data + 4);
+  if (version != IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan device spec payload version %u is not supported",
-        decoded_payload.version);
+        "Vulkan device spec payload version %u is not supported", version);
   }
-  *out_spec = decoded_payload.spec;
+  out_spec->api_version = iree_unaligned_load_le_u32(payload.data + 8);
+  out_spec->driver_version = iree_unaligned_load_le_u32(payload.data + 12);
+  out_spec->physical_device_type =
+      iree_unaligned_load_le_u32(payload.data + 16);
+  out_spec->enabled_features = iree_unaligned_load_le_u32(payload.data + 20);
+  out_spec->flags = iree_unaligned_load_le_u32(payload.data + 24);
   return iree_ok_status();
 }
 

@@ -366,7 +366,7 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
         request->host_allocator);
   }
 
-  loom_spirv_tool_output_t disassembly = {0};
+  loom_tool_output_t disassembly = {0};
   if (iree_status_is_ok(status)) {
     status = loom_spirv_tool_disassemble_binary(
         &toolchain, loom_spirv_module_binary_byte_span(&module),
@@ -378,7 +378,7 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
         &request->result->actual_output);
   }
 
-  loom_spirv_tool_output_deinitialize(&disassembly, request->host_allocator);
+  loom_tool_output_deinitialize(&disassembly, request->host_allocator);
   loom_spirv_module_binary_deinitialize(&module, request->host_allocator);
   return status;
 }
@@ -401,10 +401,10 @@ static iree_status_t loom_spirv_loom_check_query_spirv_tool(
     loom_spirv_tool_kind_t tool_kind, iree_allocator_t allocator) {
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);
-  loom_spirv_tool_output_t version_text = {0};
+  loom_tool_output_t version_text = {0};
   iree_status_t status = loom_spirv_tool_query_version(
       &toolchain, tool_kind, allocator, &version_text);
-  loom_spirv_tool_output_deinitialize(&version_text, allocator);
+  loom_tool_output_deinitialize(&version_text, allocator);
   return status;
 }
 

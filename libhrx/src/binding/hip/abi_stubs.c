@@ -394,7 +394,7 @@ static hipError_t hrx_hip_validate_mipmapped_array_descriptor(
   return hrx_hip_mipmapped_array_level_size(descriptor, 0, &ignored_size);
 }
 
-static _Thread_local hipStream_t hrx_hip_spt_stream = NULL;
+static IREE_THREAD_LOCAL hipStream_t hrx_hip_spt_stream = NULL;
 
 static hipError_t hrx_hip_spt_default_stream(hipStream_t* stream) {
   if (!stream) return hipErrorInvalidValue;

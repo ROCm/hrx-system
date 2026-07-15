@@ -31,11 +31,11 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 uint32_t LoadLeU32(const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint32_t*)(data + offset));
+  return iree_unaligned_load_le_u32(data + offset);
 }
 
 uint16_t LoadLeU16(const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint16_t*)(data + offset));
+  return iree_unaligned_load_le_u16(data + offset);
 }
 
 class AmdgpuSanitizerSiteTableTest : public ::testing::Test {

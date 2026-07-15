@@ -28,7 +28,7 @@ static iree_allocator_t loomc_workspace_iree_allocator(
     loomc_allocator_t allocator) {
   return (iree_allocator_t){
       .self = allocator.self,
-      .ctl = (iree_allocator_ctl_fn_t)allocator.ctl,
+      .ctl = allocator.ctl,
   };
 }
 

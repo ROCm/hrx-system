@@ -336,7 +336,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
 
   const iree_hal_device_spec_t*
       device_specs[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
-  memset(device_specs, 0, sizeof(device_specs));
 
   // Retain all devices and fetch their cached immutable specs.
   for (iree_host_size_t i = 0; i < device_count; ++i) {

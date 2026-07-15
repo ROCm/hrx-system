@@ -1,85 +1,87 @@
-#!/bin/bash
-# Copyright 2021 The IREE Authors
+#!/usr/bin/env bash
+# Copyright 2026 The IREE Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Updates the checked-in ELF files used for testing the ELF loader.
-# In general we try not to check in binary files however these files act as a
-# test of binary compatibility for artifacts users may have produced. If a
-# build break occurs here we know that we have broken compatibility. Today this
-# happens every few months as we are not yet binary-stable but in the future
-# will be a bigger issue.
-#
-# To use, ensure iree-compile and your compiled ld.lld are on your PATH and
-# run the script:
-#   $ ./runtime/src/iree/hal/local/elf/testdata/generate.sh
+# Regenerates the checked-in ELF compatibility fixtures from the adjacent C
+# source. Normal builds only embed these files and do not require Clang, LLD, or
+# llvm-strip. The tools are maintenance dependencies used when the executable
+# library ABI or fixture source changes.
 
-# Uncomment to see the iree-compile commands issued:
-# set -x
-set -e
+set -euo pipefail
 
-ROOT_DIR=$(git rev-parse --show-toplevel)
-TESTDATA="${ROOT_DIR}/runtime/src/iree/hal/local/elf/testdata"
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+TESTDATA_DIR="${ROOT_DIR}/runtime/src/iree/hal/local/elf/testdata"
+SOURCE_FILE="${TESTDATA_DIR}/elementwise_mul_library.c"
+CLANG="${CLANG:-clang}"
+LLVM_STRIP="${LLVM_STRIP:-llvm-strip}"
+RESOURCE_DIR="$("${CLANG}" -print-resource-dir)"
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TEMP_DIR}"' EXIT
 
-# $1: file name ("foo_arm_32.so")
-# $2: list of iree-compile arguments for targeting
-function compile_and_extract_library() {
-  local so_name=$1
-  shift
-  local compile_args=("$@")
+# executable_library.h includes <assert.h> for the C static_assert spelling.
+# Cross-compiling a freestanding payload intentionally has no target libc
+# sysroot, so provide only that language macro and use Clang's builtin headers
+# for stddef.h and stdint.h.
+cat >"${TEMP_DIR}/assert.h" <<'EOF'
+#ifndef IREE_ELF_TEST_ASSERT_H_
+#define IREE_ELF_TEST_ASSERT_H_
+#define static_assert _Static_assert
+#endif  // IREE_ELF_TEST_ASSERT_H_
+EOF
 
-  echo "Updating ${TESTDATA}/${so_name}"
+COMMON_FLAGS=(
+  -std=c11
+  -O2
+  -ffreestanding
+  -nostdinc
+  -isystem "${TEMP_DIR}"
+  -isystem "${RESOURCE_DIR}/include"
+  -I"${ROOT_DIR}/runtime/src"
+  -fPIC
+  -fvisibility=hidden
+  -fno-ident
+  -fno-stack-protector
+  -fno-unwind-tables
+  -fno-asynchronous-unwind-tables
+  -fno-sanitize=all
+  -ffunction-sections
+  -fdata-sections
+  -shared
+  -nostdlib
+  -fuse-ld=lld
+  "-Wl,--build-id=none"
+  "-Wl,--gc-sections"
+  "-Wl,--hash-style=sysv"
+  "-Wl,-z,defs"
+)
 
-  CMD=(
-    iree-compile
-      --compile-mode=hal-executable
-      ${TESTDATA}/elementwise_mul.mlir
-      -o="${TESTDATA}/${so_name}"
+compile_fixture() {
+  local output_name="$1"
+  local target_triple="$2"
+  shift 2
 
-      --iree-hal-target-device=local
-      --iree-hal-local-target-device-backends=llvm-cpu
-      --iree-llvmcpu-debug-symbols=false
-
-      "${compile_args[@]}"
-  )
-  "${CMD[@]}"
+  local temporary_output="${TEMP_DIR}/${output_name}"
+  echo "Generating ${output_name}"
+  "${CLANG}" \
+    --target="${target_triple}" \
+    "${COMMON_FLAGS[@]}" \
+    "$@" \
+    "${SOURCE_FILE}" \
+    -o "${temporary_output}"
+  "${LLVM_STRIP}" --strip-all "${temporary_output}"
+  chmod 0644 "${temporary_output}"
+  mv "${temporary_output}" "${TESTDATA_DIR}/${output_name}"
 }
 
-ARM_32=(
-  --iree-llvmcpu-target-triple=armv7a-pc-linux-elf
-  --iree-llvmcpu-target-float-abi=hard
-)
-compile_and_extract_library "elementwise_mul_arm_32.so" ${ARM_32[@]}
-
-ARM_64=(
-  --iree-llvmcpu-target-triple=aarch64-pc-linux-elf
-)
-compile_and_extract_library "elementwise_mul_arm_64.so" ${ARM_64[@]}
-
-RISCV_32=(
-  --iree-llvmcpu-target-triple=riscv32-pc-linux-elf
-  --iree-llvmcpu-target-cpu=generic-rv32
-  --iree-llvmcpu-target-cpu-features=+m,+f
-  --iree-llvmcpu-target-abi=ilp32
-)
-compile_and_extract_library "elementwise_mul_riscv_32.so" ${RISCV_32[@]}
-
-RISCV_64=(
-  --iree-llvmcpu-target-triple=riscv64-pc-linux-elf
-  --iree-llvmcpu-target-cpu=generic-rv64
-  --iree-llvmcpu-target-cpu-features=+m,+a,+f,+d,+c
-  --iree-llvmcpu-target-abi=lp64d
-)
-compile_and_extract_library "elementwise_mul_riscv_64.so" ${RISCV_64[@]}
-
-X86_32=(
-  --iree-llvmcpu-target-triple=i686-pc-linux-elf
-)
-compile_and_extract_library "elementwise_mul_x86_32.so" ${X86_32[@]}
-
-X86_64=(
-  --iree-llvmcpu-target-triple=x86_64-pc-linux-elf
-)
-compile_and_extract_library "elementwise_mul_x86_64.so" ${X86_64[@]}
+compile_fixture elementwise_mul_arm_32.so armv7a-unknown-linux-gnueabihf \
+  -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
+compile_fixture elementwise_mul_arm_64.so aarch64-unknown-linux-gnu
+compile_fixture elementwise_mul_riscv_32.so riscv32-unknown-linux-gnu \
+  -march=rv32imaf -mabi=ilp32f
+compile_fixture elementwise_mul_riscv_64.so riscv64-unknown-linux-gnu \
+  -march=rv64imafdc -mabi=lp64d
+compile_fixture elementwise_mul_x86_32.so i686-unknown-linux-gnu
+compile_fixture elementwise_mul_x86_64.so x86_64-unknown-linux-gnu

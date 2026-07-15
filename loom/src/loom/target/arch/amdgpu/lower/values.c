@@ -568,39 +568,48 @@ static bool loom_amdgpu_scalar_cmpi_has_i64_operands(
          loom_amdgpu_type_is_i64(loom_module_value_type(module, rhs));
 }
 
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_EQ ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_EQ,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_NE ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_NE,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_SLT ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_SLT,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_SLE ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_SLE,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_SGT ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_SGT,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_SGE ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_SGE,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_ULT ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_ULT,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_ULE ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_ULE,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_UGT ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_UGT,
-              "index and scalar integer predicate enums must align");
-static_assert((int)LOOM_INDEX_CMP_PREDICATE_UGE ==
-                  (int)LOOM_SCALAR_CMPI_PREDICATE_UGE,
-              "index and scalar integer predicate enums must align");
+static bool loom_amdgpu_index_cmp_predicate_to_scalar(
+    uint8_t index_predicate,
+    loom_scalar_cmpi_predicate_t* out_scalar_predicate) {
+  switch ((loom_index_cmp_predicate_t)index_predicate) {
+    case LOOM_INDEX_CMP_PREDICATE_EQ:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_EQ;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_NE:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_NE;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_SLT:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_SLT;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_SLE:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_SLE;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_SGT:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_SGT;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_SGE:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_SGE;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_ULT:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_ULT;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_ULE:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_ULE;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_UGT:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_UGT;
+      return true;
+    case LOOM_INDEX_CMP_PREDICATE_UGE:
+      *out_scalar_predicate = LOOM_SCALAR_CMPI_PREDICATE_UGE;
+      return true;
+    default:
+      return false;
+  }
+}
 
 static bool loom_amdgpu_i64_compare_predicate_descriptors(
-    uint8_t predicate, loom_amdgpu_descriptor_ref_t* out_high_descriptor_ref,
+    loom_scalar_cmpi_predicate_t predicate,
+    loom_amdgpu_descriptor_ref_t* out_high_descriptor_ref,
     loom_amdgpu_descriptor_ref_t* out_low_descriptor_ref,
     loom_amdgpu_descriptor_ref_t* out_combine_descriptor_ref,
     bool* out_needs_high_equal) {
@@ -1418,10 +1427,12 @@ iree_status_t loom_amdgpu_low_legality_verify_address_compare(
       .rhs = loom_index_cmp_rhs(op),
       .result = loom_index_cmp_result(op),
   };
-  if (!loom_amdgpu_i64_compare_predicate_descriptors(
-          loom_index_cmp_predicate(op), &plan.high_descriptor_ref,
-          &plan.low_descriptor_ref, &plan.combine_descriptor_ref,
-          &plan.needs_high_equal)) {
+  loom_scalar_cmpi_predicate_t predicate;
+  if (!loom_amdgpu_index_cmp_predicate_to_scalar(loom_index_cmp_predicate(op),
+                                                 &predicate) ||
+      !loom_amdgpu_i64_compare_predicate_descriptors(
+          predicate, &plan.high_descriptor_ref, &plan.low_descriptor_ref,
+          &plan.combine_descriptor_ref, &plan.needs_high_equal)) {
     return loom_amdgpu_low_legality_reject(context, op, IREE_SV("predicate"));
   }
   iree_string_view_t constraint_key = iree_string_view_empty();
@@ -1464,9 +1475,9 @@ iree_status_t loom_amdgpu_low_legality_verify_scalar_cmpi_i64(
       .result = loom_scalar_cmpi_result(op),
   };
   if (!loom_amdgpu_i64_compare_predicate_descriptors(
-          loom_scalar_cmpi_predicate(op), &plan.high_descriptor_ref,
-          &plan.low_descriptor_ref, &plan.combine_descriptor_ref,
-          &plan.needs_high_equal)) {
+          (loom_scalar_cmpi_predicate_t)loom_scalar_cmpi_predicate(op),
+          &plan.high_descriptor_ref, &plan.low_descriptor_ref,
+          &plan.combine_descriptor_ref, &plan.needs_high_equal)) {
     return loom_amdgpu_low_legality_reject(context, op, IREE_SV("predicate"));
   }
   iree_string_view_t constraint_key = iree_string_view_empty();
@@ -2381,10 +2392,12 @@ iree_status_t loom_amdgpu_select_index_cmp_i64_plan(
       .rhs = loom_index_cmp_rhs(source_op),
       .result = result,
   };
-  if (!loom_amdgpu_i64_compare_predicate_descriptors(
-          loom_index_cmp_predicate(source_op), &plan.high_descriptor_ref,
-          &plan.low_descriptor_ref, &plan.combine_descriptor_ref,
-          &plan.needs_high_equal)) {
+  loom_scalar_cmpi_predicate_t predicate;
+  if (!loom_amdgpu_index_cmp_predicate_to_scalar(
+          loom_index_cmp_predicate(source_op), &predicate) ||
+      !loom_amdgpu_i64_compare_predicate_descriptors(
+          predicate, &plan.high_descriptor_ref, &plan.low_descriptor_ref,
+          &plan.combine_descriptor_ref, &plan.needs_high_equal)) {
     return iree_ok_status();
   }
 
@@ -2460,9 +2473,9 @@ iree_status_t loom_amdgpu_select_scalar_cmpi_i64_plan(
       .result = result,
   };
   if (!loom_amdgpu_i64_compare_predicate_descriptors(
-          loom_scalar_cmpi_predicate(source_op), &plan.high_descriptor_ref,
-          &plan.low_descriptor_ref, &plan.combine_descriptor_ref,
-          &plan.needs_high_equal)) {
+          (loom_scalar_cmpi_predicate_t)loom_scalar_cmpi_predicate(source_op),
+          &plan.high_descriptor_ref, &plan.low_descriptor_ref,
+          &plan.combine_descriptor_ref, &plan.needs_high_equal)) {
     return iree_ok_status();
   }
 

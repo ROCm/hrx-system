@@ -15,19 +15,9 @@
 // NOTE: threading support is optional.
 #if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
 
-#define iree_thread_local /* static - single-threaded */
 #define iree_thread_id() ((uint64_t)0)
 
 #else
-
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201102L) && \
-    !__STDC_NO_THREADS__
-#define iree_thread_local _Thread_local
-#elif defined(IREE_COMPILER_MSVC)
-#define iree_thread_local __declspec(thread)
-#else
-#define iree_thread_local
-#endif  // __STDC_NO_THREADS__
 
 #if defined(IREE_PLATFORM_ANDROID)
 #include <unistd.h>
@@ -90,7 +80,11 @@ typedef struct iree_trace_thread_t {
   iree_trace_zone_t stack[128];
 #endif  // IREE_TRACING_CONSOLE_TIMING
 } iree_trace_thread_t;
-static iree_thread_local iree_trace_thread_t _thread = {0};
+#if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+static iree_trace_thread_t _thread = {0};
+#else
+static IREE_THREAD_LOCAL iree_trace_thread_t _thread = {0};
+#endif  // IREE_SYNCHRONIZATION_DISABLE_UNSAFE
 
 void iree_tracing_set_thread_name(const char* name) {
   _thread.name_length = iree_min(strlen(name), IREE_ARRAYSIZE(_thread.name));

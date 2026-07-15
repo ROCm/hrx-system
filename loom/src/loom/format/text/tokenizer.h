@@ -152,10 +152,10 @@ typedef struct loom_tokenizer_t {
   uint32_t consumed_end_line;
   uint32_t consumed_end_column;
 
-  // When true, 'x' at identifier-start position produces DIM_X instead
-  // of starting an identifier. Set by the shaped type parser during
-  // dimension list parsing (e.g., "4x[%M]xf32") and cleared before
-  // scanning element types or encoding parameters.
+  // When true, 'x' at identifier-start position produces DIM_X instead of
+  // starting an identifier. Set by the shaped type parser while scanning the
+  // dimension list and its element-type lookahead (e.g., "4x[%M]xf32"), then
+  // cleared before consuming the element type or encoding parameters.
   bool in_dim_list;
 } loom_tokenizer_t;
 

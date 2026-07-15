@@ -154,6 +154,19 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "executable_plugin_test",
+    srcs = ["executable_plugin_test.cc"],
+    deps = [
+        ":executable_plugin",
+        ":executable_plugin_manager",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/local/plugins:static_plugin",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "inline_dispatch",
     srcs = ["inline_dispatch.c"],

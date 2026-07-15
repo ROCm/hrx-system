@@ -72,6 +72,16 @@ TOOLS = {
                 sha256="e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010",
                 binary_name="bazelisk",
             ),
+            "windows-amd64": ToolAsset(
+                url="https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-windows-amd64.exe",
+                sha256="092a8738d5b41aae7a85c42cc961b1034e3389aba43ffc20c0fabda7b43e095b",
+                binary_name="bazelisk.exe",
+            ),
+            "windows-arm64": ToolAsset(
+                url="https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-windows-arm64.exe",
+                sha256="8bc42bd5d7857f18a21440b906469bb6c7cf91a7c72364d4b1e5ec56a76fe94f",
+                binary_name="bazelisk.exe",
+            ),
         },
     ),
     "buildifier": Tool(
@@ -98,6 +108,16 @@ TOOLS = {
                 url="https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/buildifier-linux-arm64",
                 sha256="947bf6700d708026b2057b09bea09abbc3cafc15d9ecea35bb3885c4b09ccd04",
                 binary_name="buildifier",
+            ),
+            "windows-amd64": ToolAsset(
+                url="https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/buildifier-windows-amd64.exe",
+                sha256="f4ecb9c73de2bc38b845d4ee27668f6248c4813a6647db4b4931a7556052e4e1",
+                binary_name="buildifier.exe",
+            ),
+            "windows-arm64": ToolAsset(
+                url="https://github.com/bazelbuild/buildtools/releases/download/v8.5.1/buildifier-windows-arm64.exe",
+                sha256="55a276ad8b1ff46be48bf64e432264034ea69a45aa3914e89c1d1936f5c2d85c",
+                binary_name="buildifier.exe",
             ),
         },
     ),
@@ -139,7 +159,7 @@ def parse_arguments() -> argparse.Namespace:
 def host_platform_key() -> str:
     system = platform.system().lower()
     machine = platform.machine().lower()
-    if system not in ("darwin", "linux"):
+    if system not in ("darwin", "linux", "windows"):
         raise RuntimeError(f"unsupported host operating system: {platform.system()}")
 
     if machine in ("x86_64", "amd64"):
@@ -154,8 +174,22 @@ def host_platform_key() -> str:
 def default_bin_dir() -> Path:
     virtual_env = os.environ.get("VIRTUAL_ENV")
     if virtual_env:
-        return Path(virtual_env) / "bin"
-    return REPO_ROOT / ".venv" / "bin"
+        venv_root = Path(virtual_env)
+    else:
+        venv_root = REPO_ROOT / ".venv"
+    return venv_bin_dir(venv_root)
+
+
+def venv_bin_dir(venv_root: Path, system: str | None = None) -> Path:
+    system = platform.system() if system is None else system
+    return venv_root / ("Scripts" if system.lower() == "windows" else "bin")
+
+
+def install_name(name: str, system: str | None = None) -> str:
+    system = platform.system() if system is None else system
+    if system.lower() == "windows" and not name.lower().endswith(".exe"):
+        return name + ".exe"
+    return name
 
 
 def selected_tools(args: argparse.Namespace) -> dict[str, Tool]:
@@ -214,23 +248,35 @@ def download_asset(asset: ToolAsset, destination: Path) -> None:
     os.replace(temporary_path, destination)
 
 
-def install_alias(primary_path: Path, alias_path: Path, expected_sha256: str) -> None:
+def install_alias(
+    primary_path: Path,
+    alias_path: Path,
+    expected_sha256: str,
+    system: str | None = None,
+) -> None:
     if alias_path == primary_path:
         return
     alias_sha256 = file_sha256(alias_path)
     if alias_path.is_symlink() or alias_sha256 != expected_sha256:
         alias_path.unlink(missing_ok=True)
-        try:
-            alias_path.symlink_to(primary_path.name)
-        except OSError:
+        system = platform.system() if system is None else system
+        if system.lower() == "windows":
             shutil.copy2(primary_path, alias_path)
+        else:
+            try:
+                alias_path.symlink_to(primary_path.name)
+            except OSError:
+                shutil.copy2(primary_path, alias_path)
 
 
 def check_alias(primary_path: Path, alias_path: Path, expected_sha256: str) -> bool:
     if alias_path == primary_path:
         return True
     if alias_path.is_symlink():
-        return alias_path.resolve() == primary_path.resolve()
+        try:
+            return alias_path.resolve() == primary_path.resolve()
+        except OSError:
+            return False
     return file_sha256(alias_path) == expected_sha256
 
 
@@ -241,8 +287,8 @@ def install_tool(name: str, tool: Tool, asset: ToolAsset, bin_dir: Path) -> bool
     else:
         print(f"{name} {tool.version}: installing {asset.url}")
         download_asset(asset, primary_path)
-    for install_name in tool.install_names:
-        install_alias(primary_path, bin_dir / install_name, asset.sha256)
+    for alias_name in tool.install_names:
+        install_alias(primary_path, bin_dir / install_name(alias_name), asset.sha256)
     return True
 
 
@@ -252,8 +298,8 @@ def check_tool(name: str, tool: Tool, asset: ToolAsset, bin_dir: Path) -> bool:
     if file_sha256(primary_path) != asset.sha256:
         print(f"{name} {tool.version}: missing or wrong hash at {primary_path}")
         ok = False
-    for install_name in tool.install_names:
-        alias_path = bin_dir / install_name
+    for alias_name in tool.install_names:
+        alias_path = bin_dir / install_name(alias_name)
         if not check_alias(primary_path, alias_path, asset.sha256):
             print(f"{name} {tool.version}: missing alias {alias_path}")
             ok = False

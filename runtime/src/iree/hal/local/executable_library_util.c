@@ -6,6 +6,31 @@
 
 #include "iree/hal/local/executable_library_util.h"
 
+iree_status_t iree_hal_executable_library_validate_query_result(
+    const iree_hal_executable_library_header_t* const* query_result,
+    const iree_hal_executable_library_v0_t** out_library) {
+  IREE_ASSERT_ARGUMENT(out_library);
+  *out_library = NULL;
+  if (!query_result || !*query_result) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable does not support this version of the runtime (%08X)",
+        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
+  }
+  const iree_hal_executable_library_header_t* header = *query_result;
+  if (header->version < IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6 ||
+      header->version > IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable library version %u is outside the supported range "
+        "[%u, %u]",
+        header->version, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6,
+        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
+  }
+  *out_library = iree_hal_executable_library_v0_from_query_result(query_result);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_executable_library_verify(
     const iree_hal_executable_params_t* executable_params,
     const iree_hal_executable_library_v0_t* library) {

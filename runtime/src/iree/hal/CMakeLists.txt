@@ -66,6 +66,8 @@ iree_cc_library(
     "device_event.c"
     "device_group.c"
     "device_spec.c"
+    "device_spec_serialization.c"
+    "device_spec_serialization.h"
     "driver.c"
     "driver_registry.c"
     "event.c"
@@ -119,6 +121,16 @@ iree_cc_test(
     iree::hal::utils::device_spec_builder
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    device_spec_fuzz
+  SRCS
+    "device_spec_fuzz.cc"
+  DEPS
+    ::hal
+    iree::base
 )
 
 iree_cc_test(

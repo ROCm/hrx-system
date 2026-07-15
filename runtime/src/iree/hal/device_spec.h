@@ -758,7 +758,7 @@ typedef enum iree_hal_executable_target_selection_result_e {
 
 // Driver-local typed facet payload preserved by core HAL.
 typedef struct iree_hal_device_spec_facet_t {
-  // Stable facet schema identifier.
+  // Non-empty stable schema identifier unique within the device spec.
   iree_string_view_t schema_id;
   // Facet schema version.
   uint32_t schema_version;
@@ -813,9 +813,14 @@ IREE_API_EXPORT void iree_hal_device_spec_retain(iree_hal_device_spec_t* spec);
 // Releases the given |spec| from the caller.
 IREE_API_EXPORT void iree_hal_device_spec_release(iree_hal_device_spec_t* spec);
 
-// Returns the stable digest of the canonical serialized spec image.
+// Returns a stable non-cryptographic fingerprint of the canonical serialized
+// spec image.
+//
+// Equal canonical images always have equal fingerprints. Fingerprints may
+// collide and must only be used to accelerate lookup or bucketing; callers
+// establishing spec identity must compare the canonical serialized images.
 IREE_API_EXPORT uint64_t
-iree_hal_device_spec_digest(const iree_hal_device_spec_t* spec);
+iree_hal_device_spec_fingerprint(const iree_hal_device_spec_t* spec);
 
 // Serializes |spec| into a canonical binary byte image.
 //

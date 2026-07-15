@@ -39,8 +39,9 @@ IREE_ATTRIBUTE_NORETURN static inline void iree_abort(void) { abort(); }
 // Assertions disabled:
 
 #define IREE_ASSERT(condition, ...) \
-  while (false && (condition)) {    \
-  }
+  do {                              \
+    (void)sizeof(!!(condition));    \
+  } while (0)
 
 // TODO(benvanik): replace the status_matchers version with a test macro.
 // #define IREE_ASSERT_OK(status) IREE_ASSERT(iree_status_is_ok(status))
@@ -49,9 +50,10 @@ IREE_ATTRIBUTE_NORETURN static inline void iree_abort(void) { abort(); }
 // we don't want to lose potentially useful errors and warnings
 // (and want to hide unused variable warnings when asserts are disabled).
 // _IREE_ASSERT_CMP is a helper and should not be used outside of this file.
-#define _IREE_ASSERT_CMP(x, op, y, ...)        \
-  while (false && ((void)(x), (void)(y), 0)) { \
-  }
+#define _IREE_ASSERT_CMP(x, op, y, ...) \
+  do {                                  \
+    (void)sizeof(!!((x)op(y)));         \
+  } while (0)
 
 #else
 

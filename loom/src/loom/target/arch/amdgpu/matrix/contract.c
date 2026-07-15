@@ -11,21 +11,22 @@
 
 #define MATRIX_TILE_SHAPE(row_count_value, column_count_value, \
                           reduction_count_value)               \
-  (loom_amdgpu_matrix_tile_shape_t) {                          \
-    .result_row_count = (row_count_value),                     \
-    .result_column_count = (column_count_value),               \
-    .reduction_count = (reduction_count_value),                \
+  {                                                            \
+      .result_row_count = (row_count_value),                   \
+      .result_column_count = (column_count_value),             \
+      .reduction_count = (reduction_count_value),              \
   }
 
 #define MATRIX_ROLE_LAYOUT(role_value, map_kind_value, register_count_value, \
                            elements_per_register_value,                      \
                            element_bit_count_value, coordinate_flags_value)  \
-  (loom_amdgpu_matrix_fragment_role_layout_t) {                              \
-    .role = (role_value), .map_kind = (map_kind_value),                      \
-    .register_count = (register_count_value),                                \
-    .elements_per_register = (elements_per_register_value),                  \
-    .element_bit_count = (element_bit_count_value),                          \
-    .coordinate_flags = (coordinate_flags_value),                            \
+  {                                                                          \
+      .role = (role_value),                                                  \
+      .map_kind = (map_kind_value),                                          \
+      .register_count = (register_count_value),                              \
+      .elements_per_register = (elements_per_register_value),                \
+      .element_bit_count = (element_bit_count_value),                        \
+      .coordinate_flags = (coordinate_flags_value),                          \
   }
 
 #define MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16(kind_value,           \

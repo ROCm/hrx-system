@@ -13,9 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 // Thread-local current context.
-static iree_thread_local iree_hal_streaming_context_t*
+static IREE_THREAD_LOCAL iree_hal_streaming_context_t*
     iree_hal_streaming_current_context = NULL;
-static iree_thread_local int iree_hal_streaming_thread_token_storage;
+static IREE_THREAD_LOCAL int iree_hal_streaming_thread_token_storage;
 
 typedef struct iree_hal_streaming_context_stack_t {
   iree_hal_streaming_context_t** contexts;
@@ -24,7 +24,7 @@ typedef struct iree_hal_streaming_context_stack_t {
 } iree_hal_streaming_context_stack_t;
 
 // Thread-local context stack for push/pop.
-static iree_thread_local iree_hal_streaming_context_stack_t
+static IREE_THREAD_LOCAL iree_hal_streaming_context_stack_t
     iree_hal_streaming_context_stack = {
         .contexts = NULL,
         .depth = 0,

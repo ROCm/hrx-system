@@ -139,11 +139,11 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_SUBGROUP_REDUCE_STRATEGY,
 };
 
-enum loom_amdgpu_lower_policy_bits_e {
-  LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK = 0x0Fu,
-  LOOM_AMDGPU_LOWER_POLICY_PRESELECT_SHIFT = 4u,
-  LOOM_AMDGPU_LOWER_POLICY_PRESELECT_MASK = 0x30u,
-};
+// Packing constants bridge the storage and preselection enum domains into the
+// byte representation; they are not themselves a semantic enum domain.
+#define LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK UINT8_C(0x0F)
+#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_SHIFT UINT8_C(4)
+#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_MASK UINT8_C(0x30)
 
 static_assert((LOOM_AMDGPU_STORAGE_MAX &
                ~LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK) == 0,

@@ -16,15 +16,12 @@ iree_cc_binary(
     "hrx_info.c"
   DEPS
     iree::base::tooling::flags
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-set_target_properties(libhrx_tools_hrx-info PROPERTIES
-  INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-)
 install(TARGETS libhrx_tools_hrx-info
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"

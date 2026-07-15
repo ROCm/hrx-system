@@ -16,6 +16,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+# The current shim implementation is ELF-specific. A Windows port must replace
+# its loader and symbol-export mechanisms before relaxing this constraint.
+_LINUX_COMPATIBILITY = ["@platforms//os:linux"]
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
@@ -41,6 +45,7 @@ hrx_cc_shared_library(
         "-Wl,--undefined-version",
         "-Wl,--version-script=$(location :amdhip64.map)",
     ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
@@ -59,6 +64,7 @@ hrx_cc_test(
     # Bazel, point the test at the artifact with HRX_TEST_LIBAMDHIP64, e.g.
     # `bazel test --test_env=HRX_TEST_LIBAMDHIP64=$(bazel cquery ...)`; without
     # it the test skips (GTEST_SKIP) rather than failing.
+    target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
         # executable resolves them (glibc that ships dl separately, ld.lld).

@@ -188,7 +188,8 @@ static iree_status_t loom_scalar_legalize_build_fp8_leading_index(
   for (uint8_t i = 1; i < format->mantissa_bits; ++i) {
     loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_i32_const_rhs(
-        builder, location, LOOM_OP_SCALAR_ANDI, mantissa, 1 << i, &mask));
+        builder, location, LOOM_OP_SCALAR_ANDI, mantissa, INT64_C(1) << i,
+        &mask));
     loom_value_id_t has_bit = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_cmpi_i32_const_rhs(
         builder, location, LOOM_SCALAR_CMPI_PREDICATE_NE, mask, 0, &has_bit));

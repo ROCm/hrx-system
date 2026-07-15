@@ -437,7 +437,7 @@ static loomc_module_byte_buffer_stream_t* loomc_module_byte_buffer_stream_cast(
 }
 
 static void loomc_module_byte_buffer_stream_destroy(
-    iree_io_stream_t* base_stream) {
+    iree_io_stream_t* IREE_RESTRICT base_stream) {
   loomc_module_byte_buffer_stream_t* stream =
       loomc_module_byte_buffer_stream_cast(base_stream);
   loomc_allocator_t allocator = stream->allocator;

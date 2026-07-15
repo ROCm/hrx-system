@@ -83,6 +83,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_dev_command(
         checkout, ["--dry-run", "bazel", "info", "execution_root"]
     )
+    smoke_test_lib.run_dev_command(checkout, ["--dry-run", "bazel", "shutdown"])
     smoke_test_lib.run_dev_command(
         checkout,
         [

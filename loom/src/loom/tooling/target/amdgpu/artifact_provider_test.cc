@@ -87,22 +87,20 @@ static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
 static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
     MakeFakeExecutableCacheVtable();
 
-static fake_hal_device_t FakeDevice(const iree_hal_device_spec_t* device_spec) {
-  fake_hal_device_t device = {};
-  device.device_spec = device_spec;
-  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
-  return device;
+static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
+                                    fake_hal_device_t* out_device) {
+  out_device->device_spec = device_spec;
+  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
 }
 
-static fake_executable_cache_t FakeExecutableCache(
+static void InitializeFakeExecutableCache(
     const iree_string_view_t* accepted_formats,
-    iree_host_size_t accepted_format_count) {
-  fake_executable_cache_t executable_cache = {};
-  executable_cache.accepted_formats = accepted_formats;
-  executable_cache.accepted_format_count = accepted_format_count;
+    iree_host_size_t accepted_format_count,
+    fake_executable_cache_t* out_executable_cache) {
+  out_executable_cache->accepted_formats = accepted_formats;
+  out_executable_cache->accepted_format_count = accepted_format_count;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
-                               &executable_cache.resource);
-  return executable_cache;
+                               &out_executable_cache->resource);
 }
 
 static iree_status_t CreateAmdgpuExecutableDeviceSpec(
@@ -283,13 +281,15 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(&device_spec));
 
-  fake_hal_device_t device = FakeDevice(device_spec);
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
   const iree_string_view_t accepted_formats[] = {
       IREE_SV("amdgcn-amd-amdhsa--gfx11-generic"),
       IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
   };
-  fake_executable_cache_t executable_cache =
-      FakeExecutableCache(accepted_formats, IREE_ARRAYSIZE(accepted_formats));
+  fake_executable_cache_t executable_cache = {};
+  InitializeFakeExecutableCache(
+      accepted_formats, IREE_ARRAYSIZE(accepted_formats), &executable_cache);
   const loom_run_hal_runtime_t runtime = {
       /*.device=*/(iree_hal_device_t*)&device,
       /*.device_group=*/nullptr,
@@ -316,12 +316,14 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(&device_spec));
 
-  fake_hal_device_t device = FakeDevice(device_spec);
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
   const iree_string_view_t accepted_formats[] = {
       IREE_SV("amdgcn-amd-amdhsa--gfx11-generic"),
   };
-  fake_executable_cache_t executable_cache =
-      FakeExecutableCache(accepted_formats, IREE_ARRAYSIZE(accepted_formats));
+  fake_executable_cache_t executable_cache = {};
+  InitializeFakeExecutableCache(
+      accepted_formats, IREE_ARRAYSIZE(accepted_formats), &executable_cache);
   const loom_run_hal_runtime_t runtime = {
       /*.device=*/(iree_hal_device_t*)&device,
       /*.device_group=*/nullptr,

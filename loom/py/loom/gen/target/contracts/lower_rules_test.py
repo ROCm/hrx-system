@@ -13,7 +13,12 @@ from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.gen.target.contracts.lower_rule_rows import source_memory_row
+from loom.gen.target.contracts.lower_rule_rows import (
+    attr_copy_row,
+    diagnostic_param_row,
+    guard_row,
+    source_memory_row,
+)
 from loom.gen.target.contracts.lower_rules import (
     _validate_c_table_shape,
     generate_lower_rule_set,
@@ -30,6 +35,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopy,
     LowerAttrCopyKind,
+    LowerDiagnosticParam,
     LowerEmit,
     LowerEmitKind,
     LowerGuard,
@@ -49,6 +55,7 @@ from loom.target.contracts import (
     ValueRef,
     Vector,
 )
+from loom.target.contracts.diagnostics import DiagnosticParamKind
 from loom.target.low_descriptors import Immediate, ImmediateKind
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
@@ -489,8 +496,46 @@ def test_generate_lower_rule_set_emits_packed_integer_storage_guard() -> None:
     assert ".other_value_ref_index = 1," in guard_text
     assert ".attr_index = 0," in guard_text
     assert ".u64 = UINT64_C(16)," in guard_text
-    assert ".minimum_i64 = 32," in guard_text
-    assert ".maximum_i64 = 32," in guard_text
+    assert ".minimum_i64 = INT64_C(32)," in guard_text
+    assert ".maximum_i64 = INT64_C(32)," in guard_text
+
+
+def test_guard_row_emits_portable_signed_i64_bounds() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.I64_RANGE,
+            minimum_i64=-(1 << 31),
+            maximum_i64=(1 << 31) - 1,
+        ),
+    )
+
+    assert ".minimum_i64 = (-INT64_C(2147483648))" in fields
+    assert ".maximum_i64 = INT64_C(2147483647)" in fields
+
+
+def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
+    fields = attr_copy_row(
+        LowerAttrCopy(
+            kind=LowerAttrCopyKind.I64_LITERAL,
+            target_name="value",
+            literal_i64=-(1 << 31),
+        )
+    )
+
+    assert ".literal_i64 = (-INT64_C(2147483648))" in fields
+
+
+def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
+    fields = diagnostic_param_row(
+        LowerDiagnosticParam(
+            name="value",
+            kind=DiagnosticParamKind.I64_LITERAL,
+            i64_value=-(1 << 31),
+        )
+    )
+
+    assert ".i64_value = (-INT64_C(2147483648))" in fields
 
 
 def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> None:
@@ -715,6 +760,32 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY" in fields
     assert ".dynamic_term_count = 1" in fields
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
+
+
+def test_source_memory_row_emits_portable_signed_i64_values() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=-(1 << 31),
+            static_byte_offset_minimum=-(1 << 63),
+            static_byte_offset_maximum=(1 << 63) - 1,
+            dynamic_term_count=1,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=-(1 << 31),
+        ),
+        diagnostic_index=0xFFFF,
+        dynamic_offset_diagnostic_index=0xFFFF,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert ".vector_lane_byte_stride = (-INT64_C(2147483648))" in fields
+    assert ".static_byte_offset_minimum = INT64_MIN" in fields
+    assert ".static_byte_offset_maximum = INT64_C(9223372036854775807)" in fields
+    assert ".dynamic_byte_stride = (-INT64_C(2147483648))" in fields
 
 
 def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:

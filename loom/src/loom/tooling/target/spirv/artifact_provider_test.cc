@@ -79,19 +79,17 @@ static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
 static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
     MakeFakeExecutableCacheVtable();
 
-static fake_hal_device_t FakeDevice(const iree_hal_device_spec_t* device_spec) {
-  fake_hal_device_t device = {};
-  device.device_spec = device_spec;
-  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
-  return device;
+static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
+                                    fake_hal_device_t* out_device) {
+  out_device->device_spec = device_spec;
+  iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
 }
 
-static fake_executable_cache_t FakeExecutableCache(bool raw_bda_supported) {
-  fake_executable_cache_t executable_cache = {};
-  executable_cache.raw_bda_supported = raw_bda_supported;
+static void InitializeFakeExecutableCache(
+    bool raw_bda_supported, fake_executable_cache_t* out_executable_cache) {
+  out_executable_cache->raw_bda_supported = raw_bda_supported;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
-                               &executable_cache.resource);
-  return executable_cache;
+                               &out_executable_cache->resource);
 }
 
 static iree_hal_vulkan_features_t BaselineVulkanFeatures() {
@@ -287,8 +285,10 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
   iree_status_t SelectBaselineTarget(loom_run_hal_device_target_t* out_target) {
     iree_hal_device_spec_t* device_spec = NULL;
     IREE_RETURN_IF_ERROR(CreateBaselineDeviceSpec(&device_spec));
-    fake_hal_device_t device = FakeDevice(device_spec);
-    fake_executable_cache_t executable_cache = FakeExecutableCache(true);
+    fake_hal_device_t device = {};
+    InitializeFakeHalDevice(device_spec, &device);
+    fake_executable_cache_t executable_cache = {};
+    InitializeFakeExecutableCache(true, &executable_cache);
     loom_run_hal_runtime_t runtime = {};
     runtime.device = (iree_hal_device_t*)&device;
     runtime.executable_cache = (iree_hal_executable_cache_t*)&executable_cache;

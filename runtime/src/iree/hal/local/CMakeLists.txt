@@ -173,6 +173,20 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    executable_plugin_test
+  SRCS
+    "executable_plugin_test.cc"
+  DEPS
+    ::executable_plugin
+    ::executable_plugin_manager
+    iree::base
+    iree::hal::local::plugins::static_plugin
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     inline_dispatch

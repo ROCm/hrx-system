@@ -7,15 +7,6 @@
 #include "hrx_internal.h"
 #include "iree/base/internal/math.h"
 
-#ifndef IREE_PREFETCH_RO
-#if defined(__GNUC__) || defined(__clang__)
-#define IREE_PREFETCH_RO(ptr, locality) \
-  __builtin_prefetch((ptr), /*rw=*/0, locality)
-#else
-#define IREE_PREFETCH_RO(ptr, locality) ((void)0)
-#endif
-#endif
-
 //===----------------------------------------------------------------------===//
 // Tuning parameters
 //===----------------------------------------------------------------------===//
@@ -39,7 +30,7 @@ static bool hrx_graph_prepare_nodes(hrx_graph_node_block_t* node_blocks,
   for (hrx_graph_node_block_t* block = node_blocks; block;
        block = block->next) {
     if (block->next) {
-      IREE_PREFETCH_RO(block->next, 1);
+      IREE_BUILTIN_PREFETCH_RO(block->next, IREE_BUILTIN_PREFETCH_LOCALITY_L3);
     }
     for (iree_host_size_t i = 0; i < block->count; ++i) {
       hrx_graph_node_s* node = block->nodes[i];

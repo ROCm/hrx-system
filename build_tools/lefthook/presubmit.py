@@ -30,7 +30,8 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -1380,6 +1381,8 @@ def run_root_devtools_tests_for_lane(
             "unittest",
             "build_tools.devtools.cli_test",
             "build_tools.devtools.command_plan_test",
+            "build_tools.devtools.environment_test",
+            "build_tools.devtools.install_test",
             "build_tools.devtools.setup_test",
         ],
         "Root devtools Python tests",
@@ -1404,6 +1407,12 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
     validate_config = SEMGREP_CONFIG in paths
     if not files and not validate_config:
         return skip_step("Semgrep", "no C/C++ runtime inputs")
+    if sys.platform == "win32":
+        return skip_step(
+            "Semgrep",
+            "semgrep-core.exe is not distributed for native Windows; "
+            "enforced by the Linux paranoid presubmit",
+        )
     if not require_static_tool("semgrep", "Semgrep", profile):
         return False
 
@@ -1468,7 +1477,7 @@ def bazel_file_uri_to_path(uri: str) -> Path:
         raise ValueError(f"expected file URI for Bazel output, got {uri}")
     if parsed.netloc:
         raise ValueError(f"file URI has unsupported host component: {uri}")
-    return Path(unquote(parsed.path))
+    return Path(url2pathname(parsed.path))
 
 
 def bazel_output_paths_from_bep(

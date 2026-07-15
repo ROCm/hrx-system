@@ -33,6 +33,7 @@
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/memory.h"
+#include "iree/base/internal/path.h"
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
@@ -1102,38 +1103,24 @@ static iree_status_t iree_async_proactor_iocp_submit_file_open(
     flags_and_attributes |= FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
   }
 
-  // Convert path to wide string. Two-pass MultiByteToWideChar: first call
-  // determines the required buffer size, second call performs the conversion.
-  // This avoids MAX_PATH (260 char) limitation and supports long paths.
-  int wide_length = MultiByteToWideChar(CP_UTF8, 0, open_op->path, -1, NULL, 0);
-  if (wide_length == 0) {
-    DWORD error = GetLastError();
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(iree_status_code_from_win32_error(error),
-                            "failed to determine wide string length for path "
-                            "(error %lu)",
-                            (unsigned long)error);
-  }
-  WCHAR* wide_path = (WCHAR*)iree_alloca(wide_length * sizeof(WCHAR));
-  int converted_length = MultiByteToWideChar(CP_UTF8, 0, open_op->path, -1,
-                                             wide_path, wide_length);
-  if (converted_length == 0) {
-    DWORD error = GetLastError();
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(iree_status_code_from_win32_error(error),
-                            "failed to convert path to wide string (error %lu)",
-                            (unsigned long)error);
-  }
+  // Convert from the runtime's UTF-8 representation only at the Win32 API
+  // boundary. The converted path is absolute and extended-length.
+  wchar_t* win32_path = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_file_path_to_win32(iree_make_cstring_view(open_op->path),
+                                  proactor->base.allocator, &win32_path));
 
   HANDLE file_handle =
-      CreateFileW(wide_path, desired_access, share_mode, NULL,
+      CreateFileW(win32_path, desired_access, share_mode, NULL,
                   creation_disposition, flags_and_attributes, NULL);
+  DWORD open_error =
+      file_handle == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+  iree_allocator_free(proactor->base.allocator, win32_path);
   if (file_handle == INVALID_HANDLE_VALUE) {
-    DWORD error = GetLastError();
     IREE_TRACE_ZONE_END(z0);
     // Post failure as direct completion for poll-thread delivery.
     iree_async_proactor_iocp_post_submit_failure(proactor, &open_op->base,
-                                                 (int)error);
+                                                 (int)open_error);
     return iree_ok_status();
   }
 

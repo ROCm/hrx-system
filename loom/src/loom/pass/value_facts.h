@@ -57,59 +57,57 @@ typedef struct loom_pass_value_fact_scope_t {
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_none(
     void) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_NONE,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_NONE;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_function(
     loom_func_like_t function) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      /*.function=*/function,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  scope.function = function;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_function_for_target(
     loom_func_like_t function, const loom_target_bundle_t* target_bundle) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      /*.function=*/function,
-      /*.region=*/{},
-      /*.parent_op=*/{},
-      /*.target_bundle=*/target_bundle,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  scope.function = function;
+  scope.target_bundle = target_bundle;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_region(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      /*.function=*/function,
-      /*.region=*/region,
-      /*.parent_op=*/parent_op,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION;
+  scope.function = function;
+  scope.region = region;
+  scope.parent_op = parent_op;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_region_for_target(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op,
     const loom_target_bundle_t* target_bundle) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      /*.function=*/function,
-      /*.region=*/region,
-      /*.parent_op=*/parent_op,
-      /*.target_bundle=*/target_bundle,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION;
+  scope.function = function;
+  scope.region = region;
+  scope.parent_op = parent_op;
+  scope.target_bundle = target_bundle;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_module(
     void) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_MODULE,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_MODULE;
+  return scope;
 }
 
 struct loom_pass_value_fact_owner_t {

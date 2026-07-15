@@ -39,12 +39,11 @@ hrx_cc_library(
         "core/hrx_loader.hpp",
         "core/hrx_test_fixture.hpp",
     ],
-    copts = [
-        "-fexceptions",
-    ],
-    cxxopts = [
-        "-fexceptions",
-    ],
+    cxxopts = select({
+        "//build_tools/bazel:cc_compiler_clang_cl": [],
+        "//build_tools/bazel:cc_compiler_msvc": [],
+        "//conditions:default": ["-fexceptions"],
+    }),
     includes = [
         "../include",
         "core",

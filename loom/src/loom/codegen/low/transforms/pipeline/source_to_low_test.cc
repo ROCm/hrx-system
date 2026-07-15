@@ -258,16 +258,16 @@ class LowLowerPassTest : public ::testing::Test {
   loom_low_lower_policy_registry_t policy_registry_ = {};
 };
 
-static loom_target_bundle_storage_t CopyTargetBundle(
-    const loom_target_bundle_t* bundle) {
-  loom_target_bundle_storage_t storage = {
+static void InitializeTargetBundleStorage(
+    const loom_target_bundle_t* bundle,
+    loom_target_bundle_storage_t* out_storage) {
+  *out_storage = {
       /*.snapshot=*/*bundle->snapshot,
       /*.export_plan=*/*bundle->export_plan,
       /*.config=*/*bundle->config,
       /*.bundle=*/*bundle,
   };
-  loom_target_bundle_storage_rebind(&storage);
-  return storage;
+  loom_target_bundle_storage_rebind(out_storage);
 }
 
 TEST_F(LowLowerPassTest,
@@ -280,8 +280,9 @@ TEST_F(LowLowerPassTest,
       "}\n"));
   ASSERT_GT(loom_test_target_bundles.count, 2u);
   const int target_payload = 42;
-  loom_target_bundle_storage_t selected_storage =
-      CopyTargetBundle(loom_test_target_bundles.values[2]);
+  loom_target_bundle_storage_t selected_storage;
+  InitializeTargetBundleStorage(loom_test_target_bundles.values[2],
+                                &selected_storage);
 
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_test_low_lower_policy_registry_initialize(&policy_registry);
@@ -478,8 +479,9 @@ TEST_F(LowLowerPassTest,
       "}\n"));
   ASSERT_GT(loom_test_target_bundles.count, 2u);
   const int target_payload = 42;
-  loom_target_bundle_storage_t selected_storage =
-      CopyTargetBundle(loom_test_target_bundles.values[2]);
+  loom_target_bundle_storage_t selected_storage;
+  InitializeTargetBundleStorage(loom_test_target_bundles.values[2],
+                                &selected_storage);
   selected_storage.snapshot.codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LLVMIR;
 
   loom_low_lower_policy_registry_t policy_registry = {};

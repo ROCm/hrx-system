@@ -36,6 +36,14 @@ TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_encode(
       &source,
       iree_make_byte_span(payload_storage.data(), payload_storage.size())));
+  static const uint8_t kExpectedPayload[] = {
+      'V', 'V', 'D', 'S', 2, 0, 0,    0,    0x00, 0x30, 0x40, 0x00, 0xd2, 0x04,
+      0,   0,   2,   0,   0, 0, 0xc0, 0x27, 0,    0,    0,    0,    0,    0,
+  };
+  ASSERT_EQ(payload_storage.size(), sizeof(kExpectedPayload));
+  EXPECT_EQ(memcmp(payload_storage.data(), kExpectedPayload,
+                   sizeof(kExpectedPayload)),
+            0);
 
   iree_hal_vulkan_device_spec_t decoded = {0};
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_decode(
@@ -44,9 +52,58 @@ TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   EXPECT_EQ(decoded.api_version, VK_MAKE_API_VERSION(0, 1, 3, 0));
   EXPECT_EQ(decoded.driver_version, 1234u);
   EXPECT_EQ(decoded.physical_device_type, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
-  EXPECT_TRUE(
-      iree_all_bits_set(decoded.enabled_features,
-                        IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL));
+  EXPECT_EQ(decoded.enabled_features, source.enabled_features);
+  EXPECT_EQ(decoded.flags, source.flags);
+}
+
+TEST(DeviceSpecTest, RejectsMalformedPayloads) {
+  iree_hal_vulkan_device_spec_t source = MakeTestSpec();
+  std::vector<uint8_t> canonical_payload(
+      iree_hal_vulkan_device_spec_payload_size());
+  IREE_ASSERT_OK(iree_hal_vulkan_device_spec_encode(
+      &source,
+      iree_make_byte_span(canonical_payload.data(), canonical_payload.size())));
+
+  iree_hal_vulkan_device_spec_t decoded = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_vulkan_device_spec_encode(
+          &source, iree_make_byte_span(canonical_payload.data(),
+                                       canonical_payload.size() - 1)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_vulkan_device_spec_decode(
+          iree_make_const_byte_span(canonical_payload.data(),
+                                    canonical_payload.size() - 1),
+          &decoded));
+
+  std::vector<uint8_t> malformed_payload = canonical_payload;
+  malformed_payload[0] ^= 0xff;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_vulkan_device_spec_decode(
+                            iree_make_const_byte_span(malformed_payload.data(),
+                                                      malformed_payload.size()),
+                            &decoded));
+
+  malformed_payload = canonical_payload;
+  malformed_payload[4] = 0xff;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_vulkan_device_spec_decode(
+                            iree_make_const_byte_span(malformed_payload.data(),
+                                                      malformed_payload.size()),
+                            &decoded));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_vulkan_device_spec_encode(
+          &source, iree_make_byte_span(
+                       NULL, iree_hal_vulkan_device_spec_payload_size())));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_vulkan_device_spec_decode(
+          iree_make_const_byte_span(NULL,
+                                    iree_hal_vulkan_device_spec_payload_size()),
+          &decoded));
 }
 
 TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {

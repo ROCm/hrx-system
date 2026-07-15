@@ -52,7 +52,7 @@ typedef size_t loomc_host_size_t;
 /// Small status codes are encoded directly in the pointer value. Rich status
 /// modes may allocate storage behind the handle and require
 /// `loomc_status_free` or `loomc_status_consume_code`.
-typedef struct loomc_status_handle_t* loomc_status_t;
+typedef struct iree_status_handle_t* loomc_status_t;
 
 /// Non-owning string view over bytes that need not be NUL-terminated.
 ///
@@ -315,7 +315,8 @@ typedef struct loomc_option_dict_t {
 } loomc_option_dict_t;
 
 /// Controls the behavior of a `loomc_allocator_ctl_fn_t` callback.
-typedef enum loomc_allocator_command_e {
+typedef uint32_t loomc_allocator_command_t;
+enum {
   /// Allocates memory without requiring zero initialization.
   LOOMC_ALLOCATOR_COMMAND_MALLOC = 0,
 
@@ -327,13 +328,18 @@ typedef enum loomc_allocator_command_e {
 
   /// Frees an existing allocation.
   LOOMC_ALLOCATOR_COMMAND_FREE = 3,
-} loomc_allocator_command_t;
+};
 
 /// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
-typedef struct loomc_allocator_alloc_params_t {
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
+typedef struct iree_allocator_alloc_params_t {
   /// Minimum allocation size in bytes.
   loomc_host_size_t byte_length;
 } loomc_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t loomc_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 /// Host allocation control callback.
 ///

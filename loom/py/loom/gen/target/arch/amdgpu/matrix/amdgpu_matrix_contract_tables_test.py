@@ -83,6 +83,14 @@ def test_generation_emits_source_requirement_flags() -> None:
     assert ".source_requirement_flags = LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT" in initializer
 
 
+def test_generation_uses_static_aggregate_initializers() -> None:
+    initializer = _contract_initializer(_contract("mfma.f32.16x16x1.f32"))
+
+    assert ".tile_shape = {" in initializer
+    assert ".lhs_payload = {" in initializer
+    assert "_t){" not in initializer
+
+
 def test_generation_resolves_gfx12_wmma_abi_shape_variants() -> None:
     f16 = _contract_initializer(_contract("wmma.f32.16x16x16.f16.gfx12"))
     bf16 = _contract_initializer(_contract("wmma.bf16.16x16x16.bf16.gfx12"))

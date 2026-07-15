@@ -31,11 +31,8 @@ typedef struct iree_hal_elf_executable_t {
   // Name used for the file field in tracy and debuggers.
   iree_string_view_t identifier;
 
-  // Queried metadata from the library.
-  union {
-    const iree_hal_executable_library_header_t** header;
-    const iree_hal_executable_library_v0_t* v0;
-  } library;
+  // Queried v0 library metadata.
+  const iree_hal_executable_library_v0_t* library;
 } iree_hal_elf_executable_t;
 
 static const iree_hal_local_executable_vtable_t iree_hal_elf_executable_vtable;
@@ -49,18 +46,14 @@ static iree_status_t iree_hal_elf_executable_query_library(
       (void**)&query_fn));
 
   // Query for a compatible version of the library.
-  executable->library.header =
-      (const iree_hal_executable_library_header_t**)iree_elf_call_p_ip(
+  const iree_hal_executable_library_header_t* const* query_result =
+      (const iree_hal_executable_library_header_t* const*)iree_elf_call_p_ip(
           query_fn, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
           &executable->base.environment);
-  if (!executable->library.header) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "executable does not support this version of the runtime (%08X)",
-        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_executable_library_validate_query_result(
+      query_result, &executable->library));
   const iree_hal_executable_library_header_t* header =
-      *executable->library.header;
+      executable->library->header;
 
   // Ensure that if the library is built for a particular sanitizer that we also
   // were compiled with that sanitizer enabled.
@@ -79,17 +72,17 @@ static iree_status_t iree_hal_elf_executable_query_library(
   }
 
   executable->identifier = iree_make_cstring_view(header->name);
-  executable->base.dispatch_attrs = executable->library.v0->exports.attrs;
+  executable->base.dispatch_attrs = executable->library->exports.attrs;
 #if defined(IREE_PLATFORM_WINDOWS) && defined(IREE_ARCH_X86_64)
   // Embedded ELF exports use the SysV x86-64 ABI while the Windows host uses
   // the Microsoft x64 ABI. Calls must go through iree_elf_call_i_ppp so the
   // argument registers are bridged correctly.
   executable->base.dispatch_ptrs = NULL;
 #else
-  executable->base.dispatch_ptrs = executable->library.v0->exports.ptrs;
+  executable->base.dispatch_ptrs = executable->library->exports.ptrs;
 #endif  // IREE_PLATFORM_WINDOWS && IREE_ARCH_X86_64
-  executable->base.export_count = executable->library.v0->exports.count;
-  executable->base.export_names = executable->library.v0->exports.names;
+  executable->base.export_count = executable->library->exports.count;
+  executable->base.export_names = executable->library->exports.names;
   return iree_ok_status();
 }
 
@@ -147,7 +140,7 @@ static iree_status_t iree_hal_elf_executable_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_library_initialize_imports(
         &executable->base.environment, import_provider,
-        &executable->library.v0->imports,
+        &executable->library->imports,
         (iree_hal_executable_import_thunk_v0_t)iree_elf_thunk_i_ppp,
         host_allocator);
   }
@@ -155,12 +148,12 @@ static iree_status_t iree_hal_elf_executable_create(
   // Verify that the library matches the executable params.
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_library_verify(executable_params,
-                                                executable->library.v0);
+                                                executable->library);
   }
 
   // Publish the executable sources with the tracing infrastructure.
   if (iree_status_is_ok(status)) {
-    iree_hal_executable_library_publish_source_files(executable->library.v0);
+    iree_hal_executable_library_publish_source_files(executable->library);
   }
 
   if (iree_status_is_ok(status)) {
@@ -198,7 +191,7 @@ static iree_status_t iree_hal_elf_executable_issue_call(
     uint32_t worker_id) {
   iree_hal_elf_executable_t* executable =
       (iree_hal_elf_executable_t*)base_executable;
-  const iree_hal_executable_library_v0_t* library = executable->library.v0;
+  const iree_hal_executable_library_v0_t* library = executable->library;
 
   if (IREE_UNLIKELY(ordinal >= library->exports.count)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -227,7 +220,7 @@ static iree_host_size_t iree_hal_elf_executable_export_count(
     iree_hal_executable_t* base_executable) {
   iree_hal_elf_executable_t* executable =
       (iree_hal_elf_executable_t*)base_executable;
-  return iree_hal_executable_library_export_count(executable->library.v0);
+  return iree_hal_executable_library_export_count(executable->library);
 }
 
 static iree_status_t iree_hal_elf_executable_export_info(
@@ -236,7 +229,7 @@ static iree_status_t iree_hal_elf_executable_export_info(
     iree_hal_executable_function_info_t* out_info) {
   iree_hal_elf_executable_t* executable =
       (iree_hal_elf_executable_t*)base_executable;
-  return iree_hal_executable_library_export_info(executable->library.v0,
+  return iree_hal_executable_library_export_info(executable->library,
                                                  export_ordinal, out_info);
 }
 
@@ -247,7 +240,7 @@ static iree_status_t iree_hal_elf_executable_export_parameters(
   iree_hal_elf_executable_t* executable =
       (iree_hal_elf_executable_t*)base_executable;
   return iree_hal_executable_library_export_parameters(
-      executable->library.v0, export_ordinal, capacity, out_parameters);
+      executable->library, export_ordinal, capacity, out_parameters);
 }
 
 static iree_status_t iree_hal_elf_executable_lookup_export_by_name(
@@ -256,7 +249,7 @@ static iree_status_t iree_hal_elf_executable_lookup_export_by_name(
   iree_hal_elf_executable_t* executable =
       (iree_hal_elf_executable_t*)base_executable;
   return iree_hal_executable_library_lookup_export_by_name(
-      executable->library.v0, name, out_export_ordinal);
+      executable->library, name, out_export_ordinal);
 }
 
 static iree_status_t iree_hal_elf_executable_try_lookup_global_by_name(

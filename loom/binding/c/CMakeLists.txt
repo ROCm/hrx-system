@@ -301,8 +301,22 @@ if(NOT WIN32)
   set_target_properties(loomc_shared PROPERTIES
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-    LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+    VISIBILITY_INLINES_HIDDEN ON)
+endif()
+if(APPLE)
+  set_target_properties(loomc_shared PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path")
+elseif(UNIX)
+  set_target_properties(loomc_shared PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN")
+  set(_loomc_export_file
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+  target_link_options(loomc_shared PRIVATE
+    "-Wl,--version-script=${_loomc_export_file}")
+  set_property(TARGET loomc_shared APPEND PROPERTY
+    LINK_DEPENDS "${_loomc_export_file}")
 endif()
 
 if(NOT TARGET loomc::loomc)

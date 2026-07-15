@@ -165,8 +165,14 @@ TEST(Arena, OversizedAllocation) {
 }
 
 TEST(Arena, AllocationThatOnlyFitsBeforeAlignmentIsOversized) {
+  if (iree_alignof(iree_arena_block_t) == iree_max_align_t) {
+    GTEST_SKIP() << "every representable block has naturally aligned usable "
+                    "space on this ABI";
+  }
+
   static constexpr iree_host_size_t kOddBlockSize =
-      sizeof(iree_arena_block_t) + iree_max_align_t * 8 + 1;
+      sizeof(iree_arena_block_t) + iree_max_align_t * 8 +
+      iree_alignof(iree_arena_block_t);
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(kOddBlockSize, iree_allocator_system(),
                                    &pool);

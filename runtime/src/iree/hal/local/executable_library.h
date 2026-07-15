@@ -126,7 +126,12 @@ typedef struct iree_hal_executable_library_header_t {
 // architecture-specific dispatch routines. Some environmental properties may
 // change per-invocation such as the CPU info when performing dispatches on
 // heterogenous processors that may change over the lifetime of the program.
-typedef const iree_hal_executable_library_header_t** (
+//
+// On success the function returns the address of the initial |header| member
+// in the selected versioned library structure. The header pointer must be
+// non-NULL. Callers inspect the header to validate the version before
+// recovering the corresponding library structure.
+typedef const iree_hal_executable_library_header_t* const* (
     *iree_hal_executable_library_query_fn_t)(
     iree_hal_executable_library_version_t max_version,
     const iree_hal_executable_environment_v0_t* environment);
@@ -649,5 +654,15 @@ typedef struct iree_hal_executable_library_v0_t {
   // Exports may reference locations within the sources by path.
   iree_hal_executable_source_file_table_v0_t sources;
 } iree_hal_executable_library_v0_t;
+
+static_assert(offsetof(iree_hal_executable_library_v0_t, header) == 0,
+              "the query result must address the initial header member");
+
+// Recovers a v0 library after its query result header has been validated.
+static inline const iree_hal_executable_library_v0_t*
+iree_hal_executable_library_v0_from_query_result(
+    const iree_hal_executable_library_header_t* const* query_result) {
+  return (const iree_hal_executable_library_v0_t*)query_result;
+}
 
 #endif  // IREE_HAL_LOCAL_EXECUTABLE_LIBRARY_H_

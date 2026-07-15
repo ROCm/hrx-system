@@ -22,6 +22,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::path
   PUBLIC
 )
 
@@ -32,8 +33,10 @@ iree_cc_test(
     "file_contents_test.cc"
   DEPS
     ::file_handle
+    ::stream
     iree::base
     iree::base::core_headers
+    iree::base::internal::path
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -128,6 +131,7 @@ iree_cc_library(
     ::file_handle
     iree::base
     iree::base::internal
+    iree::base::internal::path
   PUBLIC
 )
 

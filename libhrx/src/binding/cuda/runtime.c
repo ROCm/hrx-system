@@ -13,7 +13,7 @@
 #include "common/internal.h"
 
 // Thread-local storage for the last CUDA error.
-static iree_thread_local cudaError_t iree_cuda_thread_error = cudaSuccess;
+static IREE_THREAD_LOCAL cudaError_t iree_cuda_thread_error = cudaSuccess;
 
 // Sets the last error for the current thread.
 static void iree_cuda_set_error(cudaError_t error) {

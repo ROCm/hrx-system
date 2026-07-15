@@ -84,7 +84,7 @@ struct OperationPool {
     // accesses that race without proper submit→complete ordering visible
     // to TSAN.
     IREE_ASSERT_EQ(operation->type, IREE_ASYNC_OPERATION_TYPE_NOP);
-    IREE_ASSERT_EQ(operation->completion_fn, CompletionCallback);
+    IREE_ASSERT_EQ(operation->completion_fn, &CompletionCallback);
     IREE_ASSERT_EQ(operation->user_data, pool);
 
     // Find which slot this is by pointer arithmetic.

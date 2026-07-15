@@ -13,6 +13,7 @@ import argparse
 import os
 import shlex
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,6 +109,12 @@ NATIVE_LOOM_IMPORT_FLAG = "--//loom/config/import:enable"
 NATIVE_REPO_ENV_PREFIX = "--repo_env="
 TRUE_VALUES = frozenset(("1", "ON", "TRUE", "YES"))
 FALSE_VALUES = frozenset(("0", "OFF", "FALSE", "NO"))
+WINDOWS_LONG_PATHS_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Control\FileSystem"
+WINDOWS_LONG_PATHS_REGISTRY_VALUE = "LongPathsEnabled"
+WINDOWS_LONG_PATHS_POWERSHELL_COMMAND = (
+    'New-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" '
+    '-Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force'
+)
 
 
 @dataclass
@@ -303,6 +310,50 @@ class ConfigRequest:
         return self.dependency_mode
 
 
+def windows_long_paths_enabled() -> bool:
+    """Returns whether this Windows host has opted into long Win32 paths."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            WINDOWS_LONG_PATHS_REGISTRY_PATH,
+        ) as key:
+            value, value_type = winreg.QueryValueEx(
+                key, WINDOWS_LONG_PATHS_REGISTRY_VALUE
+            )
+    except OSError:
+        return False
+    return value_type == winreg.REG_DWORD and value == 1
+
+
+def require_windows_long_paths(
+    *,
+    platform_name: str | None = None,
+    enabled_reader: Callable[[], bool] | None = None,
+) -> None:
+    """Fails with setup instructions when Windows long paths are disabled."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    if platform_name != "win32":
+        return
+    if enabled_reader is None:
+        enabled_reader = windows_long_paths_enabled
+    if enabled_reader():
+        return
+    raise SystemExit(
+        "Windows long-path support is required for the Bazel graph. Deeply "
+        "nested generated Python tools exceed the legacy MAX_PATH limit even "
+        "when the checkout and Bazel output roots are short.\n\n"
+        "Open PowerShell as Administrator and run:\n"
+        f"  {WINDOWS_LONG_PATHS_POWERSHELL_COMMAND}\n\n"
+        "Then run:\n"
+        "  python dev.py bazel shutdown\n\n"
+        "Start a new terminal so new processes observe the policy. Windows "
+        "may require a reboot when an existing process has cached the old "
+        "value."
+    )
+
+
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -337,6 +388,11 @@ overrides belong in .bazelrc.local.""",
         dest="defines",
         metavar="NAME=VALUE",
         help="Portable project configuration option documented in BUILDING.md.",
+    )
+    parser.add_argument(
+        "--check-windows-host",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     args, native_bazel_args = parser.parse_known_args(argv)
     args.native_bazel_args = native_bazel_args
@@ -650,6 +706,9 @@ def generate_config(args: argparse.Namespace) -> str:
 
 def main() -> int:
     args = parse_arguments()
+    require_windows_long_paths()
+    if args.check_windows_host:
+        return 0
     config = generate_config(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(config, encoding="utf-8")

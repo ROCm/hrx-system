@@ -288,7 +288,7 @@ static iree_status_t loom_llvmir_loom_check_write_bitcode_disassembly(
   iree_status_t status = loom_llvmir_loom_check_write_bitcode_bytes(
       lowered_module, allocator, &bitcode);
 
-  loom_llvm_tool_output_t disassembly = {0};
+  loom_tool_output_t disassembly = {0};
   if (iree_status_is_ok(status)) {
     loom_llvm_toolchain_t toolchain;
     loom_llvm_toolchain_initialize_from_environment(&toolchain);
@@ -304,7 +304,7 @@ static iree_status_t loom_llvmir_loom_check_write_bitcode_disassembly(
         filter_flags, &result->actual_output);
   }
 
-  loom_llvm_tool_output_deinitialize(&disassembly, allocator);
+  loom_tool_output_deinitialize(&disassembly, allocator);
   loom_llvmir_loom_check_byte_buffer_deinitialize(&bitcode, allocator);
   return status;
 }
@@ -317,7 +317,7 @@ static iree_status_t loom_llvmir_loom_check_write_object(
   iree_status_t status = loom_llvmir_loom_check_write_bitcode_bytes(
       lowered_module, allocator, &bitcode);
 
-  loom_llvm_tool_output_t object = {0};
+  loom_tool_output_t object = {0};
   if (iree_status_is_ok(status)) {
     loom_llvm_toolchain_t toolchain;
     loom_llvm_toolchain_initialize_from_environment(&toolchain);
@@ -339,7 +339,7 @@ static iree_status_t loom_llvmir_loom_check_write_object(
         (int)profile->name.size, profile->name.data);
   }
 
-  loom_llvm_tool_output_deinitialize(&object, allocator);
+  loom_tool_output_deinitialize(&object, allocator);
   loom_llvmir_loom_check_byte_buffer_deinitialize(&bitcode, allocator);
   return status;
 }
@@ -595,10 +595,10 @@ static iree_status_t loom_llvmir_loom_check_query_llvm_tool(
     loom_llvm_tool_kind_t tool_kind, iree_allocator_t allocator) {
   loom_llvm_toolchain_t toolchain;
   loom_llvm_toolchain_initialize_from_environment(&toolchain);
-  loom_llvm_tool_output_t version_text = {0};
+  loom_tool_output_t version_text = {0};
   iree_status_t status = loom_llvm_tool_query_version(&toolchain, tool_kind,
                                                       allocator, &version_text);
-  loom_llvm_tool_output_deinitialize(&version_text, allocator);
+  loom_tool_output_deinitialize(&version_text, allocator);
   return status;
 }
 

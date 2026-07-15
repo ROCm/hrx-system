@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from loom.gen.support.c import c_i64_literal as _c_i64_literal
 from loom.gen.support.c import c_string_literal as _c_string_literal
 from loom.gen.target.contracts import lower_rule_spelling
 from loom.target.contracts import (
@@ -126,7 +127,7 @@ def _append_field(
     always: bool = False,
     default: str = "0",
 ) -> None:
-    value_string = "INT64_MIN" if value == -(2**63) else str(value)
+    value_string = str(value)
     if always or value_string != default:
         fields.append(f".{name} = {value_string}")
 
@@ -190,19 +191,19 @@ def source_memory_row(
     _append_field(
         fields,
         "vector_lane_byte_stride",
-        constraint.vector_lane_byte_stride,
+        _c_i64_literal(constraint.vector_lane_byte_stride),
         always=True,
     )
     _append_field(
         fields,
         "static_byte_offset_minimum",
-        constraint.static_byte_offset_minimum,
+        _c_i64_literal(constraint.static_byte_offset_minimum),
         always=True,
     )
     _append_field(
         fields,
         "static_byte_offset_maximum",
-        constraint.static_byte_offset_maximum,
+        _c_i64_literal(constraint.static_byte_offset_maximum),
         always=True,
     )
     _append_field(fields, "minimum_alignment", constraint.minimum_alignment)
@@ -218,7 +219,11 @@ def source_memory_row(
         default="LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE",
     )
     if constraint.dynamic_byte_stride is not None:
-        _append_field(fields, "dynamic_byte_stride", constraint.dynamic_byte_stride)
+        _append_field(
+            fields,
+            "dynamic_byte_stride",
+            _c_i64_literal(constraint.dynamic_byte_stride),
+        )
     _append_field(
         fields,
         "dynamic_offset_unsigned_bit_count",
@@ -400,7 +405,12 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "minimum_i64", row.minimum_i64, always=True)
+        _append_field(
+            fields,
+            "minimum_i64",
+            _c_i64_literal(row.minimum_i64),
+            always=True,
+        )
     if row.kind in (
         GuardKind.I64_RANGE,
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
@@ -408,7 +418,12 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_I64_RANGE,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "maximum_i64", row.maximum_i64, always=True)
+        _append_field(
+            fields,
+            "maximum_i64",
+            _c_i64_literal(row.maximum_i64),
+            always=True,
+        )
     return fields
 
 
@@ -489,7 +504,12 @@ def attr_copy_row(row: LowerAttrCopy) -> list[str]:
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     ):
-        _append_field(fields, "literal_i64", row.literal_i64, always=True)
+        _append_field(
+            fields,
+            "literal_i64",
+            _c_i64_literal(row.literal_i64),
+            always=True,
+        )
     if row.kind == LowerAttrCopyKind.SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE:
         _append_field(
             fields,
@@ -711,7 +731,12 @@ def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
     if row.kind == DiagnosticParamKind.VALUE_TYPE:
         _append_field(fields, "value_ref_index", row.value_ref_index, always=True)
     if row.kind == DiagnosticParamKind.I64_LITERAL:
-        _append_field(fields, "i64_value", row.i64_value, always=True)
+        _append_field(
+            fields,
+            "i64_value",
+            _c_i64_literal(row.i64_value),
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.U32_LITERAL:
         _append_field(fields, "u32_value", row.u32_value, always=True)
     if row.kind == DiagnosticParamKind.U64_LITERAL:

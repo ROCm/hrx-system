@@ -1,21 +1,43 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// Status API implementation. Follows IREE's pattern: NULL = OK,
-// non-NULL = heap-allocated error with code + message.
+// Status API implementation. NULL is OK and non-NULL is an error payload.
 
 #include <stdlib.h>
 #include <string.h>
 
 #include "hrx_internal.h"
 
+static char hrx_status_out_of_memory_message[] = "out of memory";
+static hrx_status_s hrx_status_out_of_memory_sentinel = {
+    .code = HRX_STATUS_OUT_OF_MEMORY,
+    .message = hrx_status_out_of_memory_message,
+};
+
+static hrx_status_t hrx_status_out_of_memory(void) {
+  return &hrx_status_out_of_memory_sentinel;
+}
+
+static char* hrx_status_clone_message(const char* message) {
+  const size_t message_length = strlen(message);
+  if (message_length == SIZE_MAX) return NULL;
+  char* clone = (char*)malloc(message_length + 1);
+  if (!clone) return NULL;
+  memcpy(clone, message, message_length + 1);
+  return clone;
+}
+
 hrx_status_t hrx_make_status(hrx_status_code_t code, const char* message) {
   if (code == HRX_STATUS_OK) return hrx_ok_status();
-  hrx_status_s* s = (hrx_status_s*)malloc(sizeof(hrx_status_s));
-  if (!s) return NULL;  // OOM making error — can't do much.
-  s->code = code;
-  s->message = message ? strdup(message) : NULL;
-  return s;
+  hrx_status_s* status = (hrx_status_s*)malloc(sizeof(*status));
+  if (!status) return hrx_status_out_of_memory();
+  status->code = code;
+  status->message = message ? hrx_status_clone_message(message) : NULL;
+  if (message && !status->message) {
+    free(status);
+    return hrx_status_out_of_memory();
+  }
+  return status;
 }
 
 hrx_status_code_t hrx_status_code(hrx_status_t status) {
@@ -28,22 +50,23 @@ hrx_status_t hrx_status_to_string(hrx_status_t status, char** out_message,
   if (!out_message) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "out_message is NULL");
   }
-  if (hrx_status_is_ok(status)) {
-    const char* ok_msg = "OK";
-    *out_message = strdup(ok_msg);
-    if (out_length) *out_length = strlen(ok_msg);
-    return hrx_ok_status();
+  *out_message = NULL;
+  if (out_length) *out_length = 0;
+  const char* message = "OK";
+  if (!hrx_status_is_ok(status)) {
+    message = status->message ? status->message : "(no message)";
   }
-  const char* msg = status->message ? status->message : "(no message)";
-  *out_message = strdup(msg);
-  if (out_length) *out_length = strlen(msg);
+  char* message_clone = hrx_status_clone_message(message);
+  if (!message_clone) return hrx_status_out_of_memory();
+  *out_message = message_clone;
+  if (out_length) *out_length = strlen(message);
   return hrx_ok_status();
 }
 
 void hrx_status_free_message(char* message) { free(message); }
 
 void hrx_status_ignore(hrx_status_t status) {
-  if (hrx_status_is_ok(status)) return;
+  if (hrx_status_is_ok(status) || status == hrx_status_out_of_memory()) return;
   free(status->message);
   free(status);
 }

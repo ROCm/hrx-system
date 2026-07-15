@@ -7,8 +7,6 @@ iree_add_all_subdirs()
 iree_cc_library(
   NAME
     common
-  COPTS
-    "-Wno-unused-variable"
   HDRS
     "fat_binary.h"
     "graph.h"
@@ -41,7 +39,7 @@ iree_cc_library(
     iree::hal
     iree::hal::utils::resource_set
     iree::io::file_handle
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
@@ -119,9 +117,14 @@ option(HRX_ENABLE_ZSTD "Enable zstd decompression for CCOB fat binaries" ON)
 if(HRX_ENABLE_ZSTD)
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
-    pkg_check_modules(ZSTD QUIET libzstd)
+    pkg_check_modules(HRX_ZSTD QUIET libzstd)
   endif()
-  if(ZSTD_FOUND)
+  if(HRX_ZSTD_FOUND)
+    find_library(HRX_ZSTD_LIBRARY
+      NAMES zstd
+      HINTS ${HRX_ZSTD_LIBRARY_DIRS}
+      REQUIRED
+    )
     foreach(_hrx_common_target
         libhrx_src_binding_common_common
         libhrx_src_binding_common_common.objects)
@@ -129,14 +132,21 @@ if(HRX_ENABLE_ZSTD)
         HRX_ENABLE_ZSTD=1
       )
       target_include_directories(${_hrx_common_target} PRIVATE
-        ${ZSTD_INCLUDE_DIRS}
+        ${HRX_ZSTD_INCLUDE_DIRS}
+      )
+      target_compile_options(${_hrx_common_target} PRIVATE
+        ${HRX_ZSTD_CFLAGS_OTHER}
       )
     endforeach()
     target_link_libraries(libhrx_src_binding_common_common PUBLIC
-      ${ZSTD_LIBRARIES}
+      ${HRX_ZSTD_LIBRARY}
+    )
+    target_link_options(libhrx_src_binding_common_common PUBLIC
+      ${HRX_ZSTD_LDFLAGS_OTHER}
     )
     message(STATUS
-      "hrx-runtime: CCOB zstd decompression ENABLED (libzstd ${ZSTD_VERSION})"
+      "hrx-runtime: CCOB zstd decompression ENABLED "
+      "(libzstd ${HRX_ZSTD_VERSION})"
     )
   else()
     message(STATUS

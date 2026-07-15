@@ -194,10 +194,10 @@ TEST(F16ConversionTest, F32ToF16) {
   // Underflow
   EXPECT_EQ(0, iree_math_f32_to_f16(FLT_MIN));
   EXPECT_EQ(0x8000, iree_math_f32_to_f16(-FLT_MIN));
-  EXPECT_EQ(0x00A8, iree_math_f32_to_f16(1.0e-05));
-  EXPECT_EQ(0x80A8, iree_math_f32_to_f16(-1.0e-05));
-  EXPECT_EQ(0x03FF, iree_math_f32_to_f16(6.1e-05));  // Near largest denormal
-  EXPECT_EQ(0x83FF, iree_math_f32_to_f16(-6.1e-05));
+  EXPECT_EQ(0x00A8, iree_math_f32_to_f16(1.0e-05f));
+  EXPECT_EQ(0x80A8, iree_math_f32_to_f16(-1.0e-05f));
+  EXPECT_EQ(0x03FF, iree_math_f32_to_f16(6.1e-05f));  // Near largest denormal
+  EXPECT_EQ(0x83FF, iree_math_f32_to_f16(-6.1e-05f));
 
   // Denormals.
   EXPECT_EQ(0x0200, iree_math_f32_to_f16(kF16Min / 2));

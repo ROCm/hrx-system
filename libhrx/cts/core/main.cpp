@@ -6,8 +6,6 @@
 #include <catch2/catch_session.hpp>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <filesystem>
 #include <string>
 
 #include "hrx_loader.hpp"
@@ -27,24 +25,6 @@ void printStatusAndConsume(HrxLoader& loader, const char* context,
   fprintf(stderr, "%s: %s\n", context, message ? message : "(unknown error)");
   loader.status_free_message(message);
   loader.status_ignore(status);
-}
-
-void seedInstalledCtsSourceDir(const char* argv0) {
-  if (std::getenv("HRX_CTS_SOURCE_DIR") || !argv0) {
-    return;
-  }
-
-  std::filesystem::path executable_dir =
-      std::filesystem::path(argv0).parent_path();
-  if (executable_dir.empty()) {
-    return;
-  }
-
-  std::error_code ec;
-  if (std::filesystem::is_directory(executable_dir / "testdata", ec)) {
-    std::string source_dir = executable_dir.string();
-    setenv("HRX_CTS_SOURCE_DIR", source_dir.c_str(), /*overwrite=*/0);
-  }
 }
 
 }  // namespace
@@ -71,8 +51,6 @@ int main(int argc, char* argv[]) {
   int ret = session.applyCommandLine(argc, argv);
   if (ret != 0) return ret;
   g_test_hip_library_path = hip_library;
-
-  seedInstalledCtsSourceDir(argc > 0 ? argv[0] : nullptr);
 
   // Load library.
   if (!hrx_library.empty()) {

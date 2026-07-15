@@ -17,55 +17,65 @@
 // side and not the other. Note that additions in the runtime are fine so long
 // as they don't disturb the existing values exposed to the plugin.
 
-#define STATIC_ASSERT_EQ(a, b) \
-  static_assert((int)(a) == (int)(b), "plugin/runtime API mismatch")
+#define STATIC_ASSERT_PLUGIN_ENUM_EQ(lhs, rhs) \
+  IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, "plugin/runtime API mismatch")
+#define STATIC_ASSERT_EQ(lhs, rhs) \
+  static_assert((lhs) == (rhs), "plugin/runtime API mismatch")
 
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_OK, IREE_STATUS_OK);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_CANCELLED,
-                 IREE_STATUS_CANCELLED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNKNOWN,
-                 IREE_STATUS_UNKNOWN);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_INVALID_ARGUMENT,
-                 IREE_STATUS_INVALID_ARGUMENT);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DEADLINE_EXCEEDED,
-                 IREE_STATUS_DEADLINE_EXCEEDED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_NOT_FOUND,
-                 IREE_STATUS_NOT_FOUND);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_ALREADY_EXISTS,
-                 IREE_STATUS_ALREADY_EXISTS);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_PERMISSION_DENIED,
-                 IREE_STATUS_PERMISSION_DENIED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_RESOURCE_EXHAUSTED,
-                 IREE_STATUS_RESOURCE_EXHAUSTED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_FAILED_PRECONDITION,
-                 IREE_STATUS_FAILED_PRECONDITION);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_ABORTED,
-                 IREE_STATUS_ABORTED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_OUT_OF_RANGE,
-                 IREE_STATUS_OUT_OF_RANGE);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNIMPLEMENTED,
-                 IREE_STATUS_UNIMPLEMENTED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_INTERNAL,
-                 IREE_STATUS_INTERNAL);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNAVAILABLE,
-                 IREE_STATUS_UNAVAILABLE);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DATA_LOSS,
-                 IREE_STATUS_DATA_LOSS);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNAUTHENTICATED,
-                 IREE_STATUS_UNAUTHENTICATED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DEFERRED,
-                 IREE_STATUS_DEFERRED);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_CODE_MASK,
-                 IREE_STATUS_CODE_MASK);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_OK,
+                             IREE_STATUS_OK);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_CANCELLED,
+                             IREE_STATUS_CANCELLED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNKNOWN,
+                             IREE_STATUS_UNKNOWN);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_INVALID_ARGUMENT,
+                             IREE_STATUS_INVALID_ARGUMENT);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DEADLINE_EXCEEDED,
+    IREE_STATUS_DEADLINE_EXCEEDED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_NOT_FOUND,
+                             IREE_STATUS_NOT_FOUND);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_ALREADY_EXISTS,
+                             IREE_STATUS_ALREADY_EXISTS);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_STATUS_PERMISSION_DENIED,
+    IREE_STATUS_PERMISSION_DENIED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_STATUS_RESOURCE_EXHAUSTED,
+    IREE_STATUS_RESOURCE_EXHAUSTED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_STATUS_FAILED_PRECONDITION,
+    IREE_STATUS_FAILED_PRECONDITION);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_ABORTED,
+                             IREE_STATUS_ABORTED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_OUT_OF_RANGE,
+                             IREE_STATUS_OUT_OF_RANGE);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNIMPLEMENTED,
+                             IREE_STATUS_UNIMPLEMENTED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_INTERNAL,
+                             IREE_STATUS_INTERNAL);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNAVAILABLE,
+                             IREE_STATUS_UNAVAILABLE);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DATA_LOSS,
+                             IREE_STATUS_DATA_LOSS);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_UNAUTHENTICATED,
+                             IREE_STATUS_UNAUTHENTICATED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_DEFERRED,
+                             IREE_STATUS_DEFERRED);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_STATUS_CODE_MASK,
+                             IREE_STATUS_CODE_MASK);
 
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_MALLOC,
-                 IREE_ALLOCATOR_COMMAND_MALLOC);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_CALLOC,
-                 IREE_ALLOCATOR_COMMAND_CALLOC);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_REALLOC,
-                 IREE_ALLOCATOR_COMMAND_REALLOC);
-STATIC_ASSERT_EQ(IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_FREE,
-                 IREE_ALLOCATOR_COMMAND_FREE);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_MALLOC,
+    IREE_ALLOCATOR_COMMAND_MALLOC);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_CALLOC,
+    IREE_ALLOCATOR_COMMAND_CALLOC);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(
+    IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_REALLOC,
+    IREE_ALLOCATOR_COMMAND_REALLOC);
+STATIC_ASSERT_PLUGIN_ENUM_EQ(IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_FREE,
+                             IREE_ALLOCATOR_COMMAND_FREE);
 
 STATIC_ASSERT_EQ(sizeof(iree_hal_executable_plugin_allocator_alloc_params_t),
                  sizeof(iree_allocator_alloc_params_t));
@@ -78,26 +88,40 @@ STATIC_ASSERT_EQ(sizeof(iree_hal_executable_plugin_string_pair_t),
                  sizeof(iree_string_pair_t));
 
 #undef STATIC_ASSERT_EQ
+#undef STATIC_ASSERT_PLUGIN_ENUM_EQ
 
 //===----------------------------------------------------------------------===//
 // iree_hal_executable_plugin_t
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_executable_plugin_load(
-    const iree_hal_executable_plugin_header_t** header_ptr,
+    iree_hal_executable_plugin_features_t required_features,
+    const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_plugin_t* plugin) {
-  // The header may be NULL if the plugin API used isn't compatible.
-  if (!header_ptr) {
+  // The query result may be NULL if the plugin API used isn't compatible.
+  if (!query_result || !*query_result) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "plugin does not support this version of the runtime (%08X)",
         IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST);
   }
-  plugin->library.header = header_ptr;
-  const iree_hal_executable_plugin_header_t* header = *plugin->library.header;
-
+  const iree_hal_executable_plugin_header_t* header = *query_result;
+  if (header->version != IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable plugin version %u is not supported by runtime version %u",
+        header->version, IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST);
+  }
   plugin->identifier = iree_make_cstring_view(header->name);
+
+  if (!iree_all_bits_set(header->features, required_features)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "plugin `%.*s` declares features 0x%08X but loader requires 0x%08X",
+        (int)plugin->identifier.size, plugin->identifier.data,
+        (uint32_t)header->features, (uint32_t)required_features);
+  }
 
 // Ensure features declared by the plugin are available/allowed.
 #if !IREE_STATUS_MODE
@@ -160,21 +184,21 @@ static iree_status_t iree_hal_executable_plugin_load(
       .host_allocator =
           {
               .self = host_allocator.self,
-              .ctl = (iree_hal_executable_plugin_allocator_ctl_fn_t)
-                         host_allocator.ctl,
+              .ctl = host_allocator.ctl,
           },
   };
 
   // Plugin is probably good - let's try loading it! It could fail for any
   // reason and the caller will clean up.
-  return (iree_status_t)plugin->library.v0->load(
-      &environment, (size_t)param_count,
-      (const iree_hal_executable_plugin_string_pair_t*)params, &plugin->self);
+  plugin->library =
+      iree_hal_executable_plugin_v0_from_query_result(query_result);
+  return plugin->library->load(&environment, (size_t)param_count, params,
+                               &plugin->self);
 }
 
 iree_status_t iree_hal_executable_plugin_initialize(
     const void* vtable, iree_hal_executable_plugin_features_t required_features,
-    const iree_hal_executable_plugin_header_t** header_ptr,
+    const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_hal_executable_plugin_resolve_thunk_t resolve_thunk,
     iree_allocator_t host_allocator,
@@ -185,18 +209,20 @@ iree_status_t iree_hal_executable_plugin_initialize(
   // properly initialized.
   iree_atomic_ref_count_init(&out_base_plugin->ref_count);
   out_base_plugin->vtable = vtable;
-  memset(&out_base_plugin->library, 0, sizeof(out_base_plugin->library));
+  out_base_plugin->library = NULL;
   out_base_plugin->self = NULL;
+  out_base_plugin->identifier = iree_string_view_empty();
   out_base_plugin->resolve_thunk = resolve_thunk;
 
   // Try to load the plugin; this may fail if the plugin is not supported
   // (version, features, etc) or the plugin decides it doesn't like Tuesdays.
   iree_status_t status = iree_hal_executable_plugin_load(
-      header_ptr, param_count, params, host_allocator, out_base_plugin);
+      required_features, query_result, param_count, params, host_allocator,
+      out_base_plugin);
   if (iree_status_is_ok(status)) {
     IREE_TRACE({
       const iree_hal_executable_plugin_header_t* header =
-          out_base_plugin->library.v0->header;
+          out_base_plugin->library->header;
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->name);
       IREE_TRACE_ZONE_APPEND_TEXT(z0, header->description);
     });
@@ -213,10 +239,10 @@ void iree_hal_executable_plugin_destroy(iree_hal_executable_plugin_t* plugin) {
                               plugin->identifier.size);
 
   // Unload the plugin, if it has an unload method.
-  if (plugin->library.v0 && plugin->library.v0->unload) {
-    plugin->library.v0->unload(plugin->self);
+  if (plugin->library && plugin->library->unload) {
+    plugin->library->unload(plugin->self);
   }
-  memset(&plugin->library, 0, sizeof(plugin->library));
+  plugin->library = NULL;
   plugin->self = NULL;
 
   plugin->vtable->destroy(plugin);
@@ -260,10 +286,9 @@ static iree_status_t iree_hal_executable_plugin_resolve(
   iree_hal_executable_plugin_resolution_t resolution = 0;
   iree_status_t status =
       plugin->resolve_thunk
-          ? plugin->resolve_thunk(plugin->library.v0->resolve, plugin->self,
+          ? plugin->resolve_thunk(plugin->library->resolve, plugin->self,
                                   &params, &resolution)
-          : (iree_status_t)plugin->library.v0->resolve(plugin->self, &params,
-                                                       &resolution);
+          : plugin->library->resolve(plugin->self, &params, &resolution);
   *out_resolution = (iree_hal_executable_import_resolution_t)resolution;
 
   IREE_TRACE_ZONE_END(z0);
@@ -489,10 +514,12 @@ iree_status_t iree_hal_executable_plugin_manager_register_plugin(
 // NOTE: this matches the iree_hal_executable_import_provider_t.resolve
 // function signature so that it can be directly used as a provider.
 static iree_status_t iree_hal_executable_plugin_manager_resolve(
-    iree_hal_executable_plugin_manager_t* manager, iree_host_size_t count,
-    const char* const* symbol_names, void** out_fn_ptrs, void** out_fn_contexts,
+    void* self, iree_host_size_t count, const char* const* symbol_names,
+    void** out_fn_ptrs, void** out_fn_contexts,
     iree_hal_executable_import_resolution_t* out_resolution) {
   if (!count) return iree_ok_status();
+  iree_hal_executable_plugin_manager_t* manager =
+      (iree_hal_executable_plugin_manager_t*)self;
   IREE_ASSERT_ARGUMENT(manager);
   IREE_ASSERT_ARGUMENT(out_fn_ptrs);
   IREE_ASSERT_ARGUMENT(out_fn_contexts);
@@ -584,8 +611,6 @@ iree_hal_executable_plugin_manager_provider(
     iree_hal_executable_plugin_manager_t* manager) {
   return (iree_hal_executable_import_provider_t){
       .self = manager,
-      .resolve = manager ? (iree_hal_executable_import_provider_resolve_fn_t)
-                               iree_hal_executable_plugin_manager_resolve
-                         : NULL,
+      .resolve = manager ? iree_hal_executable_plugin_manager_resolve : NULL,
   };
 }
