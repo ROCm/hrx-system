@@ -103,6 +103,82 @@ TEST_F(PassValueFactsTest, FunctionScopeComputesAndReusesCurrentFunction) {
   loom_pass_value_fact_owner_deinitialize(&owner);
 }
 
+TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
+  loom_module_t* module =
+      Parse(IREE_SV("test.func @main() {\n"
+                    "  %value = test.constant 42 : i32\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+  loom_func_like_t function = Function(module, 0);
+  loom_region_t* region = loom_func_like_body(function);
+  loom_target_bundle_t target_bundle = {};
+
+  const loom_pass_value_fact_scope_t none_scope =
+      loom_pass_value_fact_scope_none();
+  EXPECT_EQ(none_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_NONE);
+  EXPECT_EQ(none_scope.function.op, nullptr);
+  EXPECT_EQ(none_scope.function.vtable, nullptr);
+  EXPECT_EQ(none_scope.region, nullptr);
+  EXPECT_EQ(none_scope.parent_op, nullptr);
+  EXPECT_EQ(none_scope.target_bundle, nullptr);
+
+  const loom_pass_value_fact_scope_t function_scope =
+      loom_pass_value_fact_scope_function(function);
+  EXPECT_EQ(function_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  EXPECT_EQ(function_scope.function.op, function.op);
+  EXPECT_EQ(function_scope.function.vtable, function.vtable);
+  EXPECT_EQ(function_scope.region, nullptr);
+  EXPECT_EQ(function_scope.parent_op, nullptr);
+  EXPECT_EQ(function_scope.target_bundle, nullptr);
+
+  const loom_pass_value_fact_scope_t target_function_scope =
+      loom_pass_value_fact_scope_function_for_target(function, &target_bundle);
+  EXPECT_EQ(target_function_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  EXPECT_EQ(target_function_scope.function.op, function.op);
+  EXPECT_EQ(target_function_scope.function.vtable, function.vtable);
+  EXPECT_EQ(target_function_scope.region, nullptr);
+  EXPECT_EQ(target_function_scope.parent_op, nullptr);
+  EXPECT_EQ(target_function_scope.target_bundle, &target_bundle);
+
+  const loom_pass_value_fact_scope_t region_scope =
+      loom_pass_value_fact_scope_region(function, region, function.op);
+  EXPECT_EQ(region_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_REGION);
+  EXPECT_EQ(region_scope.function.op, function.op);
+  EXPECT_EQ(region_scope.function.vtable, function.vtable);
+  EXPECT_EQ(region_scope.region, region);
+  EXPECT_EQ(region_scope.parent_op, function.op);
+  EXPECT_EQ(region_scope.target_bundle, nullptr);
+
+  const loom_pass_value_fact_scope_t target_region_scope =
+      loom_pass_value_fact_scope_region_for_target(function, region,
+                                                   function.op, &target_bundle);
+  EXPECT_EQ(target_region_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_REGION);
+  EXPECT_EQ(target_region_scope.function.op, function.op);
+  EXPECT_EQ(target_region_scope.function.vtable, function.vtable);
+  EXPECT_EQ(target_region_scope.region, region);
+  EXPECT_EQ(target_region_scope.parent_op, function.op);
+  EXPECT_EQ(target_region_scope.target_bundle, &target_bundle);
+
+  const loom_pass_value_fact_scope_t module_scope =
+      loom_pass_value_fact_scope_module();
+  EXPECT_EQ(module_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_MODULE);
+  EXPECT_EQ(module_scope.function.op, nullptr);
+  EXPECT_EQ(module_scope.function.vtable, nullptr);
+  EXPECT_EQ(module_scope.region, nullptr);
+  EXPECT_EQ(module_scope.parent_op, nullptr);
+  EXPECT_EQ(module_scope.target_bundle, nullptr);
+
+  loom_pass_value_fact_owner_t owner = {};
+  loom_pass_value_fact_owner_initialize(block_pool(), &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module, target_function_scope, &facts));
+  ASSERT_NE(facts, nullptr);
+  EXPECT_EQ(facts->context.target_bundle, &target_bundle);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+}
+
 TEST_F(PassValueFactsTest, ModuleScopeComputesAllFunctionsExplicitly) {
   loom_module_t* module =
       Parse(IREE_SV("test.func @first() {\n"
