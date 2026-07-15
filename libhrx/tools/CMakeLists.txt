@@ -16,7 +16,7 @@ iree_cc_binary(
     "hrx_info.c"
   DEPS
     iree::base::tooling::flags
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
 )
 

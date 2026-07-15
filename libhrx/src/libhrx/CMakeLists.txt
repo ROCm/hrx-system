@@ -9,6 +9,76 @@
 
 iree_add_all_subdirs()
 
+set(_hrx_static_platform_copts "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_static_platform_copts "-DHRX_HAS_IREE_AMDGPU_DRIVER")
+endif()
+set(_hrx_static_platform_deps "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::registration)
+endif()
+iree_cc_library(
+  NAME
+    hrx_static
+  COPTS
+    ${_hrx_static_platform_copts}
+  HDRS
+    "buffer_table.h"
+    "hrx_internal.h"
+  SRCS
+    "allocator.c"
+    "buffer.c"
+    "buffer_table.c"
+    "buffer_view.c"
+    "device.c"
+    "event.c"
+    "executable.c"
+    "fence.c"
+    "host_allocator.c"
+    "mem_pool.c"
+    "module.c"
+    "pool.c"
+    "queue_ops.c"
+    "runtime.c"
+    "semaphore.c"
+    "status.c"
+    "stream.c"
+    "transfer.c"
+    "value_list.c"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::core_headers
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::task_driver
+    iree::hal::local::loaders::registration
+    iree::hal::memory::tlsf_pool
+    iree::hal::utils::profile_file
+    iree::hal::utils::resource_set
+    iree::io::file_handle
+    iree::modules::hal
+    iree::modules::hal::types
+    iree::task::api
+    iree::vm
+    iree::vm::bytecode::module
+    libhrx_defs
+    ${_hrx_static_platform_deps}
+  DEFINES
+    "HRX_STATIC"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/.>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/.>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../include>"
+  PUBLIC
+)
+
 set(_hrx_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
@@ -100,19 +170,23 @@ if(IREE_HAL_DRIVER_AMDGPU)
 endif()
 # IREE's allocator selector is exposed as a compile definition on the base
 # library target. libhrx is compiled through IREE's object-library wrapper, so
-# forward that definition to the object target that actually compiles the
-# sources using iree_allocator_system().
-target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
-  $<TARGET_PROPERTY:iree_base_base,INTERFACE_COMPILE_DEFINITIONS>
-)
-foreach(_hrx_generated_header_target
-    iree_base_internal_flatcc_dummy_gen
-    iree_schemas_bytecode_module_def_c_fbs_gen
-    op_table_gen
-    encoding_table_gen)
-  if(TARGET ${_hrx_generated_header_target})
-    add_dependencies(libhrx_src_libhrx_hrx.objects ${_hrx_generated_header_target})
-  endif()
+# forward that definition to the object targets that actually compile sources
+# using iree_allocator_system().
+foreach(_hrx_object_target
+    libhrx_src_libhrx_hrx_static.objects
+    libhrx_src_libhrx_hrx.objects)
+  target_compile_definitions(${_hrx_object_target} PRIVATE
+    $<TARGET_PROPERTY:iree_base_base,INTERFACE_COMPILE_DEFINITIONS>
+  )
+  foreach(_hrx_generated_header_target
+      iree_base_internal_flatcc_dummy_gen
+      iree_schemas_bytecode_module_def_c_fbs_gen
+      op_table_gen
+      encoding_table_gen)
+    if(TARGET ${_hrx_generated_header_target})
+      add_dependencies(${_hrx_object_target} ${_hrx_generated_header_target})
+    endif()
+  endforeach()
 endforeach()
 set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
   OUTPUT_NAME hrx

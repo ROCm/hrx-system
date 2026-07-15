@@ -86,8 +86,8 @@ HRX_AMDGPU_COPTS = iree_select({
     "//conditions:default": [],
 })
 
-# Bazel dependents use this normal library target; bazel_to_cmake maps it to
-# the generated shared target so CMake does not build a second public HRX lib.
+# Static implementation library for in-tree integrations that directly compose
+# with private HRX surfaces. External consumers use the shared :hrx target.
 hrx_cc_library(
     name = "hrx_static",
     srcs = HRX_SRCS,
@@ -95,7 +95,6 @@ hrx_cc_library(
     copts = HRX_AMDGPU_COPTS,
     defines = ["HRX_STATIC"],
     includes = HRX_INCLUDES,
-    tags = ["skip-bazel_to_cmake"],
     deps = HRX_DEPS,
 )
 

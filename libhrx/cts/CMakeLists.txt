@@ -310,7 +310,7 @@ hrx_cc_test(
   DEPS
     ::core
     iree::third_party::catch2
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
   ARGS
     "--hrx-library"
