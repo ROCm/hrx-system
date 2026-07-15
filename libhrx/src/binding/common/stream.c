@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "common/internal.h"
 
@@ -47,9 +46,7 @@ static int g_hrx_direct_queue_dispatch_initialized = 0;
 static int g_hrx_direct_queue_dispatch_enabled = 0;
 
 static uint64_t hrx_launch_timing_now_ns(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+  return (uint64_t)iree_time_now();
 }
 
 static double hrx_launch_timing_avg_us(uint64_t total_ns, uint64_t count) {
