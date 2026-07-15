@@ -1525,6 +1525,21 @@ static uint16_t make_kernel_dispatch_header(void) {
                  << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE));
 }
 
+// Publishes a fully populated AQL kernel dispatch packet. The command
+// processor treats a valid header as the packet publication event, so the
+// header and setup fields must be committed together after all packet and
+// kernarg writes are visible.
+static void publish_kernel_dispatch_packet(hsa_kernel_dispatch_packet_t* packet,
+                                           uint16_t header, uint16_t setup) {
+  const uint32_t header_setup = (uint32_t)header | ((uint32_t)setup << 16);
+#if defined(_WIN32)
+  (void)InterlockedExchange((volatile LONG*)&packet->full_header,
+                            (LONG)header_setup);
+#else
+  __atomic_store_n(&packet->full_header, header_setup, __ATOMIC_RELEASE);
+#endif  // defined(_WIN32)
+}
+
 static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   emit_amdgpu_hsa_api_t* api = &state->api;
   uint64_t write_index = 0;
@@ -1543,7 +1558,7 @@ static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   hsa_kernel_dispatch_packet_t* packet =
       &packets[write_index & (state->queue->size - 1)];
   memset(packet, 0, sizeof(*packet));
-  packet->setup = 1u << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  const uint16_t setup = 1u << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   packet->workgroup_size_x = 1;
   packet->workgroup_size_y = 1;
   packet->workgroup_size_z = 1;
@@ -1557,7 +1572,7 @@ static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   packet->completion_signal = state->completion_signal;
 
   const uint16_t header = make_kernel_dispatch_header();
-  __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
+  publish_kernel_dispatch_packet(packet, header, setup);
   EMIT_AMDGPU_HSA_CALL_VOID(api, hsa_queue_store_write_index_screlease,
                             state->queue, write_index + 1);
   EMIT_AMDGPU_HSA_CALL_VOID(api, hsa_signal_store_screlease,
