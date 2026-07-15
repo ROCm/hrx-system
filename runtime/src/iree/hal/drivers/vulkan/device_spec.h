@@ -18,7 +18,7 @@ extern "C" {
 #endif  // __cplusplus
 
 #define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_ID "iree.hal.drivers.vulkan.device"
-#define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION 1u
+#define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION 2u
 
 // Stable Vulkan device spec flags.
 typedef uint32_t iree_hal_vulkan_device_spec_flags_t;
@@ -44,11 +44,12 @@ typedef struct iree_hal_vulkan_device_spec_t {
 // Returns the canonical byte size of an encoded Vulkan device spec payload.
 IREE_API_EXPORT iree_host_size_t iree_hal_vulkan_device_spec_payload_size(void);
 
-// Encodes |spec| into |payload| using the canonical pointer-free payload.
+// Encodes |spec| into the canonical fixed-width little-endian |payload|.
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_encode(
     const iree_hal_vulkan_device_spec_t* spec, iree_byte_span_t payload);
 
-// Decodes |payload| into |out_spec| after validating its schema envelope.
+// Decodes the fixed-width little-endian |payload| into |out_spec| after
+// validating its schema envelope.
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_decode(
     iree_const_byte_span_t payload, iree_hal_vulkan_device_spec_t* out_spec);
 
