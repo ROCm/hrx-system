@@ -13,6 +13,7 @@ iree_cc_library(
     hdrs = ["iree_libbacktrace.h"],
     defines = ["IREE_HAVE_LIBBACKTRACE=1"],
     includes = ["."],
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//build_tools:dl",
         "//build_tools:pthreads",
