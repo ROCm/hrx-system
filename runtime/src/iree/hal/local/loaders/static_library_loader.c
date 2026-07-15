@@ -102,7 +102,7 @@ static iree_status_t iree_hal_static_executable_create(
   if (iree_status_is_ok(status)) {
     *out_executable = (iree_hal_executable_t*)executable;
   } else {
-    *out_executable = NULL;
+    iree_hal_executable_release((iree_hal_executable_t*)executable);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
