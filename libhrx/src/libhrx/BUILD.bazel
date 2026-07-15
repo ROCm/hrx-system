@@ -5,7 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:select.bzl", "iree_select")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_library", "hrx_cc_shared_library")
+load(
+    "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
+    "hrx_cc_shared_library",
+    "hrx_cc_test",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -103,4 +108,16 @@ hrx_cc_shared_library(
     ] + HRX_AMDGPU_COPTS,
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
+)
+
+hrx_cc_test(
+    name = "pool_test",
+    srcs = ["pool_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )

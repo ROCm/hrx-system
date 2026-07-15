@@ -109,6 +109,11 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
       pool->allocator, pool->params, size, &buffer));
   out_reservation->byte_length = iree_hal_buffer_byte_length(buffer);
   out_reservation->block_handle = (uint64_t)(uintptr_t)buffer;
+  // Queue allocation returns a transient HAL buffer whose reservation may
+  // outlive the HRX buffer wrapper that submitted it. Keep the pool alive
+  // until the reservation is either transferred to a synchronous allocation
+  // or explicitly released by queue retirement.
+  iree_hal_pool_retain(base_pool);
   *out_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;
   return iree_ok_status();
 }
@@ -124,6 +129,7 @@ static void hrx_iree_exact_pool_release_reservation(
     iree_hal_buffer_release(buffer);
     iree_async_notification_signal(pool->notification, /*wake_count=*/1);
   }
+  iree_hal_pool_release(base_pool);
 }
 
 static iree_status_t hrx_iree_exact_pool_materialize_reservation(
@@ -148,9 +154,14 @@ static iree_status_t hrx_iree_exact_pool_materialize_reservation(
                             "reservation has no backing buffer");
   }
 
-  if ((flags & IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP) ==
-      0) {
+  if (!iree_all_bits_set(
+          flags,
+          IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP)) {
     iree_hal_buffer_retain(buffer);
+  } else {
+    // The backing buffer directly owns the allocation after transfer and no
+    // longer calls through the pool when destroyed.
+    iree_hal_pool_release(base_pool);
   }
   *out_buffer = buffer;
   return iree_ok_status();
