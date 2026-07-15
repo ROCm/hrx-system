@@ -6,6 +6,7 @@
 
 #include "iree/hal/local/device_spec_builder.h"
 
+#include "iree/hal/local/cpu_device_spec.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -153,6 +154,38 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
             selection_result.outcome);
   ASSERT_NE(selection_result.target, nullptr);
+
+  target_selection = {
+      /*.family=*/IREE_SV("cpu"),
+      /*.target_key=*/iree_string_view_empty(),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.physical_device_affinity=*/0,
+  };
+  const iree_hal_executable_target_selection_result_t cpu_selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &target_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            cpu_selection_result.outcome);
+  ASSERT_NE(cpu_selection_result.target, nullptr);
+
+  const iree_hal_device_spec_facet_t* cpu_facet =
+      iree_hal_cpu_device_spec_find_facet(spec);
+  ASSERT_NE(cpu_facet, nullptr);
+  iree_hal_cpu_device_spec_t cpu_spec = {};
+  IREE_ASSERT_OK(iree_hal_cpu_device_spec_decode_facet(cpu_facet, &cpu_spec));
+  iree_cpu_data_t target_cpu_data = {};
+  IREE_ASSERT_OK(iree_cpu_data_parse_target_key(
+      cpu_selection_result.target->target_key, &target_cpu_data));
+  EXPECT_TRUE(
+      iree_cpu_data_satisfies_features(&cpu_spec.cpu_data, &target_cpu_data));
+
+  iree_string_builder_t target_key_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &target_key_builder);
+  IREE_ASSERT_OK(
+      iree_cpu_data_append_target_key(&cpu_spec.cpu_data, &target_key_builder));
+  EXPECT_TRUE(
+      iree_string_view_equal(cpu_selection_result.target->target_key,
+                             iree_string_builder_view(&target_key_builder)));
+  iree_string_builder_deinitialize(&target_key_builder);
 
   iree_hal_device_spec_release(spec);
   iree_hal_executable_loader_release(&loader.base);
