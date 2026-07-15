@@ -768,7 +768,7 @@ def amdgpu_device_binary_source_options(rocm_root: Path) -> list[str]:
     return [
         "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
-        f"IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH={rocm_root}",
+        f"IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH={rocm_root.as_posix()}",
     ]
 
 
