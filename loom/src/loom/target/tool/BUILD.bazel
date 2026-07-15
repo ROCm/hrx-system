@@ -28,7 +28,13 @@ _WASM_TOOL_VISIBILITY = ["//loom/src/loom/target/emit/wasm:__pkg__"]
 
 loom_cc_library(
     name = "process",
-    srcs = ["process.c"],
+    srcs = [
+        "process.c",
+        "process_platform.h",
+        "process_posix.c",
+        "process_stub.c",
+        "process_win32.c",
+    ],
     hdrs = ["process.h"],
     deps = [
         "//runtime/src/iree/base",
