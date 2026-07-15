@@ -61,12 +61,10 @@ void LowTextAsmTypeInferenceHarness::Deinitialize() {
   descriptor_set_provider_ = nullptr;
   if (context_initialized_) {
     loom_context_deinitialize(&context_);
-    context_ = {};
     context_initialized_ = false;
   }
   if (block_pool_initialized_) {
     iree_arena_block_pool_deinitialize(&block_pool_);
-    block_pool_ = {};
     block_pool_initialized_ = false;
   }
 }
