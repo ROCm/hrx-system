@@ -23,7 +23,8 @@ using ::testing::Ne;
 
 static iree_hal_device_spec_t* CreateTestDeviceSpec(
     const char* driver_id, uint32_t logical_ordinal, uint32_t physical_ordinal,
-    uint32_t numa_node, uint64_t physical_device_affinity) {
+    uint32_t numa_node,
+    iree_hal_physical_device_affinity_t physical_device_affinity) {
   iree_hal_physical_device_spec_t physical_device = {
       /*.identity=*/
       {

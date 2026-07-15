@@ -231,21 +231,7 @@ static void iree_hal_device_spec_builder_reset_executables(
           &builder->storage->executable_targets[i];
       iree_hal_device_spec_builder_free_string(host_allocator, target->family);
       iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->architecture);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->processor);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->features);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->artifact_format);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->runtime_abi);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->loader_namespace);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->loader_target);
-      iree_hal_device_spec_builder_free_string(host_allocator,
-                                               target->metadata_schema);
+                                               target->target_key);
     }
   }
   iree_allocator_free(host_allocator, builder->storage->executable_formats);
@@ -548,39 +534,7 @@ iree_status_t iree_hal_device_spec_builder_set_executables(
         builder->host_allocator, source->family, &target->family);
     if (iree_status_is_ok(status)) {
       status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->architecture, &target->architecture);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->processor, &target->processor);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->features, &target->features);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->artifact_format,
-          &target->artifact_format);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->runtime_abi, &target->runtime_abi);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->loader_namespace,
-          &target->loader_namespace);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(builder->host_allocator,
-                                                        source->loader_target,
-                                                        &target->loader_target);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_builder_copy_string(
-          builder->host_allocator, source->metadata_schema,
-          &target->metadata_schema);
+          builder->host_allocator, source->target_key, &target->target_key);
     }
   }
   if (iree_status_is_ok(status)) {

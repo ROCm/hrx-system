@@ -331,22 +331,8 @@ static iree_status_t iree_benchmark_loom_write_executable_targets_json(
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
         stream, &first_field, "family", target->family));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "architecture", target->architecture));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "processor", target->processor));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "features", target->features));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "artifact_format", target->artifact_format));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "runtime_abi", target->runtime_abi));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "loader_namespace", target->loader_namespace));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "loader_target", target->loader_target));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "metadata_schema", target->metadata_schema));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
+        stream, &first_field, "target_key", target->target_key));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
         stream, &first_field, "kind", target->kind));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(

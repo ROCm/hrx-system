@@ -506,14 +506,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
   };
   iree_hal_executable_target_t executable_target = {
       .family = IREE_SV("spirv"),
-      .architecture = IREE_SV("vulkan"),
-      .processor = IREE_SV("vulkan1.3"),
-      .features = IREE_SV("bda"),
-      .artifact_format = IREE_SV("vulkan-spirv-bda"),
-      .runtime_abi = IREE_SV("iree-hal"),
-      .loader_namespace = IREE_SV("vulkan"),
-      .loader_target = IREE_SV("vulkan-spirv-bda"),
-      .metadata_schema = IREE_SV("iree.hal.vulkan.spirv.bda"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
       .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
       .priority = 100,
       .physical_device_affinity = 1ull,

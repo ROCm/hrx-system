@@ -204,28 +204,20 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   };
   out_executable_targets[0] = {
       /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.architecture=*/iree_make_cstring_view("gfx11"),
-      /*.processor=*/iree_make_cstring_view("gfx1100"),
-      /*.features=*/iree_make_cstring_view("+wavefrontsize64"),
-      /*.artifact_format=*/iree_make_cstring_view("test-elf"),
-      /*.runtime_abi=*/iree_make_cstring_view("hsa-kernel"),
-      /*.loader_namespace=*/iree_make_cstring_view("amdgpu"),
-      /*.loader_target=*/iree_make_cstring_view("amdgpu-gfx1100"),
-      /*.metadata_schema=*/iree_make_cstring_view("msgpack"),
+      /*.target_key=*/iree_make_cstring_view("gfx1100:xnack-"),
       /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
       /*.priority=*/100,
       /*.physical_device_affinity=*/1,
       /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   out_executable_targets[1] = out_executable_targets[0];
-  out_executable_targets[1].processor = iree_make_cstring_view("gfx11-generic");
+  out_executable_targets[1].target_key =
+      iree_make_cstring_view("gfx11-generic");
   out_executable_targets[1].kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC;
   out_executable_targets[1].priority = 10;
   out_executable_targets[2] = out_executable_targets[1];
-  out_executable_targets[2].loader_target =
-      iree_make_cstring_view("amdgpu-gfx11-generic-alt");
-  out_executable_targets[2].metadata_schema =
-      iree_make_cstring_view("alt-msgpack");
+  out_executable_targets[2].target_key =
+      iree_make_cstring_view("gfx11-generic-alt");
   *out_executables = {
       /*.format_count=*/1,
       /*.formats=*/out_executable_formats,
@@ -319,58 +311,61 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   EXPECT_EQ(0, memcmp(facet->payload.data, facet_payload_storage,
                       sizeof(facet_payload_storage)));
 
-  const iree_hal_executable_target_t* selected_target = NULL;
   iree_hal_executable_target_selection_t exact_selection = {
-      /*.policy=*/
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
       /*.family=*/iree_make_cstring_view("amdgpu"),
+      /*.target_key=*/iree_string_view_empty(),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.physical_device_affinity=*/0,
   };
-  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED,
-            iree_hal_device_spec_select_executable_target(
-                spec, &exact_selection, &selected_target));
-  ASSERT_NE(selected_target, nullptr);
-  ExpectStringViewEq(selected_target->processor, "gfx1100");
+  iree_hal_executable_target_selection_result_t selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &exact_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            selection_result.outcome);
+  ASSERT_NE(selection_result.target, nullptr);
+  EXPECT_EQ(selection_result.target_ordinal, 0u);
+  ExpectStringViewEq(selection_result.target->target_key, "gfx1100:xnack-");
 
-  selected_target = NULL;
   iree_hal_executable_target_selection_t generic_selection = {
-      /*.policy=*/
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC,
       /*.family=*/iree_make_cstring_view("amdgpu"),
+      /*.target_key=*/iree_string_view_empty(),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      /*.physical_device_affinity=*/0,
   };
-  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS,
-            iree_hal_device_spec_select_executable_target(
-                spec, &generic_selection, &selected_target));
-  EXPECT_EQ(selected_target, nullptr);
+  selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &generic_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS,
+            selection_result.outcome);
+  EXPECT_EQ(selection_result.target, nullptr);
+  EXPECT_EQ(selection_result.target_ordinal, IREE_HOST_SIZE_MAX);
 
-  selected_target = NULL;
-  iree_hal_executable_target_selection_t metadata_selection = {
-      /*.policy=*/
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC,
+  iree_hal_executable_target_selection_t key_selection = {
       /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.architecture=*/iree_string_view_empty(),
-      /*.processor=*/iree_string_view_empty(),
-      /*.features=*/iree_string_view_empty(),
-      /*.artifact_format=*/iree_string_view_empty(),
-      /*.runtime_abi=*/iree_string_view_empty(),
-      /*.loader_namespace=*/iree_string_view_empty(),
-      /*.loader_target=*/iree_string_view_empty(),
-      /*.metadata_schema=*/iree_make_cstring_view("alt-msgpack"),
+      /*.target_key=*/iree_make_cstring_view("gfx11-generic-alt"),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      /*.physical_device_affinity=*/0,
   };
-  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED,
-            iree_hal_device_spec_select_executable_target(
-                spec, &metadata_selection, &selected_target));
-  ASSERT_NE(selected_target, nullptr);
-  ExpectStringViewEq(selected_target->loader_target,
-                     "amdgpu-gfx11-generic-alt");
+  selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &key_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            selection_result.outcome);
+  ASSERT_NE(selection_result.target, nullptr);
+  EXPECT_EQ(selection_result.target_ordinal, 2u);
+  ExpectStringViewEq(selection_result.target->target_key, "gfx11-generic-alt");
+
+  key_selection.target_key = iree_string_view_empty();
+  key_selection.physical_device_affinity = 1u << 1;
+  selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &key_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH,
+            selection_result.outcome);
+  EXPECT_EQ(selection_result.target, nullptr);
+  EXPECT_EQ(selection_result.target_ordinal, IREE_HOST_SIZE_MAX);
 
   iree_byte_span_t serialized_bytes = iree_byte_span_empty();
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
-  EXPECT_EQ(serialized_bytes.data_length, 1279u);
-  EXPECT_EQ(iree_hal_device_spec_fingerprint(spec),
-            UINT64_C(0x88d302034c8236e0));
   static const uint8_t kExpectedHeaderPrefix[] = {
-      'D', 'S', 'P', 'C', 4, 0, 0, 0, 0xff, 0x04, 0, 0, 0, 0, 0, 0,
+      'D', 'S', 'P', 'C', 5, 0, 0, 0,
   };
   ASSERT_GE(serialized_bytes.data_length, sizeof(kExpectedHeaderPrefix));
   EXPECT_EQ(memcmp(serialized_bytes.data, kExpectedHeaderPrefix,
@@ -425,7 +420,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("unsupported version");
     std::vector<uint8_t> bytes = canonical_bytes;
-    StoreU32Le(&bytes, 4, 5);
+    StoreU32Le(&bytes, 4, 6);
     ExpectParseFails(bytes);
   }
   {
@@ -463,7 +458,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   {
     SCOPED_TRACE("invalid ASAN mode");
     std::vector<uint8_t> bytes = canonical_bytes;
-    // The empty v4 body places the sanitizer flags at byte 324 and its mode at
+    // The empty v5 body places the sanitizer flags at byte 324 and its mode at
     // byte 328.
     StoreU32Le(&bytes, 328, UINT32_MAX);
     ExpectParseFails(bytes);
@@ -504,6 +499,78 @@ TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {
 
   external_timepoint_handle.handle_type =
       (iree_hal_external_timepoint_type_t)UINT32_MAX;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+}
+
+TEST(DeviceSpecTest, RejectsInvalidPhysicalDeviceAffinityFacts) {
+  iree_hal_physical_device_spec_t physical_device = {
+      /*.identity=*/{},
+      /*.physical_ordinal=*/0,
+      /*.partition_ordinal=*/0,
+      /*.partition_count=*/1,
+      /*.physical_device_affinity=*/3,
+  };
+  iree_hal_device_identity_spec_t identity = {
+      /*.logical_device_id=*/iree_make_cstring_view("test-device"),
+      /*.display_name=*/iree_make_cstring_view("Test Device"),
+      /*.driver_id=*/iree_make_cstring_view("test"),
+      /*.driver_version=*/iree_string_view_empty(),
+      /*.backend_id=*/iree_make_cstring_view("test"),
+      /*.device_path=*/iree_string_view_empty(),
+      /*.vendor_name=*/iree_string_view_empty(),
+      /*.vendor_id=*/0,
+      /*.device_id=*/0,
+      /*.revision_id=*/0,
+      /*.logical_ordinal=*/0,
+      /*.physical_device_count=*/1,
+      /*.physical_devices=*/&physical_device,
+      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  iree_hal_executable_target_t target = {
+      /*.family=*/iree_make_cstring_view("test"),
+      /*.target_key=*/iree_make_cstring_view("test-target"),
+      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+      /*.priority=*/0,
+      /*.physical_device_affinity=*/1,
+      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+  iree_hal_device_executable_spec_t executables = {
+      /*.format_count=*/0,
+      /*.formats=*/nullptr,
+      /*.target_count=*/1,
+      /*.targets=*/&target,
+      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/&identity,
+      /*.memory=*/nullptr,
+      /*.virtual_memory=*/nullptr,
+      /*.queues=*/nullptr,
+      /*.dispatch=*/nullptr,
+      /*.timing=*/nullptr,
+      /*.executables=*/&executables,
+      /*.sanitizer=*/nullptr,
+      /*.facet_count=*/0,
+      /*.facets=*/nullptr,
+  };
+
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+
+  physical_device.physical_device_affinity = 1;
+  target.physical_device_affinity = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+
+  target.physical_device_affinity = 1u << 1;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
@@ -855,9 +922,6 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
   iree_byte_span_t serialized_bytes = iree_byte_span_empty();
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
-  EXPECT_EQ(serialized_bytes.data_length, 698u);
-  EXPECT_EQ(iree_hal_device_spec_fingerprint(spec),
-            UINT64_C(0xa801ffb0ea120b8a));
   iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
 }

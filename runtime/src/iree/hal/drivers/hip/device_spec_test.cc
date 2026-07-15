@@ -136,9 +136,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   ASSERT_EQ(executables->target_count, 1);
   EXPECT_TRUE(iree_string_view_equal(executables->targets[0].family,
                                      IREE_SV("amdgpu")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].processor,
-                                     IREE_SV("gfx1100")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].loader_target,
+  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].target_key,
                                      IREE_SV("gfx1100")));
   EXPECT_EQ(executables->targets[0].physical_device_affinity, 1ull);
 

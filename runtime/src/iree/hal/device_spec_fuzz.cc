@@ -242,14 +242,7 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
 
     iree_hal_executable_target_t executable_target = {};
     executable_target.family = iree_make_cstring_view("amdgpu");
-    executable_target.architecture = iree_make_cstring_view("gfx11");
-    executable_target.processor = iree_make_cstring_view("gfx1100");
-    executable_target.features = iree_make_cstring_view("+wavefrontsize64");
-    executable_target.artifact_format = iree_make_cstring_view("fuzz-elf");
-    executable_target.runtime_abi = iree_make_cstring_view("hsa-kernel");
-    executable_target.loader_namespace = iree_make_cstring_view("amdgpu");
-    executable_target.loader_target = iree_make_cstring_view("amdgpu-gfx1100");
-    executable_target.metadata_schema = iree_make_cstring_view("msgpack");
+    executable_target.target_key = iree_make_cstring_view("gfx1100:xnack-");
     executable_target.kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT;
     executable_target.priority = 100;
     executable_target.physical_device_affinity = 1;

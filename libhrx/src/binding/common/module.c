@@ -15,14 +15,6 @@
 // Module management
 //===----------------------------------------------------------------------===//
 
-static iree_string_view_t iree_hal_streaming_executable_target_value(
-    const iree_hal_executable_target_t* target) {
-  if (!iree_string_view_is_empty(target->loader_target)) {
-    return target->loader_target;
-  }
-  return target->processor;
-}
-
 static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
     iree_hal_streaming_fat_binary_target_t* targets,
     iree_host_size_t target_capacity, iree_host_size_t* target_count,
@@ -57,41 +49,37 @@ static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
 
   iree_hal_executable_target_selection_t selection = {
-      .policy = IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
       .family = IREE_SV("amdgpu"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
   };
-  const iree_hal_executable_target_t* target = NULL;
   iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(device_spec, &selection,
-                                                    &target);
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH) {
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec does not report an exact executable target");
   }
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS) {
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec reports ambiguous exact executable targets");
   }
   IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
-      targets, target_capacity, &target_count,
-      iree_hal_streaming_executable_target_value(target)));
+      targets, target_capacity, &target_count, result.target->target_key));
 
-  selection.policy =
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC;
-  target = NULL;
-  result = iree_hal_device_spec_select_executable_target(device_spec,
-                                                         &selection, &target);
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS) {
+  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC;
+  result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec reports ambiguous generic executable targets");
   }
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED) {
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
-        targets, target_capacity, &target_count,
-        iree_hal_streaming_executable_target_value(target)));
+        targets, target_capacity, &target_count, result.target->target_key));
   }
 
   *out_target_count = target_count;

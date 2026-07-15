@@ -22,7 +22,7 @@
 // emitted in source order. The format contains no native structs, alignment
 // gaps, or padding bytes.
 #define IREE_HAL_DEVICE_SPEC_MAGIC UINT32_C(0x43505344)  // DSPC
-#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(4)
+#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(5)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME UINT64_C(0x100000001b3)
 
@@ -352,21 +352,7 @@ static iree_status_t iree_hal_device_spec_encode_executable_target(
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_string(writer, value->family));
   IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->architecture));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->processor));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->features));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->artifact_format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->runtime_abi));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_string(
-      writer, value->loader_namespace));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->loader_target));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->metadata_schema));
+      iree_hal_device_spec_writer_write_string(writer, value->target_key));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_u32(writer, value->kind));
   IREE_RETURN_IF_ERROR(
@@ -1028,22 +1014,8 @@ static iree_status_t iree_hal_device_spec_decode_executable_target(
   memset(out_value, 0, sizeof(*out_value));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_string(reader, &out_value->family));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->architecture));
   IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->processor));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->features));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->artifact_format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->runtime_abi));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->loader_namespace));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->loader_target));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->metadata_schema));
+      iree_hal_device_spec_reader_read_string(reader, &out_value->target_key));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_u32(reader, &out_value->kind));
   IREE_RETURN_IF_ERROR(

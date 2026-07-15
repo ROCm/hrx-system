@@ -50,18 +50,7 @@ static iree_host_size_t iree_hal_local_device_spec_find_executable_target(
     if (targets[i].kind == target->kind &&
         targets[i].priority == target->priority &&
         iree_string_view_equal(targets[i].family, target->family) &&
-        iree_string_view_equal(targets[i].architecture, target->architecture) &&
-        iree_string_view_equal(targets[i].processor, target->processor) &&
-        iree_string_view_equal(targets[i].features, target->features) &&
-        iree_string_view_equal(targets[i].artifact_format,
-                               target->artifact_format) &&
-        iree_string_view_equal(targets[i].runtime_abi, target->runtime_abi) &&
-        iree_string_view_equal(targets[i].loader_namespace,
-                               target->loader_namespace) &&
-        iree_string_view_equal(targets[i].loader_target,
-                               target->loader_target) &&
-        iree_string_view_equal(targets[i].metadata_schema,
-                               target->metadata_schema)) {
+        iree_string_view_equal(targets[i].target_key, target->target_key)) {
       return i;
     }
   }

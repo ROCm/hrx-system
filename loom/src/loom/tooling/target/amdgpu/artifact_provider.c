@@ -76,7 +76,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_device_target(
     const loom_run_hal_runtime_t* runtime,
-    iree_hal_executable_target_selection_policy_t policy,
+    iree_hal_executable_target_kind_flags_t kind_flags,
     iree_string_builder_t* builder, bool* out_selected,
     loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(runtime);
@@ -91,35 +91,31 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_device_target(
     return iree_ok_status();
   }
 
-  const iree_hal_executable_target_t* target = NULL;
   const iree_hal_executable_target_selection_t selection = {
-      .policy = policy,
       .family = IREE_SV("amdgpu"),
-      .architecture = IREE_SV("gfxip"),
-      .runtime_abi = IREE_SV("hsa"),
-      .loader_namespace = IREE_SV("amdgpu"),
-      .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
+      .kind_flags = kind_flags,
   };
   const iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(device_spec, &selection,
-                                                    &target);
-  switch (result) {
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED:
-      return loom_amdgpu_hal_artifact_provider_try_select_processor(
-          loom_amdgpu_target_info_find_processor(target->processor), runtime,
-          builder, out_selected, out_target);
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH:
-      return iree_ok_status();
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS:
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU HAL device spec reports ambiguous executable targets");
-    default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "AMDGPU HAL device spec target selection "
-                              "returned invalid result %" PRIu32,
-                              result);
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_ok_status();
   }
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL device spec reports ambiguous executable targets");
+  }
+
+  iree_string_view_t processor_name = iree_string_view_empty();
+  iree_string_view_t feature_suffix = iree_string_view_empty();
+  if (iree_string_view_split(result.target->target_key, ':', &processor_name,
+                             &feature_suffix) == -1) {
+    processor_name = result.target->target_key;
+  }
+  return loom_amdgpu_hal_artifact_provider_try_select_processor(
+      loom_amdgpu_target_info_find_processor(processor_name), runtime, builder,
+      out_selected, out_target);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
@@ -138,11 +134,11 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
   iree_status_t status = iree_ok_status();
   bool selected = false;
   status = loom_amdgpu_hal_artifact_provider_try_select_device_target(
-      runtime, IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
-      &target_id_builder, &selected, out_target);
+      runtime, IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT, &target_id_builder,
+      &selected, out_target);
   if (iree_status_is_ok(status) && !selected) {
     status = loom_amdgpu_hal_artifact_provider_try_select_device_target(
-        runtime, IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC,
+        runtime, IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
         &target_id_builder, &selected, out_target);
   }
 

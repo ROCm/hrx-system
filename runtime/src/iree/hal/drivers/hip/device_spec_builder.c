@@ -16,11 +16,13 @@ static iree_status_t iree_hal_hip_device_spec_verify_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HIP device spec requires physical devices");
   }
-  if (IREE_UNLIKELY(params->physical_device_count > 64)) {
+  if (IREE_UNLIKELY(params->physical_device_count >
+                    IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "HIP device spec physical device count %" PRIhsz
-                            " exceeds the 64-bit affinity mask capacity",
-                            params->physical_device_count);
+                            " exceeds physical-device affinity capacity %d",
+                            params->physical_device_count,
+                            IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT);
   }
   if (IREE_UNLIKELY(params->queue_count == 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -39,10 +41,12 @@ static iree_status_t iree_hal_hip_device_spec_verify_params(
   return iree_ok_status();
 }
 
-static uint64_t iree_hal_hip_device_spec_all_physical_device_affinity(
+static iree_hal_physical_device_affinity_t
+iree_hal_hip_device_spec_all_physical_device_affinity(
     iree_host_size_t physical_device_count) {
-  return physical_device_count == 64 ? UINT64_MAX
-                                     : ((1ull << physical_device_count) - 1ull);
+  return physical_device_count == IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT
+             ? UINT64_MAX
+             : ((1ull << physical_device_count) - 1ull);
 }
 
 static iree_status_t iree_hal_hip_device_spec_populate_identity(
@@ -483,10 +487,11 @@ static iree_status_t iree_hal_hip_device_spec_populate_executables(
     const iree_string_view_t gcn_arch_name = iree_make_cstring_view(
         params->physical_devices[i].facts.architecture.gcn_arch_name);
     if (iree_string_view_is_empty(gcn_arch_name)) continue;
-    const uint64_t physical_device_affinity = 1ull << i;
+    const iree_hal_physical_device_affinity_t physical_device_affinity = 1ull
+                                                                         << i;
     iree_host_size_t existing_target_index = target_count;
     for (iree_host_size_t j = 0; j < target_count; ++j) {
-      if (iree_string_view_equal(executable_targets[j].loader_target,
+      if (iree_string_view_equal(executable_targets[j].target_key,
                                  gcn_arch_name)) {
         existing_target_index = j;
         break;
@@ -499,14 +504,7 @@ static iree_status_t iree_hal_hip_device_spec_populate_executables(
     }
     executable_targets[target_count++] = (iree_hal_executable_target_t){
         .family = IREE_SV("amdgpu"),
-        .architecture = IREE_SV("gfxip"),
-        .processor = gcn_arch_name,
-        .features = iree_string_view_empty(),
-        .artifact_format = IREE_SV("rocm-hsaco-fb"),
-        .runtime_abi = IREE_SV("hip"),
-        .loader_namespace = IREE_SV("hip"),
-        .loader_target = gcn_arch_name,
-        .metadata_schema = IREE_SV("iree.hal.hip.executable"),
+        .target_key = gcn_arch_name,
         .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
         .priority = 100,
         .physical_device_affinity = physical_device_affinity,

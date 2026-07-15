@@ -30,9 +30,20 @@ typedef struct iree_hal_device_t iree_hal_device_t;
 // Invalid device ordinal sentinel value.
 #define IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID UINT32_MAX
 
+// Number of physical-device affinity bits available in one logical device.
+#define IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT 64
+
 //===----------------------------------------------------------------------===//
 // Types and Enums
 //===----------------------------------------------------------------------===//
+
+// Identifies physical-device records within one logical device specification.
+//
+// The bit namespace is local to the canonical device spec containing the
+// records. The device-spec producer assigns one unique bit to each physical
+// device record; bit positions are independent of backend physical-device
+// ordinals and iree_hal_queue_affinity_t bits.
+typedef uint64_t iree_hal_physical_device_affinity_t;
 
 // Bitmap type for device compatibility masks.
 // Sized based on max device count for efficient bitwise operations.
@@ -323,7 +334,7 @@ typedef struct iree_hal_topology_node_t {
   uint32_t local_ordinal;
   // Physical device affinity represented by this node, or 0 when not tied to
   // a specific physical-device subset.
-  uint64_t physical_device_affinity;
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 } iree_hal_topology_node_t;
 
 // Kinds of links in a normalized HAL topology graph.

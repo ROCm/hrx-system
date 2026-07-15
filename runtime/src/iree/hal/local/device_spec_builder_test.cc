@@ -49,14 +49,7 @@ static void test_executable_loader_query_spec(
   static const iree_hal_executable_target_t executable_targets[] = {
       {
           /*.family=*/IREE_SVL("test-family"),
-          /*.architecture=*/IREE_SVL("test-architecture"),
-          /*.processor=*/IREE_SVL("test-processor"),
-          /*.features=*/{},
-          /*.artifact_format=*/IREE_SVL("test-loader"),
-          /*.runtime_abi=*/IREE_SVL("test-abi"),
-          /*.loader_namespace=*/IREE_SVL("test-namespace"),
-          /*.loader_target=*/IREE_SVL("test-load-key"),
-          /*.metadata_schema=*/IREE_SVL("test.metadata"),
+          /*.target_key=*/IREE_SVL("test-target"),
           /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
           /*.priority=*/7,
           /*.physical_device_affinity=*/1ull,
@@ -150,22 +143,16 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
                                      IREE_SV("test-loader")));
   iree_hal_executable_target_selection_t target_selection = {
-      /*.policy=*/IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
       /*.family=*/IREE_SV("test-family"),
-      /*.architecture=*/iree_string_view_empty(),
-      /*.processor=*/iree_string_view_empty(),
-      /*.features=*/iree_string_view_empty(),
-      /*.artifact_format=*/IREE_SV("test-loader"),
-      /*.runtime_abi=*/IREE_SV("test-abi"),
-      /*.loader_namespace=*/iree_string_view_empty(),
-      /*.loader_target=*/iree_string_view_empty(),
-      /*.metadata_schema=*/IREE_SV("test.metadata"),
+      /*.target_key=*/IREE_SV("test-target"),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.physical_device_affinity=*/0,
   };
-  const iree_hal_executable_target_t* selected_target = NULL;
-  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED,
-            iree_hal_device_spec_select_executable_target(
-                spec, &target_selection, &selected_target));
-  ASSERT_NE(selected_target, nullptr);
+  const iree_hal_executable_target_selection_result_t selection_result =
+      iree_hal_device_spec_select_executable_target(spec, &target_selection);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            selection_result.outcome);
+  ASSERT_NE(selection_result.target, nullptr);
 
   iree_hal_device_spec_release(spec);
   iree_hal_executable_loader_release(&loader.base);

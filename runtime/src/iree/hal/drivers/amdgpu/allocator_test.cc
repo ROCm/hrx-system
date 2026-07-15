@@ -818,9 +818,7 @@ TEST_F(AllocatorTest, AmdgpuDeviceSpecExposesRepresentativePhysicalFacts) {
   ASSERT_GT(executables->target_count, 0u);
   EXPECT_TRUE(iree_string_view_equal(executables->targets[0].family,
                                      IREE_SV("amdgpu")));
-  EXPECT_FALSE(iree_string_view_is_empty(executables->targets[0].processor));
-  EXPECT_FALSE(
-      iree_string_view_is_empty(executables->targets[0].loader_target));
+  EXPECT_FALSE(iree_string_view_is_empty(executables->targets[0].target_key));
 }
 
 TEST_F(AllocatorTest, AmdgpuDeviceSpecAllowsCompositeDevices) {
