@@ -177,6 +177,7 @@ iree_status_t loom_spirv_tool_query_version(
                                             IREE_SV("querying version"));
   }
   if (iree_status_is_ok(status)) {
+    loom_tool_output_normalize_newlines(&result.stdout_text);
     *out_version_text = result.stdout_text;
     result.stdout_text = (loom_tool_output_t){0};
   }
@@ -211,6 +212,7 @@ iree_status_t loom_spirv_tool_disassemble_binary(
   loom_tool_process_result_t result = {0};
   if (iree_status_is_ok(status)) {
     const iree_string_view_t arguments[] = {
+        IREE_SV("--no-color"),
         loom_tool_temp_file_path(&input_file),
         IREE_SV("-o"),
         IREE_SV("-"),
@@ -225,6 +227,7 @@ iree_status_t loom_spirv_tool_disassemble_binary(
                                             IREE_SV("disassembling binary"));
   }
   if (iree_status_is_ok(status)) {
+    loom_tool_output_normalize_newlines(&result.stdout_text);
     *out_text = result.stdout_text;
     result.stdout_text = (loom_tool_output_t){0};
   }

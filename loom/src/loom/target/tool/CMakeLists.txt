@@ -21,6 +21,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    process_test
+  SRCS
+    "process_test.cc"
+  DEPS
+    ::process
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     llvm

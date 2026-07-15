@@ -145,6 +145,32 @@ void loom_tool_output_deinitialize(loom_tool_output_t* output,
   *output = (loom_tool_output_t){0};
 }
 
+void loom_tool_output_normalize_newlines(loom_tool_output_t* output) {
+  if (output == NULL || output->data == NULL) {
+    return;
+  }
+  iree_host_size_t read_position = 0;
+  iree_host_size_t write_position = 0;
+  while (read_position < output->length) {
+    if (output->data[read_position] == '\r') {
+      iree_host_size_t newline_position = read_position;
+      while (newline_position < output->length &&
+             output->data[newline_position] == '\r') {
+        ++newline_position;
+      }
+      if (newline_position < output->length &&
+          output->data[newline_position] == '\n') {
+        output->data[write_position++] = '\n';
+        read_position = newline_position + 1;
+        continue;
+      }
+    }
+    output->data[write_position++] = output->data[read_position++];
+  }
+  output->data[write_position] = '\0';
+  output->length = write_position;
+}
+
 void loom_tool_process_result_deinitialize(loom_tool_process_result_t* result,
                                            iree_allocator_t allocator) {
   if (result == NULL) {

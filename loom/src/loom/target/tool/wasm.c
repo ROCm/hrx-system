@@ -156,6 +156,7 @@ iree_status_t loom_wasm_tool_query_version(
                                            IREE_SV("querying version"));
   }
   if (iree_status_is_ok(status)) {
+    loom_tool_output_normalize_newlines(&result.stdout_text);
     *out_version_text = result.stdout_text;
     result.stdout_text = (loom_tool_output_t){0};
   }
@@ -205,6 +206,7 @@ iree_status_t loom_wasm_tool_disassemble_binary(
                                            IREE_SV("disassembling binary"));
   }
   if (iree_status_is_ok(status)) {
+    loom_tool_output_normalize_newlines(&result.stdout_text);
     *out_text = result.stdout_text;
     result.stdout_text = (loom_tool_output_t){0};
   }

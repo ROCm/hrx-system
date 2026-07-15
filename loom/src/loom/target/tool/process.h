@@ -44,6 +44,12 @@ typedef struct loom_tool_temp_file_t {
 void loom_tool_output_deinitialize(loom_tool_output_t* output,
                                    iree_allocator_t allocator);
 
+// Converts Windows-style newline sequences in textual |output| to LF in place.
+// Repeated carriage returns before LF are collapsed because some tools emit
+// CRLF through a text-mode stdout that inserts a second carriage return. Other
+// bytes, including carriage returns not followed by LF, are preserved.
+void loom_tool_output_normalize_newlines(loom_tool_output_t* output);
+
 // Releases stdout/stderr bytes allocated by loom_tool_process_run.
 void loom_tool_process_result_deinitialize(loom_tool_process_result_t* result,
                                            iree_allocator_t allocator);
