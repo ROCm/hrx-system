@@ -495,7 +495,7 @@ static inline void iree_unaligned_store_le_u64(uint64_t* ptr, uint64_t value) {
   memcpy((char*)ptr, &value, sizeof(value));
 }
 static inline void iree_unaligned_store_le_f64(double* ptr, double value) {
-  memcpy(&value, (char*)ptr, sizeof(value));
+  memcpy((char*)ptr, &value, sizeof(value));
 }
 
 #else
