@@ -489,7 +489,7 @@ TEST(TypeRegistry, ConfiguresFactContextResolver) {
 
   loom_type_registry_configure_fact_context(&table.context);
   EXPECT_EQ(table.context.resolve_type_domain.fn,
-            loom_type_registry_resolve_fact_domain);
+            &loom_type_registry_resolve_fact_domain);
   EXPECT_EQ(table.context.resolve_type_domain.user_data, nullptr);
 
   loom_type_registry_configure_fact_context(nullptr);
