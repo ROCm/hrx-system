@@ -13,8 +13,19 @@ if(NOT DEFINED LIBHRX_BUILD)
   option(LIBHRX_BUILD
     "Build libhrx and HRX compatibility targets." ON)
 endif()
+set(_LIBHRX_BUILD_PASSTHROUGH_DEFAULT OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_LIBHRX_BUILD_PASSTHROUGH_DEFAULT ON)
+endif()
 option(LIBHRX_BUILD_PASSTHROUGH
-  "Build libhrx HIP passthrough/interception tools." ON)
+  "Build libhrx HIP passthrough/interception tools."
+  ${_LIBHRX_BUILD_PASSTHROUGH_DEFAULT})
+if(LIBHRX_BUILD AND LIBHRX_BUILD_PASSTHROUGH AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR
+    "LIBHRX_BUILD_PASSTHROUGH=ON currently requires Linux because the "
+    "passthrough loader and export controls have not been ported yet.")
+endif()
 option(LIBHRX_BUILD_CUDA_BINDING
   "Build libhrx CUDA runtime/driver API compatibility binding." OFF)
 set(_LIBHRX_BUILD_CTS_DEFAULT OFF)
