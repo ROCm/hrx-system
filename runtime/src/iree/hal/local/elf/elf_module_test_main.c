@@ -93,20 +93,16 @@ static iree_status_t run_module_test(iree_elf_module_t* module) {
   IREE_RETURN_IF_ERROR(iree_elf_module_lookup_export(
       module, IREE_HAL_EXECUTABLE_LIBRARY_EXPORT_NAME, &query_fn_ptr));
 
-  union {
-    const iree_hal_executable_library_header_t** header;
-    const iree_hal_executable_library_v0_t* v0;
-  } library;
-  library.header =
-      (const iree_hal_executable_library_header_t**)iree_elf_call_p_ip(
+  const iree_hal_executable_library_header_t* const* query_result =
+      (const iree_hal_executable_library_header_t* const*)iree_elf_call_p_ip(
           query_fn_ptr, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
           &environment);
-  if (library.header == NULL) {
+  if (query_result == NULL || *query_result == NULL) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "library header is empty (version mismatch?)");
   }
 
-  const iree_hal_executable_library_header_t* header = *library.header;
+  const iree_hal_executable_library_header_t* header = *query_result;
   if (header->version != IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "library version %u does not match expected %u",
@@ -120,10 +116,12 @@ static iree_status_t run_module_test(iree_elf_module_t* module) {
                             header->name);
   }
 
-  if (library.v0->exports.count != 1) {
+  const iree_hal_executable_library_v0_t* library =
+      iree_hal_executable_library_v0_from_query_result(query_result);
+  if (library->exports.count != 1) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "library exports %u entry points instead of one",
-                            library.v0->exports.count);
+                            library->exports.count);
   }
 
   // ret0 = arg0 * arg1
@@ -160,7 +158,7 @@ static iree_status_t run_module_test(iree_elf_module_t* module) {
       .workgroup_id_z = 0,
       .processor_id = iree_cpu_query_processor_id(),
   };
-  int ret = iree_elf_call_i_ppp((const void*)library.v0->exports.ptrs[0],
+  int ret = iree_elf_call_i_ppp((const void*)library->exports.ptrs[0],
                                 (void*)&environment, (void*)&dispatch_state,
                                 (void*)&workgroup_state);
   if (ret != 0) {

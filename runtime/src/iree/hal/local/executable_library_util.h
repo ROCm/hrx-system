@@ -12,6 +12,11 @@
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_loader.h"
 
+// Validates |query_result| and returns the selected v0 library.
+iree_status_t iree_hal_executable_library_validate_query_result(
+    const iree_hal_executable_library_header_t* const* query_result,
+    const iree_hal_executable_library_v0_t** out_library);
+
 // Verifies the |library| matches the |executable_params|.
 iree_status_t iree_hal_executable_library_verify(
     const iree_hal_executable_params_t* executable_params,
