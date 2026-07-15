@@ -106,6 +106,23 @@ iree_cc_binary_benchmark(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
+# The Windows loader searches the executable directory but the shared HRX
+# runtime is emitted in a sibling CMake target directory. Keep this scoped to
+# the tests that directly exercise the shared runtime instead of mutating the
+# process-wide build or developer PATH.
+if(WIN32)
+  foreach(_hrx_test_name IN ITEMS
+      "libhrx/src/binding/common/buffer_table_test"
+      "libhrx/src/binding/common/buffer_table_benchmark_test")
+    if(TEST "${_hrx_test_name}")
+      set_property(TEST "${_hrx_test_name}" APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:$<TARGET_FILE_DIR:libhrx_src_libhrx_hrx>"
+      )
+    endif()
+  endforeach()
+endif()
+
 set_target_properties(libhrx_src_binding_common_common PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
