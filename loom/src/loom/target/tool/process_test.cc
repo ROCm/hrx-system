@@ -23,13 +23,19 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#elif defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+#elif defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_MACOS) || \
     defined(IREE_PLATFORM_ANDROID)
 #include <errno.h>
 #include <unistd.h>
 #endif  // IREE_PLATFORM_WINDOWS
 
 namespace {
+
+static constexpr char kArgvProbeArgument[] = "--loom-process-argv-probe";
+static constexpr char kArgvProbeArguments[][32] = {
+    "",           "space value",        "tab\tvalue",     "quote\"value",
+    "trailing\\", R"(before\\\"quote)", "space \xCF\x80",
+};
 
 TEST(ToolOutputTest, NormalizesCrLfNewlines) {
   char text[] = "first\r\nsecond\r\r\nthird\nfourth\rfifth\r\rtext";
@@ -199,9 +205,9 @@ TEST(ToolProcessTest, PreservesUtf8AtWin32Boundaries) {
       arguments, IREE_ARRAYSIZE(arguments), iree_allocator_system(), &result));
   EXPECT_TRUE(loom_tool_process_result_succeeded(&result));
   EXPECT_EQ(
-      std::string_view(result.stdout_text.data, result.stdout_text.length),
+      std::string_view(result.stdout_bytes.data, result.stdout_bytes.length),
       kUnicodeProbeOutput);
-  EXPECT_EQ(result.stderr_text.length, 0u);
+  EXPECT_EQ(result.stderr_bytes.length, 0u);
   loom_tool_process_result_deinitialize(&result, iree_allocator_system());
 
   loom_tool_temp_file_t temp_file;
@@ -240,7 +246,7 @@ TEST(ToolProcessTest, DoesNotInheritUnrelatedWin32Handles) {
 
 #endif  // IREE_PLATFORM_WINDOWS
 
-#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_MACOS) || \
     defined(IREE_PLATFORM_ANDROID)
 
 static constexpr char kDescriptorProbePrefix[] =
@@ -296,11 +302,57 @@ TEST(ToolProcessTest, DoesNotInheritUnrelatedPosixDescriptors) {
 
 #endif  // POSIX platforms
 
+#if defined(IREE_PLATFORM_WINDOWS) || defined(IREE_PLATFORM_LINUX) || \
+    defined(IREE_PLATFORM_MACOS) || defined(IREE_PLATFORM_ANDROID)
+
+TEST(ToolProcessTest, PreservesCompleteArgumentVector) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  std::string executable_path = Win32ExecutablePathUtf8();
+#else
+  const std::string& executable_path = g_executable_path;
+#endif  // IREE_PLATFORM_WINDOWS
+  ASSERT_FALSE(executable_path.empty());
+
+  iree_string_view_t arguments[IREE_ARRAYSIZE(kArgvProbeArguments) + 1];
+  arguments[0] = iree_make_cstring_view(kArgvProbeArgument);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kArgvProbeArguments); ++i) {
+    arguments[i + 1] = iree_make_cstring_view(kArgvProbeArguments[i]);
+  }
+
+  loom_tool_process_result_t result = {0};
+  IREE_ASSERT_OK(loom_tool_process_run(
+      iree_make_string_view(executable_path.data(), executable_path.size()),
+      /*search_path=*/false, arguments, IREE_ARRAYSIZE(arguments),
+      iree_allocator_system(), &result));
+  EXPECT_TRUE(loom_tool_process_result_succeeded(&result));
+  EXPECT_EQ(result.stdout_bytes.length, 0u);
+  EXPECT_EQ(result.stderr_bytes.length, 0u);
+  loom_tool_process_result_deinitialize(&result, iree_allocator_system());
+}
+
+#endif  // supported process platforms
+
 }  // namespace
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
 int wmain(int argc, wchar_t** argv) {
+  static constexpr wchar_t kArgvProbeArgumentWide[] =
+      L"--loom-process-argv-probe";
+  static constexpr wchar_t kArgvProbeArgumentsWide[][32] = {
+      L"",           L"space value",        L"tab\tvalue",   L"quote\"value",
+      L"trailing\\", LR"(before\\\"quote)", L"space \x03C0",
+  };
+  if (argc == (int)IREE_ARRAYSIZE(kArgvProbeArgumentsWide) + 2 &&
+      std::wcscmp(argv[1], kArgvProbeArgumentWide) == 0) {
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kArgvProbeArgumentsWide);
+         ++i) {
+      if (std::wcscmp(argv[i + 2], kArgvProbeArgumentsWide[i]) != 0) {
+        return 1;
+      }
+    }
+    return 0;
+  }
   if (argc == 2 && std::wcscmp(argv[1], kUnicodeProbeArgumentWide) == 0) {
     DWORD bytes_written = 0;
     BOOL write_result =
@@ -331,8 +383,17 @@ int wmain(int argc, wchar_t** argv) {
 #else
 
 int main(int argc, char** argv) {
-#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_MACOS) || \
     defined(IREE_PLATFORM_ANDROID)
+  if (argc == (int)IREE_ARRAYSIZE(kArgvProbeArguments) + 2 &&
+      std::strcmp(argv[1], kArgvProbeArgument) == 0) {
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kArgvProbeArguments); ++i) {
+      if (std::strcmp(argv[i + 2], kArgvProbeArguments[i]) != 0) {
+        return 1;
+      }
+    }
+    return 0;
+  }
   if (argc == 2 && strncmp(argv[1], kDescriptorProbePrefix,
                            strlen(kDescriptorProbePrefix)) == 0) {
     char* end = NULL;

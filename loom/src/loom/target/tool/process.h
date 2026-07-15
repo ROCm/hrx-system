@@ -30,9 +30,9 @@ typedef struct loom_tool_process_result_t {
   // Platform exit code, including signal-derived POSIX codes when applicable.
   int exit_code;
   // Captured stdout bytes.
-  loom_tool_output_t stdout_text;
+  loom_tool_output_t stdout_bytes;
   // Captured stderr bytes.
-  loom_tool_output_t stderr_text;
+  loom_tool_output_t stderr_bytes;
 } loom_tool_process_result_t;
 
 typedef struct loom_tool_temp_file_t {
@@ -63,8 +63,8 @@ bool loom_tool_process_result_succeeded(
 // the spawn policy restricts inheritance to that stdin and the redirected
 // stdout/stderr handles or file descriptors.
 //
-// |search_path| controls PATH lookup on POSIX. On Windows, CreateProcessW with
-// a NULL application name applies the platform command search behavior.
+// |search_path| controls PATH lookup. Exact execution passes the executable as
+// the Win32 application name or uses posix_spawn instead of posix_spawnp.
 //
 // A nonzero child exit code is represented in |out_result| and still returns
 // OK: launch/capture failures are status failures, tool diagnostics are child

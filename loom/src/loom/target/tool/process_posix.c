@@ -6,7 +6,7 @@
 
 #include "loom/target/tool/process_platform.h"
 
-#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_MACOS) || \
     defined(IREE_PLATFORM_ANDROID)
 
 #include <errno.h>
@@ -256,11 +256,11 @@ iree_status_t loom_tool_process_run_platform(
   }
   if (iree_status_is_ok(status)) {
     status = loom_tool_capture_file_read(&stdout_file, allocator,
-                                         &out_result->stdout_text);
+                                         &out_result->stdout_bytes);
   }
   if (iree_status_is_ok(status)) {
     status = loom_tool_capture_file_read(&stderr_file, allocator,
-                                         &out_result->stderr_text);
+                                         &out_result->stderr_bytes);
   }
   if (!iree_status_is_ok(status)) {
     loom_tool_process_result_deinitialize(out_result, allocator);

@@ -6,7 +6,7 @@
 
 #include "loom/target/tool/process_platform.h"
 
-#if defined(IREE_PLATFORM_APPLE)
+#if defined(IREE_PLATFORM_MACOS)
 
 #include <string.h>
 
@@ -39,4 +39,4 @@ iree_status_t loom_tool_posix_spawn_policy_initialize(
   return iree_ok_status();
 }
 
-#endif  // IREE_PLATFORM_APPLE
+#endif  // IREE_PLATFORM_MACOS

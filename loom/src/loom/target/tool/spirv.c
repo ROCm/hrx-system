@@ -59,23 +59,11 @@ void loom_spirv_toolchain_initialize_from_environment(
 iree_string_view_t loom_spirv_tool_name(loom_spirv_tool_kind_t tool_kind) {
   switch (tool_kind) {
     case LOOM_SPIRV_TOOL_SPIRV_AS:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("spirv-as.exe");
-#else
-      return IREE_SV("spirv-as");
-#endif
+      return IREE_SV("spirv-as" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_SPIRV_TOOL_SPIRV_DIS:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("spirv-dis.exe");
-#else
-      return IREE_SV("spirv-dis");
-#endif
+      return IREE_SV("spirv-dis" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_SPIRV_TOOL_SPIRV_VAL:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("spirv-val.exe");
-#else
-      return IREE_SV("spirv-val");
-#endif
+      return IREE_SV("spirv-val" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_SPIRV_TOOL_COUNT:
       break;
   }
@@ -136,15 +124,15 @@ static iree_status_t loom_spirv_tool_checked_status(
   const int tool_name_length =
       (int)iree_min(tool_name.size, (iree_host_size_t)INT_MAX);
   const int stdout_length =
-      (int)iree_min(result->stdout_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stdout_bytes.length, (iree_host_size_t)INT_MAX);
   const int stderr_length =
-      (int)iree_min(result->stderr_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stderr_bytes.length, (iree_host_size_t)INT_MAX);
   const int action_length =
       (int)iree_min(action.size, (iree_host_size_t)INT_MAX);
   const char* stdout_data =
-      result->stdout_text.data ? result->stdout_text.data : "";
+      result->stdout_bytes.data ? result->stdout_bytes.data : "";
   const char* stderr_data =
-      result->stderr_text.data ? result->stderr_text.data : "";
+      result->stderr_bytes.data ? result->stderr_bytes.data : "";
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "SPIR-V tool %.*s failed while %.*s with exit code %d\nstdout:\n%.*s\n"
@@ -172,9 +160,9 @@ iree_status_t loom_spirv_tool_query_version(
                                             IREE_SV("querying version"));
   }
   if (iree_status_is_ok(status)) {
-    loom_tool_output_normalize_newlines(&result.stdout_text);
-    *out_version_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_version_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   }
   loom_tool_process_result_deinitialize(&result, allocator);
   return status;
@@ -222,9 +210,9 @@ iree_status_t loom_spirv_tool_disassemble_binary(
                                             IREE_SV("disassembling binary"));
   }
   if (iree_status_is_ok(status)) {
-    loom_tool_output_normalize_newlines(&result.stdout_text);
-    *out_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   }
   loom_tool_process_result_deinitialize(&result, allocator);
   loom_tool_temp_file_deinitialize(&input_file);

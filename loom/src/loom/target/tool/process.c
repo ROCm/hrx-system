@@ -138,8 +138,8 @@ void loom_tool_process_result_deinitialize(loom_tool_process_result_t* result,
   if (result == NULL) {
     return;
   }
-  loom_tool_output_deinitialize(&result->stdout_text, allocator);
-  loom_tool_output_deinitialize(&result->stderr_text, allocator);
+  loom_tool_output_deinitialize(&result->stdout_bytes, allocator);
+  loom_tool_output_deinitialize(&result->stderr_bytes, allocator);
   result->exit_code = 0;
 }
 

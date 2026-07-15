@@ -32,41 +32,17 @@ void loom_llvm_toolchain_initialize_from_environment(
 iree_string_view_t loom_llvm_tool_name(loom_llvm_tool_kind_t tool_kind) {
   switch (tool_kind) {
     case LOOM_LLVM_TOOL_LLVM_AS:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llvm-as.exe");
-#else
-      return IREE_SV("llvm-as");
-#endif
+      return IREE_SV("llvm-as" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_LLVM_TOOL_LLVM_DIS:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llvm-dis.exe");
-#else
-      return IREE_SV("llvm-dis");
-#endif
+      return IREE_SV("llvm-dis" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_LLVM_TOOL_OPT:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("opt.exe");
-#else
-      return IREE_SV("opt");
-#endif
+      return IREE_SV("opt" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_LLVM_TOOL_LLC:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llc.exe");
-#else
-      return IREE_SV("llc");
-#endif
+      return IREE_SV("llc" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_LLVM_TOOL_LLVM_MC:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llvm-mc.exe");
-#else
-      return IREE_SV("llvm-mc");
-#endif
+      return IREE_SV("llvm-mc" IREE_PLATFORM_EXECUTABLE_SUFFIX);
     case LOOM_LLVM_TOOL_LLVM_OBJDUMP:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llvm-objdump.exe");
-#else
-      return IREE_SV("llvm-objdump");
-#endif
+      return IREE_SV("llvm-objdump" IREE_PLATFORM_EXECUTABLE_SUFFIX);
   }
   return iree_string_view_empty();
 }
@@ -104,14 +80,14 @@ static iree_status_t loom_llvm_tool_checked_status(
   int tool_name_length =
       (int)iree_min(tool_name.size, (iree_host_size_t)INT_MAX);
   int stdout_length =
-      (int)iree_min(result->stdout_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stdout_bytes.length, (iree_host_size_t)INT_MAX);
   int stderr_length =
-      (int)iree_min(result->stderr_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stderr_bytes.length, (iree_host_size_t)INT_MAX);
   int action_length = (int)iree_min(action.size, (iree_host_size_t)INT_MAX);
   const char* stdout_data =
-      result->stdout_text.data ? result->stdout_text.data : "";
+      result->stdout_bytes.data ? result->stdout_bytes.data : "";
   const char* stderr_data =
-      result->stderr_text.data ? result->stderr_text.data : "";
+      result->stderr_bytes.data ? result->stderr_bytes.data : "";
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "LLVM tool %.*s failed while %.*s with exit code %d\nstdout:\n%.*s\n"
@@ -209,8 +185,9 @@ iree_status_t loom_llvm_tool_query_version(
 
   iree_status_t status = iree_ok_status();
   if (loom_tool_process_result_succeeded(&result)) {
-    *out_version_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_version_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   } else {
     status = loom_llvm_tool_checked_status(
         tool_kind, &result, IREE_SV("querying LLVM tool version"));
@@ -248,8 +225,9 @@ iree_status_t loom_llvm_tool_disassemble_bitcode_file(
 
   iree_status_t status = iree_ok_status();
   if (loom_tool_process_result_succeeded(&result)) {
-    *out_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   } else {
     status =
         loom_llvm_tool_checked_status(LOOM_LLVM_TOOL_LLVM_DIS, &result,
@@ -412,10 +390,14 @@ iree_status_t loom_llvm_tool_compile_assembly(
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
     loom_tool_output_t* out_assembly) {
-  return loom_llvm_tool_run_bytes_to_file_output(
+  iree_status_t status = loom_llvm_tool_run_bytes_to_file_output(
       toolchain, LOOM_LLVM_TOOL_LLC, bitcode, "bc", "asm",
       IREE_SV("-filetype=asm"), IREE_SV("compiling LLVM bitcode to assembly"),
       extra_arguments, extra_argument_count, allocator, out_assembly);
+  if (iree_status_is_ok(status)) {
+    loom_tool_output_normalize_newlines(out_assembly);
+  }
+  return status;
 }
 
 iree_status_t loom_llvm_tool_assemble_native_object(
@@ -463,8 +445,9 @@ static iree_status_t loom_llvm_tool_run_file_to_stdout(
                                             argument_count, allocator, &result);
   if (iree_status_is_ok(status)) {
     if (loom_tool_process_result_succeeded(&result)) {
-      *out_text = result.stdout_text;
-      result.stdout_text = (loom_tool_output_t){0};
+      loom_tool_output_normalize_newlines(&result.stdout_bytes);
+      *out_text = result.stdout_bytes;
+      result.stdout_bytes = (loom_tool_output_t){0};
     } else {
       status = loom_llvm_tool_checked_status(tool_kind, &result, action);
     }

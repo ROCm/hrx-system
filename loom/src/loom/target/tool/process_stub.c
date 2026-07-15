@@ -7,7 +7,7 @@
 #include "loom/target/tool/process_platform.h"
 
 #if !defined(IREE_PLATFORM_WINDOWS) && !defined(IREE_PLATFORM_LINUX) && \
-    !defined(IREE_PLATFORM_APPLE) && !defined(IREE_PLATFORM_ANDROID)
+    !defined(IREE_PLATFORM_MACOS) && !defined(IREE_PLATFORM_ANDROID)
 
 #include <string.h>
 

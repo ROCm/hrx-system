@@ -133,6 +133,7 @@ TEST(LlvmIrToolTest, QueriesVersion) {
 
   std::string version = ToString(version_text);
   EXPECT_NE(version.find("LLVM"), std::string::npos);
+  EXPECT_EQ(version.find('\r'), std::string::npos);
   loom_tool_output_deinitialize(&version_text, iree_allocator_system());
 }
 
@@ -183,6 +184,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcode) {
   std::string disassembly = ToString(text);
   EXPECT_NE(disassembly.find("define dso_local void @vadd4_object"),
             std::string::npos);
+  EXPECT_EQ(disassembly.find('\r'), std::string::npos);
   loom_tool_output_deinitialize(&text, iree_allocator_system());
 }
 
@@ -205,6 +207,7 @@ TEST(LlvmIrToolTest, DisassemblesBitcodeBytes) {
   std::string disassembly = ToString(text);
   EXPECT_NE(disassembly.find("define dso_local void @vadd4_object"),
             std::string::npos);
+  EXPECT_EQ(disassembly.find('\r'), std::string::npos);
   loom_tool_output_deinitialize(&text, iree_allocator_system());
 }
 
@@ -284,6 +287,46 @@ TEST(LlvmIrToolTest, CompilesX86ObjectBytes) {
   loom_tool_output_deinitialize(&object, iree_allocator_system());
 }
 
+TEST(LlvmIrToolTest, DisassemblesX86ObjectBytes) {
+  std::string bitcode;
+  IREE_ASSERT_OK(
+      BuildBitcodeFixture(LOOM_LLVMIR_TEST_MODULE_OBJECT_VADD4, &bitcode));
+
+  loom_llvm_toolchain_t toolchain = ToolchainFromEnvironment();
+  loom_tool_output_t object = {};
+  iree_status_t status = loom_llvm_tool_compile_object(
+      &toolchain, iree_make_const_byte_span(bitcode.data(), bitcode.size()),
+      NULL, 0, iree_allocator_system(), &object);
+  if (IsToolUnavailable(iree_status_code(status))) {
+    IREE_EXPECT_NOT_OK(status);
+    GTEST_SKIP() << "llc is unavailable in this test environment";
+  }
+  IREE_ASSERT_OK(status);
+
+  const iree_string_view_t arguments[] = {IREE_SV("--disassemble")};
+  loom_tool_output_t disassembly = {};
+  status = loom_llvm_tool_disassemble_object(
+      &toolchain, iree_make_const_byte_span(object.data, object.length),
+      arguments, IREE_ARRAYSIZE(arguments), iree_allocator_system(),
+      &disassembly);
+  if (IsToolUnavailable(iree_status_code(status))) {
+    loom_tool_output_deinitialize(&object, iree_allocator_system());
+    IREE_EXPECT_NOT_OK(status);
+    GTEST_SKIP() << "llvm-objdump is unavailable in this test environment";
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(&object, iree_allocator_system());
+  }
+  IREE_ASSERT_OK(status);
+
+  std::string disassembly_text = ToString(disassembly);
+  EXPECT_NE(disassembly_text.find("vadd4_object"), std::string::npos)
+      << disassembly_text;
+  EXPECT_EQ(disassembly_text.find('\r'), std::string::npos);
+  loom_tool_output_deinitialize(&disassembly, iree_allocator_system());
+  loom_tool_output_deinitialize(&object, iree_allocator_system());
+}
+
 TEST(LlvmIrToolTest, CompilesX86Assembly) {
   std::string bitcode;
   IREE_ASSERT_OK(
@@ -329,6 +372,7 @@ TEST(LlvmIrToolTest, CompilesX86AssemblyBytes) {
   std::string assembly_text = ToString(assembly);
   EXPECT_NE(assembly_text.find("vadd4_object"), std::string::npos)
       << assembly_text;
+  EXPECT_EQ(assembly_text.find('\r'), std::string::npos);
   loom_tool_output_deinitialize(&assembly, iree_allocator_system());
 }
 
