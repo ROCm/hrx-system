@@ -59,7 +59,9 @@ bool loom_tool_process_result_succeeded(
     const loom_tool_process_result_t* result);
 
 // Invokes |executable_path| with argv-style |arguments| and captures both
-// stdout and stderr.
+// stdout and stderr. The child reads stdin from the platform null device and
+// the spawn policy restricts inheritance to that stdin and the redirected
+// stdout/stderr handles or file descriptors.
 //
 // |search_path| controls PATH lookup on POSIX. On Windows, CreateProcessW with
 // a NULL application name applies the platform command search behavior.

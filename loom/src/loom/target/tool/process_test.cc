@@ -6,6 +6,10 @@
 
 #include "loom/target/tool/process.h"
 
+#include <climits>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <cwchar>
 #include <string>
 #include <string_view>
@@ -19,6 +23,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#elif defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+    defined(IREE_PLATFORM_ANDROID)
+#include <errno.h>
+#include <unistd.h>
 #endif  // IREE_PLATFORM_WINDOWS
 
 namespace {
@@ -50,6 +58,9 @@ static constexpr char kUnicodeProbeArgumentUtf8[] =
 static constexpr wchar_t kUnicodeProbeArgumentWide[] =
     L"--loom-process-unicode-probe=\x03C0";
 static constexpr char kUnicodeProbeOutput[] = "unicode-probe:\xCF\x80";
+static constexpr char kHandleProbePrefixUtf8[] = "--loom-process-handle-probe=";
+static constexpr wchar_t kHandleProbePrefixWide[] =
+    L"--loom-process-handle-probe=";
 
 static std::string Win32WideToUtf8(const std::wstring& value) {
   int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.c_str(),
@@ -65,6 +76,33 @@ static std::string Win32WideToUtf8(const std::wstring& value) {
   result.resize((size_t)length - 1);
   return result;
 }
+
+static std::string Win32ExecutablePathUtf8() {
+  std::vector<wchar_t> module_path(32768);
+  DWORD module_path_length =
+      GetModuleFileNameW(NULL, module_path.data(), (DWORD)module_path.size());
+  if (module_path_length == 0 ||
+      module_path_length >= (DWORD)module_path.size()) {
+    return std::string();
+  }
+  return Win32WideToUtf8(
+      std::wstring(module_path.data(), (size_t)module_path_length));
+}
+
+class ScopedWin32Handle {
+ public:
+  explicit ScopedWin32Handle(HANDLE handle) : handle_(handle) {}
+  ~ScopedWin32Handle() {
+    if (handle_ != NULL && handle_ != INVALID_HANDLE_VALUE) {
+      CloseHandle(handle_);
+    }
+  }
+
+  HANDLE get() const { return handle_; }
+
+ private:
+  HANDLE handle_;
+};
 
 class ScopedUnicodeProcessProbe {
  public:
@@ -174,7 +212,89 @@ TEST(ToolProcessTest, PreservesUtf8AtWin32Boundaries) {
   loom_tool_temp_file_deinitialize(&temp_file);
 }
 
+TEST(ToolProcessTest, DoesNotInheritUnrelatedWin32Handles) {
+  SECURITY_ATTRIBUTES security_attributes = {0};
+  security_attributes.nLength = sizeof(security_attributes);
+  security_attributes.bInheritHandle = TRUE;
+  ScopedWin32Handle event(
+      CreateEventW(&security_attributes, TRUE, FALSE, NULL));
+  ASSERT_NE(event.get(), nullptr);
+
+  std::string executable_path = Win32ExecutablePathUtf8();
+  ASSERT_FALSE(executable_path.empty());
+  std::string probe_argument =
+      std::string(kHandleProbePrefixUtf8) +
+      std::to_string(reinterpret_cast<std::uintptr_t>(event.get()));
+  iree_string_view_t arguments[] = {
+      iree_make_string_view(probe_argument.data(), probe_argument.size()),
+  };
+  loom_tool_process_result_t result = {0};
+  IREE_ASSERT_OK(loom_tool_process_run(
+      iree_make_string_view(executable_path.data(), executable_path.size()),
+      /*search_path=*/false, arguments, IREE_ARRAYSIZE(arguments),
+      iree_allocator_system(), &result));
+  EXPECT_TRUE(loom_tool_process_result_succeeded(&result));
+  EXPECT_EQ(WaitForSingleObject(event.get(), 0), WAIT_TIMEOUT);
+  loom_tool_process_result_deinitialize(&result, iree_allocator_system());
+}
+
 #endif  // IREE_PLATFORM_WINDOWS
+
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+    defined(IREE_PLATFORM_ANDROID)
+
+static constexpr char kDescriptorProbePrefix[] =
+    "--loom-process-descriptor-probe=";
+static std::string g_executable_path;
+
+class ScopedPosixDescriptor {
+ public:
+  explicit ScopedPosixDescriptor(int fd) : fd_(fd) {}
+  ~ScopedPosixDescriptor() { reset(); }
+
+  int get() const { return fd_; }
+
+  void reset() {
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
+  }
+
+ private:
+  int fd_;
+};
+
+TEST(ToolProcessTest, DoesNotInheritUnrelatedPosixDescriptors) {
+  int pipe_descriptors[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipe_descriptors), 0);
+  ScopedPosixDescriptor read_descriptor(pipe_descriptors[0]);
+  ScopedPosixDescriptor write_descriptor(pipe_descriptors[1]);
+
+  std::string probe_argument = std::string(kDescriptorProbePrefix) +
+                               std::to_string(write_descriptor.get());
+  iree_string_view_t arguments[] = {
+      iree_make_string_view(probe_argument.data(), probe_argument.size()),
+  };
+  loom_tool_process_result_t result = {0};
+  iree_status_t status = loom_tool_process_run(
+      iree_make_string_view(g_executable_path.data(), g_executable_path.size()),
+      /*search_path=*/false, arguments, IREE_ARRAYSIZE(arguments),
+      iree_allocator_system(), &result);
+  write_descriptor.reset();
+  IREE_ASSERT_OK(status);
+  EXPECT_TRUE(loom_tool_process_result_succeeded(&result));
+
+  char marker = 0;
+  ssize_t read_result = -1;
+  do {
+    read_result = read(read_descriptor.get(), &marker, sizeof(marker));
+  } while (read_result < 0 && errno == EINTR);
+  EXPECT_EQ(read_result, 0);
+  loom_tool_process_result_deinitialize(&result, iree_allocator_system());
+}
+
+#endif  // POSIX platforms
 
 }  // namespace
 
@@ -186,8 +306,23 @@ int wmain(int argc, wchar_t** argv) {
     BOOL write_result =
         WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), kUnicodeProbeOutput,
                   (DWORD)sizeof(kUnicodeProbeOutput) - 1, &bytes_written, NULL);
-    return write_result && bytes_written == sizeof(kUnicodeProbeOutput) - 1 ? 0
-                                                                            : 1;
+    if (!write_result || bytes_written != sizeof(kUnicodeProbeOutput) - 1) {
+      return 1;
+    }
+    return 0;
+  }
+  if (argc == 2 && std::wcsncmp(argv[1], kHandleProbePrefixWide,
+                                std::wcslen(kHandleProbePrefixWide)) == 0) {
+    wchar_t* end = NULL;
+    unsigned long long value =
+        std::wcstoull(argv[1] + std::wcslen(kHandleProbePrefixWide), &end, 10);
+    if (end == NULL || *end != L'\0') {
+      return 1;
+    }
+    HANDLE handle =
+        reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
+    (void)SetEvent(handle);
+    return 0;
   }
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
@@ -196,6 +331,22 @@ int wmain(int argc, wchar_t** argv) {
 #else
 
 int main(int argc, char** argv) {
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_APPLE) || \
+    defined(IREE_PLATFORM_ANDROID)
+  if (argc == 2 && strncmp(argv[1], kDescriptorProbePrefix,
+                           strlen(kDescriptorProbePrefix)) == 0) {
+    char* end = NULL;
+    long fd = strtol(argv[1] + strlen(kDescriptorProbePrefix), &end, 10);
+    if (end == NULL || *end != '\0' || fd < 0 || fd > INT_MAX) {
+      return 1;
+    }
+    char marker = 'x';
+    ssize_t write_result = write(static_cast<int>(fd), &marker, sizeof(marker));
+    (void)write_result;
+    return 0;
+  }
+  g_executable_path = argv[0];
+#endif  // POSIX platforms
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

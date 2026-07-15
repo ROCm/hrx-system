@@ -16,8 +16,11 @@ loom_cc_library(
     "process.h"
   SRCS
     "process.c"
+    "process_darwin.c"
+    "process_linux.c"
     "process_platform.h"
     "process_posix.c"
+    "process_posix.h"
     "process_stub.c"
     "process_win32.c"
   DEPS

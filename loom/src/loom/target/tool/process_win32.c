@@ -280,6 +280,91 @@ static iree_status_t loom_tool_win32_make_command_line(
   return status;
 }
 
+typedef struct loom_tool_spawn_options_t {
+  // Extended process startup information passed to CreateProcessW.
+  STARTUPINFOEXW startup_info;
+  // Null input handle inherited by the child as stdin.
+  HANDLE stdin_handle;
+  // Storage for the explicit inherited-handle list.
+  LPPROC_THREAD_ATTRIBUTE_LIST attribute_list;
+  // Whether |attribute_list| was initialized.
+  bool attribute_list_initialized;
+} loom_tool_spawn_options_t;
+
+static void loom_tool_spawn_options_deinitialize(
+    loom_tool_spawn_options_t* options, iree_allocator_t allocator) {
+  if (options->attribute_list_initialized) {
+    DeleteProcThreadAttributeList(options->attribute_list);
+  }
+  iree_allocator_free(allocator, options->attribute_list);
+  if (options->stdin_handle != NULL &&
+      options->stdin_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(options->stdin_handle);
+  }
+  memset(options, 0, sizeof(*options));
+}
+
+static iree_status_t loom_tool_spawn_options_initialize(
+    HANDLE stdout_handle, HANDLE stderr_handle, iree_allocator_t allocator,
+    loom_tool_spawn_options_t* out_options) {
+  memset(out_options, 0, sizeof(*out_options));
+  out_options->stdin_handle = INVALID_HANDLE_VALUE;
+
+  SECURITY_ATTRIBUTES security_attributes;
+  memset(&security_attributes, 0, sizeof(security_attributes));
+  security_attributes.nLength = sizeof(security_attributes);
+  security_attributes.bInheritHandle = TRUE;
+  out_options->stdin_handle = CreateFileW(
+      L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+      &security_attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (out_options->stdin_handle == INVALID_HANDLE_VALUE) {
+    return loom_tool_win32_status(GetLastError(),
+                                  "failed to disconnect child stdin");
+  }
+
+  SIZE_T attribute_list_size = 0;
+  BOOL measure_result =
+      InitializeProcThreadAttributeList(NULL, 1, 0, &attribute_list_size);
+  if (measure_result) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "process startup attribute measurement unexpectedly succeeded");
+  }
+  DWORD measure_error = GetLastError();
+  if (measure_error != ERROR_INSUFFICIENT_BUFFER) {
+    return loom_tool_win32_status(
+        measure_error, "failed to measure process startup attributes");
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      allocator, attribute_list_size, (void**)&out_options->attribute_list));
+  if (!InitializeProcThreadAttributeList(out_options->attribute_list, 1, 0,
+                                         &attribute_list_size)) {
+    return loom_tool_win32_status(
+        GetLastError(), "failed to initialize process startup attributes");
+  }
+  out_options->attribute_list_initialized = true;
+
+  HANDLE inherited_handles[] = {
+      out_options->stdin_handle,
+      stdout_handle,
+      stderr_handle,
+  };
+  if (!UpdateProcThreadAttribute(
+          out_options->attribute_list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+          inherited_handles, sizeof(inherited_handles), NULL, NULL)) {
+    return loom_tool_win32_status(
+        GetLastError(), "failed to restrict inherited process handles");
+  }
+
+  out_options->startup_info.StartupInfo.cb = sizeof(out_options->startup_info);
+  out_options->startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  out_options->startup_info.StartupInfo.hStdInput = out_options->stdin_handle;
+  out_options->startup_info.StartupInfo.hStdOutput = stdout_handle;
+  out_options->startup_info.StartupInfo.hStdError = stderr_handle;
+  out_options->startup_info.lpAttributeList = out_options->attribute_list;
+  return iree_ok_status();
+}
+
 iree_status_t loom_tool_process_run_platform(
     char** argv, bool search_path, iree_allocator_t allocator,
     loom_tool_process_result_t* out_result) {
@@ -294,24 +379,25 @@ iree_status_t loom_tool_process_run_platform(
   wchar_t* command_line = NULL;
   PROCESS_INFORMATION process_info;
   memset(&process_info, 0, sizeof(process_info));
+  loom_tool_spawn_options_t spawn_options;
+  memset(&spawn_options, 0, sizeof(spawn_options));
   if (iree_status_is_ok(status)) {
     status = loom_tool_win32_make_command_line(argv, allocator, &command_line);
   }
   if (iree_status_is_ok(status)) {
-    STARTUPINFOW startup_info;
-    memset(&startup_info, 0, sizeof(startup_info));
-    startup_info.cb = sizeof(startup_info);
-    startup_info.dwFlags = STARTF_USESTDHANDLES;
-    startup_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    startup_info.hStdOutput = stdout_file.handle;
-    startup_info.hStdError = stderr_file.handle;
-
-    if (!CreateProcessW(NULL, command_line, NULL, NULL, TRUE, 0, NULL, NULL,
-                        &startup_info, &process_info)) {
+    status = loom_tool_spawn_options_initialize(
+        stdout_file.handle, stderr_file.handle, allocator, &spawn_options);
+  }
+  if (iree_status_is_ok(status)) {
+    if (!CreateProcessW(NULL, command_line, NULL, NULL, TRUE,
+                        EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
+                        &spawn_options.startup_info.StartupInfo,
+                        &process_info)) {
       status = loom_tool_win32_status(GetLastError(),
                                       "failed to spawn tool process");
     }
   }
+  loom_tool_spawn_options_deinitialize(&spawn_options, allocator);
   if (iree_status_is_ok(status)) {
     DWORD wait_result = WaitForSingleObject(process_info.hProcess, INFINITE);
     if (wait_result == WAIT_FAILED) {
