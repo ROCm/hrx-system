@@ -20,19 +20,6 @@
 extern "C" {
 #endif
 
-//===----------------------------------------------------------------------===//
-// Compiler support
-//===----------------------------------------------------------------------===//
-
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201102L) && \
-    !__STDC_NO_THREADS__
-#define iree_thread_local _Thread_local
-#elif defined(IREE_COMPILER_MSVC)
-#define iree_thread_local __declspec(thread)
-#else
-#define iree_thread_local static
-#endif  // __STDC_NO_THREADS__
-
 typedef uint64_t iree_hal_streaming_deviceptr_t;
 typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 

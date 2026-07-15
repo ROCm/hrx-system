@@ -127,6 +127,19 @@
 #endif  // _MSC_VER
 
 //===----------------------------------------------------------------------===//
+// IREE_THREAD_LOCAL
+//===----------------------------------------------------------------------===//
+
+// Declares storage with a distinct lifetime and value for each thread.
+#if defined(__cplusplus)
+#define IREE_THREAD_LOCAL thread_local
+#elif defined(IREE_COMPILER_MSVC)
+#define IREE_THREAD_LOCAL __declspec(thread)
+#else
+#define IREE_THREAD_LOCAL _Thread_local
+#endif  // __cplusplus
+
+//===----------------------------------------------------------------------===//
 // IREE_ATTRIBUTE_ALWAYS_INLINE / IREE_ATTRIBUTE_NOINLINE
 //===----------------------------------------------------------------------===//
 

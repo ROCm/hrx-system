@@ -4069,7 +4069,7 @@ CUDAAPI const char* cuGetErrorName(CUresult error) {
 }
 
 // Thread-local error state.
-static iree_thread_local CUresult iree_cuda_thread_error = CUDA_SUCCESS;
+static IREE_THREAD_LOCAL CUresult iree_cuda_thread_error = CUDA_SUCCESS;
 
 static void iree_cuda_thread_error_set(CUresult error) {
   iree_cuda_thread_error = error;
