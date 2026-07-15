@@ -470,7 +470,7 @@ TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
   }
 }
 
-TEST(DeviceSpecTest, RejectsSentinelExternalTimepointHandleType) {
+TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handle = {
       /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_NONE,
       /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
@@ -497,6 +497,53 @@ TEST(DeviceSpecTest, RejectsSentinelExternalTimepointHandleType) {
       /*.facets=*/NULL,
   };
   iree_hal_device_spec_t* spec = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+
+  external_timepoint_handle.handle_type =
+      (iree_hal_external_timepoint_type_t)UINT32_MAX;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+}
+
+TEST(DeviceSpecTest, RejectsInvalidExtensionFacets) {
+  iree_hal_device_spec_facet_t facets[2] = {
+      {
+          /*.schema_id=*/iree_string_view_empty(),
+          /*.schema_version=*/1,
+          /*.payload=*/iree_const_byte_span_empty(),
+      },
+      {
+          /*.schema_id=*/iree_make_cstring_view("test.facet"),
+          /*.schema_version=*/2,
+          /*.payload=*/iree_const_byte_span_empty(),
+      },
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/NULL,
+      /*.memory=*/NULL,
+      /*.virtual_memory=*/NULL,
+      /*.queues=*/NULL,
+      /*.dispatch=*/NULL,
+      /*.timing=*/NULL,
+      /*.executables=*/NULL,
+      /*.sanitizer=*/NULL,
+      /*.facet_count=*/1,
+      /*.facets=*/facets,
+  };
+
+  iree_hal_device_spec_t* spec = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
+
+  facets[0].schema_id = facets[1].schema_id;
+  params.facet_count = IREE_ARRAYSIZE(facets);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));

@@ -184,17 +184,11 @@ static iree_status_t iree_hal_device_spec_validate_params(
          ++i) {
       const iree_hal_external_timepoint_type_t handle_type =
           queues->external_timepoint_handles[i].handle_type;
-      switch (handle_type) {
-        case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE:
-        case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT:
-        case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT:
-          break;
-        default:
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "device spec external timepoint handle %" PRIhsz
-              " has invalid type %" PRIu32,
-              i, (uint32_t)handle_type);
+      if (!iree_hal_external_timepoint_type_is_valid(handle_type)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "device spec external timepoint handle %" PRIhsz
+                                " has invalid type %" PRIu32,
+                                i, (uint32_t)handle_type);
       }
     }
   }
@@ -247,6 +241,27 @@ static iree_status_t iree_hal_device_spec_validate_params(
   }
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
       params->facet_count, params->facets, "facets"));
+  for (iree_host_size_t i = 0; i < params->facet_count; ++i) {
+    const iree_string_view_t schema_id = params->facets[i].schema_id;
+    if (schema_id.size && !schema_id.data) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "device spec facet %" PRIhsz " schema ID has NULL storage", i);
+    }
+    if (iree_string_view_is_empty(schema_id)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "device spec facet %" PRIhsz " has an empty schema ID", i);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(schema_id, params->facets[j].schema_id)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "device spec facet %" PRIhsz
+                                " duplicates schema ID from facet %" PRIhsz,
+                                i, j);
+      }
+    }
+  }
   return iree_ok_status();
 }
 

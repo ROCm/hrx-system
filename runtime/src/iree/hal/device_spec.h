@@ -758,7 +758,7 @@ typedef enum iree_hal_executable_target_selection_result_e {
 
 // Driver-local typed facet payload preserved by core HAL.
 typedef struct iree_hal_device_spec_facet_t {
-  // Stable facet schema identifier.
+  // Non-empty stable schema identifier unique within the device spec.
   iree_string_view_t schema_id;
   // Facet schema version.
   uint32_t schema_version;

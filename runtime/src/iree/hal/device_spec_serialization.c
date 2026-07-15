@@ -932,16 +932,12 @@ static iree_status_t iree_hal_device_spec_decode_external_timepoint_handle(
   uint32_t handle_type = 0;
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_u32(reader, &handle_type));
-  switch (handle_type) {
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE:
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT:
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT:
-      break;
-    default:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "device spec external timepoint handle has invalid type %" PRIu32,
-          handle_type);
+  if (!iree_hal_external_timepoint_type_is_valid(
+          (iree_hal_external_timepoint_type_t)handle_type)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "device spec external timepoint handle has invalid type %" PRIu32,
+        handle_type);
   }
   out_value->handle_type = (iree_hal_external_timepoint_type_t)handle_type;
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
