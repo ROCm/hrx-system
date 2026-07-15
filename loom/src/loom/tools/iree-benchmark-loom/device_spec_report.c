@@ -408,10 +408,10 @@ iree_status_t iree_benchmark_loom_write_device_spec_json(
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_object_field_name(
-      stream, &first_field, "digest"));
+      stream, &first_field, "fingerprint"));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream, "\"0x%016" PRIx64 "\"",
-      iree_hal_device_spec_digest(device_spec)));
+      iree_hal_device_spec_fingerprint(device_spec)));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_object_field_name(
       stream, &first_field, "identity"));
   IREE_RETURN_IF_ERROR(

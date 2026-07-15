@@ -13,11 +13,12 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Computes the stable digest of the canonical device spec encoding.
+// Computes a stable non-cryptographic fingerprint of the canonical device spec
+// encoding.
 //
 // This traverses the spec without allocating the serialized image.
-iree_status_t iree_hal_device_spec_compute_digest(
-    const iree_hal_device_spec_t* spec, uint64_t* out_digest);
+iree_status_t iree_hal_device_spec_compute_fingerprint(
+    const iree_hal_device_spec_t* spec, uint64_t* out_fingerprint);
 
 #ifdef __cplusplus
 }  // extern "C"

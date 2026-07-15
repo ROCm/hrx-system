@@ -23,8 +23,8 @@ struct iree_hal_device_spec_t {
   iree_atomic_ref_count_t ref_count;
   // Host allocator used for all owned storage.
   iree_allocator_t host_allocator;
-  // Stable digest of the canonical serialized byte image.
-  uint64_t digest;
+  // Stable non-cryptographic fingerprint of the canonical byte image.
+  uint64_t fingerprint;
   // Owned string table backing public string views.
   char* string_table;
   // Owned string table byte length.
@@ -564,7 +564,7 @@ IREE_API_EXPORT iree_status_t iree_hal_device_spec_create(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_spec_compute_digest(spec, &spec->digest);
+    status = iree_hal_device_spec_compute_fingerprint(spec, &spec->fingerprint);
   }
   if (iree_status_is_ok(status)) {
     *out_spec = spec;
@@ -589,9 +589,9 @@ IREE_API_EXPORT void iree_hal_device_spec_release(
 }
 
 IREE_API_EXPORT uint64_t
-iree_hal_device_spec_digest(const iree_hal_device_spec_t* spec) {
+iree_hal_device_spec_fingerprint(const iree_hal_device_spec_t* spec) {
   IREE_ASSERT_ARGUMENT(spec);
-  return spec->digest;
+  return spec->fingerprint;
 }
 
 static bool iree_hal_device_spec_mask_overlaps(uint64_t available_mask,

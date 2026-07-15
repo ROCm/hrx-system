@@ -33,21 +33,21 @@ typedef struct iree_hal_device_spec_writer_t {
   iree_host_size_t capacity;
   // Number of bytes produced so far.
   iree_host_size_t offset;
-  // Rolling FNV-1a state when |is_digesting| is true.
-  uint64_t digest;
-  // Whether written bytes are incorporated into |digest|.
-  bool is_digesting;
+  // Rolling FNV-1a state when |is_fingerprinting| is true.
+  uint64_t fingerprint;
+  // Whether written bytes are incorporated into |fingerprint|.
+  bool is_fingerprinting;
 } iree_hal_device_spec_writer_t;
 
 static void iree_hal_device_spec_writer_initialize(
-    uint8_t* data, iree_host_size_t capacity, bool is_digesting,
+    uint8_t* data, iree_host_size_t capacity, bool is_fingerprinting,
     iree_hal_device_spec_writer_t* out_writer) {
   *out_writer = (iree_hal_device_spec_writer_t){
       .data = data,
       .capacity = capacity,
       .offset = 0,
-      .digest = IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS,
-      .is_digesting = is_digesting,
+      .fingerprint = IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS,
+      .is_fingerprinting = is_fingerprinting,
   };
 }
 
@@ -66,10 +66,10 @@ static iree_status_t iree_hal_device_spec_writer_write_bytes(
   if (writer->data && length) {
     memcpy(writer->data + writer->offset, source_bytes, length);
   }
-  if (writer->is_digesting) {
+  if (writer->is_fingerprinting) {
     for (iree_host_size_t i = 0; i < length; ++i) {
-      writer->digest ^= source_bytes[i];
-      writer->digest *= IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME;
+      writer->fingerprint ^= source_bytes[i];
+      writer->fingerprint *= IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME;
     }
   }
   writer->offset += length;
@@ -557,11 +557,11 @@ static iree_status_t iree_hal_device_spec_measure(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_device_spec_compute_digest(
-    const iree_hal_device_spec_t* spec, uint64_t* out_digest) {
+iree_status_t iree_hal_device_spec_compute_fingerprint(
+    const iree_hal_device_spec_t* spec, uint64_t* out_fingerprint) {
   IREE_ASSERT_ARGUMENT(spec);
-  IREE_ASSERT_ARGUMENT(out_digest);
-  *out_digest = 0;
+  IREE_ASSERT_ARGUMENT(out_fingerprint);
+  *out_fingerprint = 0;
   iree_host_size_t total_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_measure(spec, &total_length));
   iree_hal_device_spec_writer_t writer;
@@ -570,9 +570,10 @@ iree_status_t iree_hal_device_spec_compute_digest(
       iree_hal_device_spec_encode(spec, total_length, &writer));
   if (IREE_UNLIKELY(writer.offset != total_length)) {
     return iree_make_status(IREE_STATUS_INTERNAL,
-                            "canonical device spec size changed while hashing");
+                            "canonical device spec size changed while "
+                            "fingerprinting");
   }
-  *out_digest = writer.digest;
+  *out_fingerprint = writer.fingerprint;
   return iree_ok_status();
 }
 

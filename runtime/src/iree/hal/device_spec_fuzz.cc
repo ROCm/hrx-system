@@ -38,16 +38,17 @@ static void iree_hal_device_spec_fuzz_parse(iree_const_byte_span_t bytes) {
   iree_hal_device_spec_fuzz_assert(
       memcmp(canonical_bytes.data, bytes.data, bytes.data_length) == 0);
 
-  // Canonical output must remain parseable and preserve its stable digest.
+  // Canonical output must remain parseable and preserve its fingerprint.
   iree_hal_device_spec_t* reparsed_spec = NULL;
   status =
       iree_hal_device_spec_parse(iree_const_cast_byte_span(canonical_bytes),
                                  iree_allocator_system(), &reparsed_spec);
   iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
-  iree_hal_device_spec_fuzz_assert(iree_hal_device_spec_digest(spec) ==
-                                   iree_hal_device_spec_digest(reparsed_spec));
+  iree_hal_device_spec_fuzz_assert(
+      iree_hal_device_spec_fingerprint(spec) ==
+      iree_hal_device_spec_fingerprint(reparsed_spec));
 
-  // Do not rely on the non-cryptographic digest to establish equivalence.
+  // Do not rely on the non-cryptographic fingerprint to establish equivalence.
   // Serializing the reparsed object must produce the same canonical bytes.
   iree_byte_span_t reparsed_bytes = iree_byte_span_empty();
   status = iree_hal_device_spec_serialize(

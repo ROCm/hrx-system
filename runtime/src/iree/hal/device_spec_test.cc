@@ -367,7 +367,8 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
   EXPECT_EQ(serialized_bytes.data_length, 1279u);
-  EXPECT_EQ(iree_hal_device_spec_digest(spec), UINT64_C(0x88d302034c8236e0));
+  EXPECT_EQ(iree_hal_device_spec_fingerprint(spec),
+            UINT64_C(0x88d302034c8236e0));
   static const uint8_t kExpectedHeaderPrefix[] = {
       'D', 'S', 'P', 'C', 4, 0, 0, 0, 0xff, 0x04, 0, 0, 0, 0, 0, 0,
   };
@@ -387,8 +388,8 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   EXPECT_EQ(memcmp(serialized_bytes.data, reparsed_serialized_bytes.data,
                    serialized_bytes.data_length),
             0);
-  EXPECT_EQ(iree_hal_device_spec_digest(spec),
-            iree_hal_device_spec_digest(parsed_spec));
+  EXPECT_EQ(iree_hal_device_spec_fingerprint(spec),
+            iree_hal_device_spec_fingerprint(parsed_spec));
   ExpectStringViewEq(iree_hal_device_spec_identity(parsed_spec)->display_name,
                      "Test Device");
   EXPECT_EQ(iree_hal_device_spec_sanitizer(parsed_spec)
@@ -808,7 +809,8 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
   EXPECT_EQ(serialized_bytes.data_length, 698u);
-  EXPECT_EQ(iree_hal_device_spec_digest(spec), UINT64_C(0xa801ffb0ea120b8a));
+  EXPECT_EQ(iree_hal_device_spec_fingerprint(spec),
+            UINT64_C(0xa801ffb0ea120b8a));
   iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
 }
