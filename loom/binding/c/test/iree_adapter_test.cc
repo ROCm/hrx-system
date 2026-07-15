@@ -6,10 +6,18 @@
 
 #include <string.h>
 
+#include <type_traits>
+
 #include "iree/testing/gtest.h"
 #include "loomc/iree.h"
 
 namespace {
+
+static_assert(std::is_same_v<loomc_status_t, iree_status_t>);
+static_assert(
+    std::is_same_v<loomc_allocator_command_t, iree_allocator_command_t>);
+static_assert(
+    std::is_same_v<loomc_allocator_ctl_fn_t, iree_allocator_ctl_fn_t>);
 
 TEST(IreeAdapterTest, StringViewRoundTripsWithoutCopying) {
   iree_string_view_t iree_value = IREE_SV("some text");

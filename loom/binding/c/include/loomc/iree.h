@@ -170,7 +170,7 @@ LOOMC_IREE_STATIC_ASSERT(offsetof(loomc_allocator_alloc_params_t,
 /// `loomc_status_free` or converted back to `iree_status_t` and handled by
 /// IREE.
 static inline loomc_status_t loomc_status_from_iree(iree_status_t status) {
-  return (loomc_status_t)status;
+  return status;
 }
 
 /// Reinterprets a Loom status as an IREE status.
@@ -182,7 +182,7 @@ static inline loomc_status_t loomc_status_from_iree(iree_status_t status) {
 /// Ownership transfers unchanged. The returned status is handled with IREE
 /// status utilities or converted back to `loomc_status_t`.
 static inline iree_status_t iree_status_from_loomc(loomc_status_t status) {
-  return (iree_status_t)status;
+  return status;
 }
 
 /// Converts an IREE string view to a Loom string view.
@@ -245,7 +245,7 @@ static inline loomc_allocator_t loomc_allocator_from_iree(
     iree_allocator_t allocator) {
   loomc_allocator_t value = {
       allocator.self,
-      (loomc_allocator_ctl_fn_t)allocator.ctl,
+      allocator.ctl,
   };
   return value;
 }
@@ -263,7 +263,7 @@ static inline iree_allocator_t iree_allocator_from_loomc(
   IREE_ASSERT_ARGUMENT(loomc_allocator_is_valid(allocator));
   iree_allocator_t value = {
       allocator.self,
-      (iree_allocator_ctl_fn_t)allocator.ctl,
+      allocator.ctl,
   };
   return value;
 }

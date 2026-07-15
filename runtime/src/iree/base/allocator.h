@@ -474,7 +474,8 @@ iree_struct_layout_calculate(iree_host_size_t base_size,
 //===----------------------------------------------------------------------===//
 
 // Controls the behavior of an iree_allocator_ctl_fn_t callback function.
-typedef enum iree_allocator_command_e {
+typedef uint32_t iree_allocator_command_t;
+enum {
   // Allocates |byte_length| of memory and stores the pointer in |inout_ptr|.
   // Systems should align to 16 byte boundaries (or otherwise their natural
   // SIMD alignment). The runtime pools internally and small allocations
@@ -520,7 +521,7 @@ typedef enum iree_allocator_command_e {
   // This would take a pointer/length and a NUMA node ID to bind the memory to.
   // We may want flags for controlling whether this is a new allocation getting
   // bound or an existing one that is migrating to use MPOL_MF_MOVE.
-} iree_allocator_command_t;
+};
 
 // Parameters for various allocation commands.
 typedef struct iree_allocator_alloc_params_t {
