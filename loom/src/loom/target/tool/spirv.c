@@ -176,7 +176,8 @@ static iree_status_t loom_spirv_tool_write_temp_binary(
   iree_status_t status = iree_io_file_contents_write(
       loom_tool_temp_file_path(out_file), binary, allocator);
   if (!iree_status_is_ok(status)) {
-    loom_tool_temp_file_deinitialize(out_file);
+    status =
+        iree_status_join(status, loom_tool_temp_file_deinitialize(out_file));
   }
   return status;
 }
@@ -215,7 +216,11 @@ iree_status_t loom_spirv_tool_disassemble_binary(
     result.stdout_bytes = (loom_tool_output_t){0};
   }
   loom_tool_process_result_deinitialize(&result, allocator);
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(out_text, allocator);
+  }
   return status;
 }
 
@@ -242,6 +247,7 @@ iree_status_t loom_spirv_tool_validate_binary(
                                             IREE_SV("validating binary"));
   }
   loom_tool_process_result_deinitialize(&result, allocator);
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
   return status;
 }

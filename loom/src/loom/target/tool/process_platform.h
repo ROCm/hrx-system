@@ -23,7 +23,8 @@ iree_status_t loom_tool_temp_file_initialize_platform(
     const char* stem, loom_tool_temp_file_t* out_file);
 
 // Deletes platform storage owned by |file|.
-void loom_tool_temp_file_deinitialize_platform(loom_tool_temp_file_t* file);
+iree_status_t loom_tool_temp_file_deinitialize_platform(
+    loom_tool_temp_file_t* file);
 
 #ifdef __cplusplus
 }  // extern "C"

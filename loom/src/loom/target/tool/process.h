@@ -84,8 +84,9 @@ iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
 // Returns the current filesystem path for |file|.
 iree_string_view_t loom_tool_temp_file_path(const loom_tool_temp_file_t* file);
 
-// Deletes the temporary file if it still exists.
-void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file);
+// Deletes the temporary file if it still exists and deinitializes |file|.
+// Returns a failure if the file could not be deleted.
+iree_status_t loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file);
 
 #ifdef __cplusplus
 }  // extern "C"

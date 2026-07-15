@@ -32,11 +32,13 @@ iree_status_t loom_tool_temp_file_initialize_platform(
       "external tool temporary files are unsupported on this platform");
 }
 
-void loom_tool_temp_file_deinitialize_platform(loom_tool_temp_file_t* file) {
+iree_status_t loom_tool_temp_file_deinitialize_platform(
+    loom_tool_temp_file_t* file) {
   if (file == NULL) {
-    return;
+    return iree_ok_status();
   }
   memset(file, 0, sizeof(*file));
+  return iree_ok_status();
 }
 
 #endif  // Unsupported platforms

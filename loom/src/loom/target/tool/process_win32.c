@@ -91,15 +91,23 @@ static iree_status_t loom_tool_win32_wide_to_utf8(const wchar_t* value,
   return iree_ok_status();
 }
 
-static void loom_tool_win32_delete_utf8_file(const char* path) {
+static iree_status_t loom_tool_win32_delete_utf8_file(const char* path) {
   wchar_t wide_path[4096];
   int wide_length =
       MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide_path,
                           (int)IREE_ARRAYSIZE(wide_path));
-  IREE_ASSERT(wide_length != 0);
-  if (wide_length != 0) {
-    DeleteFileW(wide_path);
+  if (wide_length == 0) {
+    return loom_tool_win32_status(GetLastError(),
+                                  "failed to convert temporary file path");
   }
+  if (DeleteFileW(wide_path)) {
+    return iree_ok_status();
+  }
+  DWORD error = GetLastError();
+  if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+    return iree_ok_status();
+  }
+  return loom_tool_win32_status(error, "failed to delete temporary file");
 }
 
 static iree_status_t loom_tool_capture_file_open(
@@ -513,14 +521,17 @@ iree_status_t loom_tool_temp_file_initialize_platform(
   return status;
 }
 
-void loom_tool_temp_file_deinitialize_platform(loom_tool_temp_file_t* file) {
+iree_status_t loom_tool_temp_file_deinitialize_platform(
+    loom_tool_temp_file_t* file) {
   if (file == NULL) {
-    return;
+    return iree_ok_status();
   }
+  iree_status_t status = iree_ok_status();
   if (file->path[0] != '\0') {
-    loom_tool_win32_delete_utf8_file(file->path);
+    status = loom_tool_win32_delete_utf8_file(file->path);
   }
   memset(file, 0, sizeof(*file));
+  return status;
 }
 
 #endif  // IREE_PLATFORM_WINDOWS

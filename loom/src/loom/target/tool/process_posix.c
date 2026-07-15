@@ -80,7 +80,12 @@ static iree_status_t loom_tool_capture_file_open(
   if (fd < 0) {
     return loom_tool_posix_status(errno, "failed to open capture file");
   }
-  unlink(template_path);
+  if (unlink(template_path) < 0) {
+    int error_number = errno;
+    close(fd);
+    return loom_tool_posix_status(error_number,
+                                  "failed to unlink capture file");
+  }
   iree_status_t status = loom_tool_posix_set_close_on_exec(fd);
   if (!iree_status_is_ok(status)) {
     close(fd);
@@ -306,14 +311,19 @@ iree_status_t loom_tool_temp_file_initialize_platform(
   return iree_ok_status();
 }
 
-void loom_tool_temp_file_deinitialize_platform(loom_tool_temp_file_t* file) {
+iree_status_t loom_tool_temp_file_deinitialize_platform(
+    loom_tool_temp_file_t* file) {
   if (file == NULL) {
-    return;
+    return iree_ok_status();
   }
+  iree_status_t status = iree_ok_status();
   if (file->path[0] != '\0') {
-    unlink(file->path);
+    if (unlink(file->path) < 0 && errno != ENOENT) {
+      status = loom_tool_posix_status(errno, "failed to delete temporary file");
+    }
   }
   memset(file, 0, sizeof(*file));
+  return status;
 }
 
 #endif  // POSIX platforms

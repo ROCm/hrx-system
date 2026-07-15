@@ -213,9 +213,9 @@ iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
   return loom_tool_temp_file_initialize_platform(stem_buffer, out_file);
 }
 
-void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
+iree_status_t loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
   if (file == NULL) {
-    return;
+    return iree_ok_status();
   }
-  loom_tool_temp_file_deinitialize_platform(file);
+  return loom_tool_temp_file_deinitialize_platform(file);
 }

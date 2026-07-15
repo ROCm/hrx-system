@@ -253,7 +253,11 @@ iree_status_t loom_llvm_tool_disassemble_bitcode(
     status = loom_llvm_tool_disassemble_bitcode_file(
         toolchain, loom_tool_temp_file_path(&input_file), allocator, out_text);
   }
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(out_text, allocator);
+  }
   return status;
 }
 
@@ -368,8 +372,13 @@ static iree_status_t loom_llvm_tool_run_bytes_to_file_output(
     status = loom_llvm_tool_output_read_file(
         loom_tool_temp_file_path(&output_file), allocator, out_output);
   }
-  loom_tool_temp_file_deinitialize(&output_file);
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&output_file));
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(out_output, allocator);
+  }
   return status;
 }
 
@@ -487,6 +496,10 @@ iree_status_t loom_llvm_tool_disassemble_object(
         toolchain, loom_tool_temp_file_path(&input_file), extra_arguments,
         extra_argument_count, allocator, out_text);
   }
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(out_text, allocator);
+  }
   return status;
 }

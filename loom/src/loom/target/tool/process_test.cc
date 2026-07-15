@@ -215,7 +215,7 @@ TEST(ToolProcessTest, PreservesUtf8AtWin32Boundaries) {
       loom_tool_temp_file_initialize(IREE_SV("unicode"), &temp_file));
   EXPECT_NE(std::string_view(temp_file.path).find("\xCF\x80"),
             std::string_view::npos);
-  loom_tool_temp_file_deinitialize(&temp_file);
+  IREE_ASSERT_OK(loom_tool_temp_file_deinitialize(&temp_file));
 }
 
 TEST(ToolProcessTest, DoesNotInheritUnrelatedWin32Handles) {
@@ -304,6 +304,18 @@ TEST(ToolProcessTest, DoesNotInheritUnrelatedPosixDescriptors) {
 
 #if defined(IREE_PLATFORM_WINDOWS) || defined(IREE_PLATFORM_LINUX) || \
     defined(IREE_PLATFORM_MACOS) || defined(IREE_PLATFORM_ANDROID)
+
+TEST(ToolTempFileTest, ReportsDeleteFailures) {
+  loom_tool_temp_file_t temp_file = {};
+  IREE_ASSERT_OK(
+      loom_tool_temp_file_initialize(IREE_SV("cleanup"), &temp_file));
+  IREE_ASSERT_OK(loom_tool_temp_file_deinitialize(&temp_file));
+
+  std::strcpy(temp_file.path, ".");
+  iree_status_t status = loom_tool_temp_file_deinitialize(&temp_file);
+  IREE_EXPECT_NOT_OK(status);
+  EXPECT_EQ(temp_file.path[0], '\0');
+}
 
 TEST(ToolProcessTest, PreservesCompleteArgumentVector) {
 #if defined(IREE_PLATFORM_WINDOWS)
