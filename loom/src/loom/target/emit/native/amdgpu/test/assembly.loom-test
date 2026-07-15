@@ -3788,3 +3788,20 @@ low.func.def target(@gfx12_target) @gfx12_vopd_commutes_binary_sources(%lhs0: re
 // ----
   v_dual_mul_f32 v4, v2, v0 :: v_dual_mul_f32 v5, v1, v2
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_wait_before_storage_reserve strategy=source
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_wait_before_storage_reserve(%kernarg: reg<amdgpu.sgpr x2>) {
+  %loaded = low.op<amdgpu.s_load_dwordx8_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x8>
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
+  low.return
+}
+
+// The storage reservation emits no instruction, but wait planning may use it
+// as an ordering anchor. Assembly must visit the anchor just like encoding.
+// ----
+  s_load_dwordx8 s[8:15], s[0:1] offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_endpgm
