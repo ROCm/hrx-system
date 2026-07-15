@@ -215,6 +215,10 @@ def generate_error_catalog_h(errors: list[ErrorDef], *, catalog_symbol: str, pub
         "",
         '#include "loom/error/error_defs.h"',
         "",
+        "#ifdef __cplusplus",
+        'extern "C" {',
+        "#endif",
+        "",
         f"extern const loom_error_catalog_t {catalog_symbol};",
         "",
     ]
@@ -240,6 +244,14 @@ def generate_error_catalog_h(errors: list[ErrorDef], *, catalog_symbol: str, pub
         lines.append(f"#define {ref_macro} \\")
         lines.append(f"  LOOM_ERROR_REF({_domain_c_name(error.domain)}, {error.code})")
         lines.append("")
+    lines.extend(
+        [
+            "#ifdef __cplusplus",
+            '}  // extern "C"',
+            "#endif",
+            "",
+        ]
+    )
     lines.append(f"#endif  // {_header_guard_from_public_header(public_header)}")
     lines.append("")
     return "\n".join(lines)

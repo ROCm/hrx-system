@@ -52,6 +52,21 @@ def test_generate_error_catalog_header_uses_canonical_names() -> None:
     assert "LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_TYPE, 1)" in catalog_h
 
 
+def test_generate_error_catalog_header_uses_c_linkage() -> None:
+    catalog_h = generate_error_catalog_h(
+        [ERR_TYPE_001],
+        catalog_symbol="loom_error_catalog_test",
+        public_header="loom/error/error_catalog.h",
+    )
+
+    linkage_begin = catalog_h.index('extern "C" {')
+    catalog_declaration = catalog_h.index("extern const loom_error_catalog_t loom_error_catalog_test")
+    error_declaration = catalog_h.index("extern const loom_error_def_t loom_err_type_001")
+    linkage_end = catalog_h.index('}  // extern "C"')
+    assert linkage_begin < catalog_declaration < linkage_end
+    assert linkage_begin < error_declaration < linkage_end
+
+
 def test_generate_error_runtime_tables_uses_enum_source_of_truth() -> None:
     tables_inl = generate_error_runtime_tables_inl()
 
