@@ -100,6 +100,7 @@ STATIC_ASSERT_EQ(sizeof(iree_hal_executable_plugin_string_pair_t),
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_executable_plugin_load(
+    iree_hal_executable_plugin_features_t required_features,
     const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_plugin_t* plugin) {
@@ -117,10 +118,15 @@ static iree_status_t iree_hal_executable_plugin_load(
         "executable plugin version %u is not supported by runtime version %u",
         header->version, IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST);
   }
-  plugin->library =
-      iree_hal_executable_plugin_v0_from_query_result(query_result);
-
   plugin->identifier = iree_make_cstring_view(header->name);
+
+  if (!iree_all_bits_set(header->features, required_features)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "plugin `%.*s` declares features 0x%08X but loader requires 0x%08X",
+        (int)plugin->identifier.size, plugin->identifier.data,
+        (uint32_t)header->features, (uint32_t)required_features);
+  }
 
 // Ensure features declared by the plugin are available/allowed.
 #if !IREE_STATUS_MODE
@@ -190,6 +196,8 @@ static iree_status_t iree_hal_executable_plugin_load(
 
   // Plugin is probably good - let's try loading it! It could fail for any
   // reason and the caller will clean up.
+  plugin->library =
+      iree_hal_executable_plugin_v0_from_query_result(query_result);
   return (iree_status_t)plugin->library->load(
       &environment, (size_t)param_count,
       (const iree_hal_executable_plugin_string_pair_t*)params, &plugin->self);
@@ -216,7 +224,8 @@ iree_status_t iree_hal_executable_plugin_initialize(
   // Try to load the plugin; this may fail if the plugin is not supported
   // (version, features, etc) or the plugin decides it doesn't like Tuesdays.
   iree_status_t status = iree_hal_executable_plugin_load(
-      query_result, param_count, params, host_allocator, out_base_plugin);
+      required_features, query_result, param_count, params, host_allocator,
+      out_base_plugin);
   if (iree_status_is_ok(status)) {
     IREE_TRACE({
       const iree_hal_executable_plugin_header_t* header =
