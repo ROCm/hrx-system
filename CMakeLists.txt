@@ -72,13 +72,6 @@ option(IREE_DEV_MODE
   OFF)
 option(LIBHRX_BUILD
   "Build libhrx and HRX compatibility targets." ON)
-if(LIBHRX_BUILD)
-  if(DEFINED IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMDGPU)
-    message(FATAL_ERROR
-      "LIBHRX_BUILD=ON requires IREE_HAL_DRIVER_AMDGPU=ON.")
-  endif()
-  set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ON)
-endif()
 
 set(IREE_USE_LINKER "" CACHE STRING "")
 cmake_dependent_option(IREE_ENABLE_LLD

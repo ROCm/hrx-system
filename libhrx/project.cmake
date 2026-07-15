@@ -17,8 +17,17 @@ option(LIBHRX_BUILD_PASSTHROUGH
   "Build libhrx HIP passthrough/interception tools." ON)
 option(LIBHRX_BUILD_CUDA_BINDING
   "Build libhrx CUDA runtime/driver API compatibility binding." OFF)
+set(_LIBHRX_BUILD_CTS_DEFAULT OFF)
+if(LIBHRX_BUILD AND IREE_BUILD_TESTS AND IREE_HAL_DRIVER_AMDGPU)
+  set(_LIBHRX_BUILD_CTS_DEFAULT ON)
+endif()
 option(LIBHRX_BUILD_CTS
-  "Build libhrx conformance tests." ${IREE_BUILD_TESTS})
+  "Build libhrx conformance tests." ${_LIBHRX_BUILD_CTS_DEFAULT})
+if(LIBHRX_BUILD AND LIBHRX_BUILD_CTS AND NOT IREE_HAL_DRIVER_AMDGPU)
+  message(FATAL_ERROR
+    "LIBHRX_BUILD_CTS=ON requires IREE_HAL_DRIVER_AMDGPU=ON because the "
+    "current CTS embeds AMDGPU test kernels.")
+endif()
 option(HRX_INSTALL_TESTS
   "Install a relocatable CTest tree and test artifacts." ${IREE_BUILD_TESTS})
 set(HRX_PUBLIC_DIST_COMPONENT "HrxPublicDist" CACHE STRING
