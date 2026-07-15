@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/io/file_contents.h"
 
 #if defined(HRX_ENABLE_ZSTD)
 #include <zstd.h>
@@ -27,7 +28,7 @@ enum {
   KPACK_ZSTD_MAX_KERNELS = 1024 * 1024,  // frame-count cap for a zstd blob
 };
 
-// Refuse to load absurdly large archive files into memory.
+// Upper bound on an archive's size and on a decompressed code object.
 #define KPACK_MAX_FILE_SIZE (2ULL * 1024 * 1024 * 1024)
 
 //===----------------------------------------------------------------------===//
@@ -1023,61 +1024,33 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 // Top-level resolution
 //===----------------------------------------------------------------------===//
 
-// Reads an entire file into a freshly-allocated buffer. Returns
-// IREE_STATUS_NOT_FOUND if the file cannot be opened (caller skips the path).
-static iree_status_t kpack_read_file(const char* path,
-                                     iree_allocator_t host_allocator,
-                                     void** out_data,
-                                     iree_host_size_t* out_size) {
-  *out_data = NULL;
-  *out_size = 0;
-  FILE* f = fopen(path, "rb");
-  if (!f) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "cannot open '%s'", path);
+// Memory-maps the archive at |path|. The mapping owns the bytes and the spans
+// parsed from it stay valid until it is freed. Fails if |path| cannot be mapped
+// (caller skips the path) or is larger than KPACK_MAX_FILE_SIZE.
+static iree_status_t kpack_map_file(const char* path,
+                                    iree_allocator_t host_allocator,
+                                    iree_io_file_contents_t** out_mapping) {
+  *out_mapping = NULL;
+  iree_io_file_contents_t* mapping = NULL;
+  IREE_RETURN_IF_ERROR(iree_io_file_contents_map(iree_make_cstring_view(path),
+                                                 IREE_IO_FILE_ACCESS_READ,
+                                                 host_allocator, &mapping));
+  iree_host_size_t length = mapping->const_buffer.data_length;
+  if (length > KPACK_MAX_FILE_SIZE) {
+    iree_io_file_contents_free(mapping);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "kpack archive '%s' too large (%" PRIhsz " bytes)",
+                            path, length);
   }
-  iree_status_t status = iree_ok_status();
-  long file_size = -1;
-  if (fseek(f, 0, SEEK_END) != 0) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "cannot seek '%s'", path);
-  } else {
-    file_size = ftell(f);
-    if (file_size < 0 || fseek(f, 0, SEEK_SET) != 0) {
-      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "cannot size '%s'", path);
-    }
-  }
-  if (iree_status_is_ok(status) && (uint64_t)file_size > KPACK_MAX_FILE_SIZE) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "kpack archive '%s' too large (%ld bytes)", path,
-                              file_size);
-  }
-  void* buffer = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, (iree_host_size_t)file_size,
-                                   &buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    if (fread(buffer, 1, (size_t)file_size, f) != (size_t)file_size) {
-      iree_allocator_free(host_allocator, buffer);
-      buffer = NULL;
-      status =
-          iree_make_status(IREE_STATUS_DATA_LOSS, "short read on '%s'", path);
-    }
-  }
-  fclose(f);
-  if (iree_status_is_ok(status)) {
-    *out_data = buffer;
-    *out_size = (iree_host_size_t)file_size;
-  }
-  return status;
+  *out_mapping = mapping;
+  return iree_ok_status();
 }
 
-// An opened, in-memory archive plus its canonical path (for dedup).
+// An opened archive plus its canonical path (for dedup). |archive|'s spans
+// point into |mapping| and are valid until it is freed.
 typedef struct {
   char canonical[KPACK_PATH_MAX];
-  void* file_data;
-  iree_host_size_t file_size;
+  iree_io_file_contents_t* mapping;
   iree_hal_streaming_kpack_archive_t archive;
 } kpack_open_archive_t;
 
@@ -1114,8 +1087,9 @@ static bool kpack_arch_collect_cb(iree_string_view_t target, void* user_data) {
   return false;  // continue collecting
 }
 
-// Opens and caches the archive at |path| (deduplicated by canonical path).
-// Missing or unparseable archives are skipped (logged), not fatal.
+// Maps and parses the archive at |path| into the resolve's open list
+// (deduplicated by canonical path). Missing or unparseable archives are skipped
+// (logged), not fatal.
 static void kpack_try_open_archive(kpack_resolve_state_t* state,
                                    const char* path) {
   // realpath() requires a buffer of at least PATH_MAX bytes; KPACK_PATH_MAX is
@@ -1135,26 +1109,24 @@ static void kpack_try_open_archive(kpack_resolve_state_t* state,
     return;
   }
 
-  void* data = NULL;
-  iree_host_size_t size = 0;
+  iree_io_file_contents_t* mapping = NULL;
   iree_status_t status =
-      kpack_read_file(canonical, state->host_allocator, &data, &size);
+      kpack_map_file(canonical, state->host_allocator, &mapping);
   if (!iree_status_is_ok(status)) {
-    KPACK_DBG("failed to read %s", canonical);
+    KPACK_DBG("failed to map %s", canonical);
     iree_status_ignore(status);
     return;
   }
   kpack_open_archive_t* slot = &state->open[state->open_count];
-  status = iree_hal_streaming_kpack_archive_open(
-      iree_make_const_byte_span(data, size), &slot->archive);
+  status = iree_hal_streaming_kpack_archive_open(mapping->const_buffer,
+                                                 &slot->archive);
   if (!iree_status_is_ok(status)) {
     KPACK_DBG("failed to parse %s", canonical);
     iree_status_ignore(status);
-    iree_allocator_free(state->host_allocator, data);
+    iree_io_file_contents_free(mapping);
     return;
   }
-  slot->file_data = data;
-  slot->file_size = size;
+  slot->mapping = mapping;
   iree_host_size_t clen = strlen(canonical);
   memcpy(slot->canonical, canonical, clen + 1);
   ++state->open_count;
@@ -1359,9 +1331,9 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
     iree_status_ignore(last_error);
   }
 
-  // Release archive file buffers (the returned code object is a separate copy).
+  // Unmap the archives; the returned code object is an independent copy.
   for (iree_host_size_t o = 0; o < state.open_count; ++o) {
-    iree_allocator_free(host_allocator, state.open[o].file_data);
+    iree_io_file_contents_free(state.open[o].mapping);
   }
   iree_allocator_free(host_allocator, state.open);
   return status;
