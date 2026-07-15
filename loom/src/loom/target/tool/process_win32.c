@@ -322,11 +322,18 @@ static iree_status_t loom_tool_win32_make_command_line(
   return status;
 }
 
+enum {
+  LOOM_TOOL_STDIN_HANDLE_INDEX = 0,
+  LOOM_TOOL_STDOUT_HANDLE_INDEX,
+  LOOM_TOOL_STDERR_HANDLE_INDEX,
+  LOOM_TOOL_INHERITED_HANDLE_COUNT,
+};
+
 typedef struct loom_tool_spawn_options_t {
   // Extended process startup information passed to CreateProcessW.
   STARTUPINFOEXW startup_info;
-  // Null input handle inherited by the child as stdin.
-  HANDLE stdin_handle;
+  // Handle values retained for the lifetime of the process attribute list.
+  HANDLE inherited_handles[LOOM_TOOL_INHERITED_HANDLE_COUNT];
   // Storage for the explicit inherited-handle list.
   LPPROC_THREAD_ATTRIBUTE_LIST attribute_list;
   // Whether |attribute_list| was initialized.
@@ -339,9 +346,10 @@ static void loom_tool_spawn_options_deinitialize(
     DeleteProcThreadAttributeList(options->attribute_list);
   }
   iree_allocator_free(allocator, options->attribute_list);
-  if (options->stdin_handle != NULL &&
-      options->stdin_handle != INVALID_HANDLE_VALUE) {
-    CloseHandle(options->stdin_handle);
+  HANDLE stdin_handle =
+      options->inherited_handles[LOOM_TOOL_STDIN_HANDLE_INDEX];
+  if (stdin_handle != NULL && stdin_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(stdin_handle);
   }
   memset(options, 0, sizeof(*options));
 }
@@ -350,19 +358,23 @@ static iree_status_t loom_tool_spawn_options_initialize(
     HANDLE stdout_handle, HANDLE stderr_handle, iree_allocator_t allocator,
     loom_tool_spawn_options_t* out_options) {
   memset(out_options, 0, sizeof(*out_options));
-  out_options->stdin_handle = INVALID_HANDLE_VALUE;
+  out_options->inherited_handles[LOOM_TOOL_STDIN_HANDLE_INDEX] =
+      INVALID_HANDLE_VALUE;
 
   SECURITY_ATTRIBUTES security_attributes;
   memset(&security_attributes, 0, sizeof(security_attributes));
   security_attributes.nLength = sizeof(security_attributes);
   security_attributes.bInheritHandle = TRUE;
-  out_options->stdin_handle = CreateFileW(
+  HANDLE stdin_handle = CreateFileW(
       L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
       &security_attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (out_options->stdin_handle == INVALID_HANDLE_VALUE) {
+  if (stdin_handle == INVALID_HANDLE_VALUE) {
     return loom_tool_win32_status(GetLastError(),
                                   "failed to disconnect child stdin");
   }
+  out_options->inherited_handles[LOOM_TOOL_STDIN_HANDLE_INDEX] = stdin_handle;
+  out_options->inherited_handles[LOOM_TOOL_STDOUT_HANDLE_INDEX] = stdout_handle;
+  out_options->inherited_handles[LOOM_TOOL_STDERR_HANDLE_INDEX] = stderr_handle;
 
   SIZE_T attribute_list_size = 0;
   BOOL measure_result =
@@ -386,21 +398,17 @@ static iree_status_t loom_tool_spawn_options_initialize(
   }
   out_options->attribute_list_initialized = true;
 
-  HANDLE inherited_handles[] = {
-      out_options->stdin_handle,
-      stdout_handle,
-      stderr_handle,
-  };
   if (!UpdateProcThreadAttribute(
           out_options->attribute_list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-          inherited_handles, sizeof(inherited_handles), NULL, NULL)) {
+          out_options->inherited_handles,
+          sizeof(out_options->inherited_handles), NULL, NULL)) {
     return loom_tool_win32_status(
         GetLastError(), "failed to restrict inherited process handles");
   }
 
   out_options->startup_info.StartupInfo.cb = sizeof(out_options->startup_info);
   out_options->startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-  out_options->startup_info.StartupInfo.hStdInput = out_options->stdin_handle;
+  out_options->startup_info.StartupInfo.hStdInput = stdin_handle;
   out_options->startup_info.StartupInfo.hStdOutput = stdout_handle;
   out_options->startup_info.StartupInfo.hStdError = stderr_handle;
   out_options->startup_info.lpAttributeList = out_options->attribute_list;
