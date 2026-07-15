@@ -12,10 +12,18 @@
 
 #include <cstring>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "iree/base/internal/path.h"
+#include "iree/io/stdio_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+
+#if defined(IREE_PLATFORM_WINDOWS)
+#include <windows.h>
+#endif  // IREE_PLATFORM_WINDOWS
 
 namespace iree {
 namespace io {
@@ -29,6 +37,19 @@ std::string GetUniqueContents(const char* unique_name,
   if (str.size() < padded_size) str.resize(padded_size, 0);
   return str;
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+std::wstring ToWin32Path(iree_string_view_t path) {
+  wchar_t* converted_path = NULL;
+  IREE_CHECK_OK(
+      iree_file_path_to_win32(path, iree_allocator_system(), &converted_path));
+  std::wstring result(converted_path);
+  iree_allocator_free(iree_allocator_system(), converted_path);
+  return result;
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 TEST(FileContents, ReadWriteContentsPreload) {
   constexpr const char* kUniqueName = "ReadWriteContents";
@@ -128,6 +149,67 @@ TEST(FileContents, ConcurrentReadOpens) {
   iree_io_file_contents_free(read2);
   iree_io_file_contents_free(read1);
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+TEST(FileContents, ReadWriteLongUtf8Path) {
+  iree::testing::TempFilePath root_path("iree_file_contents_long_path");
+  std::string directory_path = root_path.path();
+  std::vector<std::wstring> created_directories;
+  do {
+    if (!created_directories.empty()) {
+      directory_path.append("/0123456789abcdef0123456789abcdef");
+    }
+    std::wstring win32_directory = ToWin32Path(
+        iree_make_string_view(directory_path.data(), directory_path.size()));
+    BOOL created = CreateDirectoryW(win32_directory.c_str(), NULL);
+    DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
+    ASSERT_TRUE(created || create_error == ERROR_ALREADY_EXISTS)
+        << "CreateDirectoryW failed with error " << create_error;
+    created_directories.push_back(std::move(win32_directory));
+  } while (directory_path.size() < 300);
+
+  std::string file_path =
+      directory_path + "/payload_\xE8\xB7\xAF\xE5\xBE\x84.bin";
+  ASSERT_GT(file_path.size(), 260u);
+  iree_string_view_t file_path_view =
+      iree_make_string_view(file_path.data(), file_path.size());
+  auto write_contents = GetUniqueContents("ReadWriteLongUtf8Path", 32);
+
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      file_path_view,
+      iree_make_const_byte_span(write_contents.data(), write_contents.size()),
+      iree_allocator_system()));
+
+  iree_io_file_contents_t* read_contents = NULL;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      file_path_view, iree_allocator_system(), &read_contents));
+  ASSERT_EQ(write_contents.size(), read_contents->const_buffer.data_length);
+  EXPECT_EQ(memcmp(write_contents.data(), read_contents->const_buffer.data,
+                   read_contents->const_buffer.data_length),
+            0);
+  iree_io_file_contents_free(read_contents);
+
+  iree_io_stream_t* stdio_stream = NULL;
+  IREE_ASSERT_OK(
+      iree_io_stdio_stream_open(IREE_IO_STDIO_STREAM_MODE_READ, file_path_view,
+                                iree_allocator_system(), &stdio_stream));
+  iree_io_stream_release(stdio_stream);
+
+  std::wstring win32_file_path = ToWin32Path(file_path_view);
+  BOOL deleted = DeleteFileW(win32_file_path.c_str());
+  DWORD delete_error = deleted ? ERROR_SUCCESS : GetLastError();
+  ASSERT_TRUE(deleted) << "DeleteFileW failed with error " << delete_error;
+  for (auto it = created_directories.rbegin(); it != created_directories.rend();
+       ++it) {
+    BOOL removed = RemoveDirectoryW(it->c_str());
+    DWORD remove_error = removed ? ERROR_SUCCESS : GetLastError();
+    ASSERT_TRUE(removed) << "RemoveDirectoryW failed with error "
+                         << remove_error;
+  }
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 }  // namespace
 }  // namespace io

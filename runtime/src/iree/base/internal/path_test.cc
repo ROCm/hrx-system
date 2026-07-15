@@ -9,6 +9,7 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 static bool operator==(const iree_string_pair_t& lhs,
                        const iree_string_pair_t& rhs) noexcept {
@@ -24,6 +25,8 @@ static std::ostream& operator<<(std::ostream& os,
 
 namespace {
 
+using ::iree::StatusCode;
+using ::iree::testing::status::StatusIs;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::IsEmpty;
@@ -200,6 +203,75 @@ TEST(FilePathTest, IsDynamicLibrary) {
   EXPECT_TRUE(iree_file_path_is_dynamic_library(
       _SV("/opt/rocm/lib/libhsa-runtime64.so.1")));
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+TEST(FilePathTest, ToWin32ConvertsRelativeUtf8Path) {
+  wchar_t* converted_path = NULL;
+  IREE_ASSERT_OK(
+      iree_file_path_to_win32(IREE_SV("relative/\xE8\xB7\xAF\xE5\xBE\x84"),
+                              iree_allocator_system(), &converted_path));
+  ASSERT_NE(converted_path, nullptr);
+
+  std::wstring path(converted_path);
+  iree_allocator_free(iree_allocator_system(), converted_path);
+  EXPECT_EQ(path.substr(0, 4), L"\\\\?\\");
+  const std::wstring expected_suffix = L"\\relative\\\u8DEF\u5F84";
+  ASSERT_GE(path.size(), expected_suffix.size());
+  EXPECT_EQ(path.compare(path.size() - expected_suffix.size(),
+                         expected_suffix.size(), expected_suffix),
+            0);
+}
+
+TEST(FilePathTest, ToWin32ConvertsUncPath) {
+  wchar_t* converted_path = NULL;
+  IREE_ASSERT_OK(iree_file_path_to_win32(IREE_SV("\\\\server\\share\\path"),
+                                         iree_allocator_system(),
+                                         &converted_path));
+  ASSERT_NE(converted_path, nullptr);
+
+  EXPECT_EQ(std::wstring(converted_path), L"\\\\?\\UNC\\server\\share\\path");
+  iree_allocator_free(iree_allocator_system(), converted_path);
+}
+
+TEST(FilePathTest, ToWin32PreservesNamespacePaths) {
+  auto expect_preserved = [](iree_string_view_t input,
+                             const wchar_t* expected) {
+    wchar_t* converted_path = NULL;
+    IREE_ASSERT_OK(iree_file_path_to_win32(input, iree_allocator_system(),
+                                           &converted_path));
+    ASSERT_NE(converted_path, nullptr);
+    EXPECT_EQ(std::wstring(converted_path), expected);
+    iree_allocator_free(iree_allocator_system(), converted_path);
+  };
+  expect_preserved(IREE_SV("\\\\?\\C:\\extended\\path"),
+                   L"\\\\?\\C:\\extended\\path");
+  expect_preserved(IREE_SV("\\\\.\\pipe\\device"), L"\\\\.\\pipe\\device");
+}
+
+TEST(FilePathTest, ToWin32RejectsInvalidUtf8AndEmbeddedNul) {
+  wchar_t* converted_path = NULL;
+  EXPECT_THAT(iree_file_path_to_win32(IREE_SV(""), iree_allocator_system(),
+                                      &converted_path),
+              StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_EQ(converted_path, nullptr);
+
+  const char invalid_utf8[] = {'p', 'a', 't', 'h', (char)0xFF};
+  EXPECT_THAT(iree_file_path_to_win32(
+                  iree_make_string_view(invalid_utf8, sizeof(invalid_utf8)),
+                  iree_allocator_system(), &converted_path),
+              StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_EQ(converted_path, nullptr);
+
+  const char embedded_nul[] = {'a', '\0', 'b'};
+  EXPECT_THAT(iree_file_path_to_win32(
+                  iree_make_string_view(embedded_nul, sizeof(embedded_nul)),
+                  iree_allocator_system(), &converted_path),
+              StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_EQ(converted_path, nullptr);
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 // NOTE: these URI methods are all implemented using the same iree_uri_split and
 // we test each independently because it's easier.

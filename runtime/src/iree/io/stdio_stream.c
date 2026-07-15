@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "iree/base/internal/path.h"
 #include "iree/io/stdio_util.h"
 
 //===----------------------------------------------------------------------===//
@@ -118,10 +119,30 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
   char fopen_mode[16] = {0};
   iree_io_map_stdio_fopen_mode(mode, fopen_mode);
 
-  // Since we stack alloc the path we want to keep it reasonable.
-  // We could heap allocate instead but a few thousand chars is quite long and
-  // since Windows doesn't support more than ~256 we generally keep them short
-  // anyway.
+  iree_status_t status = iree_ok_status();
+  FILE* handle = NULL;
+#if defined(IREE_PLATFORM_WINDOWS)
+  // Convert from the runtime's UTF-8 representation only at the Win32 API
+  // boundary. _wfopen preserves the same stdio behavior without falling back
+  // through the active ANSI code page.
+  wchar_t* win32_path = NULL;
+  status = iree_file_path_to_win32(path, host_allocator, &win32_path);
+  if (iree_status_is_ok(status)) {
+    wchar_t fopen_mode_wide[IREE_ARRAYSIZE(fopen_mode)] = {0};
+    for (iree_host_size_t i = 0; fopen_mode[i] != 0; ++i) {
+      fopen_mode_wide[i] = (wchar_t)fopen_mode[i];
+    }
+    handle = _wfopen(win32_path, fopen_mode_wide);
+    if (handle == NULL) {
+      status =
+          iree_make_stdio_statusf("unable to open file `%.*s` with mode %d",
+                                  (int)path.size, path.data, mode);
+    }
+  }
+  iree_allocator_free(host_allocator, win32_path);
+#else
+  // Since we stack allocate the path, keep it bounded to the runtime's common
+  // path limit.
   if (path.size >= IREE_MAX_PATH) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -129,14 +150,11 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
                             " exceeds maximum character length of %d",
                             path.size, IREE_MAX_PATH);
   }
-  char* path_str = iree_alloca(path.size + 1);
-  iree_string_view_to_cstring(path, path_str, path.size + 1);
   char* fopen_path = (char*)iree_alloca(path.size + 1);
   memcpy(fopen_path, path.data, path.size);
   fopen_path[path.size] = 0;  // NUL
 
-  iree_status_t status = iree_ok_status();
-  FILE* handle = fopen(fopen_path, fopen_mode);
+  handle = fopen(fopen_path, fopen_mode);
   if (handle == NULL) {
     // NOTE: for some crazy reason errno isn't set by all implementations. We
     // know it is on Windows but currently leave all others to :shrug:. We could
@@ -144,6 +162,7 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
     status = iree_make_stdio_statusf("unable to open file `%.*s` with mode %d",
                                      (int)path.size, path.data, mode);
   }
+#endif  // IREE_PLATFORM_WINDOWS
 
   iree_io_stream_t* stream = NULL;
   if (iree_status_is_ok(status)) {
