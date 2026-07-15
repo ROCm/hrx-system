@@ -179,13 +179,15 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "wait_memory_frontier",
-    srcs = ["wait_memory_frontier.c"],
-    hdrs = ["wait_memory_frontier.h"],
+    name = "wait_frontier",
+    srcs = ["wait_frontier.c"],
+    hdrs = ["wait_frontier.h"],
     deps = [
         ":wait_counters",
         "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low/allocation:table",
         "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -201,7 +203,7 @@ loom_cc_library(
         ":descriptor_semantics",
         ":structural_packet",
         ":wait_counters",
-        ":wait_memory_frontier",
+        ":wait_frontier",
         ":wait_packet_tables",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",

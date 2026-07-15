@@ -69,6 +69,7 @@ AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES = 1 << 2
 AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES = 1 << 3
 AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR = 1 << 4
 AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU = 1 << 5
+AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER = 1 << 6
 AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS = (
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR
     | AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES
@@ -76,11 +77,13 @@ AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS = (
     | AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES
     | AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR
     | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
+    | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
 )
 AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES = (
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES
     | AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES
     | AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES
+    | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
 )
 
 AMDGPU_WAVEFRONT_SIZE_FLAG_32 = 1 << 0
@@ -408,6 +411,28 @@ def processor_info(
     )
 
 
+def gfx9_10_processor_info(
+    processor: str,
+    elf_machine_flags: int,
+    *,
+    elf_feature_flags: int = 0,
+    default_wavefront_size: int = 64,
+    matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
+    kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
+        AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE
+    ),
+) -> AmdgpuProcessorInfo:
+    return processor_info(
+        processor,
+        elf_machine_flags,
+        elf_feature_flags=elf_feature_flags,
+        default_wavefront_size=default_wavefront_size,
+        matrix_feature_profile=matrix_feature_profile,
+        kernel_descriptor=kernel_descriptor,
+        scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
+    )
+
+
 def rdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
@@ -424,7 +449,11 @@ def rdna3_processor_info(
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
-        scheduling_bits=scheduling_bits | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
+        scheduling_bits=(
+            scheduling_bits
+            | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
+            | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
+        ),
     )
 
 
@@ -461,6 +490,7 @@ def gfx117x_processor_info(
         scheduling_bits=(
             AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR
             | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
+            | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
         ),
     )
 
@@ -580,29 +610,37 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
 
 
 AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
-    processor_info("gfx900", 0x02C, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
-    processor_info("gfx902", 0x02D, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
-    processor_info("gfx904", 0x02E, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
-    processor_info(
-        "gfx906",
-        0x02F,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+    gfx9_10_processor_info(
+        "gfx900", 0x02C, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
     ),
-    processor_info(
+    gfx9_10_processor_info(
+        "gfx902", 0x02D, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
+    ),
+    gfx9_10_processor_info(
+        "gfx904", 0x02E, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
+    ),
+    gfx9_10_processor_info(
+        "gfx906", 0x02F, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4
+    ),
+    gfx9_10_processor_info(
         "gfx908",
         0x030,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
     ),
-    processor_info("gfx909", 0x031, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
-    processor_info(
+    gfx9_10_processor_info(
+        "gfx909", 0x031, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
+    ),
+    gfx9_10_processor_info(
         "gfx90a",
         0x03F,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
     ),
-    processor_info("gfx90c", 0x032, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
+    gfx9_10_processor_info(
+        "gfx90c", 0x032, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
+    ),
     cdna3_processor_info("gfx940", 0x040),
     cdna3_processor_info("gfx941", 0x04B),
     cdna3_processor_info(
@@ -621,37 +659,37 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx1010",
         0x033,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx1011",
         0x034,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx1012",
         0x035,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx1013",
         0x042,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
     ),
-    processor_info("gfx1030", 0x036, default_wavefront_size=32),
-    processor_info("gfx1031", 0x037, default_wavefront_size=32),
-    processor_info("gfx1032", 0x038, default_wavefront_size=32),
-    processor_info("gfx1033", 0x039, default_wavefront_size=32),
-    processor_info("gfx1034", 0x03E, default_wavefront_size=32),
-    processor_info("gfx1035", 0x03D, default_wavefront_size=32),
-    processor_info("gfx1036", 0x045, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1030", 0x036, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1031", 0x037, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1032", 0x038, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1033", 0x039, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1034", 0x03E, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1035", 0x03D, default_wavefront_size=32),
+    gfx9_10_processor_info("gfx1036", 0x045, default_wavefront_size=32),
     rdna3_processor_info(
         processor="gfx1100",
         elf_machine_flags=0x041,
@@ -697,20 +735,20 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx9-generic",
         0x051,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
         | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx10-1-generic",
         0x052,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
         | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
         default_wavefront_size=32,
     ),
-    processor_info(
+    gfx9_10_processor_info(
         "gfx10-3-generic",
         0x053,
         elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,

@@ -132,6 +132,8 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR = 1u << 4,
   // GFX11+ processors support s_delay_alu for short ALU dependency delays.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU = 1u << 5,
+  // Same-class VMEM instructions write vector-register results in issue order.
+  LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER = 1u << 6,
   // Processor scheduling bits known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS =
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
@@ -139,7 +141,8 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR |
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
 } loom_amdgpu_processor_scheduling_bit_t;
 
 // Bitset of loom_amdgpu_processor_scheduling_bit_t values.

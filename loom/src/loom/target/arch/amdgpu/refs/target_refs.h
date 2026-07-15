@@ -38,6 +38,24 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 
+// Relative completion order of VMEM instructions that write vector-register
+// results. Distinct classes may complete out of order even when they share a
+// native wait counter.
+typedef enum loom_amdgpu_vmem_result_order_class_e {
+  // Descriptor does not write an asynchronous VMEM result.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE = 0,
+  // Descriptor writes a VMEM result whose completion class is not known.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN = 1,
+  // Buffer, flat, global, or scratch VMEM result.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_NOSAMPLER = 2,
+  // Image sampling VMEM result.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_SAMPLER = 3,
+  // Bounding-volume hierarchy VMEM result.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_BVH = 4,
+  // Number of VMEM result-order classes, including NONE.
+  LOOM_AMDGPU_VMEM_RESULT_ORDER_CLASS_COUNT = 5,
+} loom_amdgpu_vmem_result_order_class_t;
+
 typedef enum loom_amdgpu_reg_class_trait_bit_e {
   // Register class is the CDNA accumulator file.
   LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR = 1u << 0,
@@ -71,6 +89,12 @@ loom_amdgpu_descriptor_ref_t loom_amdgpu_descriptor_ref_for_descriptor(
 
 // Returns generated target-owned semantic trait bits for |descriptor|.
 loom_amdgpu_descriptor_traits_t loom_amdgpu_descriptor_traits(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
+// Returns the generated VMEM result completion-order class for |descriptor|.
+loom_amdgpu_vmem_result_order_class_t
+loom_amdgpu_descriptor_vmem_result_order_class(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
 
