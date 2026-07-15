@@ -10,6 +10,7 @@
 
 load("//build_tools/bazel:query.bzl", "iree_assert_no_dependency")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -146,6 +147,15 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "device_spec_fuzz",
+    srcs = ["device_spec_fuzz.cc"],
+    deps = [
+        ":hal",
+        "//runtime/src/iree/base",
     ],
 )
 

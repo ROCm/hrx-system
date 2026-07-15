@@ -123,6 +123,16 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_fuzz(
+  NAME
+    device_spec_fuzz
+  SRCS
+    "device_spec_fuzz.cc"
+  DEPS
+    ::hal
+    iree::base
+)
+
 iree_cc_test(
   NAME
     profile_metrics_test
