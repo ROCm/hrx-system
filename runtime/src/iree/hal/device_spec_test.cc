@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstring>
+#include <vector>
 
 #include "iree/hal/api.h"
 #include "iree/hal/utils/device_spec_builder.h"
@@ -17,6 +18,44 @@ namespace {
 static void ExpectStringViewEq(iree_string_view_t actual,
                                const char* expected) {
   EXPECT_TRUE(iree_string_view_equal(actual, iree_make_cstring_view(expected)));
+}
+
+static void StoreU32Le(std::vector<uint8_t>* bytes, size_t offset,
+                       uint32_t value) {
+  (*bytes)[offset + 0] = static_cast<uint8_t>(value >> 0);
+  (*bytes)[offset + 1] = static_cast<uint8_t>(value >> 8);
+  (*bytes)[offset + 2] = static_cast<uint8_t>(value >> 16);
+  (*bytes)[offset + 3] = static_cast<uint8_t>(value >> 24);
+}
+
+static void StoreU64Le(std::vector<uint8_t>* bytes, size_t offset,
+                       uint64_t value) {
+  for (size_t i = 0; i < 8; ++i) {
+    (*bytes)[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+  }
+}
+
+static std::vector<uint8_t> SerializeEmptySpec() {
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_device_spec_create(nullptr, iree_allocator_system(), &spec));
+  iree_byte_span_t bytes = iree_byte_span_empty();
+  IREE_CHECK_OK(
+      iree_hal_device_spec_serialize(spec, iree_allocator_system(), &bytes));
+  std::vector<uint8_t> result(bytes.data, bytes.data + bytes.data_length);
+  iree_allocator_free(iree_allocator_system(), bytes.data);
+  iree_hal_device_spec_release(spec);
+  return result;
+}
+
+static void ExpectParseFails(const std::vector<uint8_t>& bytes) {
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_parse(
+          iree_make_const_byte_span(bytes.data(), bytes.size()),
+          iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
 }
 
 static iree_hal_device_spec_params_t MakeTestSpecParams(
@@ -327,10 +366,27 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   iree_byte_span_t serialized_bytes = iree_byte_span_empty();
   IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
                                                 &serialized_bytes));
+  EXPECT_EQ(serialized_bytes.data_length, 1279u);
+  EXPECT_EQ(iree_hal_device_spec_digest(spec), UINT64_C(0x88d302034c8236e0));
+  static const uint8_t kExpectedHeaderPrefix[] = {
+      'D', 'S', 'P', 'C', 4, 0, 0, 0, 0xff, 0x04, 0, 0, 0, 0, 0, 0,
+  };
+  ASSERT_GE(serialized_bytes.data_length, sizeof(kExpectedHeaderPrefix));
+  EXPECT_EQ(memcmp(serialized_bytes.data, kExpectedHeaderPrefix,
+                   sizeof(kExpectedHeaderPrefix)),
+            0);
   iree_hal_device_spec_t* parsed_spec = NULL;
   IREE_ASSERT_OK(
       iree_hal_device_spec_parse(iree_const_cast_byte_span(serialized_bytes),
                                  iree_allocator_system(), &parsed_spec));
+  iree_byte_span_t reparsed_serialized_bytes = iree_byte_span_empty();
+  IREE_ASSERT_OK(iree_hal_device_spec_serialize(
+      parsed_spec, iree_allocator_system(), &reparsed_serialized_bytes));
+  ASSERT_EQ(serialized_bytes.data_length,
+            reparsed_serialized_bytes.data_length);
+  EXPECT_EQ(memcmp(serialized_bytes.data, reparsed_serialized_bytes.data,
+                   serialized_bytes.data_length),
+            0);
   EXPECT_EQ(iree_hal_device_spec_digest(spec),
             iree_hal_device_spec_digest(parsed_spec));
   ExpectStringViewEq(iree_hal_device_spec_identity(parsed_spec)->display_name,
@@ -340,8 +396,110 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
             64u);
 
   iree_hal_device_spec_release(parsed_spec);
+  iree_allocator_free(iree_allocator_system(), reparsed_serialized_bytes.data);
   iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
+}
+
+TEST(DeviceSpecSerializationTest, RejectsMalformedImages) {
+  {
+    SCOPED_TRACE("non-empty NULL storage");
+    iree_hal_device_spec_t* spec = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_device_spec_parse(iree_make_const_byte_span(nullptr, 1),
+                                   iree_allocator_system(), &spec));
+    EXPECT_EQ(spec, nullptr);
+  }
+
+  const std::vector<uint8_t> canonical_bytes = SerializeEmptySpec();
+  ASSERT_EQ(canonical_bytes.size(), 364u);
+
+  {
+    SCOPED_TRACE("invalid magic");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    StoreU32Le(&bytes, 0, 0);
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("unsupported version");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    StoreU32Le(&bytes, 4, 5);
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("declared length mismatch");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    StoreU64Le(&bytes, 8, bytes.size() + 1);
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("truncated body");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    bytes.pop_back();
+    StoreU64Le(&bytes, 8, bytes.size());
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("trailing data");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    bytes.push_back(0);
+    StoreU64Le(&bytes, 8, bytes.size());
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("impossible physical device count");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    StoreU64Le(&bytes, 16, UINT64_MAX);
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("impossible string length");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    StoreU64Le(&bytes, 96, UINT64_MAX);
+    ExpectParseFails(bytes);
+  }
+  {
+    SCOPED_TRACE("invalid ASAN mode");
+    std::vector<uint8_t> bytes = canonical_bytes;
+    // The empty v4 body places the sanitizer flags at byte 324 and its mode at
+    // byte 328.
+    StoreU32Le(&bytes, 328, UINT32_MAX);
+    ExpectParseFails(bytes);
+  }
+}
+
+TEST(DeviceSpecTest, RejectsSentinelExternalTimepointHandleType) {
+  iree_hal_external_timepoint_handle_spec_t external_timepoint_handle = {
+      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_NONE,
+      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
+      /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
+      /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+  };
+  iree_hal_device_queue_spec_t queues = {
+      /*.family_count=*/0,
+      /*.families=*/NULL,
+      /*.external_timepoint_handle_count=*/1,
+      /*.external_timepoint_handles=*/&external_timepoint_handle,
+      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/NULL,
+      /*.memory=*/NULL,
+      /*.virtual_memory=*/NULL,
+      /*.queues=*/&queues,
+      /*.dispatch=*/NULL,
+      /*.timing=*/NULL,
+      /*.executables=*/NULL,
+      /*.sanitizer=*/NULL,
+      /*.facet_count=*/0,
+      /*.facets=*/NULL,
+  };
+  iree_hal_device_spec_t* spec = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_EQ(spec, nullptr);
 }
 
 TEST(DeviceObservationTest, MemoryTotalFromSpecSumsKnownHeaps) {
@@ -646,6 +804,12 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
                 spec, &wildcard_timepoint_selection),
             nullptr);
 
+  iree_byte_span_t serialized_bytes = iree_byte_span_empty();
+  IREE_ASSERT_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
+                                                &serialized_bytes));
+  EXPECT_EQ(serialized_bytes.data_length, 698u);
+  EXPECT_EQ(iree_hal_device_spec_digest(spec), UINT64_C(0xa801ffb0ea120b8a));
+  iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
 }
 

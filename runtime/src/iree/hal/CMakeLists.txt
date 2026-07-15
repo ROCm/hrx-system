@@ -66,6 +66,8 @@ iree_cc_library(
     "device_event.c"
     "device_group.c"
     "device_spec.c"
+    "device_spec_serialization.c"
+    "device_spec_serialization.h"
     "driver.c"
     "driver_registry.c"
     "event.c"
