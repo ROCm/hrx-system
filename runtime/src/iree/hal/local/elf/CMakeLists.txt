@@ -116,22 +116,15 @@ iree_cc_library(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-if(MSVC)
+if(WIN32 AND IREE_ARCH STREQUAL "x86_64")
   # CMake + MASM does not work well and CMake ends up passing all our C/C++
   # flags confusing MASM. We invoke MASM directly (ml.exe/ml64.exe) to keep it
   # quiet.
-  if(MSVC_C_ARCHITECTURE_ID MATCHES 64 OR MSVC_CXX_ARCHITECTURE_ID MATCHES 64)
-    set_source_files_properties(
-      arch/x86_64_msvc.asm
-      PROPERTIES
-      LANGUAGE ASM_MASM
-    )
-    target_sources(iree_hal_local_elf_arch PRIVATE "arch/x86_64_msvc.obj")
-    add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
-      COMMAND ml64 /nologo /Zi /c /Fo ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
-      VERBATIM
-    )
-  endif()
+  target_sources(iree_hal_local_elf_arch PRIVATE "arch/x86_64_msvc.obj")
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
+    COMMAND ml64 /nologo /Zi /c /Fo ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
+    VERBATIM
+  )
 endif()
