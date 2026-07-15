@@ -5,6 +5,7 @@
 #include "hrx_internal.h"
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/alignment.h"
 #include "iree/hal/resource.h"
 
 typedef struct hrx_iree_exact_pool_t {
@@ -90,7 +91,6 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
     iree_hal_pool_acquire_info_t* out_info,
     iree_hal_pool_acquire_result_t* out_result) {
   hrx_iree_exact_pool_t* pool = hrx_iree_exact_pool_cast(base_pool);
-  (void)alignment;
   (void)requester_frontier;
   (void)flags;
   IREE_ASSERT_ARGUMENT(out_reservation);
@@ -100,6 +100,20 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
   if (size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pool reservations must be non-empty");
+  }
+  if (alignment == 0 || !iree_device_size_is_power_of_two(alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reservation alignment (%" PRIdsz
+                            ") must be a power of two > 0",
+                            alignment);
+  }
+  const iree_device_size_t pool_alignment =
+      pool->params.min_alignment ? pool->params.min_alignment : 1;
+  if (alignment > pool_alignment) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reservation alignment %" PRIdsz
+                            " exceeds exact pool alignment %" PRIdsz,
+                            alignment, pool_alignment);
   }
 
   memset(out_reservation, 0, sizeof(*out_reservation));

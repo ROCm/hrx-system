@@ -75,4 +75,43 @@ TEST_F(ExactPoolTest, TransferredReservationDropsPoolRetain) {
   iree_hal_pool_release(pool);
 }
 
+TEST_F(ExactPoolTest, RejectsInvalidOrStrongerReservationAlignment) {
+  iree_hal_buffer_params_t params = BufferParams();
+  params.min_alignment = 8;
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(hrx_iree_exact_pool_create(device_->allocator.hal_allocator,
+                                            params, &pool));
+
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t acquire_info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_pool_acquire_reservation(pool, /*size=*/4096, /*alignment=*/0,
+                                        /*requester_frontier=*/nullptr,
+                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                                        &reservation, &acquire_info, &result));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_pool_acquire_reservation(pool, /*size=*/4096, /*alignment=*/3,
+                                        /*requester_frontier=*/nullptr,
+                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                                        &reservation, &acquire_info, &result));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_pool_acquire_reservation(pool, /*size=*/4096, /*alignment=*/16,
+                                        /*requester_frontier=*/nullptr,
+                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                                        &reservation, &acquire_info, &result));
+
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservation(
+      pool, /*size=*/4096, /*alignment=*/8,
+      /*requester_frontier=*/nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &acquire_info, &result));
+  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  iree_hal_pool_release_reservation(pool, &reservation,
+                                    /*death_frontier=*/nullptr);
+  iree_hal_pool_release(pool);
+}
+
 }  // namespace
