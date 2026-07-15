@@ -71,6 +71,19 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    executable_data
+  HDRS
+    "executable_data.h"
+  SRCS
+    "executable_data.c"
+  DEPS
+    iree::base
+    iree::hal::utils::elf_format
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     executable_environment
   HDRS
     "executable_environment.h"
@@ -113,6 +126,7 @@ iree_cc_binary_benchmark(
   SRCS
     "executable_library_benchmark.c"
   DEPS
+    ::device_spec_builder
     ::executable_environment
     ::executable_library
     ::local
@@ -280,10 +294,8 @@ iree_cc_library(
     "executable_loader.h"
     "inline_command_buffer.h"
     "local_executable.h"
-    "local_executable_cache.h"
   SRCS
     "inline_command_buffer.c"
-    "local_executable_cache.c"
   DEPS
     ::executable_environment
     ::executable_library

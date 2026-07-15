@@ -58,7 +58,7 @@ static void loom_run_hal_candidate_record_report_status(
   report->target_family_name = candidate->provider->target_family_name;
   if (candidate->compiled) {
     report->target_key = candidate->device_target.target_key;
-    report->executable_format = candidate->artifact.executable_format;
+    report->executable_format = candidate->artifact.target_key;
     loom_target_compile_report_record_artifact_size(
         report, candidate->artifact.executable_data.data_length);
   }

@@ -23,7 +23,6 @@
 #include "iree/hal/replay/format.h"
 #include "iree/io/file_handle.h"
 
-#define IREE_HAL_REPLAY_EXECUTABLE_FORMAT_CAPACITY 128
 #define IREE_HAL_REPLAY_INLINE_SEMAPHORE_LIST_CAPACITY 8
 #define IREE_HAL_REPLAY_INLINE_BUFFER_REF_LIST_CAPACITY 8
 #define IREE_HAL_REPLAY_INLINE_BUFFER_BINDING_TABLE_CAPACITY 8
@@ -48,7 +47,6 @@ typedef struct iree_hal_replay_object_entry_t {
     iree_hal_allocator_t* allocator;
     iree_hal_buffer_t* buffer;
     iree_hal_command_buffer_t* command_buffer;
-    iree_hal_executable_cache_t* executable_cache;
     iree_hal_replay_executable_entry_t executable;
     iree_hal_semaphore_t* semaphore;
     iree_hal_event_t* event;
@@ -200,9 +198,6 @@ static void iree_hal_replay_executor_release_entry(
       break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER:
       iree_hal_command_buffer_release(entry->value.command_buffer);
-      break;
-    case IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE:
-      iree_hal_executable_cache_release(entry->value.executable_cache);
       break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE:
       iree_hal_executable_release(entry->value.executable.handle);
@@ -1006,79 +1001,84 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
   return status;
 }
 
-static iree_status_t iree_hal_replay_executor_prepare_captured_executable(
-    iree_hal_executable_cache_t* executable_cache,
-    const iree_hal_executable_params_t* captured_params,
-    iree_hal_executable_t** out_executable) {
-  return iree_hal_executable_cache_prepare_executable(
-      executable_cache, captured_params, out_executable);
-}
-
-static iree_status_t iree_hal_replay_executor_prepare_substitute_executable(
-    iree_hal_executable_cache_t* executable_cache,
-    const iree_hal_executable_params_t* captured_params,
-    const iree_hal_replay_executable_substitution_t* substitution,
-    iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
-  if (IREE_UNLIKELY(substitution->executable_data.data_length != 0 &&
-                    !substitution->executable_data.data)) {
+static iree_status_t iree_hal_replay_executor_select_executable_target(
+    iree_hal_device_t* device,
+    const iree_hal_executable_target_selection_t* selection,
+    iree_hal_executable_target_flags_t required_flags,
+    const iree_hal_executable_target_t** out_target) {
+  *out_target = NULL;
+  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  if (IREE_UNLIKELY(!device_spec)) {
     return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "substituted executable data has non-zero length but no data pointer");
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not expose executable target facts");
   }
-  if (IREE_UNLIKELY(substitution->executable_data.data_length == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "substituted executable data is empty");
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(device_spec, selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not support executable target '%.*s:%.*s'",
+        (int)selection->family.size, selection->family.data,
+        (int)selection->target_key.size, selection->target_key.data);
   }
-
-  iree_hal_executable_params_t replacement_params = *captured_params;
-  replacement_params.caching_mode &=
-      ~IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  replacement_params.executable_data = substitution->executable_data;
-
-  char inferred_format[IREE_HAL_REPLAY_EXECUTABLE_FORMAT_CAPACITY] = {0};
-  if (iree_string_view_is_empty(substitution->executable_format)) {
-    iree_host_size_t inferred_size = 0;
-    IREE_RETURN_IF_ERROR(iree_status_annotate(
-        iree_hal_executable_cache_infer_format(
-            executable_cache, replacement_params.caching_mode,
-            replacement_params.executable_data, sizeof(inferred_format),
-            inferred_format, &inferred_size),
-        iree_make_cstring_view(
-            "inferring substituted executable format; provide an explicit "
-            "format if the target cache cannot infer one")));
-    replacement_params.executable_format =
-        iree_make_cstring_view(inferred_format);
-  } else {
-    replacement_params.executable_format = substitution->executable_format;
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "replay executable target '%.*s:%.*s' is ambiguous",
+                            (int)selection->family.size, selection->family.data,
+                            (int)selection->target_key.size,
+                            selection->target_key.data);
   }
-  return iree_hal_executable_cache_prepare_executable(
-      executable_cache, &replacement_params, out_executable);
+  if (IREE_UNLIKELY(!iree_all_bits_set(result.target->flags, required_flags))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay executable target '%.*s:%.*s' is missing captured flags "
+        "0x%08" PRIx32,
+        (int)selection->family.size, selection->family.data,
+        (int)selection->target_key.size, selection->target_key.data,
+        required_flags & ~result.target->flags);
+  }
+  *out_target = result.target;
+  return iree_ok_status();
 }
 
-static iree_status_t iree_hal_replay_executor_prepare_executable(
+static bool iree_hal_replay_executable_target_selection_is_empty(
+    const iree_hal_executable_target_selection_t* selection) {
+  return iree_string_view_is_empty(selection->family) &&
+         iree_string_view_is_empty(selection->target_key) &&
+         selection->kind_flags == IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_NONE &&
+         selection->physical_device_affinity == 0;
+}
+
+static iree_status_t iree_hal_replay_executor_load_executable(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_PREPARE,
-      sizeof(iree_hal_replay_executable_prepare_payload_t)));
-  iree_hal_replay_executable_prepare_payload_t payload;
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD,
+      sizeof(iree_hal_replay_executable_load_payload_t)));
+  iree_hal_replay_executable_load_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
 
   iree_host_size_t constant_bytes = 0;
+  iree_host_size_t target_key_offset = 0;
   iree_host_size_t data_offset = 0;
   iree_host_size_t constants_offset = 0;
   iree_host_size_t metadata_offset = 0;
   iree_host_size_t expected_length = 0;
   if (IREE_UNLIKELY(
+          payload.reserved0 != 0 || payload.reserved1 != 0 ||
+          payload.target_kind > IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE ||
+          payload.target_family_length == 0 || payload.target_key_length == 0 ||
           payload.executable_data_length > IREE_HOST_SIZE_MAX ||
           payload.constant_count > IREE_HOST_SIZE_MAX ||
           !iree_host_size_checked_mul((iree_host_size_t)payload.constant_count,
                                       sizeof(uint32_t), &constant_bytes) ||
           !iree_host_size_checked_add(sizeof(payload),
-                                      payload.executable_format_length,
-                                      &data_offset) ||
+                                      payload.target_family_length,
+                                      &target_key_offset) ||
+          !iree_host_size_checked_add(
+              target_key_offset, payload.target_key_length, &data_offset) ||
           !iree_host_size_checked_add(
               data_offset, (iree_host_size_t)payload.executable_data_length,
               &constants_offset) ||
@@ -1089,56 +1089,50 @@ static iree_status_t iree_hal_replay_executor_prepare_executable(
               (iree_host_size_t)payload.executable_metadata_length,
               &expected_length) ||
           expected_length != record->payload.data_length)) {
-    return iree_make_status(
-        IREE_STATUS_DATA_LOSS,
-        "replay executable prepare payload length mismatch");
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay executable load payload is malformed");
   }
 
-  iree_hal_replay_object_entry_t* cache_entry = NULL;
+  iree_hal_replay_object_entry_t* device_entry = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, record->header.object_id,
-      IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE, &cache_entry));
-  iree_hal_executable_params_t params;
-  memset(&params, 0, sizeof(params));
-  params.queue_affinity = payload.queue_affinity;
-  params.executable_format =
-      iree_make_string_view((const char*)record->payload.data + sizeof(payload),
-                            payload.executable_format_length);
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_executable_target_selection_t target_selection = {
+      .family = iree_make_string_view(
+          (const char*)record->payload.data + sizeof(payload),
+          payload.target_family_length),
+      .target_key = iree_make_string_view(
+          (const char*)record->payload.data + target_key_offset,
+          payload.target_key_length),
+      .kind_flags = 1u << payload.target_kind,
+      .physical_device_affinity = payload.target_physical_device_affinity,
+  };
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
+  params.flags =
+      payload.load_flags & ~IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
   params.executable_data = iree_make_const_byte_span(
       record->payload.data + data_offset,
       (iree_host_size_t)payload.executable_data_length);
   params.constant_count = (iree_host_size_t)payload.constant_count;
-  params.constants = (const uint32_t*)(record->payload.data + constants_offset);
-  params.caching_mode = payload.caching_mode &
-                        ~IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
   iree_const_byte_span_t executable_metadata = iree_make_const_byte_span(
       record->payload.data + metadata_offset,
       (iree_host_size_t)payload.executable_metadata_length);
   if (IREE_UNLIKELY(executable_metadata.data_length == 0)) {
     return iree_make_status(
         IREE_STATUS_DATA_LOSS,
-        "replay executable prepare records require function metadata");
+        "replay executable load records require function metadata");
   }
 
-  uint8_t* executable_data_storage = NULL;
   uint32_t* constants_storage = NULL;
   iree_hal_executable_t* executable = NULL;
   iree_host_size_t function_map_count = 0;
   iree_hal_executable_function_t* function_map = NULL;
-  bool function_map_ready = false;
+  bool substituted = false;
+  bool target_substituted = false;
+  iree_string_view_t substitution_source = iree_string_view_empty();
   iree_status_t status = iree_ok_status();
-  if (payload.executable_data_length != 0) {
-    status = iree_allocator_malloc(executor->host_allocator,
-                                   params.executable_data.data_length,
-                                   (void**)&executable_data_storage);
-    if (iree_status_is_ok(status)) {
-      memcpy(executable_data_storage, params.executable_data.data,
-             params.executable_data.data_length);
-      params.executable_data = iree_make_const_byte_span(
-          executable_data_storage, params.executable_data.data_length);
-    }
-  }
-  if (iree_status_is_ok(status) && constant_bytes != 0) {
+  if (constant_bytes != 0) {
     status = iree_allocator_malloc(executor->host_allocator, constant_bytes,
                                    (void**)&constants_storage);
     if (iree_status_is_ok(status)) {
@@ -1152,8 +1146,8 @@ static iree_status_t iree_hal_replay_executor_prepare_executable(
     iree_hal_replay_executable_substitution_request_t request = {
         .sequence_ordinal = record->header.sequence_ordinal,
         .device_id = record->header.device_id,
-        .executable_cache_id = record->header.object_id,
         .executable_id = record->header.related_object_id,
+        .captured_target = &target_selection,
         .captured_params = &params,
     };
     iree_hal_replay_executable_substitution_t substitution;
@@ -1162,35 +1156,47 @@ static iree_status_t iree_hal_replay_executor_prepare_executable(
         executor->options->executable_substitution_callback.user_data, &request,
         &substitution);
     if (iree_status_is_ok(status) && substitution.substitute) {
-      status = iree_status_annotate_f(
-          iree_hal_replay_executor_prepare_substitute_executable(
-              cache_entry->value.executable_cache, &params, &substitution,
-              &executable),
-          "preparing substitute for captured executable %" PRIu64
-          " from '%.*s'",
-          record->header.related_object_id, (int)substitution.source.size,
-          substitution.source.data);
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_replay_executor_make_function_map_from_metadata(
-            executor, record->header.related_object_id, executable_metadata,
-            executable, &function_map_count, &function_map);
-        function_map_ready = iree_status_is_ok(status);
+      substituted = true;
+      substitution_source = substitution.source;
+      if (IREE_UNLIKELY(
+              iree_const_byte_span_is_empty(substitution.executable_data))) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "substituted executable data is empty");
+      } else {
+        params.executable_data = substitution.executable_data;
       }
-      if (!iree_status_is_ok(status)) {
-        iree_hal_executable_release(executable);
-        executable = NULL;
+      if (iree_status_is_ok(status) &&
+          !iree_hal_replay_executable_target_selection_is_empty(
+              &substitution.target)) {
+        target_selection = substitution.target;
+        target_substituted = true;
       }
     }
   }
-  if (iree_status_is_ok(status) && !executable) {
-    status = iree_hal_replay_executor_prepare_captured_executable(
-        cache_entry->value.executable_cache, &params, &executable);
+  const iree_hal_executable_target_t* target = NULL;
+  if (iree_status_is_ok(status)) {
+    const iree_hal_executable_target_flags_t required_flags =
+        target_substituted ? IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE
+                           : payload.target_flags;
+    status = iree_hal_replay_executor_select_executable_target(
+        device_entry->value.device, &target_selection, required_flags, &target);
   }
-  if (iree_status_is_ok(status) && !function_map_ready) {
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_load_executable(device_entry->value.device,
+                                             payload.queue_affinity, target,
+                                             &params, &executable);
+    if (!iree_status_is_ok(status) && substituted) {
+      status = iree_status_annotate_f(
+          status,
+          "loading substitute for captured executable %" PRIu64 " from '%.*s'",
+          record->header.related_object_id, (int)substitution_source.size,
+          substitution_source.data);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_replay_executor_make_function_map_from_metadata(
         executor, record->header.related_object_id, executable_metadata,
         executable, &function_map_count, &function_map);
-    function_map_ready = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_replay_object_entry_t entry = {
@@ -1210,38 +1216,7 @@ static iree_status_t iree_hal_replay_executor_prepare_executable(
     iree_allocator_free(executor->host_allocator, function_map);
   }
   iree_allocator_free(executor->host_allocator, constants_storage);
-  iree_allocator_free(executor->host_allocator, executable_data_storage);
   return status;
-}
-
-static iree_status_t iree_hal_replay_executor_create_executable_cache(
-    iree_hal_replay_executor_t* executor,
-    const iree_hal_replay_file_record_t* record) {
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_CACHE_OBJECT,
-      sizeof(iree_hal_replay_executable_cache_object_payload_t)));
-  iree_hal_replay_executable_cache_object_payload_t payload;
-  memcpy(&payload, record->payload.data, sizeof(payload));
-  if (IREE_UNLIKELY(payload.identifier_length >
-                    record->payload.data_length - sizeof(payload))) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay executable cache identifier overflow");
-  }
-  iree_hal_replay_object_entry_t* device_entry = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
-      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      &device_entry));
-  iree_string_view_t identifier =
-      iree_make_string_view((const char*)record->payload.data + sizeof(payload),
-                            (iree_host_size_t)payload.identifier_length);
-  iree_hal_executable_cache_t* executable_cache = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_executable_cache_create(
-      device_entry->value.device, identifier, &executable_cache));
-  iree_hal_replay_object_entry_t entry = {.value.executable_cache =
-                                              executable_cache};
-  return iree_hal_replay_executor_store(
-      executor, record->header.related_object_id,
-      IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE, entry);
 }
 
 static iree_status_t iree_hal_replay_executor_create_command_buffer(
@@ -3512,10 +3487,8 @@ static iree_status_t iree_hal_replay_executor_replay_operation(
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME:
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_MAP_RANGE:
       return iree_ok_status();
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EXECUTABLE_CACHE:
-      return iree_hal_replay_executor_create_executable_cache(executor, record);
-    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_PREPARE_EXECUTABLE:
-      return iree_hal_replay_executor_prepare_executable(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE:
+      return iree_hal_replay_executor_load_executable(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER:
       return iree_hal_replay_executor_create_command_buffer(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT:

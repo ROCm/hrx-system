@@ -40,7 +40,7 @@ static int iree_hal_static_executable_import_thunk_v0(
 }
 
 static iree_status_t iree_hal_static_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     const iree_hal_executable_library_v0_t* library,
     const iree_hal_executable_import_provider_t import_provider,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
@@ -329,45 +329,10 @@ static void iree_hal_static_library_loader_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-static iree_status_t iree_hal_static_library_loader_infer_format(
+static bool iree_hal_static_library_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  // Always return "static" as the format string.
-  const char* format_str = "static";
-  const iree_host_size_t format_length = strlen(format_str) + 1;  // + NUL
-  if (executable_format_capacity < format_length) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "insufficient capacity for format string; need %" PRIhsz
-        " but have %" PRIhsz,
-        format_length, executable_format_capacity);
-  }
-
-  // Copy the format string with NUL terminator.
-  memcpy(executable_format, format_str, format_length);
-
-  // Infer the size of the executable data.
-  if (executable_data.data_length != 0) {
-    // Size is known.
-    *out_inferred_size = executable_data.data_length;
-  } else {
-    // Size is unknown - find the first NUL byte.
-    *out_inferred_size =
-        strlen((const char*)executable_data.data) + 1;  // + NUL
-  }
-
-  return iree_ok_status();
-}
-
-static bool iree_hal_static_library_loader_query_support(
-    iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_equal(executable_format,
-                                iree_make_cstring_view("static"));
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("cpu"));
 }
 
 static void iree_hal_static_library_loader_query_spec(
@@ -376,9 +341,33 @@ static void iree_hal_static_library_loader_query_spec(
   *out_executable_spec = (iree_hal_device_executable_spec_t){0};
 }
 
-static iree_status_t iree_hal_static_library_loader_try_load(
+static bool iree_hal_static_library_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  iree_hal_static_library_loader_t* executable_loader =
+      (iree_hal_static_library_loader_t*)base_executable_loader;
+  const iree_const_byte_span_t executable_data = load_params->executable_data;
+  if (iree_const_byte_span_is_empty(executable_data) ||
+      executable_data.data[executable_data.data_length - 1] != 0) {
+    return false;
+  }
+  const iree_string_view_t library_name = iree_make_string_view(
+      (const char*)executable_data.data, executable_data.data_length - 1);
+  for (iree_host_size_t i = 0; i < executable_loader->library_count; ++i) {
+    if (iree_string_view_equal(
+            library_name, iree_make_cstring_view(
+                              executable_loader->libraries[i]->header->name))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t iree_hal_static_library_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   iree_hal_static_library_loader_t* executable_loader =
       (iree_hal_static_library_loader_t*)base_executable_loader;
@@ -412,8 +401,9 @@ static iree_status_t iree_hal_static_library_loader_try_load(
 static const iree_hal_executable_loader_vtable_t
     iree_hal_static_library_loader_vtable = {
         .destroy = iree_hal_static_library_loader_destroy,
-        .infer_format = iree_hal_static_library_loader_infer_format,
-        .query_support = iree_hal_static_library_loader_query_support,
+        .query_target_support =
+            iree_hal_static_library_loader_query_target_support,
         .query_spec = iree_hal_static_library_loader_query_spec,
-        .try_load = iree_hal_static_library_loader_try_load,
+        .claims_executable = iree_hal_static_library_loader_claims_executable,
+        .load = iree_hal_static_library_loader_load,
 };

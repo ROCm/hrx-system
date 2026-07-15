@@ -60,7 +60,7 @@ endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
 iree_hal_cts_testdata(
-  FORMAT_NAME
+  TARGET_NAME
     vulkan_spirv
   TARGET_DEVICE
     "vulkan"
@@ -68,8 +68,10 @@ iree_hal_cts_testdata(
     "iree_cts_testdata_vulkan_spirv"
   BACKEND_NAME
     "vulkan"
-  FORMAT_STRING
-    [=["vulkan-spirv-bda"]=]
+  TARGET_FAMILY
+    "spirv"
+  TARGET_KEY
+    [=[vulkan1.3+bda]=]
   TESTDATA_DIR
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
 )

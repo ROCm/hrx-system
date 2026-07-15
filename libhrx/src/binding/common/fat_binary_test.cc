@@ -128,8 +128,8 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   });
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100:sramecc-:xnack-")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.target_key=*/IREE_SV("gfx1100:sramecc-:xnack-")},
+      {/*.target_key=*/IREE_SV("gfx11-generic")},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -139,7 +139,7 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx1100");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
+  EXPECT_STREQ(extract.matches[0].target_key, "gfx1100");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
@@ -149,8 +149,8 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx11-generic", elf}});
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100:sramecc-:xnack-")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.target_key=*/IREE_SV("gfx1100:sramecc-:xnack-")},
+      {/*.target_key=*/IREE_SV("gfx11-generic")},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -160,7 +160,7 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx11-generic");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
+  EXPECT_STREQ(extract.matches[0].target_key, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
@@ -169,8 +169,8 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
   std::vector<uint8_t> bundle = MakeBundle({{"gfx11-generic", elf}});
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.target_key=*/IREE_SV("gfx1100")},
+      {/*.target_key=*/IREE_SV("gfx11-generic")},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -179,7 +179,7 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
 
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]), "gfx11-generic");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
+  EXPECT_STREQ(extract.matches[0].target_key, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
@@ -189,8 +189,8 @@ TEST(FatBinaryTest, ReportsMissingRankedTargets) {
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx942", elf}});
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.target_key=*/IREE_SV("gfx1100")},
+      {/*.target_key=*/IREE_SV("gfx11-generic")},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(

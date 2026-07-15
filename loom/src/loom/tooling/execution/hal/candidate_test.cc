@@ -76,6 +76,7 @@ iree_status_t FakeHalSelectDeviceTarget(
   (void)runtime;
   (void)allocator;
   *out_target = (loom_run_hal_device_target_t){
+      /*.hal_target=*/nullptr,
       /*.data=*/&kFakeHalTarget,
       /*.target_storage=*/{},
       /*.target_bundle=*/&kFakeTargetBundle,
@@ -115,7 +116,8 @@ iree_status_t FakeHalEmitArtifact(
                             "unexpected fake HAL target payload");
   }
   *out_artifact = (loom_run_hal_artifact_t){
-      /*.executable_format=*/IREE_SVL("fake-hal-format"),
+      /*.hal_target=*/nullptr,
+      /*.target_key=*/IREE_SVL("fake-hal-target"),
       /*.target_bundle=*/{},
       /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
       /*.target_artifact_data=*/
@@ -218,8 +220,8 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   EXPECT_EQ(candidate.device_target.data, &kFakeHalTarget);
   EXPECT_EQ(candidate.device_target.target_bundle, &kFakeTargetBundle);
   EXPECT_EQ(candidate.artifact.target_bundle, &kFakeTargetBundle);
-  EXPECT_TRUE(iree_string_view_equal(candidate.artifact.executable_format,
-                                     IREE_SV("fake-hal-format")));
+  EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
+                                     IREE_SV("fake-hal-target")));
   EXPECT_EQ(candidate.artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_ELF);
   EXPECT_EQ(candidate.artifact.target_artifact_data.data,
@@ -237,7 +239,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.target_key,
                                      IREE_SV("fake-hal")));
   EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.executable_format,
-                                     IREE_SV("fake-hal-format")));
+                                     IREE_SV("fake-hal-target")));
   EXPECT_EQ(candidate.compile_report.artifact_size,
             sizeof(kFakeHalExecutableData));
   EXPECT_EQ(report.artifact_size, candidate.compile_report.artifact_size);
@@ -293,11 +295,11 @@ TEST_F(HalCandidateTest, EmitsModuleTargetCandidate) {
   EXPECT_EQ(candidate.device_target.data, nullptr);
   EXPECT_EQ(candidate.device_target.target_bundle, nullptr);
   EXPECT_EQ(candidate.artifact.target_bundle, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(candidate.artifact.executable_format,
-                                     IREE_SV("fake-hal-format")));
+  EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
+                                     IREE_SV("fake-hal-target")));
   EXPECT_TRUE(iree_string_view_is_empty(candidate.compile_report.target_key));
   EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.executable_format,
-                                     IREE_SV("fake-hal-format")));
+                                     IREE_SV("fake-hal-target")));
   EXPECT_EQ(report.artifact_size, sizeof(kFakeHalExecutableData));
 
   g_fake_hal_expect_module_target = false;

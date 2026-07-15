@@ -21,20 +21,11 @@ typedef struct test_executable_loader_t {
 static void test_executable_loader_destroy(
     iree_hal_executable_loader_t* base_executable_loader) {}
 
-static iree_status_t test_executable_loader_infer_format(
+static bool test_executable_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  return iree_make_status(IREE_STATUS_CANCELLED);
-}
-
-static bool test_executable_loader_query_support(
-    iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_equal(executable_format, IREE_SV("test-loader"));
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("cpu")) ||
+         iree_string_view_equal(target->family, IREE_SV("test-family"));
 }
 
 static void test_executable_loader_query_spec(
@@ -57,21 +48,29 @@ static void test_executable_loader_query_spec(
   };
 }
 
-static iree_status_t test_executable_loader_try_load(
+static bool test_executable_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  return false;
+}
+
+static iree_status_t test_executable_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   *out_executable = NULL;
-  return iree_make_status(IREE_STATUS_CANCELLED);
+  return iree_make_status(IREE_STATUS_INTERNAL);
 }
 
 static const iree_hal_executable_loader_vtable_t test_executable_loader_vtable =
     {
         /*.destroy=*/test_executable_loader_destroy,
-        /*.infer_format=*/test_executable_loader_infer_format,
-        /*.query_support=*/test_executable_loader_query_support,
+        /*.query_target_support=*/test_executable_loader_query_target_support,
         /*.query_spec=*/test_executable_loader_query_spec,
-        /*.try_load=*/test_executable_loader_try_load,
+        /*.claims_executable=*/test_executable_loader_claims_executable,
+        /*.load=*/test_executable_loader_load,
 };
 
 TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {

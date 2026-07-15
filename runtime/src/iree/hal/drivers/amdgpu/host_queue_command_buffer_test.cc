@@ -147,12 +147,10 @@ TEST_F(HostQueueCommandBufferTest,
       &options, &libhsa_, &topology_, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_TSAN,
       host_allocator_));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
-  IREE_ASSERT_OK(
-      LoadCtsExecutable(test_device.base_device(),
-                        iree_make_cstring_view("tsan_executable_test.bin"),
-                        &executable_cache, &executable));
+  IREE_ASSERT_OK(LoadCtsExecutable(
+      test_device.base_device(),
+      iree_make_cstring_view("tsan_executable_test.bin"), &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -228,7 +226,6 @@ TEST_F(HostQueueCommandBufferTest,
       command->flags, IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -350,13 +347,12 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
     GTEST_SKIP() << "fine-grained GPU memory pool is not available";
   }
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -518,7 +514,6 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -531,13 +526,12 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   const iree_hal_executable_function_t normal_function =
       iree_hal_executable_function_from_index(0);
@@ -755,7 +749,6 @@ TEST_F(HostQueueCommandBufferTest,
                       sizeof(second_expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -922,13 +915,12 @@ TEST_F(HostQueueCommandBufferTest,
                     "physical device";
   }
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_multi_workgroup_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = nullptr;
   IREE_ASSERT_OK(
@@ -1008,7 +1000,6 @@ TEST_F(HostQueueCommandBufferTest,
   }
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -1059,13 +1050,12 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
                     "physical device";
   }
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -1173,7 +1163,6 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesBindingTableSlots) {
@@ -1195,13 +1184,12 @@ TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesBindingTableSlots) {
                     "physical device";
   }
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -1306,7 +1294,6 @@ TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesBindingTableSlots) {
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -1319,13 +1306,12 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -1472,7 +1458,6 @@ TEST_F(HostQueueCommandBufferTest,
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
@@ -1484,13 +1469,12 @@ TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -1611,7 +1595,6 @@ TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferTest,

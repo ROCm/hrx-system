@@ -24,9 +24,9 @@ static iree_hal_null_executable_t* iree_hal_null_executable_cast(
 }
 
 iree_status_t iree_hal_null_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_executable = NULL;

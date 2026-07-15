@@ -24,8 +24,6 @@ using loomc::testing::HandlePtr;
 
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
-using ExecutableCachePtr =
-    HandlePtr<iree_hal_executable_cache_t, iree_hal_executable_cache_release>;
 using ExecutablePtr =
     HandlePtr<iree_hal_executable_t, iree_hal_executable_release>;
 using FrontierTrackerPtr = HandlePtr<iree_async_frontier_tracker_t,
@@ -229,7 +227,6 @@ loomc_status_t CreateSource(const IreeHalKernelExecutionTarget& target,
 loomc_status_t CreateHalTargetProfile(
     const IreeHalKernelExecutionTarget& target,
     loomc_target_environment_t* target_environment, iree_hal_device_t* device,
-    iree_hal_executable_cache_t* executable_cache,
     TargetProfilePtr* out_profile, ResultPtr* out_result) {
   loomc_iree_hal_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_PROFILE_OPTIONS,
@@ -237,7 +234,6 @@ loomc_status_t CreateHalTargetProfile(
       /*.next=*/nullptr,
       /*.identifier=*/target.target_profile_identifier,
       /*.device=*/device,
-      /*.executable_cache=*/executable_cache,
       /*.providers=*/target.profile_providers,
       /*.provider_count=*/target.profile_provider_count,
   };
@@ -344,20 +340,30 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
 }
 
 iree_status_t PrepareExecutableFromArtifact(
-    const IreeHalKernelExecutionTarget& target,
-    iree_hal_executable_cache_t* executable_cache,
+    const IreeHalKernelExecutionTarget& target, iree_hal_device_t* device,
     const loomc_artifact_t* artifact, iree_hal_executable_t** out_executable) {
   *out_executable = nullptr;
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format = target.executable_format;
-  executable_params.executable_data = iree_make_const_byte_span(
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(device), &target.executable_target_selection);
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "HAL device does not advertise the test target");
+  } else if (target_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL device advertises ambiguous test targets");
+  }
+
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+  load_params.executable_data = iree_make_const_byte_span(
       artifact->contents.data, artifact->contents.data_length);
-  return iree_hal_executable_cache_prepare_executable(
-      executable_cache, &executable_params, out_executable);
+  return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                         target_result.target, &load_params,
+                                         out_executable);
 }
 
 iree_status_t DispatchAndWait(iree_hal_device_t* device,
@@ -435,7 +441,6 @@ iree_status_t DispatchAndWait(iree_hal_device_t* device,
 void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_NE(target.label, nullptr);
   ASSERT_FALSE(iree_string_view_is_empty(target.device_uri));
-  ASSERT_FALSE(iree_string_view_is_empty(target.executable_cache_identifier));
   ASSERT_FALSE(loomc_string_view_is_empty(target.target_profile_identifier));
   ASSERT_FALSE(loomc_string_view_is_empty(target.source_identifier));
   ASSERT_FALSE(loomc_string_view_is_empty(target.source_text));
@@ -444,7 +449,8 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_FALSE(loomc_string_view_is_empty(target.target_pipeline_identifier));
   ASSERT_FALSE(loomc_string_view_is_empty(target.artifact_format));
   ASSERT_FALSE(loomc_string_view_is_empty(target.artifact_identifier));
-  ASSERT_FALSE(iree_string_view_is_empty(target.executable_format));
+  ASSERT_FALSE(
+      iree_string_view_is_empty(target.executable_target_selection.family));
   ASSERT_NE(target.profile_providers, nullptr);
   ASSERT_GT(target.profile_provider_count, 0u);
   ASSERT_NE(target.create_target_environment, nullptr);
@@ -466,11 +472,6 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   }
   IREE_ASSERT_OK(iree_status);
 
-  iree_hal_executable_cache_t* executable_cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      device.get(), target.executable_cache_identifier, &executable_cache));
-  ExecutableCachePtr executable_cache_ptr(executable_cache);
-
   TargetEnvironmentPtr target_environment;
   ContextPtr context;
   LOOMC_ASSERT_OK(CreateTargetContext(target, &target_environment, &context));
@@ -486,9 +487,9 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
 
   TargetProfilePtr target_profile;
   ResultPtr result;
-  LOOMC_ASSERT_OK(CreateHalTargetProfile(
-      target, target_environment.get(), device.get(),
-      executable_cache_ptr.get(), &target_profile, &result));
+  LOOMC_ASSERT_OK(CreateHalTargetProfile(target, target_environment.get(),
+                                         device.get(), &target_profile,
+                                         &result));
   if (!ResultSucceeded(result.get(), "IREE HAL target profile creation")) {
     GTEST_SKIP() << target.label << " did not produce a usable target profile";
   }
@@ -580,8 +581,8 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_GE(artifact->contents.data_length, sizeof(uint32_t));
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(PrepareExecutableFromArtifact(
-      target, executable_cache_ptr.get(), artifact, &executable));
+  IREE_ASSERT_OK(PrepareExecutableFromArtifact(target, device.get(), artifact,
+                                               &executable));
   ExecutablePtr executable_ptr(executable);
 
   std::array<int32_t, 2> input = {7, 10};

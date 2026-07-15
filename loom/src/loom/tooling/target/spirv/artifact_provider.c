@@ -45,9 +45,36 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
 
   *out_target = (loom_run_hal_device_target_t){0};
 
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(runtime->device);
+  if (device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Vulkan HAL device does not expose immutable device facts");
+  }
+  const iree_hal_executable_target_selection_t target_selection = {
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(device_spec,
+                                                    &target_selection);
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Vulkan HAL device does not support the vulkan1.3+bda SPIR-V target");
+  } else if (target_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Vulkan HAL device reports ambiguous vulkan1.3+bda SPIR-V targets");
+  }
+
   loom_spirv_vulkan_hal_profile_facts_t facts = {0};
-  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_query(
-      runtime->device, runtime->executable_cache, &facts));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_vulkan_hal_profile_query(runtime->device, &facts));
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
       &facts, &out_target->target_storage));
 
@@ -78,6 +105,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
     return status;
   }
 
+  out_target->hal_target = target_result.target;
   out_target->data = profile_storage != NULL ? &profile_storage->profile : NULL;
   out_target->target_bundle = &out_target->target_storage.bundle;
   out_target->target_key = out_target->target_storage.bundle.name;
@@ -181,7 +209,10 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
     const iree_const_byte_span_t module_bytes =
         loom_spirv_module_binary_byte_span(&storage->module);
     *out_artifact = (loom_run_hal_artifact_t){
-        .executable_format = IREE_SV("vulkan-spirv-bda"),
+        .hal_target = target->hal_target,
+        .target_key = target->hal_target != NULL
+                          ? target->hal_target->target_key
+                          : target->target_key,
         .target_bundle = target->target_bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
         .target_artifact_data = module_bytes,

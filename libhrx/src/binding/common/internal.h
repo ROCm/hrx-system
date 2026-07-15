@@ -198,7 +198,6 @@ struct iree_hal_streaming_context_t {
 
   // HAL resources.
   iree_hal_allocator_t* device_allocator;
-  iree_hal_executable_cache_t* executable_cache;
   iree_status_t loop_status;
 
   // Context flags.
@@ -652,7 +651,6 @@ typedef struct iree_hal_streaming_module_t {
   iree_atomic_ref_count_t ref_count;
 
   // HAL executable resources.
-  iree_hal_executable_cache_t* cache;
   iree_hal_executable_t* executable;
   iree_hal_executable_t** executables;
   iree_host_size_t executable_count;
@@ -1525,15 +1523,14 @@ iree_status_t iree_hal_streaming_context_wait_all_submitted(
 // Synchronization: none (creates new module).
 iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t image, iree_allocator_t host_allocator,
-    iree_hal_streaming_module_t** out_module);
+    iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
+    iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
 
 // Loads module from a file at the given path.
 // Synchronization: none (creates new module).
 iree_status_t iree_hal_streaming_module_create_from_file(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t path,
+    iree_hal_executable_load_flags_t load_flags, iree_string_view_t path,
     iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
 
 void iree_hal_streaming_module_retain(iree_hal_streaming_module_t* module);

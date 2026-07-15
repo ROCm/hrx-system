@@ -28,7 +28,7 @@
 #include "iree/hal/drivers/hip/hip_buffer.h"
 #include "iree/hal/drivers/hip/hip_multi_queue_command_buffer.h"
 #include "iree/hal/drivers/hip/memory_pools.h"
-#include "iree/hal/drivers/hip/nop_executable_cache.h"
+#include "iree/hal/drivers/hip/native_executable.h"
 #include "iree/hal/drivers/hip/per_device_information.h"
 #include "iree/hal/drivers/hip/rccl_channel.h"
 #include "iree/hal/drivers/hip/rccl_dynamic_symbols.h"
@@ -1310,20 +1310,36 @@ static iree_status_t iree_hal_hip_device_import_file(
       /*proactor=*/NULL, iree_hal_device_host_allocator(base_device), out_file);
 }
 
-static iree_status_t iree_hal_hip_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_hip_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
-  hipDevice_t devices[IREE_HAL_MAX_QUEUES];
-  hipCtx_t contexts[IREE_HAL_MAX_QUEUES];
-  for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-    devices[i] = device->devices[i].hip_device;
-    contexts[i] = device->devices[i].hip_context;
+
+  // HIP native executables replicate module state across the entire logical
+  // device and select a per-device module during dispatch.
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  iree_hal_physical_device_affinity_t physical_device_affinity = 0;
+  for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
+    physical_device_affinity |=
+        identity->physical_devices[i].physical_device_affinity;
   }
-  return iree_hal_hip_nop_executable_cache_create(
-      base_device, identifier, device->hip_symbols,
-      iree_hal_hip_device_make_topology(device), device->host_allocator,
-      out_executable_cache);
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "HIP executable target `%.*s` physical-device affinity 0x%016" PRIx64
+        " does not cover logical-device affinity 0x%016" PRIx64,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+
+  return iree_hal_hip_native_executable_create(
+      base_device, device->hip_symbols,
+      iree_hal_hip_device_make_topology(device), load_params,
+      device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_hip_device_create_semaphore(
@@ -3098,7 +3114,7 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .create_channel = iree_hal_hip_device_create_channel,
     .create_command_buffer = iree_hal_hip_device_create_command_buffer,
     .create_event = iree_hal_hip_device_create_event,
-    .create_executable_cache = iree_hal_hip_device_create_executable_cache,
+    .load_executable = iree_hal_hip_device_load_executable,
     .import_file = iree_hal_hip_device_import_file,
     .create_semaphore = iree_hal_hip_device_create_semaphore,
     .query_semaphore_compatibility =

@@ -16,12 +16,12 @@ namespace {
 
 // Global storage for registered suites and backends.
 // Protected by a mutex for thread-safe static initialization.
-// Executable format registered before its backend (or separately from it).
-struct PendingFormat {
-  // Backend name the executable format should attach to.
+// Executable target registered before its backend (or separately from it).
+struct PendingTarget {
+  // Backend name the executable target should attach to.
   std::string backend_name;
-  // Executable format waiting for backend registration.
-  ExecutableFormat format;
+  // Executable target waiting for backend registration.
+  ExecutableTarget target;
 };
 
 struct RegistryData {
@@ -35,8 +35,8 @@ struct RegistryData {
   std::vector<TestSuiteInfo> test_suites;
   // Registered CTS backend configurations.
   std::vector<BackendConfig> backends;
-  // Executable formats waiting for matching backend registration.
-  std::vector<PendingFormat> pending_formats;
+  // Executable targets waiting for matching backend registration.
+  std::vector<PendingTarget> pending_targets;
   // Process-level cleanup hooks registered by CTS helper libraries.
   std::vector<CleanupFn> cleanups;
 };
@@ -70,32 +70,32 @@ void CtsRegistry::RegisterCleanup(CleanupFn cleanup) {
   data.cleanups.push_back(std::move(cleanup));
 }
 
-void CtsRegistry::RegisterExecutableFormat(const char* backend_name,
-                                           ExecutableFormat format) {
+void CtsRegistry::RegisterExecutableTarget(const char* backend_name,
+                                           ExecutableTarget target) {
   auto& data = GetRegistryData();
   std::lock_guard<std::mutex> lock(data.mutex);
-  data.pending_formats.push_back(
-      {std::string(backend_name), std::move(format)});
+  data.pending_targets.push_back(
+      {std::string(backend_name), std::move(target)});
 }
 
-std::vector<ExecutableFormat> CtsRegistry::ListExecutableFormats(
+std::vector<ExecutableTarget> CtsRegistry::ListExecutableTargets(
     const char* backend_name) {
   auto& data = GetRegistryData();
   std::lock_guard<std::mutex> lock(data.mutex);
 
-  std::vector<ExecutableFormat> formats;
-  for (const auto& pending : data.pending_formats) {
+  std::vector<ExecutableTarget> targets;
+  for (const auto& pending : data.pending_targets) {
     if (pending.backend_name == backend_name) {
-      formats.push_back(pending.format);
+      targets.push_back(pending.target);
     }
   }
   for (const auto& backend : data.backends) {
     if (std::string(backend.name) == backend_name) {
-      formats.insert(formats.end(), backend.executable_formats.begin(),
-                     backend.executable_formats.end());
+      targets.insert(targets.end(), backend.executable_targets.begin(),
+                     backend.executable_targets.end());
     }
   }
-  return formats;
+  return targets;
 }
 
 //===----------------------------------------------------------------------===//
@@ -124,26 +124,26 @@ bool CtsRegistry::TagsMatch(const BackendConfig& backend,
   return true;
 }
 
-// Merges pending executable formats into their matching backends.
+// Merges pending executable targets into their matching backends.
 // Must be called with data.mutex held.
-static void MergePendingFormats(RegistryData& data) {
-  for (auto& pending : data.pending_formats) {
+static void MergePendingTargets(RegistryData& data) {
+  for (auto& pending : data.pending_targets) {
     bool found = false;
     for (auto& backend : data.backends) {
       if (pending.backend_name == backend.name) {
-        backend.executable_formats.push_back(std::move(pending.format));
+        backend.executable_targets.push_back(std::move(pending.target));
         found = true;
         break;
       }
     }
     if (!found) {
-      std::cerr << "CtsRegistry: Executable format for '"
+      std::cerr << "CtsRegistry: executable target for '"
                 << pending.backend_name
                 << "' has no matching backend registration.\n";
       std::abort();
     }
   }
-  data.pending_formats.clear();
+  data.pending_targets.clear();
 }
 
 void CtsRegistry::InstantiateAll() {
@@ -156,10 +156,10 @@ void CtsRegistry::InstantiateAll() {
   }
   data.instantiated = true;
 
-  // Merge pending executable formats into their backends. This handles the
-  // case where RegisterExecutableFormat() was called before or after the
+  // Merge pending executable targets into their backends. This handles the
+  // case where RegisterExecutableTarget() was called before or after the
   // corresponding RegisterBackend() — static init ordering is unspecified.
-  MergePendingFormats(data);
+  MergePendingTargets(data);
 
   if (data.backends.empty() || data.test_suites.empty()) {
     return;
@@ -182,9 +182,9 @@ void CtsRegistry::Instantiate(const char* suite_name,
   auto& data = GetRegistryData();
   std::lock_guard<std::mutex> lock(data.mutex);
 
-  // Merge pending executable formats (same as InstantiateAll) so that
-  // formats registered separately from backends are available.
-  MergePendingFormats(data);
+  // Merge pending executable targets (same as InstantiateAll) so that targets
+  // registered separately from backends are available.
+  MergePendingTargets(data);
 
   // Find the specified suite.
   const TestSuiteInfo* suite = nullptr;

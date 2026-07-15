@@ -18,7 +18,6 @@ add_custom_command(OUTPUT executable_srcs.stamp
     "command_buffer_dispatch_multi_entrypoint_test.mlir"
     "command_buffer_dispatch_multi_workgroup_test.mlir"
     "command_buffer_dispatch_test.mlir"
-    "executable_cache_test.mlir"
     "executable_test.mlir"
 )
 

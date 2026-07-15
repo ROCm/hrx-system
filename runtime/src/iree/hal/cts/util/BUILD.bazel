@@ -21,7 +21,7 @@ package(
 # Main entry point for CTS test binaries and testdata generation template.
 exports_files([
     "test_main.cc",
-    "testdata_format.cc.tpl",
+    "testdata_target.cc.tpl",
 ])
 
 # CTS registry for link-time test composition.

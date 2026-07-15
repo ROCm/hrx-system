@@ -255,6 +255,16 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "executable_target_test",
+    srcs = ["executable_target_test.cc"],
+    deps = [
+        ":executable_target",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "code_object_target",
     srcs = ["code_object_target.c"],
@@ -730,14 +740,13 @@ iree_runtime_cc_test(
 iree_amdgpu_hal_cts_testdata(
     name = "testdata_amdgpu_queue_benchmark",
     srcs = ["queue_benchmark_testdata.c"],
-    format_name = "amdgpu_queue_benchmark",
-    format_string = '"amdgcn-amd-amdhsa--{AMDGPU_TARGET}"',
     identifier = "iree_queue_benchmark_testdata_amdgpu",
     internal_hdrs = [
         "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
         "//runtime/src/iree/hal/drivers/amdgpu/device:bitcode_hdrs",
     ],
     tags = ["manual"],
+    target_name = "amdgpu_queue_benchmark",
     target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
 )
 
@@ -749,6 +758,7 @@ iree_runtime_cc_benchmark(
     ],
     deps = [
         ":benchmark_flags",
+        ":executable_target",
         ":testdata_amdgpu_queue_benchmark",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

@@ -20,7 +20,6 @@
 #include "iree/hal/device_event.h"
 #include "iree/hal/device_spec.h"
 #include "iree/hal/event.h"
-#include "iree/hal/executable_cache.h"
 #include "iree/hal/fence.h"
 #include "iree/hal/file.h"
 #include "iree/hal/memory/asan.h"
@@ -55,24 +54,22 @@ enum iree_hal_device_feature_bits_t {
 
   // Device supports executable debugging.
   // When present executables *may* be compiled with
-  // IREE_HAL_EXECUTABLE_CACHING_MODE_ENABLE_DEBUGGING and will have usable
+  // IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING and will have usable
   // debugging related methods. Note that if the input executables do not have
   // embedded debugging information they still may not be able to perform
   // disassembly or fine-grained breakpoint insertion.
   IREE_HAL_DEVICE_FEATURE_SUPPORTS_DEBUGGING = 1u << 0,
 
   // Device supports executable coverage information.
-  // When present executables *may* be compiled with
-  // IREE_HAL_EXECUTABLE_CACHING_MODE_ENABLE_COVERAGE and will produce
-  // coverage buffers during dispatch. Note that input executables must have
-  // partial embedded debug information to allow mapping back to source offsets.
+  // When present instrumented executables may produce coverage buffers during
+  // dispatch. Input executables must have partial embedded debug information
+  // to allow mapping back to source offsets.
   IREE_HAL_DEVICE_FEATURE_SUPPORTS_COVERAGE = 1u << 1,
 
   // Device supports executable and command queue profiling.
-  // When present executables *may* be compiled with
-  // IREE_HAL_EXECUTABLE_CACHING_MODE_ENABLE_PROFILING and will produce
-  // profiling buffers during dispatch. Note that input executables must have
-  // partial embedded debug information to allow mapping back to source offsets.
+  // When present executables and queue operations may produce profiling data.
+  // Input executables may require partial embedded debug information to map
+  // profiling results back to source offsets.
   IREE_HAL_DEVICE_FEATURE_SUPPORTS_PROFILING = 1u << 2,
 };
 
@@ -681,6 +678,24 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_queue_pool_backend_t* out_backend);
 
+// Loads a native executable artifact for |target| on |queue_affinity|.
+//
+// |target| must be an exact borrowed row from iree_hal_device_spec(device).
+// The backend resolves |queue_affinity| to physical devices and requires every
+// selected physical device to be present in |target->physical_device_affinity|.
+// An ANY queue affinity therefore requires a target valid for every physical
+// device selected by the backend.
+//
+// The executable data and constants are borrowed only for the duration of the
+// call unless IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA is set. Loading
+// is a cold path and implementations may parse, verify, link, or optimize the
+// native artifact before returning.
+IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* params,
+    iree_hal_executable_t** out_executable);
+
 // Reserves and returns a device-local queue-ordered transient buffer.
 // The allocation will not be committed until the entire |wait_semaphore_list|
 // has been reached. Once the storage is available for use the
@@ -1116,9 +1131,11 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
       iree_hal_event_flags_t flags, iree_hal_event_t** out_event);
 
-  iree_status_t(IREE_API_PTR* create_executable_cache)(
-      iree_hal_device_t* device, iree_string_view_t identifier,
-      iree_hal_executable_cache_t** out_executable_cache);
+  iree_status_t(IREE_API_PTR* load_executable)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_executable_target_t* target,
+      const iree_hal_executable_load_params_t* params,
+      iree_hal_executable_t** out_executable);
 
   iree_status_t(IREE_API_PTR* import_file)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

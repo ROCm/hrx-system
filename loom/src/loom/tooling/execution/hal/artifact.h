@@ -17,6 +17,7 @@
 #define LOOM_TOOLING_EXECUTION_HAL_ARTIFACT_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/device_spec.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/compile_report.h"
@@ -36,6 +37,9 @@ struct loom_run_hal_runtime_t;
 
 // Target facts selected from one HAL runtime device.
 typedef struct loom_run_hal_device_target_t {
+  // Exact target row borrowed from the active HAL device spec. NULL for
+  // offline target selections that cannot be loaded into a device.
+  const iree_hal_executable_target_t* hal_target;
   // Provider-owned target payload. Usually points at static target info. NULL
   // requests emission from the module's target records without a runtime
   // processor override.
@@ -50,10 +54,12 @@ typedef struct loom_run_hal_device_target_t {
   iree_string_view_t target_key;
 } loom_run_hal_device_target_t;
 
-// Loadable HAL artifact bytes ready for iree_hal_executable_cache_prepare.
+// Loadable HAL artifact bytes ready for iree_hal_device_load_executable.
 typedef struct loom_run_hal_artifact_t {
-  // HAL executable format string consumed by the selected HAL loader.
-  iree_string_view_t executable_format;
+  // Exact target row borrowed from the active HAL device spec.
+  const iree_hal_executable_target_t* hal_target;
+  // Family-owned target key used to emit the artifact.
+  iree_string_view_t target_key;
   // Target-neutral bundle resolved for the artifact, when available.
   const loom_target_bundle_t* target_bundle;
   // Target-native artifact format.
@@ -117,7 +123,7 @@ struct loom_run_hal_artifact_provider_t {
   // Target-owned defaults used when the shared HAL testbench builds the
   // prepared-low compile pipeline before artifact emission.
   loom_target_pipeline_options_t default_pipeline_options;
-  // Selects a concrete target supported by the active HAL executable cache.
+  // Selects a concrete target supported by the active HAL device.
   loom_run_hal_select_device_target_fn_t select_device_target;
   // Selects a concrete offline target by provider-owned key. This is used by
   // compilation tools that do not have an active HAL runtime device.

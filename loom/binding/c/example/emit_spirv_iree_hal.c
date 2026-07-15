@@ -66,9 +66,6 @@ typedef struct emit_spirv_iree_hal_state_t {
   // Live IREE HAL device used as the source of target facts.
   iree_hal_device_t* device;
 
-  // Live IREE HAL executable cache used to validate SPIR-V loadability.
-  iree_hal_executable_cache_t* executable_cache;
-
   // SPIR-V target package linked into this embedding binary.
   loomc_target_environment_t* target_environment;
 
@@ -155,7 +152,6 @@ static void emit_spirv_iree_hal_state_deinitialize(
   loomc_workspace_release(state->workspace);
   loomc_context_release(state->context);
   loomc_target_environment_release(state->target_environment);
-  iree_hal_executable_cache_release(state->executable_cache);
   iree_hal_device_release(state->device);
   iree_async_proactor_pool_release(state->proactor_pool);
 }
@@ -244,12 +240,6 @@ static loomc_status_t create_hal_device_and_cache(
     return loomc_status_from_iree(iree_status);
   }
 
-  iree_status = iree_hal_executable_cache_create(
-      state->device, iree_make_cstring_view("loomc-example"),
-      &state->executable_cache);
-  if (!iree_status_is_ok(iree_status)) {
-    return loomc_status_from_iree(iree_status);
-  }
   return loomc_ok_status();
 }
 
@@ -303,7 +293,6 @@ static loomc_status_t create_target_profile_and_selection(
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("iree-hal-device"),
       .device = state->device,
-      .executable_cache = state->executable_cache,
       .providers = providers,
       .provider_count = 1,
   };

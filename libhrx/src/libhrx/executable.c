@@ -77,16 +77,15 @@ static iree_status_t hrx_executable_snapshot_export_names(
   return iree_ok_status();
 }
 
-static hrx_status_t hrx_executable_wrap(
-    hrx_device_t device, iree_hal_executable_cache_t* hal_executable_cache,
-    iree_hal_executable_t* hal_executable, hrx_executable_t* executable) {
+static hrx_status_t hrx_executable_wrap(hrx_device_t device,
+                                        iree_hal_executable_t* hal_executable,
+                                        hrx_executable_t* executable) {
   iree_host_size_t export_count = 0;
   const char** export_names = NULL;
   iree_status_t status = hrx_executable_snapshot_export_names(
       hal_executable, &export_count, &export_names);
   if (!iree_status_is_ok(status)) {
     iree_hal_executable_release(hal_executable);
-    iree_hal_executable_cache_release(hal_executable_cache);
     return hrx_status_from_iree(status);
   }
 
@@ -96,13 +95,11 @@ static hrx_status_t hrx_executable_wrap(
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), export_names);
     iree_hal_executable_release(hal_executable);
-    iree_hal_executable_cache_release(hal_executable_cache);
     return hrx_status_from_iree(status);
   }
 
   memset(value, 0, sizeof(*value));
   iree_atomic_ref_count_init(&value->ref_count);
-  value->hal_executable_cache = hal_executable_cache;
   value->hal_executable = hal_executable;
   value->device = device;
   value->export_count = export_count;
@@ -115,46 +112,56 @@ static hrx_status_t hrx_executable_wrap(
 hrx_status_t hrx_executable_load_data(hrx_device_t device,
                                       const void* executable_data,
                                       size_t executable_data_size,
-                                      const char* executable_format,
+                                      const char* target_family,
+                                      const char* target_key,
                                       hrx_executable_t* executable) {
   if (!device || !executable || !executable_data || executable_data_size == 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "device, executable_data, or executable is invalid");
   }
   *executable = NULL;
-  if (!executable_format || executable_format[0] == '\0') {
+  if (!target_family || target_family[0] == '\0' || !target_key ||
+      target_key[0] == '\0') {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "executable_format is required");
+                           "target_family and target_key are required");
   }
 
-  iree_hal_executable_cache_t* hal_executable_cache = NULL;
-  iree_status_t status = iree_hal_executable_cache_create(
-      device->hal_device, IREE_SV("hrx"), &hal_executable_cache);
-  if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
+  iree_hal_executable_target_selection_t selection = {
+      .family = iree_make_cstring_view(target_family),
+      .target_key = iree_make_cstring_view(target_key),
+  };
+  const iree_hal_executable_target_selection_result_t selection_result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(device->hal_device), &selection);
+  if (selection_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "executable target is not supported by the device");
+  } else if (selection_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
+                           "executable target is ambiguous for the device");
   }
 
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = iree_make_cstring_view(executable_format);
-  params.executable_data =
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data =
       iree_make_const_byte_span(executable_data, executable_data_size);
-  params.caching_mode = 0;
 
   iree_hal_executable_t* hal_executable = NULL;
-  status = iree_hal_executable_cache_prepare_executable(
-      hal_executable_cache, &params, &hal_executable);
+  iree_status_t status = iree_hal_device_load_executable(
+      device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, selection_result.target,
+      &load_params, &hal_executable);
   if (!iree_status_is_ok(status)) {
-    iree_hal_executable_cache_release(hal_executable_cache);
     return hrx_status_from_iree(status);
   }
 
-  return hrx_executable_wrap(device, hal_executable_cache, hal_executable,
-                             executable);
+  return hrx_executable_wrap(device, hal_executable, executable);
 }
 
 hrx_status_t hrx_executable_load_file(hrx_device_t device, const char* path,
-                                      const char* executable_format,
+                                      const char* target_family,
+                                      const char* target_key,
                                       hrx_executable_t* executable) {
   if (!device || !path || !executable) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -202,14 +209,13 @@ hrx_status_t hrx_executable_load_file(hrx_device_t device, const char* path,
   }
 
   status = hrx_executable_load_data(device, file_data, (size_t)file_size,
-                                    executable_format, executable);
+                                    target_family, target_key, executable);
   hrx_host_allocator_free(hrx_host_allocator_system(), file_data);
   return status;
 }
 
 void hrx_executable_retain(hrx_executable_t executable) {
   if (!executable) return;
-  iree_hal_executable_cache_retain(executable->hal_executable_cache);
   iree_hal_executable_retain(executable->hal_executable);
   hrx_device_retain(executable->device);
   iree_atomic_ref_count_inc(&executable->ref_count);
@@ -217,8 +223,6 @@ void hrx_executable_retain(hrx_executable_t executable) {
 
 void hrx_executable_release(hrx_executable_t executable) {
   if (!executable) return;
-  iree_hal_executable_cache_t* hal_executable_cache =
-      executable->hal_executable_cache;
   iree_hal_executable_t* hal_executable = executable->hal_executable;
   hrx_device_t device = executable->device;
   if (iree_atomic_ref_count_dec(&executable->ref_count) == 1) {
@@ -226,7 +230,6 @@ void hrx_executable_release(hrx_executable_t executable) {
     iree_allocator_free(iree_allocator_system(), executable);
   }
   iree_hal_executable_release(hal_executable);
-  iree_hal_executable_cache_release(hal_executable_cache);
   hrx_device_release(device);
 }
 

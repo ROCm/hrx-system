@@ -57,10 +57,11 @@ iree_runtime_cc_library(
 
 iree_hal_cts_testdata(
     backend_name = "vulkan",
-    format_name = "vulkan_spirv",
-    format_string = '"vulkan-spirv-bda"',
     identifier = "iree_cts_testdata_vulkan_spirv",
     target_device = "vulkan",
+    target_family = "spirv",
+    target_key = "vulkan1.3+bda",
+    target_name = "vulkan_spirv",
     testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
 )
 

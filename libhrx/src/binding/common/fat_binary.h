@@ -21,25 +21,25 @@ extern "C" {
 #endif  // __cplusplus
 
 enum {
-  IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY = 64,
+  IREE_HAL_STREAMING_FAT_BINARY_TARGET_KEY_CAPACITY = 64,
 };
 
 // One ELF image matched out of a fat-binary / offload bundle.
 // The span's lifetime is owned by iree_hal_streaming_fat_binary_extract_t
 // and remains valid until that object is reset/deinitialized.
 typedef struct iree_hal_streaming_fat_binary_elf_t {
-  // Raw AMD HSACO ELF bytes ready to hand to the HAL executable cache.
+  // Raw AMD HSACO ELF bytes ready to load on the selected HAL target.
   iree_const_byte_span_t data;
   // Bundle entry triple (empty for raw-ELF inputs). Borrowed.
   iree_string_view_t triple;
-  // NUL-terminated HAL AMDGPU executable format derived from the ELF header.
-  char executable_format[IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY];
+  // NUL-terminated HAL AMDGPU target key derived from the ELF header.
+  char target_key[IREE_HAL_STREAMING_FAT_BINARY_TARGET_KEY_CAPACITY];
 } iree_hal_streaming_fat_binary_elf_t;
 
 // Ranked fat-binary target candidate.
 typedef struct iree_hal_streaming_fat_binary_target_t {
-  // Target string to match against bundle entries.
-  iree_string_view_t value;
+  // Family-owned target key to match against bundle entries.
+  iree_string_view_t target_key;
 } iree_hal_streaming_fat_binary_target_t;
 
 // Owns the ELFs produced by a single fat-binary unpack.
@@ -65,12 +65,11 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Raw ELF also counts as "supported" (trivially passthrough).
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
-// Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU executable
-// format string from its code-object target metadata.
+// Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU target key from
+// its code-object target metadata.
 iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-    iree_const_byte_span_t elf_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_elf_size);
+    iree_const_byte_span_t elf_data, iree_host_size_t target_key_capacity,
+    char* target_key, iree_host_size_t* out_elf_size);
 
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
 // every contained ELF whose bundle triple matches the best-ranked target

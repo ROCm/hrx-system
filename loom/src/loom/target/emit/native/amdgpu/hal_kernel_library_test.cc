@@ -646,9 +646,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
                 processor->elf.machine_flags | processor->elf.feature_flags)
           << StringViewToString(processor->name);
     }
-    EXPECT_NE(
-        iree_string_view_find(library.executable_format, processor->name, 0),
-        IREE_STRING_VIEW_NPOS)
+    EXPECT_NE(iree_string_view_find(library.target_key, processor->name, 0),
+              IREE_STRING_VIEW_NPOS)
         << StringViewToString(processor->name);
     std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
                       library.hsaco_data_length);

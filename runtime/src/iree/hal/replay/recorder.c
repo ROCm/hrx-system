@@ -852,55 +852,15 @@ static iree_status_t iree_hal_replay_device_create_event(
   return status;
 }
 
-static iree_status_t iree_hal_replay_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_replay_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
-  *out_executable_cache = NULL;
-
-  iree_hal_replay_object_id_t executable_cache_id =
-      IREE_HAL_REPLAY_OBJECT_ID_NONE;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_reserve_object_id(
-      device->recorder, &executable_cache_id));
-
-  iree_hal_replay_executable_cache_object_payload_t payload = {
-      .identifier_length = identifier.size,
-  };
-  iree_const_byte_span_t payload_iovecs[2] = {
-      iree_make_const_byte_span(&payload, sizeof(payload)),
-      iree_make_const_byte_span(identifier.data, identifier.size),
-  };
-
-  iree_hal_replay_pending_record_t pending_record;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_begin_operation(
-      device->recorder, device->device_id, device->device_id,
-      executable_cache_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EXECUTABLE_CACHE,
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_CACHE_OBJECT, &pending_record));
-
-  iree_hal_executable_cache_t* base_executable_cache = NULL;
-  iree_hal_executable_cache_t* replay_executable_cache = NULL;
-  iree_status_t status = iree_hal_executable_cache_create(
-      device->base_device, identifier, &base_executable_cache);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_replay_recorder_executable_cache_create_proxy(
-        device->recorder, device->device_id, executable_cache_id,
-        base_executable_cache, device->host_allocator,
-        &replay_executable_cache);
-  }
-  status = iree_hal_replay_recorder_end_creation_operation(
-      &pending_record, status, IREE_ARRAYSIZE(payload_iovecs), payload_iovecs,
-      IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE, executable_cache_id,
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_CACHE_OBJECT,
-      IREE_ARRAYSIZE(payload_iovecs), payload_iovecs);
-
-  if (iree_status_is_ok(status)) {
-    *out_executable_cache = replay_executable_cache;
-  } else {
-    iree_hal_executable_cache_release(replay_executable_cache);
-  }
-  iree_hal_executable_cache_release(base_executable_cache);
-  return status;
+  return iree_hal_replay_recorder_device_load_executable(
+      device->recorder, device->device_id, device->base_device, queue_affinity,
+      target, params, device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_replay_device_import_file(
@@ -2051,7 +2011,7 @@ static const iree_hal_device_vtable_t iree_hal_replay_device_vtable = {
     .create_channel = iree_hal_replay_device_create_channel,
     .create_command_buffer = iree_hal_replay_device_create_command_buffer,
     .create_event = iree_hal_replay_device_create_event,
-    .create_executable_cache = iree_hal_replay_device_create_executable_cache,
+    .load_executable = iree_hal_replay_device_load_executable,
     .import_file = iree_hal_replay_device_import_file,
     .create_semaphore = iree_hal_replay_device_create_semaphore,
     .query_semaphore_compatibility =

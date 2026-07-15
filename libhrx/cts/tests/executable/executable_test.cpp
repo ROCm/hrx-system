@@ -30,7 +30,7 @@ std::string base_gpu_target(std::string arch) {
 
 struct HsacoImage {
   const iree_file_toc_t* file = nullptr;
-  std::string executable_format;
+  std::string target_key;
 };
 
 const iree_file_toc_t* find_hsaco_for_target(const std::string& target) {
@@ -86,9 +86,9 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   }
 
   hrx_executable_t executable = nullptr;
-  REQUIRE_OK(
-      hrx().executable_load_data(device_, hsaco.file->data, hsaco.file->size,
-                                 hsaco.executable_format.c_str(), &executable));
+  REQUIRE_OK(hrx().executable_load_data(device_, hsaco.file->data,
+                                        hsaco.file->size, "amdgpu",
+                                        hsaco.target_key.c_str(), &executable));
   REQUIRE(executable != nullptr);
 
   hrx().executable_retain(executable);

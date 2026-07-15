@@ -557,11 +557,9 @@ typedef struct hrx_buffer_view_s {
 typedef struct hrx_executable_s {
   // Reference count for the executable wrapper.
   iree_atomic_ref_count_t ref_count;
-  // Retained executable cache used to prepare the HAL executable.
-  iree_hal_executable_cache_t* hal_executable_cache;
   // Retained HAL executable containing the native functions.
   iree_hal_executable_t* hal_executable;
-  // Retained device that owns the executable cache and HAL executable.
+  // Retained device that owns the HAL executable.
   hrx_device_t device;
   // Number of NUL-terminated export names snapshotted at load time.
   iree_host_size_t export_count;

@@ -27,7 +27,6 @@
 #include "iree/hal/drivers/vulkan/device_plan.h"
 #include "iree/hal/drivers/vulkan/device_spec_builder.h"
 #include "iree/hal/drivers/vulkan/executable.h"
-#include "iree/hal/drivers/vulkan/executable_cache.h"
 #include "iree/hal/drivers/vulkan/physical_device.h"
 #include "iree/hal/drivers/vulkan/physical_device_selection.h"
 #include "iree/hal/drivers/vulkan/queue.h"
@@ -105,6 +104,9 @@ struct iree_hal_vulkan_logical_device_t {
 
   // Recognized Vulkan device extension bits enabled on the logical device.
   iree_hal_vulkan_device_extensions_t enabled_extensions;
+
+  // Device-owned pipeline cache shared by all loaded executables.
+  VkPipelineCache executable_pipeline_cache;
 
   // Device-owned built-in pipelines used by queue command polyfills.
   iree_hal_vulkan_builtins_t builtins;
@@ -521,6 +523,11 @@ static void iree_hal_vulkan_logical_device_destroy(
   }
   iree_hal_allocator_release(device->device_allocator);
   iree_hal_vulkan_builtins_deinitialize(&device->builtins);
+  if (device->executable_pipeline_cache) {
+    iree_vkDestroyPipelineCache(
+        IREE_VULKAN_DEVICE(&device->syms), device->logical_device,
+        device->executable_pipeline_cache, /*pAllocator=*/NULL);
+  }
   iree_async_proactor_pool_release(device->proactor_pool);
   if (device->logical_device && device->owns_logical_device) {
     iree_vkDestroyDevice(IREE_VULKAN_DEVICE(&device->syms),
@@ -1070,15 +1077,50 @@ static iree_status_t iree_hal_vulkan_logical_device_create_event(
   return iree_hal_vulkan_unimplemented(IREE_SV("events"));
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_vulkan_logical_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
-  return iree_hal_vulkan_executable_cache_create(
-      &device->syms, device->logical_device, &device->physical_device,
-      device->enabled_features, device->enabled_extensions, identifier,
-      device->host_allocator, out_executable_cache);
+  if (IREE_UNLIKELY(!iree_string_view_equal(target->family, IREE_SV("spirv")) ||
+                    !iree_string_view_equal(target->target_key,
+                                            IREE_SV("vulkan1.3+bda")))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan executable target must be 'spirv:vulkan1.3+bda'");
+  }
+
+  const iree_hal_queue_affinity_t dispatch_affinity =
+      device->queues.compute.selection.affinity;
+  if (!iree_hal_queue_affinity_is_empty(queue_affinity) &&
+      !iree_hal_queue_affinity_is_any(queue_affinity) &&
+      (queue_affinity & ~dispatch_affinity) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan executable queue affinity 0x%" PRIx64
+        " selects queues outside dispatch affinity 0x%" PRIx64,
+        queue_affinity, dispatch_affinity);
+  }
+
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (IREE_UNLIKELY((physical_device_affinity &
+                     ~target->physical_device_affinity) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan executable target physical affinity 0x%" PRIx64
+        " does not include selected physical affinity 0x%" PRIx64,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+
+  return iree_hal_vulkan_executable_create(
+      &device->syms, device->logical_device, device->executable_pipeline_cache,
+      load_params, device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_import_file(
@@ -1922,6 +1964,20 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_queue_staging(
   return status;
 }
 
+static iree_status_t
+iree_hal_vulkan_logical_device_initialize_executable_pipeline_cache(
+    iree_hal_vulkan_logical_device_t* device) {
+  VkPipelineCacheCreateInfo create_info = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+  };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkCreatePipelineCache(
+      IREE_VULKAN_DEVICE(&device->syms), device->logical_device, &create_info,
+      /*pAllocator=*/NULL, &device->executable_pipeline_cache);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  return status;
+}
+
 static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
     iree_hal_vulkan_logical_device_t* device,
     const iree_hal_vulkan_device_plan_t* device_plan,
@@ -1951,6 +2007,11 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
         device_options->max_cached_bda_replay_publication_bytes;
     device->retained_cached_bda_replay_instances =
         device_options->retained_cached_bda_replay_instances;
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_vulkan_logical_device_initialize_executable_pipeline_cache(
+            device);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_builtins_initialize(
@@ -2211,8 +2272,7 @@ static const iree_hal_device_vtable_t iree_hal_vulkan_logical_device_vtable = {
     .create_command_buffer =
         iree_hal_vulkan_logical_device_create_command_buffer,
     .create_event = iree_hal_vulkan_logical_device_create_event,
-    .create_executable_cache =
-        iree_hal_vulkan_logical_device_create_executable_cache,
+    .load_executable = iree_hal_vulkan_logical_device_load_executable,
     .import_file = iree_hal_vulkan_logical_device_import_file,
     .create_semaphore = iree_hal_vulkan_logical_device_create_semaphore,
     .query_semaphore_compatibility =

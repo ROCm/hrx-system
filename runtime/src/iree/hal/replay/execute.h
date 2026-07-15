@@ -39,16 +39,16 @@ typedef struct iree_hal_replay_file_path_remap_t {
 } iree_hal_replay_file_path_remap_t;
 
 typedef struct iree_hal_replay_executable_substitution_request_t {
-  // Sequence ordinal of the executable prepare operation being replayed.
+  // Sequence ordinal of the executable load operation being replayed.
   uint64_t sequence_ordinal;
-  // Captured device object id that owns the executable cache.
+  // Captured device object id receiving the load request.
   iree_hal_replay_object_id_t device_id;
-  // Captured executable cache object id receiving the prepare request.
-  iree_hal_replay_object_id_t executable_cache_id;
-  // Captured executable object id produced by the prepare request.
+  // Captured executable object id produced by the load request.
   iree_hal_replay_object_id_t executable_id;
-  // Captured executable parameters borrowed from the replay file.
-  const iree_hal_executable_params_t* captured_params;
+  // Captured target selection borrowed from the replay file.
+  const iree_hal_executable_target_selection_t* captured_target;
+  // Captured executable load parameters borrowed from the replay file.
+  const iree_hal_executable_load_params_t* captured_params;
 } iree_hal_replay_executable_substitution_request_t;
 
 typedef struct iree_hal_replay_executable_substitution_t {
@@ -56,9 +56,9 @@ typedef struct iree_hal_replay_executable_substitution_t {
   bool substitute;
   // Optional diagnostic source for the replacement, such as a file path.
   iree_string_view_t source;
-  // Replacement executable format, or empty to infer from |executable_data|.
-  iree_string_view_t executable_format;
-  // Replacement executable data borrowed for the prepare call.
+  // Replacement target selection, or an empty selection to retain the capture.
+  iree_hal_executable_target_selection_t target;
+  // Replacement executable data borrowed for the load call.
   iree_const_byte_span_t executable_data;
 } iree_hal_replay_executable_substitution_t;
 
@@ -85,15 +85,15 @@ typedef struct iree_hal_replay_scope_event_t {
 // The callback receives the captured executable ids and parameters. It may
 // leave |out_substitution->substitute| false to use the captured payload
 // unchanged. Replacement data only needs to remain valid for the callback's
-// prepare call; replay clears ALIAS_PROVIDED_DATA on substituted executable
-// parameters before handing them to the HAL.
+// load call; replay clears ALIAS_PROVIDED_DATA before handing captured or
+// substituted executable data to the HAL.
 typedef iree_status_t (*iree_hal_replay_executable_substitution_fn_t)(
     void* user_data,
     const iree_hal_replay_executable_substitution_request_t* request,
     iree_hal_replay_executable_substitution_t* out_substitution);
 
 typedef struct iree_hal_replay_executable_substitution_callback_t {
-  // Callback invoked for each captured executable prepare operation.
+  // Callback invoked for each captured executable load operation.
   iree_hal_replay_executable_substitution_fn_t fn;
   // Opaque callback state passed to |fn|.
   void* user_data;

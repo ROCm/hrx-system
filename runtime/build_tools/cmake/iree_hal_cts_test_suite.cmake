@@ -26,14 +26,15 @@
 # those tests compile and then fail at runtime.
 #
 # Parameters:
-#   FORMAT_NAME: Short name (e.g., "vmvx", "llvm_cpu", "cuda").
-#   FORMAT_VARIANT_TOKEN: Optional token in FORMAT_STRING to replace per variant.
-#   FORMAT_VARIANTS: Optional variant values. Each value registers
-#     ${FORMAT_NAME}_${variant} while preserving the base target names.
+#   TARGET_NAME: Short target name (e.g., "vmvx", "llvm_cpu", "cuda").
+#   TARGET_VARIANT_TOKEN: Optional token in TARGET_KEY to replace per variant.
+#   TARGET_VARIANTS: Optional variant values. Each value registers
+#     ${TARGET_NAME}_${variant} while preserving the base target names.
 #   TARGET_DEVICE: Accepted for compatibility with old compiler-backed calls.
 #   IDENTIFIER: C identifier for the embedded data (e.g., "iree_cts_testdata_vmvx").
 #   BACKEND_NAME: Backend name for CtsRegistry (e.g., "local_task").
-#   FORMAT_STRING: C expression for the format (e.g., "vmvx-bytecode-fb").
+#   TARGET_FAMILY: HAL executable target family.
+#   TARGET_KEY: Canonical family-owned target key.
 #   TESTDATA_DIR: Accepted for compatibility with old compiler-backed calls.
 #   FLAGS: Accepted for compatibility with old compiler-backed calls.
 function(iree_hal_cts_testdata)

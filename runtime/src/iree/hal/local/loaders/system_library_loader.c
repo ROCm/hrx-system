@@ -12,7 +12,7 @@
 
 #include "iree/base/internal/dynamic_library.h"
 #include "iree/hal/api.h"
-#include "iree/hal/local/executable_format.h"
+#include "iree/hal/local/executable_data.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_library_util.h"
 #include "iree/hal/local/executable_plugin_manager.h"
@@ -206,7 +206,7 @@ static int iree_hal_system_executable_import_thunk_v0(
 }
 
 static iree_status_t iree_hal_system_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     const iree_hal_executable_import_provider_t import_provider,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
@@ -468,37 +468,10 @@ static void iree_hal_system_library_loader_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-#if defined(IREE_PLATFORM_APPLE)
-#define IREE_PLATFORM_DYLIB_TYPE "dylib"
-#elif defined(IREE_PLATFORM_WINDOWS)
-#define IREE_PLATFORM_DYLIB_TYPE "dll"
-#elif defined(IREE_PLATFORM_WASM)
-#define IREE_PLATFORM_DYLIB_TYPE "wasm"
-#else
-#define IREE_PLATFORM_DYLIB_TYPE "elf"
-#endif  // IREE_PLATFORM_*
-
-static iree_status_t iree_hal_system_library_loader_infer_format(
+static bool iree_hal_system_library_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = iree_hal_executable_infer_system_format(
-      executable_data, executable_format_capacity, executable_format,
-      out_inferred_size);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-static bool iree_hal_system_library_loader_query_support(
-    iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_starts_with(
-      executable_format,
-      iree_make_cstring_view("system-" IREE_PLATFORM_DYLIB_TYPE "-" IREE_ARCH));
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("cpu"));
 }
 
 static void iree_hal_system_library_loader_query_spec(
@@ -507,9 +480,27 @@ static void iree_hal_system_library_loader_query_spec(
   *out_executable_spec = (iree_hal_device_executable_spec_t){0};
 }
 
-static iree_status_t iree_hal_system_library_loader_try_load(
+static bool iree_hal_system_library_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  if (!iree_hal_local_executable_data_is_system_library(
+          load_params->executable_data)) {
+    return false;
+  }
+  if (!iree_hal_local_executable_data_is_elf(load_params->executable_data)) {
+    return true;
+  }
+  return iree_any_bit_set(load_params->flags,
+                          IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING) ||
+         iree_hal_local_elf_data_requires_system_loader(
+             load_params->executable_data);
+}
+
+static iree_status_t iree_hal_system_library_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   iree_hal_system_library_loader_t* executable_loader =
       (iree_hal_system_library_loader_t*)base_executable_loader;
@@ -528,8 +519,9 @@ static iree_status_t iree_hal_system_library_loader_try_load(
 static const iree_hal_executable_loader_vtable_t
     iree_hal_system_library_loader_vtable = {
         .destroy = iree_hal_system_library_loader_destroy,
-        .infer_format = iree_hal_system_library_loader_infer_format,
-        .query_support = iree_hal_system_library_loader_query_support,
+        .query_target_support =
+            iree_hal_system_library_loader_query_target_support,
         .query_spec = iree_hal_system_library_loader_query_spec,
-        .try_load = iree_hal_system_library_loader_try_load,
+        .claims_executable = iree_hal_system_library_loader_claims_executable,
+        .load = iree_hal_system_library_loader_load,
 };

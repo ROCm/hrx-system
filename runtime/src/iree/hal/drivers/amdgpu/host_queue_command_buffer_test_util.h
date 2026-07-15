@@ -26,6 +26,7 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
+#include "iree/hal/drivers/amdgpu/util/executable_target.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -139,66 +140,64 @@ static iree_status_t CreateHostVisibleDispatchBuffer(
                                             out_buffer);
 }
 
-static bool IsAmdgpuCtsExecutableFormat(
-    const iree::hal::cts::ExecutableFormat& format) {
-  if (format.format == nullptr || format.data_fn == nullptr) return false;
+static bool IsAmdgpuCtsExecutableTarget(
+    const iree::hal::cts::ExecutableTarget& target) {
+  if (target.family == nullptr || target.target_key == nullptr ||
+      target.data_fn == nullptr) {
+    return false;
+  }
+  if (!iree_string_view_equal(iree_make_cstring_view(target.family),
+                              IREE_SV("amdgpu"))) {
+    return false;
+  }
   return iree_string_view_starts_with(
-      iree_make_string_view(format.name.data(), format.name.size()),
+      iree_make_string_view(target.name.data(), target.name.size()),
       IREE_SV("amdgpu_"));
 }
 
-static iree_status_t LoadCtsExecutable(
-    iree_hal_device_t* device, iree_string_view_t file_name,
-    iree_hal_executable_cache_t** out_executable_cache,
-    iree_hal_executable_t** out_executable) {
-  *out_executable_cache = NULL;
+static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
+                                       iree_string_view_t file_name,
+                                       iree_hal_executable_t** out_executable) {
   *out_executable = NULL;
 
-  const auto formats =
-      iree::hal::cts::CtsRegistry::ListExecutableFormats("amdgpu");
-  iree_status_t candidate_status = iree_ok_status();
-  bool found_format = false;
+  const auto targets =
+      iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+  bool found_target = false;
   bool found_executable_data = false;
-  for (const auto& format : formats) {
-    if (!IsAmdgpuCtsExecutableFormat(format)) continue;
-    found_format = true;
-    iree_const_byte_span_t executable_data = format.data_fn(file_name);
-    if (executable_data.data_length == 0) continue;
+  for (const auto& target : targets) {
+    if (!IsAmdgpuCtsExecutableTarget(target)) continue;
+    found_target = true;
+    const iree_const_byte_span_t executable_data = target.data_fn(file_name);
+    if (iree_const_byte_span_is_empty(executable_data)) continue;
     found_executable_data = true;
 
-    iree_hal_executable_cache_t* executable_cache = NULL;
-    iree_hal_executable_t* executable = NULL;
-    iree_status_t status = iree_hal_executable_cache_create(
-        device, iree_make_cstring_view("default"), &executable_cache);
-    if (iree_status_is_ok(status)) {
-      iree_hal_executable_params_t executable_params;
-      iree_hal_executable_params_initialize(&executable_params);
-      executable_params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      executable_params.executable_format =
-          iree_make_cstring_view(format.format);
-      executable_params.executable_data = executable_data;
-      status = iree_hal_executable_cache_prepare_executable(
-          executable_cache, &executable_params, &executable);
+    iree_hal_executable_target_selection_result_t target_result;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
+        iree_hal_device_spec(device), iree_make_cstring_view(target.target_key),
+        /*physical_device_affinity=*/0, &target_result));
+    if (target_result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+      continue;
     }
-
-    if (iree_status_is_ok(status)) {
-      *out_executable_cache = executable_cache;
-      *out_executable = executable;
-      iree_status_free(candidate_status);
-      return iree_ok_status();
+    if (target_result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU CTS target '%s' ambiguously matches the device spec",
+          target.target_key);
     }
-    iree_hal_executable_release(executable);
-    iree_hal_executable_cache_release(executable_cache);
-    candidate_status = iree_status_join(candidate_status, status);
+    iree_hal_executable_load_params_t load_params;
+    iree_hal_executable_load_params_initialize(&load_params);
+    load_params.flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+    load_params.executable_data = executable_data;
+    return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                           target_result.target, &load_params,
+                                           out_executable);
   }
 
-  if (!iree_status_is_ok(candidate_status)) {
-    return candidate_status;
-  }
-  if (!found_format) {
+  if (!found_target) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "no registered AMDGPU CTS executable formats");
+                            "no registered AMDGPU CTS executable targets");
   }
   if (!found_executable_data) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -206,7 +205,7 @@ static iree_status_t LoadCtsExecutable(
   }
   return iree_make_status(
       IREE_STATUS_NOT_FOUND,
-      "registered AMDGPU CTS executable data was not accepted by the device");
+      "no registered AMDGPU CTS target matches the device spec");
 }
 
 static iree_status_t QueueTransientTransferBuffer(
@@ -266,13 +265,7 @@ static iree_status_t AppendConstantsBindingsDispatch(
 }
 
 struct TwoDispatchCommandBuffer {
-  ~TwoDispatchCommandBuffer() {
-    iree_hal_executable_release(executable);
-    iree_hal_executable_cache_release(executable_cache);
-  }
-
-  // Executable cache owning |executable|.
-  iree_hal_executable_cache_t* executable_cache = NULL;
+  ~TwoDispatchCommandBuffer() { iree_hal_executable_release(executable); }
 
   // CTS executable containing the constants+bindings dispatch entry point.
   iree_hal_executable_t* executable = NULL;
@@ -299,7 +292,7 @@ static iree_status_t CreateTwoDispatchCommandBuffer(
       test_device->base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &out_fixture->executable_cache, &out_fixture->executable));
+      &out_fixture->executable));
 
   IREE_RETURN_IF_ERROR(CreateHostVisibleDispatchBuffer(
       test_device->allocator(), /*buffer_size=*/4 * sizeof(uint32_t),

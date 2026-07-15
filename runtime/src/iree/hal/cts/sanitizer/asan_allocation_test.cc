@@ -147,9 +147,6 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
                    << "' was created without HAL ASAN enabled";
     }
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device(), iree_make_cstring_view("default"), executable_cache_.out()));
-
     iree_const_byte_span_t executable_data =
         GetParam().executable_data
             ? GetParam().executable_data(
@@ -160,22 +157,27 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
                    << "' has no ASAN allocation CTS executable data";
     }
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(GetParam().executable_format);
-    executable_params.executable_data = executable_data;
-    status = iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, executable_.out());
-    if (iree_status_is_incompatible(status)) {
-      iree_status_free(status);
-      GTEST_SKIP() << "Executable format '" << GetParam().executable_format
-                   << "' is incompatible with CTS backend/device '"
+    iree_hal_executable_target_selection_result_t result;
+    IREE_ASSERT_OK(
+        SelectBackendExecutableTarget(device(), GetParam(), &result));
+    if (result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+      GTEST_SKIP() << "Executable target '"
+                   << GetParam().executable_target_family << ":"
+                   << GetParam().executable_target_key
+                   << "' is not advertised by CTS backend/device '"
                    << GetParam().name << "'";
     }
-    IREE_ASSERT_OK(status);
+    ASSERT_EQ(result.outcome,
+              IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+
+    iree_hal_executable_load_params_t load_params;
+    iree_hal_executable_load_params_initialize(&load_params);
+    load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+    load_params.executable_data = executable_data;
+    IREE_ASSERT_OK(iree_hal_device_load_executable(
+        device(), IREE_HAL_QUEUE_AFFINITY_ANY, result.target, &load_params,
+        executable_.out()));
   }
 
   void TearDown() override {
@@ -216,7 +218,6 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
   }
 
   SanitizerCachedBackendDevice asan_device_;
-  Ref<iree_hal_executable_cache_t> executable_cache_;
   Ref<iree_hal_executable_t> executable_;
 };
 

@@ -40,8 +40,8 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology);
 
-// Returns whether the IREE HAL executable |format| is supported by all GPU
-// devices in |topology|. Some devices may support multiple ISAs.
+// Returns whether |target_key| is supported by |device_agent|. Some devices may
+// support multiple ISAs.
 //
 // Supports AMDGPU target IDs in both compiler spelling (`gfx1100`,
 // `gfx942:xnack-`) and the canonical ISA names reported by HSA
@@ -49,12 +49,10 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
 // compatibility so generic code-object targets and explicit feature modes can
 // be checked without relying on string equality.
 //
-// Optionally |out_isa| can be used to get the agent ISA for the given format.
-// Note that this will be from the first device but should match all other
-// devices in the topology.
-iree_status_t iree_hal_amdgpu_executable_format_supported(
+// Optionally |out_isa| can be used to get the agent ISA matching the target.
+iree_status_t iree_hal_amdgpu_executable_target_supported(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    iree_string_view_t format, bool* out_supported, hsa_isa_t* out_isa);
+    iree_string_view_t target_key, bool* out_supported, hsa_isa_t* out_isa);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_executable_t
@@ -97,23 +95,17 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   bool pm4_launch_state_valid;
 } iree_hal_amdgpu_executable_dispatch_descriptor_t;
 
-// Infers the format of the executable and calculates its total size.
-// If executable_data.data_length is 0 attempts to infer size from the data.
-// Returns the canonical target-ID format string and total size of the
-// executable data.
-//
-iree_status_t iree_hal_amdgpu_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_allocator_t host_allocator, iree_host_size_t* out_inferred_size);
-
-// Creates a AMDGPU executable from a binary in memory. Each executable may
+// Creates an AMDGPU executable from a binary in memory. Each executable may
 // contain multiple entry points and be composed of several modules presented to
-// the HAL as a single instance. See iree_hal_executable_params_t for more
+// the HAL as a single instance. See iree_hal_executable_load_params_t for more
 // information about the lifetime of the resources referenced within.
 //
 // |libhsa| and |topology| are captured by-reference and must remain valid for
-// the lifetime of the cache.
+// the lifetime of the executable.
+//
+// |queue_affinity| selects the physical devices onto which the executable is
+// loaded. |target| must be an exact borrowed row from |device|'s immutable spec
+// and cover every selected physical device.
 //
 // |executable_id| is a non-zero logical-device-local identifier assigned to
 // this executable before it is visible to profiling or device-originated
@@ -141,7 +133,9 @@ iree_status_t iree_hal_amdgpu_executable_infer_format(
 iree_status_t iree_hal_amdgpu_executable_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    const iree_hal_executable_params_t* executable_params,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
     iree_hal_amdgpu_asan_state_t* asan_state,
     iree_hal_amdgpu_tsan_state_t* tsan_state,

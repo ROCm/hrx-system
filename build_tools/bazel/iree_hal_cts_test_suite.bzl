@@ -92,61 +92,65 @@ _registration = rule(
 def _generate_registration(
         name,
         header,
-        format_name,
-        format_string,
+        target_name,
+        target_family,
+        target_key,
         identifier,
         backend_name,
         testonly):
     registration = "%s.cc" % name
     _registration(
         name = "%s_gen" % name,
-        template = "//runtime/src/iree/hal/cts/util:testdata_format.cc.tpl",
+        template = "//runtime/src/iree/hal/cts/util:testdata_target.cc.tpl",
         out = registration,
         substitutions = {
             "{BACKEND_NAME}": backend_name,
-            "{FORMAT_FUNC_NAME}": _camel_case(format_name),
-            "{FORMAT_NAME}": format_name,
-            "{FORMAT_STRING}": format_string,
-            "{FORMAT_VAR_NAME}": "%s_format" % format_name,
             "{HEADER_PATH}": "%s/%s" % (native.package_name(), header),
             "{IDENTIFIER}": identifier,
+            "{TARGET_FAMILY}": target_family,
+            "{TARGET_FUNC_NAME}": _camel_case(target_name),
+            "{TARGET_KEY}": target_key,
+            "{TARGET_NAME}": target_name,
+            "{TARGET_VAR_NAME}": "%s_target" % target_name,
         },
         testonly = testonly,
     )
     return registration
 
 def iree_hal_cts_testdata(
-        format_name,
+        target_name,
+        target_family,
+        target_key,
         target_device,
         identifier,
         backend_name,
-        format_string,
         testdata,
         flags = [],
         flag_values = {},
-        cmake_format_variant_values = [],
+        cmake_target_variant_values = [],
         data = [],
         testonly = True,
         **kwargs):
     """Registers an empty CTS executable-data library for legacy callsites.
 
     Args:
-      format_name: CTS executable format name.
+      target_name: CTS executable target name.
+      target_family: HAL executable target family.
+      target_key: Canonical family-owned target key.
       target_device: Legacy compiler target device name.
       identifier: C identifier prefix for the empty TOC.
       backend_name: CTS backend name.
-      format_string: HAL executable format string.
       testdata: Legacy compiler testdata sources.
       flags: Legacy compiler flags.
-      flag_values: Placeholder values used by CMake format variants.
-      cmake_format_variant_values: Optional CMake format variant placeholders.
+      flag_values: Placeholder values used by CMake target variants.
+      cmake_target_variant_values: Optional CMake target variant placeholders.
       data: Legacy data dependencies.
       testonly: Whether generated targets are test-only.
       **kwargs: Common attributes forwarded to generated targets.
     """
     _ignore_unused(target_device, testdata, flags, data)
 
-    testdata_name = "testdata_%s" % format_name
+    testdata_name = "testdata_%s" % target_name
     header = "%s.h" % testdata_name
     source = "%s.c" % testdata_name
 
@@ -166,7 +170,7 @@ def iree_hal_cts_testdata(
         **kwargs
     )
 
-    variant_placeholders = cmake_format_variant_values
+    variant_placeholders = cmake_target_variant_values
     if len(variant_placeholders) > 1:
         fail("iree_hal_cts_testdata supports one CMake format variant value")
 
@@ -174,7 +178,7 @@ def iree_hal_cts_testdata(
         variant_placeholder = variant_placeholders[0]
         variant_flag = flag_values.get(variant_placeholder)
         if not variant_flag:
-            fail("cmake_format_variant_values requires matching flag_values")
+            fail("cmake_target_variant_values requires matching flag_values")
 
         requested = iree_amdgpu_exact_target_selector_config_settings(
             name = "%s_exact_target" % testdata_name,
@@ -187,8 +191,9 @@ def iree_hal_cts_testdata(
             registration = _generate_registration(
                 name = "%s_%s_registration" % (testdata_name, target_fragment),
                 header = header,
-                format_name = "%s_%s" % (format_name, target_fragment),
-                format_string = format_string.replace(variant_token, exact_target),
+                target_name = "%s_%s" % (target_name, target_fragment),
+                target_family = target_family,
+                target_key = target_key.replace(variant_token, exact_target),
                 identifier = identifier,
                 backend_name = backend_name,
                 testonly = testonly,
@@ -201,8 +206,9 @@ def iree_hal_cts_testdata(
         registration_srcs = [_generate_registration(
             name = "%s_registration" % testdata_name,
             header = header,
-            format_name = format_name,
-            format_string = format_string,
+            target_name = target_name,
+            target_family = target_family,
+            target_key = target_key,
             identifier = identifier,
             backend_name = backend_name,
             testonly = testonly,

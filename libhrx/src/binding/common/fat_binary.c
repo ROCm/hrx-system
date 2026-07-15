@@ -12,8 +12,8 @@
 #include <zstd.h>
 #endif
 
-#define HRX_FAT_EXECUTABLE_FORMAT_CAPACITY \
-  IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY
+#define HRX_FAT_TARGET_KEY_CAPACITY \
+  IREE_HAL_STREAMING_FAT_BINARY_TARGET_KEY_CAPACITY
 
 //===----------------------------------------------------------------------===//
 // Format magic & on-disk structures
@@ -243,62 +243,59 @@ static bool hrx_amdgpu_processor_is_generic(iree_string_view_t processor) {
   return iree_string_view_ends_with(processor, IREE_SV("-generic"));
 }
 
-static iree_status_t hrx_fat_append_format_string(
-    iree_host_size_t executable_format_capacity, char* executable_format,
+static iree_status_t hrx_fat_append_target_key_string(
+    iree_host_size_t target_key_capacity, char* target_key,
     iree_host_size_t* length, iree_string_view_t value) {
-  if (*length + value.size >= executable_format_capacity) {
+  if (*length + value.size >= target_key_capacity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU executable format buffer too small");
+                            "AMDGPU target key buffer too small");
   }
-  memcpy(executable_format + *length, value.data, value.size);
+  memcpy(target_key + *length, value.data, value.size);
   *length += value.size;
-  executable_format[*length] = '\0';
+  target_key[*length] = '\0';
   return iree_ok_status();
 }
 
-static iree_status_t hrx_fat_append_format_feature(
-    iree_host_size_t executable_format_capacity, char* executable_format,
+static iree_status_t hrx_fat_append_target_key_feature(
+    iree_host_size_t target_key_capacity, char* target_key,
     iree_host_size_t* length, iree_string_view_t name,
     hrx_amdgpu_feature_state_t state) {
   if (state != HRX_AMDGPU_FEATURE_STATE_OFF &&
       state != HRX_AMDGPU_FEATURE_STATE_ON) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(
-      executable_format_capacity, executable_format, length, IREE_SV(":")));
-  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(
-      executable_format_capacity, executable_format, length, name));
-  return hrx_fat_append_format_string(
-      executable_format_capacity, executable_format, length,
+  IREE_RETURN_IF_ERROR(hrx_fat_append_target_key_string(
+      target_key_capacity, target_key, length, IREE_SV(":")));
+  IREE_RETURN_IF_ERROR(hrx_fat_append_target_key_string(
+      target_key_capacity, target_key, length, name));
+  return hrx_fat_append_target_key_string(
+      target_key_capacity, target_key, length,
       state == HRX_AMDGPU_FEATURE_STATE_ON ? IREE_SV("+") : IREE_SV("-"));
 }
 
-static iree_status_t hrx_fat_format_amdgpu_executable_format(
+static iree_status_t hrx_fat_format_amdgpu_target_key(
     const hrx_amdgpu_elf_machine_target_t* machine_target,
     hrx_amdgpu_feature_state_t sramecc, hrx_amdgpu_feature_state_t xnack,
-    iree_host_size_t executable_format_capacity, char* executable_format) {
-  if (executable_format_capacity == 0 || executable_format == NULL) {
+    iree_host_size_t target_key_capacity, char* target_key) {
+  if (target_key_capacity == 0 || target_key == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "executable format output buffer is empty");
+                            "target key output buffer is empty");
   }
-  executable_format[0] = '\0';
+  target_key[0] = '\0';
   iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(executable_format_capacity,
-                                                    executable_format, &length,
-                                                    machine_target->processor));
-  IREE_RETURN_IF_ERROR(hrx_fat_append_format_feature(
-      executable_format_capacity, executable_format, &length,
-      IREE_SV("sramecc"), sramecc));
-  return hrx_fat_append_format_feature(executable_format_capacity,
-                                       executable_format, &length,
-                                       IREE_SV("xnack"), xnack);
+  IREE_RETURN_IF_ERROR(hrx_fat_append_target_key_string(
+      target_key_capacity, target_key, &length, machine_target->processor));
+  IREE_RETURN_IF_ERROR(hrx_fat_append_target_key_feature(
+      target_key_capacity, target_key, &length, IREE_SV("sramecc"), sramecc));
+  return hrx_fat_append_target_key_feature(target_key_capacity, target_key,
+                                           &length, IREE_SV("xnack"), xnack);
 }
 
 // Validates an AMDGPU ELF header, computes the total on-disk ELF size from the
-// section-header table, and derives the AMDGPU HAL executable format string.
+// section-header table, and derives the AMDGPU HAL target key.
 iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-    iree_const_byte_span_t elf, iree_host_size_t executable_format_capacity,
-    char* executable_format, iree_host_size_t* out_size) {
+    iree_const_byte_span_t elf, iree_host_size_t target_key_capacity,
+    char* target_key, iree_host_size_t* out_size) {
   if (!hrx_fat_length_at_least(elf, sizeof(hrx_elf64_header_t))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ELF data too small (got %" PRIhsz ")",
@@ -394,9 +391,8 @@ iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
         generic_version);
   }
 
-  IREE_RETURN_IF_ERROR(hrx_fat_format_amdgpu_executable_format(
-      machine_target, sramecc, xnack, executable_format_capacity,
-      executable_format));
+  IREE_RETURN_IF_ERROR(hrx_fat_format_amdgpu_target_key(
+      machine_target, sramecc, xnack, target_key_capacity, target_key));
 
   if (h.shoff > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -551,8 +547,8 @@ static bool hrx_fat_triple_matches_any_target(
     const iree_hal_streaming_fat_binary_target_t* targets,
     iree_host_size_t* out_target_index) {
   for (iree_host_size_t i = 0; i < target_count; ++i) {
-    if (iree_string_view_is_empty(targets[i].value)) continue;
-    if (hrx_fat_triple_matches(triple, targets[i].value)) {
+    if (iree_string_view_is_empty(targets[i].target_key)) continue;
+    if (hrx_fat_triple_matches(triple, targets[i].target_key)) {
       *out_target_index = i;
       return true;
     }
@@ -577,7 +573,7 @@ static void hrx_fat_extract_clear_matches(
 static iree_status_t hrx_fat_extract_push(
     iree_hal_streaming_fat_binary_extract_t* extract,
     iree_const_byte_span_t elf_data, iree_string_view_t triple,
-    const char* executable_format) {
+    const char* target_key) {
   if (extract->match_count == extract->match_capacity) {
     iree_host_size_t new_capacity =
         extract->match_capacity ? extract->match_capacity * 2 : 4;
@@ -595,8 +591,8 @@ static iree_status_t hrx_fat_extract_push(
   }
   extract->matches[extract->match_count].data = elf_data;
   extract->matches[extract->match_count].triple = triple;
-  memcpy(extract->matches[extract->match_count].executable_format,
-         executable_format, HRX_FAT_EXECUTABLE_FORMAT_CAPACITY);
+  memcpy(extract->matches[extract->match_count].target_key, target_key,
+         HRX_FAT_TARGET_KEY_CAPACITY);
   extract->match_count++;
   return iree_ok_status();
 }
@@ -669,14 +665,14 @@ static iree_status_t hrx_fat_extract_from_bundle(
                               "] (triple '%.*s') is not an AMDGPU ELF",
                               i, (int)triple.size, triple.data);
     }
-    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
+    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-        entry_bytes, sizeof(executable_format), executable_format, &elf_size));
+        entry_bytes, sizeof(target_key), target_key, &elf_size));
     iree_const_byte_span_t tight_elf =
         iree_make_const_byte_span(entry_bytes.data, elf_size);
     IREE_RETURN_IF_ERROR(
-        hrx_fat_extract_push(extract, tight_elf, triple, executable_format));
+        hrx_fat_extract_push(extract, tight_elf, triple, target_key));
   }
   return iree_ok_status();
 }
@@ -701,10 +697,10 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
       }
       break;
     }
-    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
+    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-        remaining, sizeof(executable_format), executable_format, &elf_size));
+        remaining, sizeof(target_key), target_key, &elf_size));
     if (elf_size == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "ELF at offset %" PRIhsz " has zero size",
@@ -712,7 +708,7 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
     }
     IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
         extract, iree_make_const_byte_span(remaining.data, elf_size),
-        iree_string_view_empty(), executable_format));
+        iree_string_view_empty(), target_key));
     offset += elf_size;
   }
   return extract->match_count > initial_match_count
@@ -858,15 +854,15 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
     status =
         hrx_fat_extract_from_bundle(inner, target_count, targets, out_extract);
   } else if (hrx_fat_is_elf(inner)) {
-    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
+    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
     status = iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-        inner, sizeof(executable_format), executable_format, &elf_size);
+        inner, sizeof(target_key), target_key, &elf_size);
     if (iree_status_is_ok(status)) {
       iree_const_byte_span_t tight =
           iree_make_const_byte_span(inner.data, elf_size);
-      status = hrx_fat_extract_push(
-          out_extract, tight, iree_string_view_empty(), executable_format);
+      status = hrx_fat_extract_push(out_extract, tight,
+                                    iree_string_view_empty(), target_key);
     }
   } else {
     const uint8_t* head =
@@ -884,8 +880,8 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
     status = iree_make_status(IREE_STATUS_NOT_FOUND,
                               "no ELF in fat binary matches any of %" PRIhsz
                               " target candidates (first '%.*s')",
-                              target_count, (int)targets[0].value.size,
-                              targets[0].value.data);
+                              target_count, (int)targets[0].target_key.size,
+                              targets[0].target_key.data);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_streaming_fat_binary_extract_reset(out_extract);

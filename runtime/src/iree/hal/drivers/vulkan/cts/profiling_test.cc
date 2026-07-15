@@ -13,33 +13,7 @@
 
 namespace iree::hal::cts {
 
-class VulkanProfilingTest : public CtsTestBase<> {
- protected:
-  iree_status_t CreateScaleAndOffsetExecutable(
-      Ref<iree_hal_executable_cache_t>& executable_cache,
-      Ref<iree_hal_executable_t>& executable) {
-    IREE_RETURN_IF_ERROR(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), executable_cache.out()));
-
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-
-    if (!iree_hal_executable_cache_can_prepare_format(
-            executable_cache.get(), executable_params.caching_mode,
-            executable_params.executable_format)) {
-      return iree_ok_status();
-    }
-
-    return iree_hal_executable_cache_prepare_executable(
-        executable_cache.get(), &executable_params, executable.out());
-  }
-};
+class VulkanProfilingTest : public CtsTestBase<> {};
 
 TEST_P(VulkanProfilingTest, QueueEventsRecordNativeTransferSubmissions) {
   constexpr iree_device_size_t kBufferSize = 128;
@@ -200,13 +174,22 @@ TEST_P(VulkanProfilingTest,
 }
 
 TEST_P(VulkanProfilingTest, ExecutableMetadataRecordsDirectDispatchFunctions) {
-  Ref<iree_hal_executable_cache_t> executable_cache;
-  Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(CreateScaleAndOffsetExecutable(executable_cache, executable));
-  if (!executable) {
-    GTEST_SKIP()
-        << "Vulkan SPIR-V executable format is disabled on this device";
+  const iree_hal_executable_target_selection_result_t target_result =
+      SelectExecutableTarget(iree_make_cstring_view(executable_target_family()),
+                             iree_make_cstring_view(executable_target_key()));
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    GTEST_SKIP() << "Vulkan executable target is unavailable on this device";
   }
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            target_result.outcome);
+
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(LoadExecutable(
+      target_result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA,
+      executable_data(
+          IREE_SV("command_buffer_dispatch_constants_bindings_test.bin")),
+      executable.out()));
 
   Ref<iree_hal_buffer_t> input_buffer;
   {

@@ -36,8 +36,6 @@ iree_runtime_cc_library(
         "native_executable.h",
         "nccl_channel.c",
         "nccl_channel.h",
-        "nop_executable_cache.c",
-        "nop_executable_cache.h",
         "stream_command_buffer.c",
         "stream_command_buffer.h",
         "timepoint_pool.c",

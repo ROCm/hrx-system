@@ -43,9 +43,6 @@ struct IreeHalKernelExecutionTarget {
   // HAL device URI used to create the live device.
   iree_string_view_t device_uri;
 
-  // Executable cache identifier used when preparing the HAL executable.
-  iree_string_view_t executable_cache_identifier;
-
   // Profile identifier passed to `loomc_target_profile_create_iree_hal`.
   loomc_string_view_t target_profile_identifier;
 
@@ -79,8 +76,8 @@ struct IreeHalKernelExecutionTarget {
   // Artifact identifier reported by emission diagnostics.
   loomc_string_view_t artifact_identifier;
 
-  // HAL executable format used by `iree_hal_executable_cache_prepare`.
-  iree_string_view_t executable_format;
+  // HAL executable target selected for direct loading.
+  iree_hal_executable_target_selection_t executable_target_selection;
 
   // Static provider array used to project HAL device facts into Loom facts.
   const loomc_iree_hal_profile_provider_t* const* profile_providers;

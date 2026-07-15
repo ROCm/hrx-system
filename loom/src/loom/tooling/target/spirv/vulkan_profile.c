@@ -131,24 +131,34 @@ static void loom_spirv_vulkan_hal_profile_project_feature_flag(
 }
 
 iree_status_t loom_spirv_vulkan_hal_profile_query(
-    iree_hal_device_t* device, iree_hal_executable_cache_t* executable_cache,
+    iree_hal_device_t* device,
     loom_spirv_vulkan_hal_profile_facts_t* out_facts) {
   IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(executable_cache);
   IREE_ASSERT_ARGUMENT(out_facts);
 
   *out_facts = (loom_spirv_vulkan_hal_profile_facts_t){0};
-  if (iree_hal_executable_cache_can_prepare_format(
-          executable_cache, IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          IREE_SV("vulkan-spirv-bda"))) {
-    out_facts->flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE;
-  }
-
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
   if (device_spec == NULL) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "HAL device does not expose immutable device facts");
+  }
+  const iree_hal_executable_target_selection_t target_selection = {
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(device_spec,
+                                                    &target_selection);
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL device reports ambiguous Vulkan SPIR-V executable targets");
+  } else if (target_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+    out_facts->flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE;
   }
   const iree_hal_device_dispatch_spec_t* dispatch =
       iree_hal_device_spec_dispatch(device_spec);
@@ -436,8 +446,8 @@ iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(
   }
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE,
-      IREE_SV("Vulkan HAL executable cache does not support "
-              "vulkan-spirv-bda")));
+      IREE_SV("Vulkan HAL device does not support the vulkan1.3+bda "
+              "SPIR-V target")));
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS,
       IREE_SV("Vulkan device does not expose buffer device addresses")));

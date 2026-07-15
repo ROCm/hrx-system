@@ -70,6 +70,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "executable_data",
+    srcs = ["executable_data.c"],
+    hdrs = ["executable_data.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/utils:elf_format",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "executable_environment",
     srcs = ["executable_environment.c"],
     hdrs = ["executable_environment.h"],
@@ -100,6 +110,7 @@ iree_runtime_cc_benchmark(
     name = "executable_library_benchmark",
     srcs = ["executable_library_benchmark.c"],
     deps = [
+        ":device_spec_builder",
         ":executable_environment",
         ":executable_library",
         ":local",
@@ -245,13 +256,11 @@ iree_runtime_cc_library(
     name = "local",
     srcs = [
         "inline_command_buffer.c",
-        "local_executable_cache.c",
     ],
     hdrs = [
         "executable_loader.h",
         "inline_command_buffer.h",
         "local_executable.h",
-        "local_executable_cache.h",
     ],
     deps = [
         ":executable_environment",

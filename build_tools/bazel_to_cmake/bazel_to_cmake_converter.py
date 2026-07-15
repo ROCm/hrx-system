@@ -2081,10 +2081,10 @@ class BuildFileFunctions(object):
         name,
         srcs,
         target_selectors_flag,
-        format_name,
-        format_string,
+        target_name,
         identifier,
         backend_name="amdgpu",
+        target_family="amdgpu",
         target="amdgcn-amd-amdhsa",
         deps=None,
         internal_hdrs=None,
@@ -2101,19 +2101,15 @@ class BuildFileFunctions(object):
         targets_block = self._convert_amdgpu_target_selectors_block(
             target_selectors_flag
         )
-        format_name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
+        target_name_block = self._convert_string_arg_block(
+            "TARGET_NAME", target_name, quote=False
         )
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
-        else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
         identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
         backend_name_block = self._convert_string_arg_block(
             "BACKEND_NAME", backend_name
+        )
+        target_family_block = self._convert_string_arg_block(
+            "TARGET_FAMILY", target_family
         )
         hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
         srcs_block = self._convert_srcs_block(srcs)
@@ -2127,10 +2123,10 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{target_block}"
             f"{targets_block}"
-            f"{format_name_block}"
-            f"{format_string_block}"
+            f"{target_name_block}"
             f"{identifier_block}"
             f"{backend_name_block}"
+            f"{target_family_block}"
             f"{hdrs_block}"
             f"{srcs_block}"
             f"{deps_block}"
@@ -2494,21 +2490,22 @@ class BuildFileFunctions(object):
 
     def _iree_hal_cts_testdata(
         self,
-        format_name,
+        target_name,
+        target_family,
+        target_key,
         target_device,
         identifier,
         backend_name,
-        format_string,
         testdata,
         flags=None,
         flag_values=None,
-        cmake_format_variant_values=None,
+        cmake_target_variant_values=None,
         data=None,
         testonly=None,
         target_compatible_with=None,
         **kwargs,
     ):
-        variant_placeholders = set(cmake_format_variant_values or [])
+        variant_placeholders = set(cmake_target_variant_values or [])
         variant_token = None
         variant_values_var = None
         if len(variant_placeholders) > 1:
@@ -2518,13 +2515,13 @@ class BuildFileFunctions(object):
         if variant_placeholders:
             if not flag_values:
                 raise ValueError(
-                    "cmake_format_variant_values requires matching flag_values"
+                    "cmake_target_variant_values requires matching flag_values"
                 )
             variant_placeholder = next(iter(variant_placeholders))
             variant_label = flag_values.get(variant_placeholder)
             if not variant_label:
                 raise ValueError(
-                    f"cmake_format_variant_values entry {variant_placeholder} "
+                    f"cmake_target_variant_values entry {variant_placeholder} "
                     "is missing from flag_values"
                 )
             variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(variant_label)
@@ -2546,7 +2543,7 @@ class BuildFileFunctions(object):
                 if cmake_var is not None:
                     if placeholder not in variant_placeholders:
                         cmake_ref = "${" + cmake_var + "}"
-                        format_string = format_string.replace(template, cmake_ref)
+                        target_key = target_key.replace(template, cmake_ref)
                         if flags:
                             flags = [f.replace(template, cmake_ref) for f in flags]
                 else:
@@ -2555,17 +2552,17 @@ class BuildFileFunctions(object):
                 flags = [f for f in flags if not any(t in f for t in file_templates)]
 
         name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
+            "TARGET_NAME", target_name, quote=False
         )
         variant_token_block = self._convert_string_arg_block(
-            "FORMAT_VARIANT_TOKEN", variant_token
+            "TARGET_VARIANT_TOKEN", variant_token
         )
         if variant_values_var:
-            format_variants_block = self._convert_string_list_block(
-                "FORMAT_VARIANTS", [f"${{{variant_values_var}}}"], quote=False
+            target_variants_block = self._convert_string_list_block(
+                "TARGET_VARIANTS", [f"${{{variant_values_var}}}"], quote=False
             )
         else:
-            format_variants_block = ""
+            target_variants_block = ""
         target_device_block = self._convert_string_arg_block(
             "TARGET_DEVICE", target_device
         )
@@ -2573,18 +2570,14 @@ class BuildFileFunctions(object):
         backend_name_block = self._convert_string_arg_block(
             "BACKEND_NAME", backend_name
         )
-        # Bracket-quote C expressions like "embedded-elf-" IREE_ARCH so CMake
-        # leaves them alone. If placeholder substitution produced a CMake
-        # variable reference, use a normal quoted argument so the generated
-        # testdata registration contains the configured value instead of the
-        # literal ${...} token.
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
+        target_family_block = self._convert_string_arg_block(
+            "TARGET_FAMILY", target_family
+        )
+        if "${" in target_key:
+            escaped_target_key = target_key.replace("\\", "\\\\").replace('"', '\\"')
+            target_key_block = f'  TARGET_KEY\n    "{escaped_target_key}"\n'
         else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
+            target_key_block = f"  TARGET_KEY\n    [=[{target_key}]=]\n"
         flags_block = self._convert_string_list_block("FLAGS", flags)
 
         # Convert Bazel label to CMake directory path.
@@ -2600,11 +2593,12 @@ class BuildFileFunctions(object):
             f"iree_hal_cts_testdata(\n"
             f"{name_block}"
             f"{variant_token_block}"
-            f"{format_variants_block}"
+            f"{target_variants_block}"
             f"{target_device_block}"
             f"{identifier_block}"
             f"{backend_name_block}"
-            f"{format_string_block}"
+            f"{target_family_block}"
+            f"{target_key_block}"
             f"{testdata_dir_block}"
             f"{flags_block}"
             f")\n\n"

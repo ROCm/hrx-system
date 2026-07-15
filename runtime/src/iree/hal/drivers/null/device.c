@@ -15,7 +15,6 @@
 #include "iree/hal/drivers/null/command_buffer.h"
 #include "iree/hal/drivers/null/event.h"
 #include "iree/hal/drivers/null/executable.h"
-#include "iree/hal/drivers/null/executable_cache.h"
 #include "iree/hal/drivers/null/semaphore.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
@@ -350,18 +349,13 @@ static iree_status_t iree_hal_null_device_create_event(
                                     out_event);
 }
 
-static iree_status_t iree_hal_null_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
-  iree_hal_null_device_t* device = iree_hal_null_device_cast(base_device);
-
-  // TODO(null): pass any additional resources required during executable
-  // creation or cache management.
-  (void)device;
-
-  return iree_hal_null_executable_cache_create(
-      identifier, iree_hal_device_host_allocator(base_device),
-      out_executable_cache);
+static iree_status_t iree_hal_null_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
+  return iree_hal_null_executable_create(
+      load_params, iree_hal_device_host_allocator(base_device), out_executable);
 }
 
 static iree_status_t iree_hal_null_device_import_file(
@@ -704,7 +698,7 @@ static const iree_hal_device_vtable_t iree_hal_null_device_vtable = {
     .create_channel = iree_hal_null_device_create_channel,
     .create_command_buffer = iree_hal_null_device_create_command_buffer,
     .create_event = iree_hal_null_device_create_event,
-    .create_executable_cache = iree_hal_null_device_create_executable_cache,
+    .load_executable = iree_hal_null_device_load_executable,
     .import_file = iree_hal_null_device_import_file,
     .create_semaphore = iree_hal_null_device_create_semaphore,
     .query_semaphore_compatibility =

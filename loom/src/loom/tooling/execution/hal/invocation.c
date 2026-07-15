@@ -182,20 +182,23 @@ iree_status_t loom_run_hal_artifact_prepare(
     const loom_run_hal_artifact_t* artifact,
     iree_hal_executable_t** out_hal_executable) {
   *out_hal_executable = NULL;
-  if (runtime->device == NULL || runtime->executable_cache == NULL) {
+  if (runtime->device == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL runtime is not initialized");
   }
+  if (artifact->hal_target == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HAL artifact was not emitted for the active device target");
+  }
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format = artifact->executable_format;
-  executable_params.executable_data = artifact->executable_data;
-  return iree_hal_executable_cache_prepare_executable(
-      runtime->executable_cache, &executable_params, out_hal_executable);
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+  load_params.executable_data = artifact->executable_data;
+  return iree_hal_device_load_executable(
+      runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, artifact->hal_target,
+      &load_params, out_hal_executable);
 }
 
 iree_status_t loom_run_hal_prepared_candidate_prepare(

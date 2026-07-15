@@ -30,6 +30,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 

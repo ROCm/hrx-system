@@ -129,6 +129,7 @@ static iree_status_t FakeHalSelectDeviceTarget(
   (void)runtime;
   (void)allocator;
   *out_target = (loom_run_hal_device_target_t){
+      /*.hal_target=*/nullptr,
       /*.data=*/&kFakeHalTarget,
       /*.target_storage=*/{},
       /*.target_bundle=*/{},

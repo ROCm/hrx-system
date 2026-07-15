@@ -90,7 +90,6 @@ TEST(LoomcFullPackageTest, LinksCoreAndSpirvTargetPackages) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("full-package"),
       /*.device=*/nullptr,
-      /*.executable_cache=*/nullptr,
       /*.providers=*/nullptr,
       /*.provider_count=*/0,
   };

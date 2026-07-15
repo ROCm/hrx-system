@@ -22,7 +22,6 @@
 #include "iree/hal/local/inline_command_buffer.h"
 #include "iree/hal/local/inline_dispatch.h"
 #include "iree/hal/local/local_executable.h"
-#include "iree/hal/local/local_executable_cache.h"
 #include "iree/hal/local/profile.h"
 #include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
@@ -425,13 +424,30 @@ static iree_status_t iree_hal_sync_device_create_event(
                                     out_event);
 }
 
-static iree_status_t iree_hal_sync_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_sync_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
-  return iree_hal_local_executable_cache_create(
-      identifier, /*worker_capacity=*/1, device->loader_count, device->loaders,
-      iree_hal_device_host_allocator(base_device), out_executable_cache);
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "local executable target `%.*s:%.*s` affinity 0x%016" PRIx64
+        " does not cover physical-device affinity 0x%016" PRIx64,
+        (int)target->family.size, target->family.data,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+  return iree_hal_executable_loader_select_and_load(
+      device->loader_count, device->loaders, target, load_params,
+      /*worker_capacity=*/1, out_executable);
 }
 
 static iree_status_t iree_hal_sync_device_import_file(
@@ -1738,7 +1754,7 @@ static const iree_hal_device_vtable_t iree_hal_sync_device_vtable = {
     .create_channel = iree_hal_sync_device_create_channel,
     .create_command_buffer = iree_hal_sync_device_create_command_buffer,
     .create_event = iree_hal_sync_device_create_event,
-    .create_executable_cache = iree_hal_sync_device_create_executable_cache,
+    .load_executable = iree_hal_sync_device_load_executable,
     .import_file = iree_hal_sync_device_import_file,
     .create_semaphore = iree_hal_sync_device_create_semaphore,
     .query_semaphore_compatibility =

@@ -232,6 +232,42 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
       device, queue_affinity, out_backend);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* params,
+    iree_hal_executable_t** out_executable) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(params);
+  IREE_ASSERT_ARGUMENT(out_executable);
+  *out_executable = NULL;
+  if (IREE_UNLIKELY(iree_hal_device_spec_executable_target_ordinal(
+                        iree_hal_device_spec(device), target) ==
+                    IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable target must be borrowed from the device spec");
+  }
+  if (IREE_UNLIKELY(iree_const_byte_span_is_empty(params->executable_data))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data must not be empty");
+  }
+  if (IREE_UNLIKELY(!params->executable_data.data)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data pointer must not be NULL");
+  }
+  if (IREE_UNLIKELY(params->constant_count != 0 && !params->constants)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable constants are required when constant count is nonzero");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(device, load_executable)(
+      device, queue_affinity, target, params, out_executable);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_alloca(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,

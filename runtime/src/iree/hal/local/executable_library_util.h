@@ -21,9 +21,9 @@ iree_status_t iree_hal_executable_library_validate_query_result(
     const iree_hal_executable_library_header_t* const* query_result,
     const iree_hal_executable_library_v0_t** out_library);
 
-// Verifies the |library| matches the |executable_params|.
+// Verifies the |library| matches the |load_params|.
 iree_status_t iree_hal_executable_library_verify(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     const iree_hal_executable_library_v0_t* library);
 
 // Allocates and resolves import function and context storage on |environment|

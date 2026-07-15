@@ -160,7 +160,7 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
   iree_string_builder_initialize(host_allocator, &exact_target_key_builder);
   iree_status_t status =
       iree_cpu_data_append_target_key(&cpu_data, &exact_target_key_builder);
-  const iree_hal_executable_target_t cpu_targets[] = {
+  const iree_hal_executable_target_t available_cpu_targets[] = {
       {
           .family = IREE_SV("cpu"),
           .target_key = iree_string_builder_view(&exact_target_key_builder),
@@ -179,13 +179,22 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
       },
   };
 
+  iree_hal_executable_target_t
+      cpu_targets[IREE_ARRAYSIZE(available_cpu_targets)];
+  iree_host_size_t cpu_target_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(available_cpu_targets); ++i) {
+    if (iree_hal_query_any_executable_loader_target_support(
+            params->loader_count, params->loaders, &available_cpu_targets[i])) {
+      cpu_targets[cpu_target_count++] = available_cpu_targets[i];
+    }
+  }
+
   iree_hal_executable_target_t* executable_targets = NULL;
   iree_host_size_t executable_target_count = 0;
   if (iree_status_is_ok(status)) {
     status = iree_hal_local_device_spec_collect_executables(
-        IREE_ARRAYSIZE(cpu_targets), cpu_targets, params->loader_count,
-        params->loaders, host_allocator, &executable_targets,
-        &executable_target_count);
+        cpu_target_count, cpu_targets, params->loader_count, params->loaders,
+        host_allocator, &executable_targets, &executable_target_count);
   }
 
   iree_hal_device_spec_builder_t builder;

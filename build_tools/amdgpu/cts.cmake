@@ -8,8 +8,7 @@ include(CMakeParseArguments)
 include("${CMAKE_CURRENT_LIST_DIR}/binary.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/selectors.cmake")
 
-function(_iree_amdgpu_cts_target_deps out_var exact_target code_object_target)
-  iree_amdgpu_target_label_fragment(_TARGET_FRAGMENT "${exact_target}")
+function(_iree_amdgpu_cts_target_deps out_var code_object_target)
   iree_amdgpu_target_label_fragment(
     _CODE_OBJECT_TARGET_FRAGMENT
     "${code_object_target}"
@@ -17,12 +16,6 @@ function(_iree_amdgpu_cts_target_deps out_var exact_target code_object_target)
   set(_TARGET_DEPS)
   foreach(_DEP ${ARGN})
     set(_TARGET_DEP "${_DEP}")
-    string(REPLACE "{AMDGPU_TARGET}" "${exact_target}"
-      _TARGET_DEP "${_TARGET_DEP}"
-    )
-    string(REPLACE "{AMDGPU_TARGET_FRAGMENT}" "${_TARGET_FRAGMENT}"
-      _TARGET_DEP "${_TARGET_DEP}"
-    )
     string(REPLACE "{AMDGPU_CODE_OBJECT_TARGET}" "${code_object_target}"
       _TARGET_DEP "${_TARGET_DEP}"
     )
@@ -48,8 +41,7 @@ endfunction()
 # SRCS: C sources. Each source basename maps to `<basename>.bin` in the CTS
 #       executable-data table of contents.
 # DEPS: Bitcode archives passed to each generated executable. Entries may use
-#       `{AMDGPU_TARGET}`, `{AMDGPU_TARGET_FRAGMENT}`,
-#       `{AMDGPU_CODE_OBJECT_TARGET}`, and
+#       `{AMDGPU_CODE_OBJECT_TARGET}` and
 #       `{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}` placeholders.
 # INTERNAL_HDRS: Headers that should invalidate device compilation.
 # COPTS: Additional flags to pass to clang.
@@ -61,7 +53,7 @@ function(iree_amdgpu_hal_cts_testdata)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
-    "NAME;TARGET;FORMAT_NAME;FORMAT_STRING;IDENTIFIER;BACKEND_NAME;INTERNALIZE"
+    "NAME;TARGET;TARGET_NAME;IDENTIFIER;BACKEND_NAME;TARGET_FAMILY;INTERNALIZE"
     "TARGETS;SRCS;DEPS;INTERNAL_HDRS;COPTS;LINKOPTS"
     ${ARGN}
   )
@@ -75,11 +67,8 @@ function(iree_amdgpu_hal_cts_testdata)
   if(NOT _RULE_TARGET)
     message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires TARGET")
   endif()
-  if(NOT _RULE_FORMAT_NAME)
-    message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires FORMAT_NAME")
-  endif()
-  if(NOT _RULE_FORMAT_STRING)
-    message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires FORMAT_STRING")
+  if(NOT _RULE_TARGET_NAME)
+    message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires TARGET_NAME")
   endif()
   if(NOT _RULE_IDENTIFIER)
     message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires IDENTIFIER")
@@ -87,10 +76,13 @@ function(iree_amdgpu_hal_cts_testdata)
   if(NOT _RULE_BACKEND_NAME)
     set(_RULE_BACKEND_NAME "amdgpu")
   endif()
+  if(NOT _RULE_TARGET_FAMILY)
+    set(_RULE_TARGET_FAMILY "amdgpu")
+  endif()
 
   iree_amdgpu_expand_target_selectors(
-    _EXACT_TARGETS
-    "${IREE_AMDGPU_TARGET_EXPANSION_EXACT}"
+    _CODE_OBJECT_TARGETS
+    "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
     ${_RULE_TARGETS}
   )
 
@@ -104,12 +96,13 @@ function(iree_amdgpu_hal_cts_testdata)
   endif()
 
   set(_TARGET_LIBS)
-  foreach(_EXACT_TARGET ${_EXACT_TARGETS})
-    iree_amdgpu_target_label_fragment(_TARGET_FRAGMENT "${_EXACT_TARGET}")
-    iree_amdgpu_target_code_object(_CODE_OBJECT_TARGET "${_EXACT_TARGET}")
+  foreach(_CODE_OBJECT_TARGET ${_CODE_OBJECT_TARGETS})
+    iree_amdgpu_target_label_fragment(
+      _TARGET_FRAGMENT
+      "${_CODE_OBJECT_TARGET}"
+    )
     _iree_amdgpu_cts_target_deps(
       _TARGET_DEPS
-      "${_EXACT_TARGET}"
       "${_CODE_OBJECT_TARGET}"
       ${_RULE_DEPS}
     )
@@ -161,13 +154,12 @@ function(iree_amdgpu_hal_cts_testdata)
       PUBLIC
     )
 
-    set(_TARGET_FORMAT_NAME "${_RULE_FORMAT_NAME}_${_TARGET_FRAGMENT}")
-    string(REPLACE "{AMDGPU_TARGET}" "${_EXACT_TARGET}" _FORMAT_STRING
-      "${_RULE_FORMAT_STRING}"
+    set(_REGISTRATION_TARGET_NAME
+      "${_RULE_TARGET_NAME}_${_TARGET_FRAGMENT}"
     )
     set(_REGISTRATION "${_RULE_NAME}_${_TARGET_FRAGMENT}_registration.cc")
     set(_REGISTRATION_TEMPLATE
-      "${IREE_SOURCE_DIR}/runtime/src/iree/hal/cts/util/testdata_format.cc.tpl"
+      "${IREE_SOURCE_DIR}/runtime/src/iree/hal/cts/util/testdata_target.cc.tpl"
     )
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
       "${_REGISTRATION_TEMPLATE}"
@@ -179,16 +171,19 @@ function(iree_amdgpu_hal_cts_testdata)
     string(REPLACE "{BACKEND_NAME}" "${_RULE_BACKEND_NAME}"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
-    string(REPLACE "{FORMAT_FUNC_NAME}" "${_TARGET_IDENTIFIER}"
+    string(REPLACE "{TARGET_FUNC_NAME}" "${_TARGET_IDENTIFIER}"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
-    string(REPLACE "{FORMAT_NAME}" "${_TARGET_FORMAT_NAME}"
+    string(REPLACE "{TARGET_NAME}" "${_REGISTRATION_TARGET_NAME}"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
-    string(REPLACE "{FORMAT_STRING}" "${_FORMAT_STRING}"
+    string(REPLACE "{TARGET_FAMILY}" "${_RULE_TARGET_FAMILY}"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
-    string(REPLACE "{FORMAT_VAR_NAME}" "${_TARGET_IDENTIFIER}_format"
+    string(REPLACE "{TARGET_KEY}" "${_CODE_OBJECT_TARGET}"
+      _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
+    )
+    string(REPLACE "{TARGET_VAR_NAME}" "${_TARGET_IDENTIFIER}_target"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
     string(REPLACE "{HEADER_PATH}" "${_DATA_HEADER}"

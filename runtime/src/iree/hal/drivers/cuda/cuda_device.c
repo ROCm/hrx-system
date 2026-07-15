@@ -22,9 +22,9 @@
 #include "iree/hal/drivers/cuda/event_semaphore.h"
 #include "iree/hal/drivers/cuda/graph_command_buffer.h"
 #include "iree/hal/drivers/cuda/memory_pools.h"
+#include "iree/hal/drivers/cuda/native_executable.h"
 #include "iree/hal/drivers/cuda/nccl_channel.h"
 #include "iree/hal/drivers/cuda/nccl_dynamic_symbols.h"
-#include "iree/hal/drivers/cuda/nop_executable_cache.h"
 #include "iree/hal/drivers/cuda/stream_command_buffer.h"
 #include "iree/hal/drivers/cuda/timepoint_pool.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
@@ -964,13 +964,31 @@ static iree_status_t iree_hal_cuda_device_create_event(
                           "event not yet implemented");
 }
 
-static iree_status_t iree_hal_cuda_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_cuda_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_cuda_device_t* device = iree_hal_cuda_device_cast(base_device);
-  return iree_hal_cuda_nop_executable_cache_create(
-      base_device, identifier, device->cuda_symbols, device->cu_device,
-      device->cu_context, device->host_allocator, out_executable_cache);
+
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "CUDA executable target `%.*s` physical-device affinity 0x%016" PRIx64
+        " does not cover device affinity 0x%016" PRIx64,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+
+  return iree_hal_cuda_native_executable_create(
+      base_device, device->cuda_symbols, device->cu_device, device->cu_context,
+      load_params, device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_cuda_device_import_file(
@@ -1238,7 +1256,7 @@ static const iree_hal_device_vtable_t iree_hal_cuda_device_vtable = {
     .create_channel = iree_hal_cuda_device_create_channel,
     .create_command_buffer = iree_hal_cuda_device_create_command_buffer,
     .create_event = iree_hal_cuda_device_create_event,
-    .create_executable_cache = iree_hal_cuda_device_create_executable_cache,
+    .load_executable = iree_hal_cuda_device_load_executable,
     .import_file = iree_hal_cuda_device_import_file,
     .create_semaphore = iree_hal_cuda_device_create_semaphore,
     .query_semaphore_compatibility =
