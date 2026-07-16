@@ -13,7 +13,9 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Validates a complete, uniform generation parameter source catalog.
+// Validates a complete generation parameter source catalog. Checkpoint and
+// execution-layout sources may not be mixed, while independently materialized
+// resident stages may replace either representation.
 iree_status_t id4_ideogram4_generation_parameter_sources_validate(
     const id4_ideogram4_generation_parameter_sources_t* sources);
 
@@ -35,13 +37,15 @@ id4_ideogram4_generation_parameter_source_for_stage(
     const id4_ideogram4_generation_parameter_sources_t* sources,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal);
 
-// Returns whether |entry| contains compatible slabs populated from |source|.
+// Returns whether |entry| contains compatible slabs populated from a
+// materializable |source|. Explicit resident sources bypass this cache.
 bool id4_ideogram4_resident_parameter_cache_entry_matches(
     const id4_ideogram4_resident_parameter_cache_entry_t* entry,
     const id4_pipeline_parameter_source_t* source,
     const id4_pipeline_plan_t* plan);
 
-// Replaces |entry| with retained slabs and an owned copy of |source|.
+// Replaces |entry| with retained slabs and an owned checkpoint or
+// execution-layout source. Explicit resident sources are rejected.
 iree_status_t id4_ideogram4_resident_parameter_cache_entry_assign(
     id4_ideogram4_resident_parameter_cache_entry_t* entry,
     const id4_pipeline_parameter_source_t* source,

@@ -630,20 +630,26 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
           &bundle->parameter_sources, stage_ordinal);
   id4_ideogram4_resident_parameter_cache_entry_t* resident_parameter_entry =
       &bundle->session->resident_stage_parameters[stage_ordinal];
-  const bool reuse_parameter_slabs =
+  const bool source_is_resident =
+      stage_parameter_source && stage_parameter_source->kind ==
+                                    ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT;
+  const bool reuse_cached_parameter_slabs =
       retain_parameter_slabs &&
       id4_ideogram4_resident_parameter_cache_entry_matches(
           resident_parameter_entry, stage_parameter_source, slot->plan);
   id4_pipeline_parameter_slab_set_t* resident_parameter_slabs =
-      reuse_parameter_slabs ? resident_parameter_entry->slabs : NULL;
-  if (reuse_parameter_slabs) {
+      source_is_resident
+          ? stage_parameter_source->storage.resident.slabs
+          : (reuse_cached_parameter_slabs ? resident_parameter_entry->slabs
+                                          : NULL);
+  if (resident_parameter_slabs) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
         slot->plan, resident_parameter_slabs));
   }
 
   iree_hal_semaphore_t* materialize_semaphore = NULL;
   uint64_t materialize_payload_value = 1;
-  if (materialize_parameter_slabs && !reuse_parameter_slabs) {
+  if (materialize_parameter_slabs && !resident_parameter_slabs) {
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
         bundle->device, bundle->queue_affinity, /*initial_value=*/0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &materialize_semaphore));
@@ -677,7 +683,7 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   prepare_options.structure_size = sizeof(prepare_options);
   if (!has_parameter_slabs) {
     prepare_options.parameter_policy = id4_pipeline_stage_no_parameters();
-  } else if (reuse_parameter_slabs) {
+  } else if (resident_parameter_slabs) {
     prepare_options.parameter_policy = id4_pipeline_stage_parameters(
         id4_pipeline_resident_parameter_source(resident_parameter_slabs),
         ID4_PIPELINE_STAGE_PARAMETER_RESIDENCY_RESIDENT, 0);
@@ -693,7 +699,7 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   }
   prepare_options.kernel_library = bundle->kernel_library;
   prepare_options.wait_semaphore_list =
-      has_parameter_slabs && !reuse_parameter_slabs
+      has_parameter_slabs && !resident_parameter_slabs
           ? wait_semaphore_list
           : iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_semaphore_list;
@@ -704,7 +710,7 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   iree_status_t status = id4_pipeline_stage_prepare(
       slot->stage, slot->plan, &prepare_options, out_stage_bundle);
   if (iree_status_is_ok(status) && retain_parameter_slabs &&
-      !reuse_parameter_slabs) {
+      !resident_parameter_slabs) {
     id4_pipeline_parameter_slab_set_t* parameter_slabs =
         id4_pipeline_bundle_parameter_slabs(*out_stage_bundle);
     if (!parameter_slabs) {

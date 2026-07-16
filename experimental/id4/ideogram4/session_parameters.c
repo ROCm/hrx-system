@@ -75,6 +75,15 @@ static iree_status_t id4_ideogram4_generation_parameter_source_validate(
             (int)name.size, name.data);
       }
       return iree_ok_status();
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT:
+      if (!source->storage.resident.slabs) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 generation %.*s resident parameter slabs are "
+            "required",
+            (int)name.size, name.data);
+      }
+      return iree_ok_status();
     default:
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -94,6 +103,9 @@ static void id4_ideogram4_generation_parameter_source_retain(
       iree_io_parameter_provider_retain(
           source->storage.execution_layout.provider);
       break;
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT:
+      id4_pipeline_parameter_slab_set_retain(source->storage.resident.slabs);
+      break;
     default:
       break;
   }
@@ -109,6 +121,9 @@ static void id4_ideogram4_generation_parameter_source_release(
       iree_io_parameter_provider_release(
           source->storage.execution_layout.provider);
       iree_io_parameter_index_release(source->storage.execution_layout.index);
+      break;
+    case ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT:
+      id4_pipeline_parameter_slab_set_release(source->storage.resident.slabs);
       break;
     default:
       break;
@@ -134,13 +149,16 @@ iree_status_t id4_ideogram4_generation_parameter_sources_validate(
         id4_ideogram4_generation_parameter_source_at(sources, descriptor);
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_source_validate(
         source, descriptor->name));
+    if (source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT) {
+      continue;
+    }
     if (common_kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_INVALID) {
       common_kind = source->kind;
     } else if (source->kind != common_kind) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "Ideogram 4 generation parameter sources must use one common "
-          "representation");
+          "Ideogram 4 generation checkpoint and execution-layout sources "
+          "cannot be mixed");
     }
   }
   return iree_ok_status();
@@ -281,6 +299,11 @@ iree_status_t id4_ideogram4_resident_parameter_cache_entry_assign(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "resident parameter cache source and slabs are required");
+  }
+  if (source->kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_RESIDENT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "resident parameter cache only accepts materializable sources");
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_source_validate(
       source, IREE_SV("cached stage")));
