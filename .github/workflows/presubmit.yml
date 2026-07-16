@@ -31,6 +31,7 @@ jobs:
       HRX_PYTHON: ${{ github.workspace }}/build/presubmit/python/bin/python3
       HRX_RELEASE_TYPE: nightly
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/presubmit/rocm-root
+      IREE_CLANG_TIDY_LLVM_ROOT: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm
       IREE_CLANG_TIDY_REQUIRED: "1"
       PIP_CACHE_DIR: ${{ github.workspace }}/build/presubmit/caches/pip
     steps:
@@ -54,9 +55,10 @@ jobs:
       - name: Check tool versions
         run: |
           python3 dev.py bazel doctor
-          clang-tidy --version
-          llvm-config --version
-          clang++ --version
+          bash .github/scripts/check_host_toolchain.sh
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang-tidy" --version
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/llvm-config" --version
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang++" --version
           test -d "${HRX_ROCM_ROOT}/lib/llvm/include"
 
       - name: Run presubmit

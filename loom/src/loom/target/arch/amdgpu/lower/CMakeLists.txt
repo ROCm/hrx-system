@@ -231,6 +231,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::matrix::projection
     loom::target::arch::amdgpu::planning::wait_packets
     loom::target::arch::amdgpu::planning::wait_plan
+    loom::target::arch::amdgpu::records::target_records_tables
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info

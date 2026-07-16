@@ -118,16 +118,21 @@ python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-g
 python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan-sanitizers --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
 ```
+
+AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
+or family selector and applies it to both the runtime HAL target set and Loom's
+`iree_hal`-derived compiler target set. Bazel AMDGPU commands run resource-tagged
+tests from both `//runtime/...` and `//loom/...`.
 
 The aggregate `*-sanitizers` commands batch sanitizer configurations for CI
 scheduling. Individual sanitizer commands are the targeted reproduction form:
@@ -135,10 +140,10 @@ scheduling. Individual sanitizer commands are the targeted reproduction form:
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 ```
 
 Sanitizer CI tests ASAN, UBSAN, and TSAN. MSAN is build-only until the CI host

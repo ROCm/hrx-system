@@ -84,8 +84,8 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "${CC}" --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Configure libhrx Bazel

@@ -129,8 +129,8 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          clang --version
-          "${CC}" --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
           echo "Importer profile: ${IMPORTER_PROFILE}"
           echo "Importer lock: ${IMPORTER_LOCK_FILE}"

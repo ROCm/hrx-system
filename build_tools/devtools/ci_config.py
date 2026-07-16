@@ -23,6 +23,9 @@ IREE_TARGET_DIRECTORIES = ("runtime", "loom")
 # provide.
 SANITIZER_TEST_CONFIGS = ("asan", "ubsan", "tsan")
 SANITIZER_BUILD_CONFIGS = ("msan",)
+# Tests whose production resource layout conflicts with host TSAN use this
+# conventional Bazel tag and CTest label.
+HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
 
 CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS = (
     "iree::base::status_test",
@@ -144,10 +147,11 @@ NON_CPU_HAL_DRIVER_CTEST_REGEX = (
 
 AMDGPU_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
-AMDGPU_TARGET_SELECTOR = "gfx942"
-RUNTIME_AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
+DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
+AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
 AMDGPU_BAZEL_RESOURCE_SLICES = (
-    ("runtime", "//runtime", "//runtime/...", RUNTIME_AMDGPU_RESOURCE_TAG),
+    ("runtime", "//runtime", "//runtime/...", AMDGPU_RESOURCE_TAG),
+    ("Loom", "//loom", "//loom/...", AMDGPU_RESOURCE_TAG),
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
