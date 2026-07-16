@@ -76,11 +76,12 @@ typedef bool (*iree_hal_streaming_kpack_target_callback_t)(
     iree_string_view_t target, void* user_data);
 
 // Invokes |callback| for each ISA target compatible with |agent_isa|, ordered
-// most-specific first (full feature set, then every feature subset by
-// descending cardinality, then the bare processor). Stops early and returns
-// true if a callback returns true; returns false otherwise (including empty
-// input). Targets longer than IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY are
-// skipped.
+// most-specific first: the full feature set, then every feature subset in
+// descending feature-bitmask order (each feature maps to a bit, earlier-listed
+// features to higher bits, so higher-priority features are retained longest),
+// then the bare processor. Stops early and returns true if a callback returns
+// true; returns false otherwise (including empty input). Targets longer than
+// IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY are skipped.
 bool iree_hal_streaming_kpack_for_each_compatible_target(
     iree_string_view_t agent_isa,
     iree_hal_streaming_kpack_target_callback_t callback, void* user_data);
@@ -204,10 +205,10 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 // search paths are expanded per candidate architecture.
 //
 // On success |out_code_object| is a freshly-allocated buffer owned by the
-// caller (free with iree_allocator_free); it holds a raw AMDGPU code object
-// (ELF, a concatenation of ELFs, or a Clang offload bundle) ready to feed back
-// through the normal fat-binary extraction path. On failure both outputs are
-// left untouched.
+// caller (free with iree_allocator_free) and |out_code_object_size| is nonzero;
+// it holds a raw AMDGPU code object (ELF, a concatenation of ELFs, or a Clang
+// offload bundle) ready to feed back through the normal fat-binary extraction
+// path. On failure both outputs are left untouched.
 iree_status_t iree_hal_streaming_kpack_resolve_code_object(
     const void* hipk_metadata, uint32_t co_index,
     iree_host_size_t target_arch_count, const iree_string_view_t* target_archs,

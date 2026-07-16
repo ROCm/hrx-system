@@ -19,25 +19,34 @@
 // name plus a handful of search paths) and real archive TOCs; exceeding them is
 // treated as malformed input rather than silently truncated.
 enum {
-  KPACK_MP_MAX_DEPTH = 32,      // msgpack nesting guard
-  KPACK_MAX_FEATURES = 6,       // ISA feature flags considered for subsetting
-  KPACK_PATH_MAX = 4096,        // filesystem path buffer
-  KPACK_MAX_LOOKUP_KEY = 1024,  // "<kernel_name>#<co_index>"
-  KPACK_MAX_ARCH_CANDIDATES = 64,        // distinct compatible arch strings
-  KPACK_MAX_OPEN_ARCHIVES = 64,          // archives opened per resolve
-  KPACK_ZSTD_MAX_KERNELS = 1024 * 1024,  // frame-count cap for a zstd blob
+  KPACK_MP_MAX_DEPTH = 32,  // msgpack nesting guard
+  // ISA features subset into a target ID (today sramecc, xnack), with headroom.
+  // One target expands to at most 2^KPACK_MAX_FEATURES candidates, kept well
+  // within KPACK_MAX_ARCH_CANDIDATES.
+  KPACK_MAX_FEATURES = 4,
+  KPACK_PATH_MAX = 4096,           // filesystem path buffer
+  KPACK_MAX_LOOKUP_KEY = 1024,     // "<kernel_name>#<co_index>"
+  KPACK_MAX_ARCH_CANDIDATES = 64,  // distinct compatible arch strings
+  KPACK_MAX_OPEN_ARCHIVES = 64,    // archives opened per resolve
 };
 
-// Upper bound on an archive's size and on a decompressed code object.
-#define KPACK_MAX_FILE_SIZE (2ULL * 1024 * 1024 * 1024)
+// Upper bound on a single resolved code object. Real AMDGPU code objects are
+// far smaller, so this rejects an implausible (corrupt) size before allocating
+// it.
+#define KPACK_MAX_CODE_OBJECT_BYTES (256ULL * 1024 * 1024)
 
 //===----------------------------------------------------------------------===//
 // Debug logging
 //===----------------------------------------------------------------------===//
 
-static bool kpack_debug_enabled(void) {
-  const char* e = getenv("ROCM_KPACK_DEBUG");
+// True if an environment variable is set to a non-empty, non-"0" value.
+static bool kpack_env_flag(const char* name) {
+  const char* e = getenv(name);
   return e != NULL && e[0] != '\0' && e[0] != '0';
+}
+
+static bool kpack_debug_enabled(void) {
+  return kpack_env_flag("ROCM_KPACK_DEBUG");
 }
 
 #define KPACK_DBG(...)                             \
@@ -48,12 +57,6 @@ static bool kpack_debug_enabled(void) {
       fflush(stderr);                              \
     }                                              \
   } while (0)
-
-// True if an environment variable is set to a non-empty, non-"0" value.
-static bool kpack_env_flag(const char* name) {
-  const char* e = getenv(name);
-  return e != NULL && e[0] != '\0' && e[0] != '0';
-}
 
 //===----------------------------------------------------------------------===//
 // Minimal MessagePack reader
@@ -607,6 +610,12 @@ static iree_status_t kpack_decompress_none(
                             offset, offset + size,
                             archive->archive.data_length);
   }
+  if (size > KPACK_MAX_CODE_OBJECT_BYTES) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack code object %" PRIu64
+                            " bytes exceeds limit %" PRIu64,
+                            size, (uint64_t)KPACK_MAX_CODE_OBJECT_BYTES);
+  }
   void* buffer = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, (iree_host_size_t)size, &buffer));
@@ -632,22 +641,18 @@ static iree_status_t kpack_decompress_zstd(
       "kpack zstd-per-kernel archive requires building HRX with "
       "HRX_ENABLE_ZSTD (install libzstd and rebuild)");
 #else
-  // Bound the trusted sizes before allocating or walking frames: original_size
-  // drives the output allocation and num_kernels drives the frame walk, so an
-  // absurd value would be an allocation-amplification / graceful-fail DoS
-  // shape. The num_kernels cap matches the reference unpacker's MAX_KERNELS;
-  // the original_size cap reuses HRX's whole-file KPACK_MAX_FILE_SIZE limit and
-  // has no counterpart in the reference, which bounds the compressed blob but
-  // not the decompressed size.
-  if (original_size > KPACK_MAX_FILE_SIZE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kpack zstd decompressed size %" PRIu64
-                            " exceeds limit %" PRIu64,
-                            original_size, (uint64_t)KPACK_MAX_FILE_SIZE);
+  // Cap the decompressed size before allocating the output buffer for it.
+  if (original_size > KPACK_MAX_CODE_OBJECT_BYTES) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "kpack zstd decompressed size %" PRIu64 " exceeds limit %" PRIu64,
+        original_size, (uint64_t)KPACK_MAX_CODE_OBJECT_BYTES);
   }
 
   // Blob layout: [num_kernels: u32][ (frame_size: u32)(zstd_frame) ]*, all
-  // little-endian (these are raw binary fields, not msgpack).
+  // little-endian (these are raw binary fields, not msgpack). The frame walk
+  // below is self-terminating on the blob length, so num_kernels only needs to
+  // bound the requested ordinal.
   const uint8_t* p = archive->zstd_blob.data;
   const uint8_t* end = p + archive->zstd_blob.data_length;
   if ((uint64_t)(end - p) < sizeof(uint32_t)) {
@@ -657,11 +662,6 @@ static iree_status_t kpack_decompress_zstd(
   uint32_t num_kernels;
   memcpy(&num_kernels, p, sizeof(num_kernels));
   p += sizeof(uint32_t);
-  if (num_kernels > KPACK_ZSTD_MAX_KERNELS) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kpack zstd kernel count %u exceeds limit %d",
-                            num_kernels, KPACK_ZSTD_MAX_KERNELS);
-  }
   if (ordinal >= num_kernels) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "kpack zstd ordinal %" PRIu64
@@ -705,8 +705,7 @@ static iree_status_t kpack_decompress_zstd(
     }
     p += frame_size;
   }
-  // Unreachable: the loop returns at i == ordinal and ordinal < num_kernels is
-  // enforced above; kept as a defensive backstop.
+  // Unreachable: the loop returns at i == ordinal, and ordinal < num_kernels.
   return iree_make_status(IREE_STATUS_INTERNAL, "kpack zstd frame walk failed");
 #endif  // HRX_ENABLE_ZSTD
 }
@@ -1024,27 +1023,16 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 // Top-level resolution
 //===----------------------------------------------------------------------===//
 
-// Memory-maps the archive at |path|. The mapping owns the bytes and the spans
-// parsed from it stay valid until it is freed; the file must not change size
-// while mapped. Fails if |path| cannot be mapped (caller skips the path) or is
-// larger than KPACK_MAX_FILE_SIZE.
+// Memory-maps the archive at |path|; the mapping owns the bytes and the spans
+// parsed from it stay valid until it is freed. The file must not change size
+// while mapped. Fails if |path| cannot be mapped (caller skips the path).
 static iree_status_t kpack_map_file(const char* path,
                                     iree_allocator_t host_allocator,
                                     iree_io_file_contents_t** out_mapping) {
   *out_mapping = NULL;
-  iree_io_file_contents_t* mapping = NULL;
-  IREE_RETURN_IF_ERROR(iree_io_file_contents_map(iree_make_cstring_view(path),
-                                                 IREE_IO_FILE_ACCESS_READ,
-                                                 host_allocator, &mapping));
-  iree_host_size_t length = mapping->const_buffer.data_length;
-  if (length > KPACK_MAX_FILE_SIZE) {
-    iree_io_file_contents_free(mapping);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "kpack archive '%s' too large (%" PRIhsz " bytes)",
-                            path, length);
-  }
-  *out_mapping = mapping;
-  return iree_ok_status();
+  return iree_io_file_contents_map(iree_make_cstring_view(path),
+                                   IREE_IO_FILE_ACCESS_READ, host_allocator,
+                                   out_mapping);
 }
 
 // An opened archive plus its canonical path (for dedup). |archive|'s spans
