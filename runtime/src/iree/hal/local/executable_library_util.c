@@ -244,6 +244,7 @@ iree_status_t iree_hal_executable_library_export_parameters(
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_hal_executable_dispatch_parameter_v0_t* src = &export_params[i];
     iree_hal_executable_function_parameter_t* dst = &out_parameters[i];
+    memset(dst, 0, sizeof(*dst));
     switch (src->type) {
       case IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT:
         dst->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;

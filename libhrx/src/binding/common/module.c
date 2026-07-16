@@ -191,45 +191,27 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   }
 
   // Analyze each export to determine operation counts.
-  // We count the total operations per symbol with copy coalescing.
   iree_host_size_t total_ops = 0;
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     const iree_host_size_t parameter_count = export_infos[i].parameter_count;
     if (!parameter_count) continue;
-    // Query parameters to analyze coalescing opportunities.
+    // Query parameters before allocating symbol-owned operation storage.
     status = iree_hal_executable_export_parameters(
         export_executables[i], export_ordinals[i], parameter_count,
         &parameters[parameter_base]);
     if (!iree_status_is_ok(status)) break;
-    // TOOD re-enable coalescing, which doesn't work for
-    //      args arrays
-    // uint32_t src_offset = 0;
-    //  int32_t last_constant_end = -1;
     for (uint16_t j = 0; j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
           parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
-      const bool is_buffer_binding_parameter =
-          parameter->type ==
-              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
-          symbol_op_counts[i].resolve_count < export_infos[i].binding_count;
-      if (is_binding_parameter || is_buffer_binding_parameter) {
+      if (is_binding_parameter) {
         ++symbol_op_counts[i].resolve_count;
         ++total_ops;
-        // src_offset += parameter->size;
-        //  last_constant_end = -1;  // break contiguity
       } else {
-        //// CONSTANT or BUFFER_PTR - check for contiguity.
-        //// Calculate source offset based on parameter order and sizes.
-        // if (src_offset != last_constant_end) {
-        //  New copy operation needed.
         ++symbol_op_counts[i].copy_count;
         ++total_ops;
-        //}
-        // src_offset += parameter->size;
-        // last_constant_end = src_offset;
       }
     }
     parameter_base += parameter_count;
@@ -279,29 +261,36 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           "function constant metadata exceeds supported parameter size");
       continue;
     }
-    // Executable binding_count describes normal HAL dispatch bindings. HRX's
-    // unpacker needs the number of reflected BINDING parameters it will
-    // resolve from the HIP launch ABI.
+    // Executable binding_count describes normal HAL dispatch bindings. Native
+    // HIP packing uses the same reflected BINDING parameters and only consults
+    // their optional target ABI offsets while constructing custom kernargs.
+    parameter_info->buffer_size = 0;
+    parameter_info->constant_bytes = 0;
+    parameter_info->direct_arg_bytes = 0;
     parameter_info->binding_count = symbol_op_counts[i].resolve_count;
     parameter_info->copy_count = symbol_op_counts[i].copy_count;
     parameter_info->ops = current_ops;
     const uint16_t parameter_count = export_infos[i].parameter_count;
     if (parameter_count == 0) {
       // No parameters.
-      parameter_info->constant_bytes = 0;
-      parameter_info->buffer_size = 0;
       continue;
     }
 
-    // Build operations with coalescing.
-    // Copy ops go first, then resolve ops.
-    uint16_t src_offset = 0;
-    size_t direct_arg_offset = 0;
+    // Build one operation per reflected parameter. Copy ops go first, then
+    // resolve ops.
+    uint16_t source_offset = 0;
+    iree_host_size_t direct_arg_offset = 0;
     uint16_t buffer_size = 0;
-    size_t this_kernel_direct_arg_size = 0;  // Native direct-arg prefix size.
+    iree_host_size_t this_kernel_direct_arg_size = 0;
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
+    for (uint16_t j = 0; j < symbol_op_counts[i].resolve_count; ++j) {
+      // This sentinel is replaced when its dense HAL binding ordinal is
+      // reflected below. It detects duplicate metadata before the operation
+      // table becomes visible to dispatch.
+      resolve_ops_start[j].resolve.destination_ordinal = UINT16_MAX;
+    }
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
     for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count;
@@ -310,94 +299,118 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
           parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
-      const bool is_buffer_binding_parameter =
-          parameter->type ==
-              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
-          resolve_count < export_infos[i].binding_count;
-      size_t native_dst_offset = direct_arg_offset;
-      if (is_buffer_binding_parameter) {
-        native_dst_offset = parameter->offset;
+      iree_host_size_t native_abi_destination_offset = direct_arg_offset;
+      if (parameter->flags &
+          IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET) {
+        native_abi_destination_offset = parameter->native_abi_offset;
       }
-      const size_t source_extent = (size_t)src_offset + parameter->size;
-      const size_t native_extent = native_dst_offset + parameter->size;
-      if (source_extent > UINT16_MAX || native_dst_offset > UINT16_MAX ||
-          native_extent > UINT16_MAX) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "function parameter metadata exceeds supported argument size");
+      iree_host_size_t source_extent = 0;
+      iree_host_size_t native_extent = 0;
+      iree_host_size_t next_direct_arg_offset = 0;
+      if (IREE_UNLIKELY(
+              native_abi_destination_offset > UINT16_MAX ||
+              !iree_host_size_checked_add((iree_host_size_t)source_offset,
+                                          parameter->size, &source_extent) ||
+              source_extent > UINT16_MAX ||
+              !iree_host_size_checked_add(native_abi_destination_offset,
+                                          parameter->size, &native_extent) ||
+              native_extent > UINT16_MAX ||
+              !iree_host_size_checked_add(direct_arg_offset, parameter->size,
+                                          &next_direct_arg_offset))) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "kernel parameter layout exceeds metadata "
+                                  "field width");
         break;
       }
-      if (is_binding_parameter || is_buffer_binding_parameter) {
-        // Update offsets. Bindings are passed as pointers.
-        // |parameter->offset| is the kernarg byte offset for all parameter
-        // types when the backend populates it (e.g. AMDGPU HSACO). The
-        // binding-list ordinal is recovered by iteration: |resolve_count|
-        // is the running count of BINDING parameters seen so far, which is
-        // exactly the index of this parameter in the bindings list.
+      if (!is_binding_parameter) {
+        iree_host_size_t constant_destination_extent = 0;
+        if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                              (iree_host_size_t)parameter->offset,
+                              parameter->size, &constant_destination_extent) ||
+                          constant_destination_extent >
+                              export_infos[i].constant_byte_length)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel constant parameter exceeds the reflected constants "
+              "range");
+          break;
+        }
+      }
+      const uint16_t next_source_offset = (uint16_t)source_extent;
+      if (is_binding_parameter) {
+        if (IREE_UNLIKELY(parameter->offset >=
+                          symbol_op_counts[i].resolve_count)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel binding parameter ordinal %u exceeds binding count %u",
+              parameter->offset, symbol_op_counts[i].resolve_count);
+          break;
+        }
         iree_hal_streaming_parameter_resolve_op_t* op =
-            &resolve_ops_start[resolve_count].resolve;
+            &resolve_ops_start[parameter->offset].resolve;
+        if (IREE_UNLIKELY(op->destination_ordinal != UINT16_MAX)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel metadata assigns binding ordinal %u more than once",
+              parameter->offset);
+          break;
+        }
         op->reserved = 0;
-        op->src_offset = src_offset;
-        op->dst_ordinal = resolve_count;
-        op->src_ordinal = j;
-        // For HIP native launches using CUSTOM_DIRECT_ARGUMENTS we need
-        // to place raw device pointers at their kernarg ABI offset. Binding
-        // export parameter offsets are binding-list ordinals in some IREE HAL
-        // backends, not byte offsets, so use the packed source offset we
-        // calculate from the full parameter sequence. AMDGPU BUFFER_PTR
-        // parameters already carry native kernarg byte offsets.
-        op->dst_offset = (uint16_t)native_dst_offset;
-        src_offset = (uint16_t)source_extent;
-        buffer_size = src_offset;
+        op->source_offset = source_offset;
+        op->destination_ordinal = parameter->offset;
+        op->source_ordinal = j;
+        // Native launches place raw device pointers at target ABI offsets.
+        op->native_abi_destination_offset =
+            (uint16_t)native_abi_destination_offset;
+        source_offset = next_source_offset;
+        buffer_size = source_offset;
         ++resolve_count;
 
-        size_t param_extent = native_extent;
-        if (param_extent > this_kernel_direct_arg_size) {
-          this_kernel_direct_arg_size = param_extent;
+        if (native_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = native_extent;
         }
-        direct_arg_offset =
-            iree_max(param_extent, direct_arg_offset + parameter->size);
+        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       } else {
-        // TODO: fix coalescing. It does not work when we have
-        // parameter arrays because each constant comes in as a
-        // separate parameter with its own offset.
-        //// CONSTANT or BUFFER_PTR - try to coalesce and choose offsets.
-        // if (active_copy &&
-        //     active_copy->src_offset + active_copy->size == src_offset) {
-        //   // Extend the current copy operation.
-        //   active_copy->size += parameter->size;
-        // } else {
-        //  Start a new copy operation.
+        // Constants use two layouts: a dense HAL constants buffer in source
+        // order, and the target ABI byte image used by native HIP launches.
         iree_hal_streaming_parameter_copy_op_t* op =
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
-        op->src_offset = src_offset;
-        op->src_ordinal = j;
-        op->direct_dst_offset = (uint16_t)native_dst_offset;
-        op->dst_offset = parameter->offset;  // offset in constants
+        op->source_offset = source_offset;
+        op->source_ordinal = j;
+        op->native_abi_destination_offset =
+            (uint16_t)native_abi_destination_offset;
+        op->constant_destination_offset = parameter->offset;
         ++copy_count;
-        // active_copy = op;
-        // }
-        src_offset = (uint16_t)source_extent;
-        buffer_size = src_offset;
+        source_offset = next_source_offset;
+        buffer_size = source_offset;
 
-        size_t direct_arg_extent = native_extent;
-        if (direct_arg_extent > this_kernel_direct_arg_size) {
-          this_kernel_direct_arg_size = direct_arg_extent;
+        if (native_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = native_extent;
         }
-        direct_arg_offset =
-            iree_max(direct_arg_extent, direct_arg_offset + parameter->size);
+        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       }
     }
-    if (iree_status_is_ok(status)) {
-      parameter_info->buffer_size = buffer_size;
-      parameter_info->constant_bytes =
-          (uint16_t)export_infos[i].constant_byte_length;
-      if (buffer_size > this_kernel_direct_arg_size) {
-        this_kernel_direct_arg_size = buffer_size;
-      }
-      parameter_info->direct_arg_bytes = (uint16_t)this_kernel_direct_arg_size;
+    if (!iree_status_is_ok(status)) break;
+    parameter_info->buffer_size = buffer_size;
+    if (IREE_UNLIKELY(export_infos[i].constant_byte_length > UINT16_MAX)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "kernel constant layout exceeds metadata "
+                                "field width");
+      break;
     }
+    parameter_info->constant_bytes =
+        (uint16_t)export_infos[i].constant_byte_length;
+    if (buffer_size > this_kernel_direct_arg_size) {
+      this_kernel_direct_arg_size = buffer_size;
+    }
+    if (IREE_UNLIKELY(this_kernel_direct_arg_size > UINT16_MAX)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "kernel direct argument layout exceeds "
+                                "metadata field width");
+      break;
+    }
+    parameter_info->direct_arg_bytes = (uint16_t)this_kernel_direct_arg_size;
 
     // Advance to next symbol's ops.
     parameter_base += parameter_count;

@@ -135,6 +135,18 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "executable_library_util_test",
+    srcs = ["executable_library_util_test.cc"],
+    deps = [
+        ":executable_library_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "executable_plugin",
     hdrs = ["executable_plugin.h"],

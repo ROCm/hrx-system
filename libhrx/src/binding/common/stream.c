@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "common/kernel_arguments.h"
 
 // Env-gated timing for launch-path investigation. This intentionally uses plain
 // counters because the current perf probes run single-threaded and we want the
@@ -867,17 +868,16 @@ iree_status_t iree_hal_streaming_unpack_parameters(
 
   const uint8_t* parameter_buffer = (const uint8_t*)parameter_buffer_ptr;
 
-  // Copy constant data spans.
-  // Each copy represents one or more constants laid out contiguously and
-  // copied in order. Constants are placed at their ABI offsets (dst_offset)
-  // matching how they'll appear in the kernel argument buffer.
+  // Copy constant data spans into the HAL constants table. Native ABI packing
+  // uses a separate destination offset so dense constants do not imply ABI
+  // layout.
   uint8_t* constants = (uint8_t*)out_constants;
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
     if (copy_op.size > 0) {
-      memcpy(constants + copy_op.dst_offset,
-             parameter_buffer + copy_op.src_offset, copy_op.size);
+      memcpy(constants + copy_op.constant_destination_offset,
+             parameter_buffer + copy_op.source_offset, copy_op.size);
     }
   }
 
@@ -889,18 +889,18 @@ iree_status_t iree_hal_streaming_unpack_parameters(
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* device_ptr = *(void**)(parameter_buffer + resolve_op.src_offset);
+    void* device_ptr = *(void**)(parameter_buffer + resolve_op.source_offset);
     // Kernel metadata identifies pointer slots but not the dynamic object
     // extent. Resolve with an unknown length; the HAL buffer reference owns
     // the allocation for dispatch.
 
     if (!device_ptr) {
-      bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
+      bindings[resolve_op.destination_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
     iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
-        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+        context, device_ptr, &bindings[resolve_op.destination_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
@@ -949,24 +949,24 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
   // array points to the actual parameter value. Metadata-described pointer
   // slots can be resolved to HAL bindings; arbitrary bytes stay raw.
 
-  // Copy constant data spans.
-  // For each copy operation, we read from the parameter list at the source
-  // ordinal and copy to the ABI offset in the constants buffer.
+  // Copy constant data spans into the HAL constants table. For pointer-array
+  // launches, the source ordinal selects the element that points at the value.
   uint8_t* constants = (uint8_t*)out_constants;
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    // In pointer array mode, src_ordinal is an index into the parameter_list
+    // In pointer array mode, source_ordinal is an index into the parameter_list
     // array. Each parameter_list[index] is a pointer to the actual value.
     // We need to dereference it to get the value.
-    void* param_ptr = parameter_list[copy_op.src_ordinal];
+    void* param_ptr = parameter_list[copy_op.source_ordinal];
     if (!param_ptr && copy_op.size > 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)copy_op.src_ordinal);
+                              (uint32_t)copy_op.source_ordinal);
     }
     if (copy_op.size > 0) {
-      memcpy(constants + copy_op.dst_offset, param_ptr, copy_op.size);
+      memcpy(constants + copy_op.constant_destination_offset, param_ptr,
+             copy_op.size);
     }
   }
 
@@ -979,12 +979,13 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    // In pointer array mode, src_offset is an index into the parameter_list.
-    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    // In pointer array mode, source_ordinal is an index into the
+    // parameter_list.
+    void* param_ptr = parameter_list[resolve_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)resolve_op.src_ordinal);
+                              (uint32_t)resolve_op.source_ordinal);
     }
     // The parameter points to a device pointer (void*)
     void* device_ptr = *(void**)param_ptr;
@@ -993,12 +994,12 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     // the allocation for dispatch.
 
     if (!device_ptr) {
-      bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
+      bindings[resolve_op.destination_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
     iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
-        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+        context, device_ptr, &bindings[resolve_op.destination_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
@@ -1024,6 +1025,9 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   *out_constants_size = parameters->direct_arg_bytes
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
+  if (*out_constants_size == 0) {
+    *out_constants_size = parameters->buffer_size;
+  }
   if (*out_constants_size == 0) return iree_ok_status();
   if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
                                              parameters->binding_count > 0 ||
@@ -1036,36 +1040,41 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    void* param_ptr = parameter_list[copy_op.src_ordinal];
+    void* param_ptr = parameter_list[copy_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)copy_op.src_ordinal);
+                              (uint32_t)copy_op.source_ordinal);
     }
-    if ((iree_host_size_t)copy_op.direct_dst_offset > *out_constants_size ||
+    if ((iree_host_size_t)copy_op.native_abi_destination_offset >
+            *out_constants_size ||
         (iree_host_size_t)copy_op.size >
-            *out_constants_size - copy_op.direct_dst_offset) {
+            *out_constants_size - copy_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel argument copy exceeds kernarg size");
     }
-    memcpy(constants + copy_op.direct_dst_offset, param_ptr, copy_op.size);
+    memcpy(constants + copy_op.native_abi_destination_offset, param_ptr,
+           copy_op.size);
   }
 
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    void* param_ptr = parameter_list[resolve_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)resolve_op.src_ordinal);
+                              (uint32_t)resolve_op.source_ordinal);
     }
     void* device_ptr = *(void**)param_ptr;
-    if ((iree_host_size_t)resolve_op.dst_offset > *out_constants_size ||
-        sizeof(device_ptr) > *out_constants_size - resolve_op.dst_offset) {
+    if ((iree_host_size_t)resolve_op.native_abi_destination_offset >
+            *out_constants_size ||
+        sizeof(device_ptr) >
+            *out_constants_size - resolve_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel pointer argument exceeds kernarg size");
     }
-    memcpy(constants + resolve_op.dst_offset, &device_ptr, sizeof(void*));
+    memcpy(constants + resolve_op.native_abi_destination_offset, &device_ptr,
+           sizeof(void*));
   }
 
   return iree_ok_status();
@@ -1107,8 +1116,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         "cooperative kernel launch not yet implemented in HAL layer");
   }
 
-  // Verify parameter buffer. Native launches provide a parameter buffer
-  // without a trusted byte length; unpacking is bounded by symbol metadata.
+  // Verify parameter storage early for metadata-described launches. The
+  // concrete branch below decides whether the storage is a native byte image,
+  // a pointer array to pack, or a shared unflagged metadata buffer.
   if (!params->buffer && symbol->parameters.buffer_size > 0) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -1176,23 +1186,16 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
   uint64_t timing_params_start_ns =
       timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  if (is_pre_packed && params->buffer) {
-    // Pre-packed buffer: pass the raw buffer directly to the kernel.
-    // This is used for kernels launched via HIP_LAUNCH_PARAM_BUFFER_POINTER
-    // (e.g., hipBLASLt GEMM kernels) where the buffer is already packed.
-    if (params->buffer_size != 0) {
-      if (params->buffer_size < symbol->parameters.constant_bytes) {
-        constants_size = symbol->parameters.constant_bytes;
-        constants = iree_alloca(constants_size);
-        memset(constants, 0, constants_size);
-        memcpy(constants, params->buffer, params->buffer_size);
-      } else {
-        constants = params->buffer;
-        constants_size = params->buffer_size;
-      }
-    } else {
-      constants = params->buffer;
-    }
+  if (is_pre_packed) {
+    // Pre-packed buffers are already in native kernarg layout. They may
+    // contain device pointers either as formal pointer arguments or inside
+    // opaque data, so preserve the bytes exactly and rely on HIP lifetime
+    // ordering instead of trying to translate visible pointer slots.
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_validate_prepacked_kernel_arguments(symbol, params));
+    constants = params->buffer;
+    constants_size = params->buffer_size;
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
@@ -1202,47 +1205,26 @@ iree_status_t iree_hal_streaming_launch_kernel(
           IREE_STATUS_UNIMPLEMENTED,
           "non-empty args-array kernel launch requires parameter metadata");
     }
-    // Unpack parameters from array of pointers (void**).
-    iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
-        stream->context, &symbol->parameters, (void**)params->buffer, constants,
-        &binding_list);
-    if (!iree_status_is_ok(unpack_status)) {
-      // If unpack fails due to NULL or external device pointers, fall back
-      // to raw argument passing. This handles native kernels with optional
-      // parameters or external allocations.
-      if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
-        iree_status_ignore(unpack_status);
-
-        // Convert void** to packed buffer format.
-        // Pack all parameters (copies + resolves) into a single constants
-        // buffer. For native kernels, we use the parameter metadata to know the
-        // layout.
-        const iree_hal_streaming_parameter_info_t* params_info =
-            &symbol->parameters;
-        void** args_array = (void**)params->buffer;
-
-        // Build a native direct-argument buffer from the args array. This is
-        // only for fallback cases where pointers cannot be represented as HAL
-        // bindings.
-        constants_size = params_info->direct_arg_bytes
-                             ? params_info->direct_arg_bytes
-                             : params_info->constant_bytes;
-        constants = iree_alloca(constants_size);
-        memset(constants, 0, constants_size);
-        iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
-            params_info, args_array, constants, &constants_size);
-        if (!iree_status_is_ok(pack_status)) {
-          IREE_TRACE_ZONE_END(z0);
-          return pack_status;
-        }
-
-        binding_list.count = 0;  // No IREE bindings, using raw pointers.
-        use_raw_arguments = true;
-      } else {
-        IREE_TRACE_ZONE_END(z0);
-        return unpack_status;
-      }
+    // Pointer-array launches are converted to native kernarg bytes. This keeps
+    // formal pointer arguments and pointers nested inside copied structs on the
+    // same device-pointer contract.
+    constants_size = symbol->parameters.direct_arg_bytes
+                         ? symbol->parameters.direct_arg_bytes
+                         : symbol->parameters.constant_bytes;
+    if (constants_size == 0) {
+      constants_size = symbol->parameters.buffer_size;
     }
+    constants = constants_size ? iree_alloca(constants_size) : NULL;
+    if (constants) memset(constants, 0, constants_size);
+    iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
+        &symbol->parameters, (void**)params->buffer, constants,
+        &constants_size);
+    if (!iree_status_is_ok(pack_status)) {
+      IREE_TRACE_ZONE_END(z0);
+      return pack_status;
+    }
+    binding_list.count = 0;
+    use_raw_arguments = true;
   } else if (is_native_kernel && params->buffer) {
     // Native kernel with pre-packed buffer: pass raw arguments directly. This
     // path is only valid when the caller did not declare the buffer as a HIP
@@ -1251,28 +1233,40 @@ iree_status_t iree_hal_streaming_launch_kernel(
     if (params->buffer_size > 0) {
       constants_size = params->buffer_size;
     }
+    binding_list.count = 0;
     use_raw_arguments = true;
-  } else {
-    // Unpack parameters from packed buffer.
+  } else if (params->buffer) {
+    // Unflagged launches use the shared metadata path. HIP entry points mark
+    // native kernarg bytes with PRE_PACKED or provide ARGS_ARRAY so device
+    // pointer values are preserved without depending on reflected pointer
+    // slots.
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameters(
         stream->context, &symbol->parameters, params->buffer, constants,
         &binding_list);
     if (!iree_status_is_ok(unpack_status)) {
       // If unpack fails due to NULL or external device pointers, fall back
       // to raw argument passing. This handles native kernels with optional
-      // parameters or external allocations (e.g., hipBLASLt workspace).
+      // parameters or external allocations.
       if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
         iree_status_ignore(unpack_status);
-        // Use the raw packed buffer directly.
         constants = params->buffer;
         constants_size = params->buffer_size;
-        binding_list.count = 0;  // No IREE bindings, using raw pointers.
+        binding_list.count = 0;
         use_raw_arguments = true;
       } else {
         IREE_TRACE_ZONE_END(z0);
         return unpack_status;
       }
     }
+  } else if (is_empty_native_kernel) {
+    constants = NULL;
+    constants_size = 0;
+    binding_list.count = 0;
+    use_raw_arguments = true;
+  } else {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel launch missing parameter storage");
   }
   if (timing_enabled) {
     timing_params_ns += hrx_launch_timing_now_ns() - timing_params_start_ns;
@@ -1316,10 +1310,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
       .dynamic_workgroup_local_memory = params->shared_memory_bytes,
   };
 
-  // Use the metadata-described constants+bindings path whenever possible. The
-  // AMDGPU backend uses HSACO metadata on that path to synthesize HIP/OpenCL
-  // hidden kernargs such as group size and block count. CUSTOM_DIRECT_ARGUMENTS
-  // is reserved for callers that supply or require native kernarg bytes.
+  // HIP launches use native kernarg bytes. The AMDGPU queue code still
+  // populates the dispatch implicit arguments for CUSTOM_DIRECT_ARGUMENTS; this
+  // flag only says that the explicit argument payload is already native.
   iree_hal_dispatch_flags_t flags =
       (use_raw_arguments || is_pre_packed)
           ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS

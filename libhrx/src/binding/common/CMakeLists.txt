@@ -12,6 +12,7 @@ iree_cc_library(
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
+    "kernel_arguments.h"
     "tls.h"
   SRCS
     "context.c"
@@ -22,6 +23,7 @@ iree_cc_library(
     "graph_analysis.c"
     "graph_exec.c"
     "init.c"
+    "kernel_arguments.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
@@ -69,6 +71,19 @@ iree_cc_test(
     buffer_table_test
   SRCS
     "buffer_table_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    graph_test
+  SRCS
+    "graph_test.cc"
   DEPS
     ::common
     iree::base

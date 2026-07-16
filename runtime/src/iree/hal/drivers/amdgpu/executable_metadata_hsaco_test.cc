@@ -252,21 +252,30 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   EXPECT_EQ(metadata->parameters[0].offset, 0);
   EXPECT_EQ(metadata->parameters[0].size, 2);
   EXPECT_EQ(metadata->parameters[1].type,
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR);
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_TRUE(iree_all_bits_set(
+      metadata->parameters[1].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
   ExpectRebasedView(loaded_code_object_data, args[1].name,
                     metadata->parameters[1].name);
-  EXPECT_EQ(metadata->parameters[1].offset, 8);
+  EXPECT_EQ(metadata->parameters[1].offset, 0);
+  EXPECT_EQ(metadata->parameters[1].native_abi_offset, 8);
   EXPECT_EQ(metadata->parameters[2].type,
             IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT);
   ExpectRebasedView(loaded_code_object_data, args[2].name,
                     metadata->parameters[2].name);
   EXPECT_EQ(metadata->parameters[2].offset, 2);
+  EXPECT_EQ(metadata->parameters[2].native_abi_offset, 20);
   EXPECT_EQ(metadata->parameters[2].size, 6);
   EXPECT_EQ(metadata->parameters[3].type,
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR);
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_TRUE(iree_all_bits_set(
+      metadata->parameters[3].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
   ExpectRebasedView(loaded_code_object_data, args[3].name,
                     metadata->parameters[3].name);
-  EXPECT_EQ(metadata->parameters[3].offset, 32);
+  EXPECT_EQ(metadata->parameters[3].offset, 1);
+  EXPECT_EQ(metadata->parameters[3].native_abi_offset, 32);
 
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }

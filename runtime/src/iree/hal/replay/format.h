@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 2u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 3u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -391,14 +391,16 @@ typedef struct iree_hal_replay_executable_function_metadata_t {
 typedef struct iree_hal_replay_executable_parameter_metadata_t {
   // Parameter offset in bytes or binding ordinal, depending on type.
   uint16_t offset;
+  // Target ABI byte offset when the native ABI offset flag is set.
+  uint16_t native_abi_offset;
   // Parameter flags from iree_hal_executable_function_parameter_t.
   uint16_t flags;
+  // Parameter size in bytes.
+  uint16_t size;
   // iree_hal_executable_function_parameter_type_t value.
   uint8_t type;
-  // Parameter size in bytes.
-  uint8_t size;
   // Reserved for future parameter metadata; must be zero.
-  uint16_t reserved0;
+  uint8_t reserved0;
 } iree_hal_replay_executable_parameter_metadata_t;
 
 // Payload describing a captured semaphore object.

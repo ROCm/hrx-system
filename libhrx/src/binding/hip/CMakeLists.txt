@@ -9,6 +9,31 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    launch_params
+  COPTS
+    "-Wno-attributes"
+  HDRS
+    "api.h"
+    "launch_params.h"
+  SRCS
+    "launch_params.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
@@ -24,6 +49,7 @@ iree_cc_library(
     "abi_stubs.c"
     "api.c"
   DEPS
+    ::launch_params
     iree::base
     iree::base::threading
     iree::hal
@@ -44,50 +70,96 @@ iree_cc_library(
 )
 endif()
 
+if(TARGET libhrx_src_binding_hip_amdhip64)
+set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
+  OUTPUT_NAME amdhip64
+  VERSION 7.9999.0
+  SOVERSION 7
+  POSITION_INDEPENDENT_CODE ON
+  INSTALL_RPATH "$ORIGIN"
+)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     hip_get_proc_address_test
   SRCS
     "hip_get_proc_address_test.cc"
+  DATA
+    ::amdhip64
   DEPS
     ${CMAKE_DL_LIBS}
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_launch_validation_api_test
+  SRCS
+    "hip_launch_validation_api_test.cc"
+  COPTS
+    "-Wno-attributes"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
+iree_cc_test(
+  NAME
+    launch_params_test
+  SRCS
+    "launch_params_test.cc"
+  COPTS
+    "-Wno-attributes"
+  DEPS
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-# Point hip_get_proc_address_test at the shared object built in this tree so it
-# can dlopen() the exact artifact under test, and make sure that artifact is
-# built first. Guarded because the test target only exists when tests are
-# enabled. (The library is passed by absolute path rather than as a test DATA
-# edge because DATA installs into the relocatable test tree, and the shim's
-# build-tree path is only valid for the in-tree ctest run.)
-if(TARGET libhrx_src_binding_hip_hip_get_proc_address_test)
-  target_compile_definitions(libhrx_src_binding_hip_hip_get_proc_address_test
-    PRIVATE
-      "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
-  )
-  add_dependencies(libhrx_src_binding_hip_hip_get_proc_address_test
-    libhrx_src_binding_hip_amdhip64
-  )
-endif()
+# Point HIP DSO tests at the shared object built in this tree so they dlopen()
+# the exact artifact under test, and make sure that artifact is built first.
+# The build-tree path is only valid for the in-tree CTest run.
+foreach(_hrx_hip_dso_test
+    libhrx_src_binding_hip_hip_get_proc_address_test
+    libhrx_src_binding_hip_hip_launch_validation_api_test)
+  if(TARGET ${_hrx_hip_dso_test})
+    target_compile_definitions(${_hrx_hip_dso_test}
+      PRIVATE
+        "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
+    )
+    add_dependencies(${_hrx_hip_dso_test}
+      libhrx_src_binding_hip_amdhip64
+    )
+  endif()
+endforeach()
 
 # The symbol version script and --undefined-version are applied through the
 # generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
 # LINK_FLAGS here so the version script is not applied twice.
 if(TARGET libhrx_src_binding_hip_amdhip64)
-  set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
-    OUTPUT_NAME amdhip64
-    VERSION 7.9999.0
-    SOVERSION 7
-    POSITION_INDEPENDENT_CODE ON
-    INSTALL_RPATH "$ORIGIN"
-  )
-
   install(TARGETS libhrx_src_binding_hip_amdhip64
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
