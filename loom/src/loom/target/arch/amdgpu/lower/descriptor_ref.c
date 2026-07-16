@@ -11,6 +11,67 @@
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/op_defs.h"
 
+bool loom_amdgpu_descriptor_set_has_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  if (descriptor_set == NULL) {
+    return false;
+  }
+  return loom_amdgpu_descriptor_ref_ordinal(descriptor_set, descriptor_ref) !=
+         LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+}
+
+iree_string_view_t loom_amdgpu_descriptor_set_key(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (descriptor_set == NULL) {
+    return IREE_SV("<missing>");
+  }
+  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
+  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
+                                                       : descriptor_set_key;
+}
+
+bool loom_amdgpu_descriptor_set_has_all_refs(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
+    iree_host_size_t descriptor_ref_count) {
+  for (iree_host_size_t i = 0; i < descriptor_ref_count; ++i) {
+    const loom_amdgpu_descriptor_ref_t descriptor_ref = descriptor_refs[i];
+    if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+      continue;
+    }
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool loom_amdgpu_descriptor_requirements_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_requirement_t* requirements,
+    iree_host_size_t requirement_count,
+    iree_string_view_t* out_constraint_key) {
+  for (iree_host_size_t i = 0; i < requirement_count; ++i) {
+    *out_constraint_key = requirements[i].constraint_key;
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                            requirements[i].descriptor_ref)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool loom_amdgpu_descriptor_requirement_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t constraint_key,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    iree_string_view_t* out_constraint_key) {
+  *out_constraint_key = constraint_key;
+  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
+}
+
 iree_status_t loom_amdgpu_lookup_descriptor_ref(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref,

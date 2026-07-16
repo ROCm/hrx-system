@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/lower/arithmetic.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
+#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/bf16.h"
@@ -358,13 +359,6 @@ typedef struct loom_amdgpu_scalar_conversion_rule_t {
   loom_amdgpu_descriptor_ref_t required_descriptor_refs[4];
 } loom_amdgpu_scalar_conversion_rule_t;
 
-typedef struct loom_amdgpu_descriptor_requirement_t {
-  // Constraint key reported when this descriptor ref is missing.
-  iree_string_view_t constraint_key;
-  // Descriptor ref required by the lowering strategy.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-} loom_amdgpu_descriptor_requirement_t;
-
 typedef struct loom_amdgpu_descriptor_requirement_span_t {
   // Descriptor requirements required by this span.
   const loom_amdgpu_descriptor_requirement_t* requirements;
@@ -390,21 +384,6 @@ enum {
       .requirements = requirements_,                           \
       .requirement_count = IREE_ARRAYSIZE(requirements_),      \
   }
-
-static bool loom_amdgpu_descriptor_requirements_present(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_descriptor_requirement_t* requirements,
-    iree_host_size_t requirement_count,
-    iree_string_view_t* out_constraint_key) {
-  for (iree_host_size_t i = 0; i < requirement_count; ++i) {
-    *out_constraint_key = requirements[i].constraint_key;
-    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
-                                            requirements[i].descriptor_ref)) {
-      return false;
-    }
-  }
-  return true;
-}
 
 static bool loom_amdgpu_descriptor_requirement_span_present(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -435,15 +414,6 @@ static bool loom_amdgpu_i64_alu_descriptor_requirements_present(
              descriptor_set, row->first, out_constraint_key) &&
          loom_amdgpu_descriptor_requirement_span_present(
              descriptor_set, row->second, out_constraint_key);
-}
-
-static bool loom_amdgpu_descriptor_requirement_present(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t constraint_key,
-    loom_amdgpu_descriptor_ref_t descriptor_ref,
-    iree_string_view_t* out_constraint_key) {
-  *out_constraint_key = constraint_key;
-  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
 }
 
 static const loom_amdgpu_descriptor_requirement_t

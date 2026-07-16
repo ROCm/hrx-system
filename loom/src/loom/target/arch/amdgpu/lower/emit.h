@@ -13,6 +13,7 @@
 
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/source_memory_plan.h"
+#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
 
@@ -117,23 +118,6 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
     loom_low_lower_context_t* context,
     loom_amdgpu_descriptor_ref_t descriptor_ref,
     loom_low_lower_resolved_descriptor_t* out_descriptor);
-
-// Returns true when |descriptor_set| contains the target-generated descriptor
-// reference.
-bool loom_amdgpu_descriptor_set_has_ref(
-    const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref);
-
-// Returns a stable display key for |descriptor_set| diagnostics.
-iree_string_view_t loom_amdgpu_descriptor_set_key(
-    const loom_low_descriptor_set_t* descriptor_set);
-
-// Returns true when |descriptor_set| contains every non-NONE descriptor ref in
-// |descriptor_refs|.
-bool loom_amdgpu_descriptor_set_has_all_refs(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
-    iree_host_size_t descriptor_ref_count);
 
 // Returns true when |descriptor_set| can emit |descriptor_ref| with |immediate|
 // through the normal VGPR immediate helper, including target inline forms.
