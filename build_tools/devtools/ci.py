@@ -509,7 +509,10 @@ def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]
         *amdgpu_test_steps(
             targets,
             target_selector,
-            xfail_targets=ci_config.AMDGPU_XFAIL_TARGETS,
+            xfail_targets=(
+                ci_config.AMDGPU_XFAIL_TARGETS
+                + ci_config.amdgpu_bazel_xfail_targets(target_selector)
+            ),
         ),
     ]
 

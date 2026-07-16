@@ -186,6 +186,13 @@ LOOM_AMDGPU_CMAKE_COMPILE_CTEST_REGEXES = tuple(
 AMDGPU_XFAILS = ()
 AMDGPU_SANITIZERS_XFAILS = ()
 AMDGPU_TSAN_XFAILS = ()
+AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
+    # gfx120X currently hangs while initializing or executing device-side TSAN.
+    # Keep every other Loom AMDGPU execution test active on the runner.
+    "gfx120X-all": (
+        bazel_xfail("//loom/src/loom/tools/iree-test-loom:amdgpu_tsan_execution_test"),
+    ),
+}
 AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)
 AMDGPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_SANITIZERS_XFAILS)
@@ -198,6 +205,13 @@ AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(
 AMDGPU_TSAN_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(
     AMDGPU_SANITIZERS_XFAILS + AMDGPU_TSAN_XFAILS
 )
+
+
+def amdgpu_bazel_xfail_targets(target_selector: str) -> tuple[str, ...]:
+    return bazel_xfail_targets(
+        AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR.get(target_selector, ())
+    )
+
 
 VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
 RUNTIME_VULKAN_RESOURCE_TAG = "iree-run-requirement=runtime.resource.vulkan_device"

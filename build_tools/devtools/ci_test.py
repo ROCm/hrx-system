@@ -551,6 +551,45 @@ class CiTest(unittest.TestCase):
             loom_resource_test.argv,
         )
 
+    def test_amdgpu_gfx120x_quarantines_tsan_execution(self):
+        xfail_target = (
+            "-//loom/src/loom/tools/iree-test-loom:amdgpu_tsan_execution_test"
+        )
+        gfx120x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//loom/...",
+                "--amdgpu-target",
+                "gfx120X-all",
+            ]
+        )
+        gfx110x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//loom/...",
+                "--amdgpu-target",
+                "gfx110X-all",
+            ]
+        )
+
+        gfx120x_steps = ci.steps_from_args(gfx120x_args)
+        gfx110x_steps = ci.steps_from_args(gfx110x_args)
+        gfx120x_test = next(
+            step
+            for step in gfx120x_steps
+            if step.name == "Test IREE AMDGPU Loom resources"
+        )
+        gfx110x_test = next(
+            step
+            for step in gfx110x_steps
+            if step.name == "Test IREE AMDGPU Loom resources"
+        )
+
+        self.assertIn(xfail_target, gfx120x_test.argv)
+        self.assertNotIn(xfail_target, gfx110x_test.argv)
+
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
             [
