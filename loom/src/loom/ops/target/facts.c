@@ -97,6 +97,15 @@ static iree_status_t loom_target_symbol_fact_compute(
     const loom_symbol_facts_base_t** out_facts) {
   *out_facts = NULL;
 
+  loom_target_like_t target =
+      loom_target_like_cast(module, symbol->defining_op);
+  const loom_target_like_descriptor_t* descriptor =
+      loom_target_like_descriptor(target);
+  const uint8_t selector = loom_attr_as_enum(loom_target_like_selector(target));
+  const loom_target_bundle_t* row_bundle =
+      loom_target_bundle_table_lookup(descriptor->bundle_table, selector);
+  if (!row_bundle) return iree_ok_status();
+
   loom_target_symbol_facts_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
       context, sizeof(*facts), (void**)&facts));
@@ -110,12 +119,8 @@ static iree_status_t loom_target_symbol_fact_compute(
   };
   facts->name = module->strings.entries[symbol->name_id];
 
-  loom_target_like_t target =
-      loom_target_like_cast(module, symbol->defining_op);
-  const loom_target_like_descriptor_t* descriptor =
-      loom_target_like_descriptor(target);
-  facts->selector = loom_attr_as_enum(loom_target_like_selector(target));
-  facts->row_bundle = descriptor->bundle_table->values[facts->selector];
+  facts->selector = selector;
+  facts->row_bundle = row_bundle;
   loom_target_bundle_storage_initialize_from_bundle(
       &facts->storage, facts->name, facts->row_bundle);
   for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
