@@ -932,7 +932,9 @@ static bool loom_low_lower_rule_integer_element_range_facts(
     }
     loom_value_facts_t aggregate = lanes.lanes[0];
     for (iree_host_size_t i = 1; i < lanes.count; ++i) {
-      loom_value_facts_meet(&aggregate, &lanes.lanes[i], &aggregate);
+      loom_value_facts_t next_aggregate;
+      loom_value_facts_meet(&aggregate, &lanes.lanes[i], &next_aggregate);
+      aggregate = next_aggregate;
     }
     *out_facts = aggregate;
     return true;
