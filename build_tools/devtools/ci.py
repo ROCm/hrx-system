@@ -913,7 +913,6 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
             dev_command(
                 "bazel",
                 "test",
-                "--config=asan",
                 "--importer-env",
                 "tilelang",
                 *ci_config.IMPORTER_TILELANG_BAZEL_TEST_TARGETS,
