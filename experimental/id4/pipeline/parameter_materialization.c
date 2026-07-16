@@ -48,10 +48,6 @@ struct id4_pipeline_parameter_materialization_t {
   const id4_pipeline_plan_t* plan;
   // Plan-local slab index populated by the materialization.
   iree_host_size_t target_slab_index;
-  // Device owning the domain allocation; retained by |plan|.
-  iree_hal_device_t* device;
-  // Queue affinity used for materialization operations.
-  iree_hal_queue_affinity_t queue_affinity;
   // Optional allocation pool retained for the domain lifetime.
   iree_hal_pool_t* allocation_pool;
   // Queue-allocated domain buffer owned by this object.
@@ -104,6 +100,22 @@ static iree_status_t id4_pipeline_parameter_materialization_emit(
   event.key = key;
   event.message = message;
   return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
+static iree_status_t id4_pipeline_parameter_materialization_query_placement(
+    const id4_pipeline_parameter_materialization_t* materialization,
+    iree_hal_buffer_placement_t* out_placement) {
+  *out_placement = iree_hal_buffer_placement_undefined();
+  const iree_hal_buffer_placement_t placement =
+      iree_hal_buffer_allocation_placement(materialization->target_buffer);
+  if (iree_hal_buffer_placement_is_undefined(placement) ||
+      iree_hal_queue_affinity_is_empty(placement.queue_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "queue-allocated parameter materialization has no device placement");
+  }
+  *out_placement = placement;
+  return iree_ok_status();
 }
 
 static iree_hal_semaphore_list_t
@@ -225,7 +237,7 @@ static iree_status_t id4_pipeline_parameter_materialization_validate_options(
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
       options->wait_semaphore_list, IREE_SV("materialization acquire wait"),
-      ID4_PIPELINE_PARAMETER_MATERIALIZATION_LIST_FLAG_REQUIRE_NONEMPTY));
+      /*flags=*/0));
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_validate_list(
       options->signal_semaphore_list, IREE_SV("materialization acquire signal"),
       ID4_PIPELINE_PARAMETER_MATERIALIZATION_LIST_FLAG_REQUIRE_NONEMPTY));
@@ -295,8 +307,6 @@ iree_status_t id4_pipeline_parameter_materialization_acquire(
   materialization->plan = options->plan;
   id4_pipeline_plan_retain((id4_pipeline_plan_t*)materialization->plan);
   materialization->target_slab_index = options->target_slab_index;
-  materialization->device = device;
-  materialization->queue_affinity = placement->queue_affinity;
   materialization->allocation_pool = options->allocation_pool;
   iree_hal_pool_retain(materialization->allocation_pool);
   iree_status_t status = id4_pipeline_parameter_materialization_emit(
@@ -435,6 +445,11 @@ iree_status_t id4_pipeline_parameter_materialization_publish(
   iree_status_t status = id4_pipeline_parameter_materialization_emit(
       materialization, IREE_SV("parameter.materialization.publish"),
       IREE_SV("publishing parameter-domain contents"), diagnostics_sink);
+  iree_hal_buffer_placement_t placement = iree_hal_buffer_placement_undefined();
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_materialization_query_placement(
+        materialization, &placement);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_materialization_edge_initialize(
         signal_semaphore_list, materialization->host_allocator,
@@ -442,8 +457,8 @@ iree_status_t id4_pipeline_parameter_materialization_publish(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_barrier(
-        materialization->device, materialization->queue_affinity,
-        wait_semaphore_list, signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+        placement.device, placement.queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
     materialization->state =
@@ -518,6 +533,9 @@ iree_status_t id4_pipeline_parameter_materialization_retire(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter materialization allocation has another preserve owner");
   }
+  iree_hal_buffer_placement_t placement = iree_hal_buffer_placement_undefined();
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_query_placement(
+      materialization, &placement));
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_materialization_edge_initialize(
       signal_semaphore_list, materialization->host_allocator,
       &materialization->retirement_edge));
@@ -537,9 +555,8 @@ iree_status_t id4_pipeline_parameter_materialization_retire(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_dealloca(
-        materialization->device, materialization->queue_affinity,
-        wait_semaphore_list, signal_semaphore_list,
-        materialization->target_buffer, dealloca_flags);
+        placement.device, placement.queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, materialization->target_buffer, dealloca_flags);
   }
   if (iree_status_is_ok(status)) {
     materialization->owns_target_allocation = false;
@@ -554,6 +571,48 @@ iree_status_t id4_pipeline_parameter_materialization_retire(
     iree_hal_semaphore_list_fail(signal_semaphore_list,
                                  iree_status_clone(status));
   }
+  return status;
+}
+
+iree_status_t id4_pipeline_parameter_materialization_retire_and_wait(
+    id4_pipeline_parameter_materialization_t* materialization,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_dealloca_flags_t dealloca_flags,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!materialization) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter materialization is required");
+  }
+
+  iree_hal_buffer_placement_t placement = iree_hal_buffer_placement_undefined();
+  iree_hal_semaphore_t* completion_semaphore = NULL;
+  iree_status_t status = id4_pipeline_parameter_materialization_query_placement(
+      materialization, &placement);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        placement.device, placement.queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion_semaphore);
+  }
+  uint64_t completion_value = 1;
+  const iree_hal_semaphore_list_t completion_list = {
+      .count = completion_semaphore ? 1 : 0,
+      .semaphores = &completion_semaphore,
+      .payload_values = &completion_value,
+  };
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_materialization_retire(
+        materialization, wait_semaphore_list, completion_list, dealloca_flags,
+        diagnostics_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_wait(
+        completion_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_materialization_complete_retirement(
+        materialization);
+  }
+  iree_hal_semaphore_release(completion_semaphore);
   return status;
 }
 

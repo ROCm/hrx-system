@@ -1264,6 +1264,19 @@ iree_status_t id4_pipeline_parameter_layout_gather_slab(
         &target_load, target_buffer);
   }
   if (iree_status_is_ok(status)) {
+    const iree_hal_buffer_placement_t placement =
+        iree_hal_buffer_allocation_placement(target_buffer);
+    if (iree_hal_buffer_placement_is_undefined(placement) ||
+        iree_hal_queue_affinity_is_empty(placement.queue_affinity)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter layout target slab has no device placement");
+    } else {
+      archive_load.device = placement.device;
+      archive_load.queue_affinity = placement.queue_affinity;
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_layout_submit_slab_gather(
         options, &archive_load, target_buffer, options->wait_semaphore_list,
         options->signal_semaphore_list);

@@ -67,11 +67,11 @@ typedef struct id4_pipeline_parameter_materialization_acquire_options_t {
 } id4_pipeline_parameter_materialization_acquire_options_t;
 
 // Acquires undefined queue-ordered storage matching one planned parameter
-// domain. Both allocation semaphore lists must be nonempty. The returned
-// materialization owns the asynchronous allocation independently of every other
-// parameter domain. Callers must populate the target buffer after the
-// acquire-readiness edge, publish it, and explicitly retire it after releasing
-// every complete binding that retains it.
+// domain. The allocation wait list may be empty; the signal list must be
+// nonempty. The returned materialization owns the asynchronous allocation
+// independently of every other parameter domain. Callers must populate the
+// target buffer after the acquire-readiness edge, publish it, and explicitly
+// retire it after releasing every complete binding that retains it.
 iree_status_t id4_pipeline_parameter_materialization_acquire(
     const id4_pipeline_parameter_materialization_acquire_options_t* options,
     iree_allocator_t host_allocator,
@@ -132,6 +132,19 @@ iree_status_t id4_pipeline_parameter_materialization_retire(
     id4_pipeline_parameter_materialization_t* materialization,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_dealloca_flags_t dealloca_flags,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
+// Schedules domain retirement on the device and queue recorded by the domain
+// allocation, waits for its independently signaled completion, and completes
+// host-side retirement. The caller must own the only materialization reference
+// and provide waits that dominate every in-flight use. A rejected queue
+// submission leaves the published materialization available for another
+// retirement attempt. An asynchronous queue failure is terminal and returned
+// to the caller.
+iree_status_t id4_pipeline_parameter_materialization_retire_and_wait(
+    id4_pipeline_parameter_materialization_t* materialization,
+    iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_dealloca_flags_t dealloca_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
