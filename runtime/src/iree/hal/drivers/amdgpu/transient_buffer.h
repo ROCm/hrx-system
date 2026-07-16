@@ -126,6 +126,9 @@ void iree_hal_amdgpu_transient_buffer_commit(iree_hal_buffer_t* buffer);
 // Decommits the wrapper and releases the staged backing view.
 void iree_hal_amdgpu_transient_buffer_decommit(iree_hal_buffer_t* buffer);
 
+// Returns true after queue_dealloca has decommitted |buffer|.
+bool iree_hal_amdgpu_transient_buffer_is_deallocated(iree_hal_buffer_t* buffer);
+
 // Marks the wrapper as queued for deallocation. Returns false if a dealloca has
 // already been queued for this wrapper.
 bool iree_hal_amdgpu_transient_buffer_begin_dealloca(iree_hal_buffer_t* buffer);
