@@ -38,6 +38,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "adaptive_sort_test",
+    srcs = ["adaptive_sort_test.cc"],
+    deps = [
+        ":adaptive_sort",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "diff",
     srcs = ["diff.c"],

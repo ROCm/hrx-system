@@ -40,6 +40,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    adaptive_sort_test
+  SRCS
+    "adaptive_sort_test.cc"
+  DEPS
+    ::adaptive_sort
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     diff
