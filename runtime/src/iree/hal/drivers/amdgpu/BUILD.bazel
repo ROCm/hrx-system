@@ -28,6 +28,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:executable_target",
         "//runtime/src/iree/hal/drivers/amdgpu/util:target_id",
         "//runtime/src/iree/hal/utils:device_spec_builder",
     ],
@@ -54,6 +55,20 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "executable_global_resolver",
+    srcs = ["executable_global_resolver.c"],
+    hdrs = ["executable_global_resolver.h"],
+    deps = [
+        ":buffer",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:global_table",
         "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
     ],
 )
@@ -154,8 +169,6 @@ iree_runtime_cc_library(
         "driver.h",
         "executable.c",
         "executable.h",
-        "executable_cache.c",
-        "executable_cache.h",
         "feedback_state.c",
         "feedback_state.h",
         "host_queue.c",
@@ -239,6 +252,7 @@ iree_runtime_cc_library(
         ":access_policy",
         ":buffer",
         ":device_spec_builder",
+        ":executable_global_resolver",
         ":executable_metadata",
         ":executable_metadata_hsaco",
         ":kernarg_layout",
@@ -308,7 +322,6 @@ iree_runtime_cc_library(
         "buffer.h",
         "driver.h",
         "executable.h",
-        "executable_cache.h",
         "feedback_state.h",
         "host_queue.h",
         "host_queue_blit.h",
@@ -544,21 +557,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "executable_test",
-    srcs = ["executable_test.cc"],
-    deps = [
-        ":amdgpu",
-        ":headers",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:hsaco_metadata",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "source_context_test",
     srcs = ["source_context_test.cc"],
     deps = [
@@ -574,12 +572,12 @@ iree_cmake_extra_content(
     content = """
 if(TARGET iree::hal::drivers::amdgpu::cts::testdata_amdgpu)
   iree_amdgpu_expand_target_selectors(
-    _IREE_HAL_AMDGPU_EXACT_TARGETS
-    "${IREE_AMDGPU_TARGET_EXPANSION_EXACT}"
+    _IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS
+    "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
     ${IREE_HAL_AMDGPU_TARGETS}
   )
 endif()
-if(_IREE_HAL_AMDGPU_EXACT_TARGETS)
+if(_IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS)
 """,
     inline = True,
 )
@@ -601,6 +599,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
         "//runtime/src/iree/hal/drivers/amdgpu/cts:tsan_executable_testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:executable_target",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -624,6 +623,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:executable_target",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -638,14 +638,13 @@ iree_cmake_extra_content(
 iree_amdgpu_hal_cts_testdata(
     name = "testdata_amdgpu_pm4_command_buffer_benchmark",
     srcs = ["pm4_command_buffer_benchmark_testdata.c"],
-    format_name = "amdgpu_pm4_command_buffer_benchmark",
-    format_string = '"amdgcn-amd-amdhsa--{AMDGPU_TARGET}"',
     identifier = "iree_pm4_command_buffer_benchmark_testdata_amdgpu",
     internal_hdrs = [
         "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
         "//runtime/src/iree/hal/drivers/amdgpu/device:bitcode_hdrs",
     ],
     tags = ["manual"],
+    target_name = "amdgpu_pm4_command_buffer_benchmark",
     target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
 )
 
@@ -669,6 +668,7 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_flags",
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_profile",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:executable_target",
     ],
 )
 

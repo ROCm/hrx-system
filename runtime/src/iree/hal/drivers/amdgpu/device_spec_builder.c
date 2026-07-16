@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/util/executable_target.h"
+
 static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     const iree_hal_amdgpu_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
@@ -17,17 +19,27 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU device spec requires initialized physical devices");
   }
-  if (IREE_UNLIKELY(params->physical_device_count > 64)) {
+  if (IREE_UNLIKELY(params->physical_device_count >
+                    IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU device spec physical device count %" PRIhsz
-                            " exceeds the 64-bit affinity mask capacity",
-                            params->physical_device_count);
+                            " exceeds physical-device affinity capacity %d",
+                            params->physical_device_count,
+                            IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT);
   }
   if (IREE_UNLIKELY(!params->device_allocator)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU device spec allocator is NULL");
   }
   return iree_ok_status();
+}
+
+static iree_hal_physical_device_affinity_t
+iree_hal_amdgpu_device_spec_all_physical_device_affinity(
+    iree_host_size_t physical_device_count) {
+  return physical_device_count == IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT
+             ? UINT64_MAX
+             : ((1ull << physical_device_count) - 1ull);
 }
 
 static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
@@ -166,9 +178,8 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
           .allocation_alignment = allocator_heap->min_alignment,
           .maximum_allocation_size = allocator_heap->max_allocation_size,
           .physical_device_affinity =
-              params->physical_device_count == 64
-                  ? UINT64_MAX
-                  : ((1ull << params->physical_device_count) - 1ull),
+              iree_hal_amdgpu_device_spec_all_physical_device_affinity(
+                  params->physical_device_count),
           .flags = heap_flags,
       };
       memory_types[i] = (iree_hal_memory_type_spec_t){
@@ -412,102 +423,15 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_executables(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const iree_hal_amdgpu_target_id_t* exact_target_id =
-      &params->physical_devices[0].target_id;
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_lookup_code_object_target(
-      exact_target_id, &code_object_target_id));
-
-  char exact_format_storage[128] = {0};
-  iree_host_size_t exact_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      exact_target_id, sizeof(exact_format_storage), exact_format_storage,
-      &exact_format_length));
-
-  char code_object_format_storage[128] = {0};
-  iree_host_size_t code_object_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      &code_object_target_id, sizeof(code_object_format_storage),
-      code_object_format_storage, &code_object_format_length));
-
-  iree_hal_executable_format_spec_t executable_formats[2] = {
-      {
-          .format =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  iree_host_size_t format_count = 1;
-  if (!iree_string_view_equal(
-          executable_formats[0].format,
-          iree_make_string_view(code_object_format_storage,
-                                code_object_format_length))) {
-    executable_formats[format_count++] = (iree_hal_executable_format_spec_t){
-        .format = iree_make_string_view(code_object_format_storage,
-                                        code_object_format_length),
-        .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-        .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-    };
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    const iree_hal_amdgpu_target_id_t* exact_target_id =
+        &params->physical_devices[i].target_id;
+    const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_device_spec_builder_add_executable_targets(
+            builder, exact_target_id, target_affinity));
   }
-
-  iree_hal_executable_target_t executable_targets[2] = {
-      {
-          .family = IREE_SV("amdgpu"),
-          .architecture = IREE_SV("gfxip"),
-          .processor = exact_target_id->processor,
-          .features = iree_string_view_empty(),
-          .artifact_format =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .runtime_abi = IREE_SV("hsa"),
-          .loader_namespace = IREE_SV("amdgpu"),
-          .loader_target =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
-          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-          .priority = 100,
-          .physical_device_affinity =
-              params->physical_device_count == 64
-                  ? UINT64_MAX
-                  : ((1ull << params->physical_device_count) - 1ull),
-          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-      },
-  };
-  iree_host_size_t target_count = 1;
-  if (!iree_string_view_equal(exact_target_id->processor,
-                              code_object_target_id.processor) ||
-      exact_target_id->sramecc != code_object_target_id.sramecc ||
-      exact_target_id->xnack != code_object_target_id.xnack) {
-    executable_targets[target_count++] = (iree_hal_executable_target_t){
-        .family = IREE_SV("amdgpu"),
-        .architecture = IREE_SV("gfxip"),
-        .processor = code_object_target_id.processor,
-        .features = iree_string_view_empty(),
-        .artifact_format = iree_make_string_view(code_object_format_storage,
-                                                 code_object_format_length),
-        .runtime_abi = IREE_SV("hsa"),
-        .loader_namespace = IREE_SV("amdgpu"),
-        .loader_target = iree_make_string_view(code_object_format_storage,
-                                               code_object_format_length),
-        .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
-        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-        .priority = 50,
-        .physical_device_affinity =
-            params->physical_device_count == 64
-                ? UINT64_MAX
-                : ((1ull << params->physical_device_count) - 1ull),
-        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-    };
-  }
-
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = format_count,
-      .formats = executable_formats,
-      .target_count = target_count,
-      .targets = executable_targets,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_device_spec_populate_sanitizer(

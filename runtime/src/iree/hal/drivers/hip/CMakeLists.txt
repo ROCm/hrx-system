@@ -45,8 +45,6 @@ iree_cc_library(
     "memory_pools.h"
     "native_executable.c"
     "native_executable.h"
-    "nop_executable_cache.c"
-    "nop_executable_cache.h"
     "per_device_information.h"
     "rccl_channel.c"
     "rccl_channel.h"
@@ -97,6 +95,7 @@ iree_cc_library(
     iree::base
     iree::base::core_headers
     iree::hal
+    iree::hal::drivers::amdgpu::util::executable_target
     iree::hal::utils::device_spec_builder
   PUBLIC
 )

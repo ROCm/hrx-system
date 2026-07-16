@@ -26,8 +26,10 @@ IREE_FLAG(
     "Higher numbers will reduce the effect of submission overheads on the\n"
     "final timings but too high a value may result in hangs.");
 
-IREE_FLAG(string, executable_format, "",
-          "Format of the executable file being loaded.");
+IREE_FLAG(string, executable_target_family, "",
+          "Target family of the executable file being loaded.");
+IREE_FLAG(string, executable_target_key, "",
+          "Family-owned target key of the executable file being loaded.");
 IREE_FLAG(string, executable_file, "", "Path to the executable file to load.");
 
 IREE_FLAG(int32_t, entry_point, 0, "Entry point ordinal to run.");
@@ -385,14 +387,6 @@ static iree_status_t iree_benchmark_executable_from_flags(
   }
   iree_async_frontier_tracker_release(frontier_tracker);
 
-  // We'll reuse the same executable cache so that once we load the executable
-  // we'll be able to reuse any driver-side optimizations.
-  iree_hal_executable_cache_t* executable_cache = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_create(
-        device, iree_make_cstring_view("cache"), &executable_cache);
-  }
-
   // Allocate storage for buffers and populate them.
   // They only need to remain valid for the duration of the invocation and all
   // memory accessed by the invocation will come from here.
@@ -427,15 +421,35 @@ static iree_status_t iree_benchmark_executable_from_flags(
   iree_tooling_value_io_context_free(value_io_context);
   value_io_context = NULL;
 
-  // Setup the specification used to perform the executable load.
-  // This information is normally used to select the appropriate loader but in
-  // this benchmark we only have a single one.
-  // TODO(benvanik): expose the flags once they are implemented anywhere.
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
+  // Select the exact target row used to load the native executable artifact.
+  const iree_hal_executable_target_t* executable_target = NULL;
+  if (iree_status_is_ok(status)) {
+    const iree_hal_executable_target_selection_t selection = {
+        .family = iree_make_cstring_view(FLAG_executable_target_family),
+        .target_key = iree_make_cstring_view(FLAG_executable_target_key),
+    };
+    const iree_hal_executable_target_selection_result_t result =
+        iree_hal_device_spec_select_executable_target(
+            iree_hal_device_spec(device), &selection);
+    if (result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+      status = iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "device does not support executable target '%s:%s'",
+          FLAG_executable_target_family, FLAG_executable_target_key);
+    } else if (result.outcome ==
+               IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "executable target '%s:%s' is ambiguous",
+                                FLAG_executable_target_family,
+                                FLAG_executable_target_key);
+    } else {
+      executable_target = result.target;
+    }
+  }
+
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
 
   // Load the executable data into memory.
   // In normal usage this would be mapped from the containing module file (which
@@ -450,23 +464,22 @@ static iree_status_t iree_benchmark_executable_from_flags(
           &file_contents);
     }
   }
-  executable_params.executable_format =
-      iree_make_cstring_view(FLAG_executable_format);
   if (file_contents) {
-    executable_params.executable_data = file_contents->const_buffer;
+    load_params.executable_data = file_contents->const_buffer;
   }
 
   // Executable-level constants allow us to perform some basic load-time value
   // propagation - usually dependent on device features or tuning parameters.
-  executable_params.constant_count = parsed_params.executable_constant_count;
-  executable_params.constants = &parsed_params.executable_constants[0].ui32;
+  load_params.constant_count = parsed_params.executable_constant_count;
+  load_params.constants = &parsed_params.executable_constants[0].ui32;
 
   // Perform the load, which will fail if the executable cannot be loaded or
   // there was an issue with the layouts.
   iree_hal_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_prepare_executable(
-        executable_cache, &executable_params, &executable);
+    status = iree_hal_device_load_executable(
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, executable_target, &load_params,
+        &executable);
   }
   iree_hal_executable_function_t function =
       iree_hal_executable_function_from_index((uint32_t)FLAG_entry_point);
@@ -514,7 +527,6 @@ static iree_status_t iree_benchmark_executable_from_flags(
 
   iree_hal_executable_release(executable);
   iree_io_file_contents_free(file_contents);
-  iree_hal_executable_cache_release(executable_cache);
   iree_hal_device_group_release(device_group);
   iree_hal_device_release(device);
   for (iree_host_size_t i = 0; i < parsed_params.binding_count; ++i) {
@@ -540,16 +552,16 @@ int main(int argc, char** argv) {
       "Executable artifacts can be extracted from VMFB files using `unzip`,\n"
       "dumped by producer toolchains, or generated directly by vendor tools.\n"
       "\n"
-      "Example runtime device and executable format pairs:\n"
+      "Example runtime device and executable target pairs:\n"
       "    --device=local-sync or --device=local-task\n"
-      "    --executable_format=vmvx-bytecode-fb\n"
+      "    --executable_target_family=ireevm\n"
+      "    --executable_target_key=bytecode\n"
       "    --device=local-sync or --device=local-task\n"
-      "    --executable_format=embedded-elf-x86_64\n"
-      "    --executable_format=system-dll-x86_64\n"
-      "    --device=cuda\n"
-      "    --executable_format=cuda-nvptx-fb\n"
+      "    --executable_target_family=cpu\n"
+      "    --executable_target_key=x86_64\n"
       "    --device=vulkan\n"
-      "    --executable_format=vulkan-spirv-bda\n"
+      "    --executable_target_family=spirv\n"
+      "    --executable_target_key=vulkan1.3+bda\n"
       "\n"
       "Note that this tool is intentionally low level: you must specify all\n"
       "of the push constant/binding parameters precisely as they are expected\n"
@@ -560,7 +572,8 @@ int main(int argc, char** argv) {
       "\n"
       "Example --flagfile:\n"
       "  --device=local-sync\n"
-      "  --executable_format=embedded-elf-x86_64\n"
+      "  --executable_target_family=cpu\n"
+      "  --executable_target_key=x86_64\n"
       "  --executable_file=runtime/src/iree/hal/local/elf/testdata/"
       "elementwise_mul_x86_64.so\n"
       "  --entry_point=0\n"

@@ -121,38 +121,6 @@ static iree_status_t iree_hal_hip_query_limits(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_hip_native_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  // Read the size prefix (with unsafe inference if size is unknown).
-  const bool unsafe_infer_size = (executable_data.data_length == 0);
-  iree_const_byte_span_t flatbuffer_data = iree_const_byte_span_empty();
-  IREE_RETURN_IF_ERROR(iree_hal_read_executable_flatbuffer_header(
-      executable_data, unsafe_infer_size,
-      iree_hal_hip_ExecutableDef_file_identifier, &flatbuffer_data));
-
-  // Verify the flatbuffer structure.
-  if (!iree_hal_hip_ExecutableDef_verify_as_root(flatbuffer_data.data,
-                                                 flatbuffer_data.data_length)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "failed to verify executable flatbuffer structure");
-  }
-
-  // Write the format string.
-  iree_string_view_t format = IREE_SV("HSACO");
-  if (format.size >= executable_format_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable format buffer too small");
-  }
-  memcpy(executable_format, format.data, format.size + /*NUL*/ 1);
-
-  // Return the total size (header + flatbuffer).
-  *out_inferred_size =
-      sizeof(iree_flatbuffer_file_header_t) + flatbuffer_data.data_length;
-  return iree_ok_status();
-}
-
 // Verifies the structure of the flatbuffer so that we can avoid doing so during
 // runtime.
 //
@@ -292,10 +260,10 @@ static iree_status_t iree_hal_hip_function_attributes_verify(
 iree_status_t iree_hal_hip_native_executable_create(
     iree_hal_device_t* device, const iree_hal_hip_dynamic_symbols_t* symbols,
     iree_hal_hip_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(symbols);
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   if (topology.count < 1) {
     return iree_make_status(
@@ -306,7 +274,8 @@ iree_status_t iree_hal_hip_native_executable_create(
 
   *out_executable = NULL;
 
-  // TODO: move to the executable cache to avoid repeated queries.
+  // TODO: capture these immutable limits during device creation to avoid
+  // repeated queries on each executable load.
   iree_hal_hip_limits_t limits = {0};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_query_limits(symbols, topology.devices[0].hip_device,
@@ -317,7 +286,7 @@ iree_status_t iree_hal_hip_native_executable_create(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_hal_read_executable_flatbuffer_header(
-          executable_params->executable_data, /*unsafe_infer_size=*/false,
+          load_params->executable_data, /*unsafe_infer_size=*/false,
           iree_hal_hip_ExecutableDef_file_identifier, &executable_flatbuffer));
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(

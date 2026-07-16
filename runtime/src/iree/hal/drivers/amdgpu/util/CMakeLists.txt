@@ -172,12 +172,10 @@ iree_cc_library(
   SRCS
     "global_table.c"
   DEPS
-    ::libhsa
     iree::base
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::drivers::amdgpu::buffer
     iree::hal::drivers::amdgpu::queue_affinity
   PUBLIC
 )
@@ -193,8 +191,6 @@ iree_cc_test(
     ::global_table
     iree::base
     iree::hal
-    iree::hal::drivers::amdgpu
-    iree::hal::drivers::amdgpu::queue_affinity
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -216,8 +212,6 @@ iree_cc_binary_benchmark(
     ::global_table
     iree::base
     iree::hal
-    iree::hal::drivers::amdgpu
-    iree::hal::drivers::amdgpu::queue_affinity
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
@@ -321,6 +315,41 @@ iree_cc_library(
   DEPS
     iree::base
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    executable_target
+  HDRS
+    "executable_target.h"
+  SRCS
+    "executable_target.c"
+  DEPS
+    ::target_id
+    iree::hal
+    iree::hal::utils::device_spec_builder
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    executable_target_test
+  SRCS
+    "executable_target_test.cc"
+  DEPS
+    ::executable_target
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
 )
 endif()
 
@@ -995,6 +1024,7 @@ iree_amdgpu_binary_variants_embed_data(
   SRCS
     "pm4_dispatch_test_kernels.c"
   TESTONLY
+  FLATTEN
   PUBLIC
 )
 endif()
@@ -1060,13 +1090,13 @@ iree_amdgpu_hal_cts_testdata(
     amdgcn-amd-amdhsa
   TARGETS
     ${IREE_HAL_AMDGPU_TARGETS}
-  FORMAT_NAME
+  TARGET_NAME
     amdgpu_queue_benchmark
-  FORMAT_STRING
-    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
   IDENTIFIER
     "iree_queue_benchmark_testdata_amdgpu"
   BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
     "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
@@ -1085,6 +1115,7 @@ iree_cc_binary_benchmark(
     "queue_benchmark.cc"
   DEPS
     ::benchmark_flags
+    ::executable_target
     ::testdata_amdgpu_queue_benchmark
     iree::async
     iree::async::util::proactor_pool
@@ -1226,6 +1257,7 @@ iree_amdgpu_binary_variants_embed_data(
   SRCS
     "feedback_channel_test_kernels.c"
   TESTONLY
+  FLATTEN
   PUBLIC
 )
 endif()

@@ -465,7 +465,7 @@ void loom_amdgpu_hal_kernel_library_deinitialize(
   if (library == NULL) {
     return;
   }
-  iree_allocator_free(allocator, (void*)library->executable_format.data);
+  iree_allocator_free(allocator, (void*)library->target_key.data);
   iree_allocator_free(allocator, library->hsaco_data);
   iree_allocator_free(allocator, library->target_listing_data);
   loom_target_artifact_manifest_json_t artifact_manifest_json = {
@@ -477,18 +477,17 @@ void loom_amdgpu_hal_kernel_library_deinitialize(
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_set_contents(
-    iree_string_view_t executable_format, iree_const_byte_span_t hsaco,
+    iree_string_view_t target_key, iree_const_byte_span_t hsaco,
     iree_allocator_t allocator, loom_amdgpu_hal_kernel_library_t* out_library) {
   *out_library = (loom_amdgpu_hal_kernel_library_t){0};
 
-  void* executable_format_data = NULL;
+  void* target_key_data = NULL;
   iree_status_t status = iree_allocator_clone(
-      allocator,
-      iree_make_const_byte_span(executable_format.data, executable_format.size),
-      &executable_format_data);
+      allocator, iree_make_const_byte_span(target_key.data, target_key.size),
+      &target_key_data);
   if (iree_status_is_ok(status)) {
-    out_library->executable_format =
-        iree_make_string_view(executable_format_data, executable_format.size);
+    out_library->target_key =
+        iree_make_string_view(target_key_data, target_key.size);
     out_library->hsaco_data = (uint8_t*)hsaco.data;
     out_library->hsaco_data_length = hsaco.data_length;
   }
@@ -932,7 +931,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       entry_reports[i].backend_name = report->backend_name;
       entry_reports[i].target_family_name = report->target_family_name;
       entry_reports[i].target_key = report->target_key;
-      entry_reports[i].executable_format = report->executable_format;
+      entry_reports[i].artifact_format = report->artifact_format;
     }
   }
   loom_amdgpu_hal_kernel_library_kernel_plan_t* plans = NULL;

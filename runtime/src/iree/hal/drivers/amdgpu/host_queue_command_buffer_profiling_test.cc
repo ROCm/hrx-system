@@ -1468,13 +1468,12 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   export_pattern.assign("nomatch");
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   const uint64_t executable_id = iree_hal_amdgpu_executable_id(executable);
   EXPECT_TRUE(iree_hal_amdgpu_logical_device_should_profile_dispatch(
@@ -1484,7 +1483,6 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   IREE_ASSERT_OK(profiling.End());
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,
@@ -1598,13 +1596,12 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   IREE_ASSERT_OK(profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
                                  CommandBufferProfileSinkAsBase(&sink)));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
   const uint32_t input_values[4] = {1, 2, 3, 4};
@@ -1686,7 +1683,6 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   }
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,

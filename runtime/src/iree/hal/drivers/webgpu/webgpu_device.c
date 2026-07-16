@@ -11,7 +11,7 @@
 #include "iree/hal/drivers/webgpu/webgpu_allocator.h"
 #include "iree/hal/drivers/webgpu/webgpu_builtins.h"
 #include "iree/hal/drivers/webgpu/webgpu_command_buffer.h"
-#include "iree/hal/drivers/webgpu/webgpu_executable_cache.h"
+#include "iree/hal/drivers/webgpu/webgpu_executable.h"
 #include "iree/hal/drivers/webgpu/webgpu_fd_file.h"
 #include "iree/hal/drivers/webgpu/webgpu_imports.h"
 #include "iree/hal/drivers/webgpu/webgpu_queue.h"
@@ -354,13 +354,15 @@ static iree_status_t iree_hal_webgpu_device_create_event(
                           "queue have implicit ordering");
 }
 
-static iree_status_t iree_hal_webgpu_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_webgpu_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_executable_cache_create(
-      device->device_handle, identifier, device->host_allocator,
-      out_executable_cache);
+  return iree_hal_webgpu_executable_create(device->device_handle, load_params,
+                                           device->host_allocator,
+                                           out_executable);
 }
 
 static iree_status_t iree_hal_webgpu_device_import_file(
@@ -604,7 +606,7 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
     .create_channel = iree_hal_webgpu_device_create_channel,
     .create_command_buffer = iree_hal_webgpu_device_create_command_buffer,
     .create_event = iree_hal_webgpu_device_create_event,
-    .create_executable_cache = iree_hal_webgpu_device_create_executable_cache,
+    .load_executable = iree_hal_webgpu_device_load_executable,
     .import_file = iree_hal_webgpu_device_import_file,
     .create_semaphore = iree_hal_webgpu_device_create_semaphore,
     .query_semaphore_compatibility =

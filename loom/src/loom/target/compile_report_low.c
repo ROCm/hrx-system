@@ -402,11 +402,11 @@ static void loom_target_compile_report_accumulate_low_memory_effects(
     loom_target_compile_report_static_instruction_mix_t* mix) {
   IREE_ASSERT_LE((uint64_t)descriptor->effect_start + descriptor->effect_count,
                  descriptor_set->effect_count);
-  const loom_low_effect_t* effects =
-      &descriptor_set->effects[descriptor->effect_start];
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    loom_target_compile_report_accumulate_low_memory_effect(&effects[i],
-                                                            features, mix);
+    const uint32_t effect_index = descriptor->effect_start + i;
+    const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
+    loom_target_compile_report_accumulate_low_memory_effect(effect, features,
+                                                            mix);
   }
 }
 

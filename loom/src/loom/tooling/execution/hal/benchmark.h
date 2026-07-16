@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/profile_sink.h"
 #include "iree/hal/utils/statistics_sink.h"
 #include "loom/tooling/execution/benchmark.h"
 #include "loom/tooling/execution/hal/invocation.h"

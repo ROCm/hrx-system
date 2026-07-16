@@ -16,7 +16,6 @@
 #include "iree/hal/drivers/amdgpu/aql_program_builder.h"
 #include "iree/hal/drivers/amdgpu/device_spec_builder.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
-#include "iree/hal/drivers/amdgpu/executable_cache.h"
 #include "iree/hal/drivers/amdgpu/feedback_state.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
@@ -2735,9 +2734,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_event(
                           "AMDGPU events not yet implemented");
 }
 
-static iree_status_t iree_hal_amdgpu_logical_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_amdgpu_logical_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
 
@@ -2762,12 +2763,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_executable_cache(
     }
   }
 
-  return iree_hal_amdgpu_executable_cache_create(
+  uint64_t executable_id = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_allocate_executable_id(
+      base_device, &executable_id));
+  return iree_hal_amdgpu_executable_create(
       base_device, &logical_device->system->libhsa,
-      &logical_device->system->topology, &logical_device->feedback,
-      &logical_device->asan, &logical_device->tsan, queue_scope_count,
-      queue_scopes, &logical_device->profile_metadata, identifier,
-      iree_hal_device_host_allocator(base_device), out_executable_cache);
+      &logical_device->system->topology, queue_affinity, target, load_params,
+      executable_id, &logical_device->feedback, &logical_device->asan,
+      &logical_device->tsan, queue_scope_count, queue_scopes,
+      &logical_device->profile_metadata,
+      iree_hal_device_host_allocator(base_device), out_executable);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_import_file(
@@ -3420,8 +3425,7 @@ static const iree_hal_device_vtable_t iree_hal_amdgpu_logical_device_vtable = {
     .create_command_buffer =
         iree_hal_amdgpu_logical_device_create_command_buffer,
     .create_event = iree_hal_amdgpu_logical_device_create_event,
-    .create_executable_cache =
-        iree_hal_amdgpu_logical_device_create_executable_cache,
+    .load_executable = iree_hal_amdgpu_logical_device_load_executable,
     .import_file = iree_hal_amdgpu_logical_device_import_file,
     .create_semaphore = iree_hal_amdgpu_logical_device_create_semaphore,
     .query_semaphore_compatibility =

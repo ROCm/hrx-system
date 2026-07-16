@@ -20,15 +20,6 @@ import re
 import bazel_to_cmake_config
 import bazel_to_cmake_targets
 
-# Maps Bazel string_flag labels to CMake variable names. Used by
-# flag_values in iree_hal_executable rules and CTS macros to resolve
-# {PLACEHOLDER} template variables to ${CMAKE_VARIABLE} references.
-_BUILD_SETTING_CMAKE_VARIABLES = {}
-
-_BUILD_SETTING_CMAKE_LIST_VARIABLES = {
-    "//runtime/src/iree/hal/drivers/amdgpu:targets": "_IREE_HAL_AMDGPU_EXACT_TARGETS",
-}
-
 _LOCATION_PATTERN = re.compile(
     r"\$\((location|locations|rootpath|rootpaths|execpath|execpaths) ([^)]+)\)"
 )
@@ -2081,10 +2072,10 @@ class BuildFileFunctions(object):
         name,
         srcs,
         target_selectors_flag,
-        format_name,
-        format_string,
+        target_name,
         identifier,
         backend_name="amdgpu",
+        target_family="amdgpu",
         target="amdgcn-amd-amdhsa",
         deps=None,
         internal_hdrs=None,
@@ -2101,19 +2092,15 @@ class BuildFileFunctions(object):
         targets_block = self._convert_amdgpu_target_selectors_block(
             target_selectors_flag
         )
-        format_name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
+        target_name_block = self._convert_string_arg_block(
+            "TARGET_NAME", target_name, quote=False
         )
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
-        else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
         identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
         backend_name_block = self._convert_string_arg_block(
             "BACKEND_NAME", backend_name
+        )
+        target_family_block = self._convert_string_arg_block(
+            "TARGET_FAMILY", target_family
         )
         hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
         srcs_block = self._convert_srcs_block(srcs)
@@ -2127,10 +2114,10 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{target_block}"
             f"{targets_block}"
-            f"{format_name_block}"
-            f"{format_string_block}"
+            f"{target_name_block}"
             f"{identifier_block}"
             f"{backend_name_block}"
+            f"{target_family_block}"
             f"{hdrs_block}"
             f"{srcs_block}"
             f"{deps_block}"
@@ -2214,7 +2201,7 @@ class BuildFileFunctions(object):
         c_file_output=None,
         h_file_output=None,
         identifier=None,
-        flatten=None,
+        flatten=True,
         internal_hdrs=None,
         copts=None,
         linkopts=None,
@@ -2492,132 +2479,10 @@ class BuildFileFunctions(object):
             f"  PUBLIC\n)\n\n"
         )
 
-    def _iree_hal_cts_testdata(
+    def _iree_runtime_hal_cts_test_suite(
         self,
-        format_name,
-        target_device,
-        identifier,
-        backend_name,
-        format_string,
-        testdata,
-        flags=None,
-        flag_values=None,
-        cmake_format_variant_values=None,
-        data=None,
-        testonly=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        variant_placeholders = set(cmake_format_variant_values or [])
-        variant_token = None
-        variant_values_var = None
-        if len(variant_placeholders) > 1:
-            raise NotImplementedError(
-                "iree_hal_cts_testdata supports one CMake format variant value"
-            )
-        if variant_placeholders:
-            if not flag_values:
-                raise ValueError(
-                    "cmake_format_variant_values requires matching flag_values"
-                )
-            variant_placeholder = next(iter(variant_placeholders))
-            variant_label = flag_values.get(variant_placeholder)
-            if not variant_label:
-                raise ValueError(
-                    f"cmake_format_variant_values entry {variant_placeholder} "
-                    "is missing from flag_values"
-                )
-            variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(variant_label)
-            if not variant_values_var:
-                raise NotImplementedError(
-                    f"No CMake list variable mapping for {variant_label}"
-                )
-            variant_token = "{" + variant_placeholder + "}"
-
-        # Resolve {PLACEHOLDER} template variables from flag_values.
-        # Build settings map to CMake variables; file targets (not in the
-        # mapping) have their flags stripped since CMake auto-discovers
-        # platform libraries via findPlatformLibDirectory().
-        if flag_values:
-            file_templates = set()
-            for placeholder, label in flag_values.items():
-                cmake_var = _BUILD_SETTING_CMAKE_VARIABLES.get(label)
-                template = "{" + placeholder + "}"
-                if cmake_var is not None:
-                    if placeholder not in variant_placeholders:
-                        cmake_ref = "${" + cmake_var + "}"
-                        format_string = format_string.replace(template, cmake_ref)
-                        if flags:
-                            flags = [f.replace(template, cmake_ref) for f in flags]
-                else:
-                    file_templates.add(template)
-            if flags and file_templates:
-                flags = [f for f in flags if not any(t in f for t in file_templates)]
-
-        name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
-        )
-        variant_token_block = self._convert_string_arg_block(
-            "FORMAT_VARIANT_TOKEN", variant_token
-        )
-        if variant_values_var:
-            format_variants_block = self._convert_string_list_block(
-                "FORMAT_VARIANTS", [f"${{{variant_values_var}}}"], quote=False
-            )
-        else:
-            format_variants_block = ""
-        target_device_block = self._convert_string_arg_block(
-            "TARGET_DEVICE", target_device
-        )
-        identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
-        backend_name_block = self._convert_string_arg_block(
-            "BACKEND_NAME", backend_name
-        )
-        # Bracket-quote C expressions like "embedded-elf-" IREE_ARCH so CMake
-        # leaves them alone. If placeholder substitution produced a CMake
-        # variable reference, use a normal quoted argument so the generated
-        # testdata registration contains the configured value instead of the
-        # literal ${...} token.
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
-        else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
-        flags_block = self._convert_string_list_block("FLAGS", flags)
-
-        # Convert Bazel label to CMake directory path.
-        # "//runtime/src/iree/hal/cts/testdata:executable_srcs"
-        #   -> "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
-        testdata_dir = testdata.split(":")[0].lstrip("/")
-        testdata_dir_block = (
-            f'  TESTDATA_DIR\n    "${{PROJECT_SOURCE_DIR}}/{testdata_dir}"\n'
-        )
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_hal_cts_testdata(\n"
-            f"{name_block}"
-            f"{variant_token_block}"
-            f"{format_variants_block}"
-            f"{target_device_block}"
-            f"{identifier_block}"
-            f"{backend_name_block}"
-            f"{format_string_block}"
-            f"{testdata_dir_block}"
-            f"{flags_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def _iree_hal_cts_test_suite(
-        self,
-        backends_lib,
-        executable_formats=None,
+        backends,
         testdata_libs=None,
-        testdata=None,
-        flag_values=None,
         name="",
         args=None,
         resource_group=None,
@@ -2632,34 +2497,13 @@ class BuildFileFunctions(object):
                     resource_group = tag[len("resource_group:") :]
                     break
 
-        # Expand executable_formats into individual iree_hal_cts_testdata()
-        # calls. The CMake function takes only flat TESTDATA_LIBS, avoiding
-        # nested dict argument parsing.
-        _testdata_libs = list(testdata_libs or [])
-        if executable_formats:
-            for format_name, config in executable_formats.items():
-                self._iree_hal_cts_testdata(
-                    format_name=format_name,
-                    target_device=config["target_device"],
-                    identifier=config["identifier"],
-                    backend_name=config["backend_name"],
-                    format_string=config["format_string"],
-                    testdata=testdata,
-                    flag_values=flag_values,
-                    flags=config.get("flags"),
-                    target_compatible_with=target_compatible_with,
-                )
-                _testdata_libs.append(f":testdata_{format_name}_lib")
-
-        # Use _convert_target_list_block for BACKENDS_LIB so that local
-        # targets like ":backends" preserve their "::" CMake alias form.
-        # (_convert_target_block replaces "::" with "_", which is wrong
-        # for local package-relative references.)
+        # Target-list conversion preserves package-relative CMake aliases such
+        # as ::backends; scalar target conversion rewrites those aliases.
         backends_block = self._convert_target_list_block(
-            "BACKENDS_LIB", [backends_lib] if backends_lib else None
+            "BACKENDS", [backends] if backends else None
         )
         testdata_libs_block = self._convert_target_list_block(
-            "TESTDATA_LIBS", _testdata_libs if _testdata_libs else None
+            "TESTDATA_LIBS", testdata_libs
         )
         name_block = (
             self._convert_string_arg_block("NAME", name, quote=False) if name else ""
@@ -2671,18 +2515,15 @@ class BuildFileFunctions(object):
         resource_group_block = self._convert_string_arg_block(
             "RESOURCE_GROUP", resource_group, quote=False
         )
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"iree_hal_cts_test_suite(\n"
+            f"iree_runtime_hal_cts_test_suite(\n"
             f"{backends_block}"
             f"{testdata_libs_block}"
             f"{name_block}"
             f"{args_block}"
             f"{labels_block}"
             f"{resource_group_block}"
-            f"{testonly_block}"
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
@@ -2900,6 +2741,7 @@ class BuildFileFunctions(object):
         # unused
         size="small",
         timeout=None,
+        visibility=None,
     ):
         if self._should_skip_target(tags=tags):
             return

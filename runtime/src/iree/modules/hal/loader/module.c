@@ -126,108 +126,17 @@ static iree_host_size_t iree_hal_cast_host_size(int64_t value) {
 
 IREE_HAL_ABI_EXPORT(iree_hal_loader_module_executable_query_support,  //
                     r, i) {
-  iree_vm_buffer_t* executable_format = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_buffer_check_deref(args->r0, &executable_format));
-  iree_string_view_t executable_format_str =
-      iree_vm_buffer_as_string(executable_format);
-
-  bool has_support = false;
-  iree_hal_loader_module_t* loader_module = IREE_HAL_LOADER_MODULE_CAST(module);
-  for (iree_host_size_t i = 0; i < loader_module->loader_count; ++i) {
-    iree_hal_executable_loader_t* loader = loader_module->loaders[i];
-    if (iree_hal_executable_loader_query_support(loader, 0,
-                                                 executable_format_str)) {
-      has_support = true;
-      break;
-    }
-  }
-
-  rets->i0 = has_support ? 1 : 0;
+  rets->i0 = 0;
   return iree_ok_status();
-}
-
-static iree_status_t iree_hal_loader_module_try_load(
-    iree_hal_loader_module_t* loader_module,
-    const iree_hal_executable_params_t* executable_params,
-    iree_hal_executable_t** out_executable) {
-  for (iree_host_size_t i = 0; i < loader_module->loader_count; ++i) {
-    iree_hal_executable_loader_t* loader = loader_module->loaders[i];
-    if (!iree_hal_executable_loader_query_support(
-            loader, executable_params->caching_mode,
-            executable_params->executable_format)) {
-      // Loader definitely can't handle the executable; no use trying so skip.
-      continue;
-    }
-    // The loader _may_ handle the executable.
-    // If the specific executable is present but not supported then the try will
-    // fail with IREE_STATUS_CANCELLED and if and if the executable is not
-    // registered with the loader then it will fail with IREE_STATUS_NOT_FOUND.
-    // In either of those cases we continue trying to find a loader that can
-    // provide the executable.
-    iree_status_t status = iree_hal_executable_loader_try_load(
-        loader, executable_params, /*worker_capacity=*/1, out_executable);
-    if (iree_status_is_ok(status)) {
-      // Executable was successfully loaded.
-      return status;
-    } else if (!iree_status_is_cancelled(status) &&
-               !iree_status_is_not_found(status)) {
-      // Error beyond just the try failing due to unsupported formats.
-      return status;
-    }
-    iree_status_ignore(status);
-  }
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "no executable loader registered for the given executable format '%.*s'",
-      (int)executable_params->executable_format.size,
-      executable_params->executable_format.data);
 }
 
 IREE_HAL_ABI_EXPORT(iree_hal_loader_module_executable_load,  //
                     rrr, r) {
-  iree_vm_buffer_t* executable_format = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_buffer_check_deref(args->r0, &executable_format));
-  iree_string_view_t executable_format_str =
-      iree_vm_buffer_as_string(executable_format);
-  iree_vm_buffer_t* executable_data = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_deref(args->r1, &executable_data));
-  iree_host_size_t constant_count = 0;
-  const uint32_t* constants = NULL;
-  if (iree_vm_buffer_isa(args->r2)) {
-    iree_vm_buffer_t* constant_buffer = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_vm_buffer_check_deref(args->r2, &constant_buffer));
-    if (constant_buffer->data.data_length % 4 != 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "constant buffer data must contain 4-byte "
-                              "elements but data length is %" PRIhsz,
-                              constant_buffer->data.data_length);
-    }
-    constant_count = constant_buffer->data.data_length / sizeof(uint32_t);
-    constants = (const uint32_t*)constant_buffer->data.data;
-  }
-
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode |=
-      executable_data->access == IREE_VM_BUFFER_ACCESS_ORIGIN_MODULE
-          ? IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA
-          : 0;
-  executable_params.executable_format = executable_format_str;
-  executable_params.executable_data = iree_make_const_byte_span(
-      executable_data->data.data, executable_data->data.data_length);
-  executable_params.constant_count = constant_count;
-  executable_params.constants = constants;
-
-  iree_hal_executable_t* executable = NULL;
-  iree_hal_loader_module_t* loader_module = IREE_HAL_LOADER_MODULE_CAST(module);
-  iree_status_t status = iree_hal_loader_module_try_load(
-      loader_module, &executable_params, &executable);
-
-  rets->r0 = iree_hal_executable_move_ref(executable);
-  return status;
+  rets->r0 = iree_vm_ref_null();
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "the legacy HAL loader VM module cannot represent target-explicit "
+      "executable loading");
 }
 
 IREE_HAL_ABI_EXPORT(iree_hal_loader_module_executable_lookup_function,  //

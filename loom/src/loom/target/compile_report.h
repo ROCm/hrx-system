@@ -1068,8 +1068,8 @@ typedef struct loom_target_compile_report_t {
   iree_string_view_t target_config_name;
   // Low function symbol produced or selected after lowering, if any.
   iree_string_view_t lowered_symbol;
-  // HAL executable format string, if a HAL artifact was produced.
-  iree_string_view_t executable_format;
+  // Canonical target artifact format name, if an artifact was produced.
+  iree_string_view_t artifact_format;
   // Number of bytes in the produced artifact.
   uint64_t artifact_size;
   // Number of low schedule nodes before target emission.

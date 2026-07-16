@@ -65,8 +65,8 @@ typedef struct loom_amdgpu_hal_kernel_library_options_t {
 
 // Allocator-owned AMDGPU HSACO kernel-library artifact.
 typedef struct loom_amdgpu_hal_kernel_library_t {
-  // Allocator-owned target id used by the AMDGPU loader.
-  iree_string_view_t executable_format;
+  // Allocator-owned AMDGPU target key used to emit the artifact.
+  iree_string_view_t target_key;
   // Allocator-owned HSACO ELF image bytes.
   uint8_t* hsaco_data;
   // Number of bytes in |hsaco_data|.

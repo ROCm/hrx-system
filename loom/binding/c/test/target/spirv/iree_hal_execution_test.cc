@@ -118,7 +118,6 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   loomc::testing::target::IreeHalKernelExecutionTarget target = {};
   target.label = "SPIR-V Vulkan";
   target.device_uri = IREE_SV("vulkan");
-  target.executable_cache_identifier = IREE_SV("loomc-spirv-execution-test");
   target.target_profile_identifier = loomc_make_cstring_view("live-vulkan");
   target.source_identifier =
       loomc_make_cstring_view("double_i32_at_byte_offset.loom");
@@ -134,7 +133,12 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   target.artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
   target.artifact_identifier =
       loomc_make_cstring_view("double_i32_at_byte_offset.spv");
-  target.executable_format = IREE_SV("vulkan-spirv-bda");
+  target.executable_target_selection = {
+      /*.family=*/IREE_SV("spirv"),
+      /*.target_key=*/IREE_SV("vulkan1.3+bda"),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      /*.physical_device_affinity=*/0,
+  };
   target.profile_providers = profile_providers;
   target.profile_provider_count = 1;
   target.create_target_environment = CreateSpirvTargetEnvironment;

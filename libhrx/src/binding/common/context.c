@@ -50,6 +50,14 @@ iree_status_t iree_hal_streaming_context_create(
   *out_context = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_streaming_global_symbol_registry_t* registry =
+      iree_hal_streaming_global_symbol_registry();
+  if (!registry) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "global symbol registry failed to initialize");
+  }
+
   iree_hal_streaming_context_t* context = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, sizeof(*context),
@@ -61,7 +69,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
-  context->executable_cache = NULL;
   context->flags = flags;
   context->default_stream = NULL;
   context->next_stream_id = 1;
@@ -103,27 +110,13 @@ iree_status_t iree_hal_streaming_context_create(
   iree_hal_device_retain(context->device);
   iree_hal_allocator_retain(context->device_allocator);
 
-  // Create executable cache for this context.
-  iree_status_t status = iree_hal_executable_cache_create(
-      context->device, IREE_SV("stream_hal_cache"), &context->executable_cache);
-
   // Initialize buffer mapping table.
-  if (iree_status_is_ok(status)) {
-    hrx_buffer_table_initialize(&context->buffer_table);
-  }
+  hrx_buffer_table_initialize(&context->buffer_table);
 
   // Initialize symbol map with global registry as the backing store.
-  iree_hal_streaming_global_symbol_registry_t* registry =
-      iree_hal_streaming_global_symbol_registry();
-  if (iree_status_is_ok(status) && !registry) {
-    status = iree_make_status(IREE_STATUS_INTERNAL,
-                              "global symbol registry failed to initialize");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_context_symbol_map_initialize(
-        context, /*initial_capacity=*/16, registry, host_allocator,
-        &context->symbol_map);
-  }
+  iree_status_t status = iree_hal_streaming_context_symbol_map_initialize(
+      context, /*initial_capacity=*/16, registry, host_allocator,
+      &context->symbol_map);
 
   // Allocate stream tracking array.
   if (iree_status_is_ok(status)) {
@@ -213,7 +206,6 @@ static void iree_hal_streaming_context_destroy(
   iree_slim_mutex_deinitialize(&context->stream_list_mutex);
 
   iree_status_ignore(context->loop_status);
-  iree_hal_executable_cache_release(context->executable_cache);
   iree_hal_allocator_release(context->device_allocator);
   iree_hal_device_release(context->device);
 

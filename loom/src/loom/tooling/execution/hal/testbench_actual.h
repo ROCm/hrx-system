@@ -119,8 +119,8 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   const loom_module_t* test_module;
   // Actual invocation selected from the owning check.case.
   const loom_testbench_invocation_plan_t* actual_invocation;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
+  // Optional case plan providing compile-time literals and sample parameters.
+  const loom_testbench_case_plan_t* case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.
@@ -158,8 +158,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   const loom_module_t* test_module;
   // Actual invocation selected from the owning check.case.
   const loom_testbench_invocation_plan_t* actual_invocation;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
+  // Optional case plan providing compile-time literals and sample parameters.
+  const loom_testbench_case_plan_t* case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.
@@ -237,8 +237,6 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   const loom_module_t* test_module;
   // Case plan whose actual invocations are executed by the sequence.
   const loom_testbench_case_plan_t* case_plan;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.

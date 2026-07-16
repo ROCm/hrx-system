@@ -18,6 +18,7 @@ loom_cc_library(
     "artifact.c"
   DEPS
     iree::base
+    iree::hal
     loom::error::diagnostic
     loom::ir
     loom::target::compile_report

@@ -103,7 +103,7 @@ HIP or the legacy ROCm HAL driver. The major runtime objects are:
 * a driver that discovers HSA agents and creates logical devices;
 * one logical device spanning one or more physical GPU devices;
 * one physical-device object per HSA GPU agent, including queues, memory pools,
-  executable caches, profiling state, and device metrics;
+  profiling state, and device metrics;
 * host queues that translate HAL queue operations into AQL packet streams;
 * replayable command buffers that store backend command records and emit AQL
   packets at submission time; and

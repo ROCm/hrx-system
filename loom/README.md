@@ -24,7 +24,7 @@ facts are still visible enough to compile, inspect, specialize, and tune.
 | Area | Status |
 | --- | --- |
 | Loom text, bytecode, IR, passes, linking, reports | Active core infrastructure |
-| `loomc` public C API | Active embedding surface for AOT, JIT, packaging, executable caches, and tuning/search |
+| `loomc` public C API | Active embedding surface for AOT, JIT, packaging, caller-owned artifact caches, and tuning/search |
 | AMDGPU HSACO | Most established native target path |
 | SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
 | x86, Wasm, IREEVM | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
@@ -143,7 +143,7 @@ need different compositions:
 
 - AOT packaging can compile and emit ahead of deployment.
 - Runtime JITs can link and specialize around live target facts.
-- Executable caches can own artifact storage and invalidation policy.
+- Caller-owned artifact caches can define storage and invalidation policy.
 - Tuning servers can reuse compilers, linkers, pass programs, target profiles,
   and frozen indexes across many worker-local workspaces.
 
@@ -212,7 +212,7 @@ python dev.py bazel run \
   //loom/binding/c/example:emit_spirv_vulkan
 ```
 
-IREE HAL-derived SPIR-V target facts and executable-cache validation:
+IREE HAL-derived SPIR-V target facts and emission:
 
 ```bash
 python dev.py bazel run \
@@ -222,7 +222,7 @@ python dev.py bazel run \
 
 The raw Vulkan path is useful when evaluating Loom as an embeddable compiler
 near an application's own shader/module loading boundary. The IREE HAL path is
-useful when evaluating Loom as a companion to IREE runtime executable caches.
+useful when evaluating Loom as a compiler for target-explicit IREE HAL loading.
 
 ## Useful Entry Points
 

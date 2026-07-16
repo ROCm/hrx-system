@@ -236,40 +236,36 @@ static iree_status_t hrx_set_gpu_architecture_from_hal(
     iree_hal_device_t* hal_device, hrx_device_s* dev) {
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(hal_device);
   iree_hal_executable_target_selection_t selection = {
-      .policy = IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
       .family = IREE_SV("amdgpu"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
   };
-  const iree_hal_executable_target_t* target = NULL;
   const iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(device_spec, &selection,
-                                                    &target);
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH) {
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec does not report an exact executable target");
-  } else if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS) {
+  } else if (result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec reports ambiguous exact executable targets");
   }
 
-  iree_string_view_t architecture = target->loader_target;
-  if (iree_string_view_is_empty(architecture)) {
-    architecture = target->processor;
-  }
-  if (iree_string_view_is_empty(architecture)) {
+  const iree_string_view_t target_key = result.target->target_key;
+  if (iree_string_view_is_empty(target_key)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU HAL device spec exact target has no architecture string");
+        "AMDGPU HAL device spec exact target has an empty target key");
   }
-  if (architecture.size >= sizeof(dev->architecture)) {
+  if (target_key.size >= sizeof(dev->architecture)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU architecture string length %" PRIhsz
+                            "AMDGPU target key length %" PRIhsz
                             " exceeds HRX storage capacity",
-                            architecture.size);
+                            target_key.size);
   }
-  memcpy(dev->architecture, architecture.data, architecture.size);
-  dev->architecture[architecture.size] = 0;
+  memcpy(dev->architecture, target_key.data, target_key.size);
+  dev->architecture[target_key.size] = 0;
   return iree_ok_status();
 }
 #endif  // HRX_HAS_IREE_AMDGPU_DRIVER

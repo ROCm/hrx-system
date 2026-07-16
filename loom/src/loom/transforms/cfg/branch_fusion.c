@@ -435,9 +435,11 @@ static iree_status_t loom_branch_fusion_fuse_region(
   for (uint16_t i = 0; i < first->results.count; ++i) {
     final_yield_values[i] = first_yield_values[i];
   }
-  IREE_RETURN_IF_ERROR(loom_branch_fusion_resolve_terminator_values(
-      &second_remap, second->terminators[region_index],
-      final_yield_values + first->results.count));
+  if (second->results.count > 0) {
+    IREE_RETURN_IF_ERROR(loom_branch_fusion_resolve_terminator_values(
+        &second_remap, second->terminators[region_index],
+        final_yield_values + first->results.count));
+  }
   return loom_branch_fusion_replace_terminator_values(
       context, fused_terminator, final_yield_values,
       (uint16_t)(first->results.count + second->results.count));

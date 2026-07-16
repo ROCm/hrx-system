@@ -1,12 +1,10 @@
-#include "iree/hal/pool.h"
-
 #include <string.h>
 
 #include "hrx_internal.h"
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/alignment.h"
-#include "iree/hal/resource.h"
+#include "iree/hal/api.h"
 
 typedef struct hrx_iree_exact_pool_t {
   iree_hal_resource_t resource;

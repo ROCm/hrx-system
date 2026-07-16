@@ -90,6 +90,54 @@ class CiTest(unittest.TestCase):
         self.assertIn("//runtime/...", test_step.argv)
         self.assertIn("//loom/...", test_step.argv)
 
+    def test_bazel_repository_build_covers_supported_linux_graph(self):
+        args = ci.parse_arguments(["iree-bazel-repository-build"])
+
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps], ["Configure Bazel", "Build repository"]
+        )
+        configure_step = steps[0]
+        for define in (
+            "IREE_HAL_DRIVER_AMDGPU",
+            "IREE_HAL_DRIVER_HIP",
+            "IREE_HAL_DRIVER_LOCAL_SYNC",
+            "IREE_HAL_DRIVER_LOCAL_TASK",
+            "IREE_HAL_DRIVER_NULL",
+            "IREE_HAL_DRIVER_VULKAN",
+            "IREE_HAL_DRIVER_WEBGPU",
+        ):
+            self.assertIn(f"-D{define}=ON", configure_step.argv)
+        self.assertIn(
+            "--//loom/config/target:enable="
+            + ",".join(ci.REPOSITORY_BUILD_LOOM_TARGETS),
+            configure_step.argv,
+        )
+        self.assertIn(
+            "--//loom/config/import:enable="
+            + ",".join(ci.REPOSITORY_BUILD_LOOM_IMPORTERS),
+            configure_step.argv,
+        )
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
+        build_step = steps[-1]
+        self.assertEqual(build_step.argv[-1], "//...")
+        self.assertFalse(any(arg.startswith("-//") for arg in build_step.argv))
+        self.assertFalse(any(step.name.startswith("Test") for step in steps))
+
+    def test_bazel_repository_build_rejects_partial_target_scope(self):
+        args = ci.parse_arguments(
+            ["iree-bazel-repository-build", "--target", "//runtime/..."]
+        )
+
+        with self.assertRaisesRegex(ValueError, "repository-wide"):
+            ci.steps_from_args(args)
+
     def test_amdgpu_dry_run_does_not_embed_machine_paths(self):
         args = ci.parse_arguments(
             [
@@ -118,8 +166,46 @@ class CiTest(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("dev.py bazel configure", text)
         self.assertIn("-DIREE_ROCM_DEPENDENCY_MODE=pinned", text)
+        self.assertIn(
+            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942",
+            text,
+        )
+        self.assertIn("--//loom/config/target/amdgpu:targets=iree_hal", text)
         self.assertNotIn("IREE_ROCM_PATH", text)
         self.assertNotIn("/opt/rocm", text)
+
+    def test_amdgpu_target_selects_runtime_and_loom_build_settings(self):
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--amdgpu-target",
+                "gfx1150",
+            ]
+        )
+
+        steps = ci.steps_from_args(args)
+        bazel_action_steps = [
+            step
+            for step in steps
+            if step.argv[2:4] in (("bazel", "build"), ("bazel", "test"))
+        ]
+
+        self.assertTrue(bazel_action_steps)
+        for step in bazel_action_steps:
+            self.assertIn(
+                "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1150",
+                step.argv,
+            )
+            self.assertIn(
+                "--//loom/config/target/amdgpu:targets=iree_hal",
+                step.argv,
+            )
+
+    def test_amdgpu_target_rejected_by_non_amdgpu_command(self):
+        args = ci.parse_arguments(["iree-bazel-cpu", "--amdgpu-target", "gfx1150"])
+
+        with self.assertRaisesRegex(ValueError, "only supported for AMDGPU"):
+            ci.steps_from_args(args)
 
     def test_amdgpu_bazel_tests_pin_libhsa_from_rocm_root(self):
         args = ci.parse_arguments(
@@ -145,6 +231,19 @@ class CiTest(unittest.TestCase):
             + str(Path("/tmp/rocm-root") / "lib" / "libhsa-runtime64.so.1"),
             runtime_resource_test.argv,
         )
+
+    def test_amdgpu_bazel_device_toolchain_uses_fetched_rocm_root(self):
+        args = ci.parse_arguments(["iree-bazel-amdgpu"])
+
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.steps_from_args(args)
+
+        configure_step = next(step for step in steps if step.name == "Configure Bazel")
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
 
     def test_amdgpu_bazel_tests_use_explicit_libhsa_override(self):
         args = ci.parse_arguments(
@@ -173,7 +272,7 @@ class CiTest(unittest.TestCase):
             runtime_resource_test.argv,
         )
 
-    def test_amdgpu_loom_target_scope_omits_resource_tests(self):
+    def test_amdgpu_loom_target_scope_runs_loom_resources(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
@@ -183,12 +282,14 @@ class CiTest(unittest.TestCase):
         )
 
         steps = ci.steps_from_args(args)
-
-        self.assertFalse(
-            any("resources" in step.name for step in steps),
+        loom_resource_test = next(
+            step for step in steps if step.name == "Test IREE AMDGPU Loom resources"
         )
+
+        self.assertIn("//loom/...", loom_resource_test.argv)
+        self.assertNotIn("//runtime/...", loom_resource_test.argv)
         self.assertFalse(
-            any("//loom/..." in step.argv for step in steps),
+            any(step.name == "Test IREE AMDGPU runtime resources" for step in steps)
         )
 
     def test_bazel_loom_amdgpu_command_runs_compile_coverage_without_driver(self):
@@ -405,7 +506,7 @@ class CiTest(unittest.TestCase):
             self.assertTrue(any(target in step.argv for step in build_steps))
         self.assertTrue(
             any(
-                "--test_tag_filters=" + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG in line
+                "--test_tag_filters=" + ci_config.AMDGPU_RESOURCE_TAG in line
                 for line in command_lines
             )
         )
@@ -420,9 +521,11 @@ class CiTest(unittest.TestCase):
                 for arg in runtime_resource_test.argv
             )
         )
-        self.assertFalse(
-            any(step.name == "Test IREE AMDGPU Loom resources" for step in steps)
+        loom_resource_test = next(
+            step for step in steps if step.name == "Test IREE AMDGPU Loom resources"
         )
+        self.assertIn("//loom/...", loom_resource_test.argv)
+        self.assertNotIn("//runtime/...", loom_resource_test.argv)
 
     def test_amdgpu_resource_slices_share_resource_tag_without_target_overlap(self):
         args = ci.parse_arguments(["iree-bazel-amdgpu", "--target", "//..."])
@@ -431,16 +534,61 @@ class CiTest(unittest.TestCase):
         runtime_resource_test = next(
             step for step in steps if step.name == "Test IREE AMDGPU runtime resources"
         )
+        loom_resource_test = next(
+            step for step in steps if step.name == "Test IREE AMDGPU Loom resources"
+        )
 
         self.assertIn("//runtime/...", runtime_resource_test.argv)
         self.assertNotIn("//loom/...", runtime_resource_test.argv)
-        self.assertFalse(
-            any(step.name == "Test IREE AMDGPU Loom resources" for step in steps)
-        )
+        self.assertIn("//loom/...", loom_resource_test.argv)
+        self.assertNotIn("//runtime/...", loom_resource_test.argv)
         self.assertIn(
-            "--test_tag_filters=" + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG,
+            "--test_tag_filters=" + ci_config.AMDGPU_RESOURCE_TAG,
             runtime_resource_test.argv,
         )
+        self.assertIn(
+            "--test_tag_filters=" + ci_config.AMDGPU_RESOURCE_TAG,
+            loom_resource_test.argv,
+        )
+
+    def test_amdgpu_gfx120x_quarantines_tsan_execution(self):
+        xfail_target = (
+            "-//loom/src/loom/tools/iree-test-loom:amdgpu_tsan_execution_test"
+        )
+        gfx120x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//loom/...",
+                "--amdgpu-target",
+                "gfx120X-all",
+            ]
+        )
+        gfx110x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//loom/...",
+                "--amdgpu-target",
+                "gfx110X-all",
+            ]
+        )
+
+        gfx120x_steps = ci.steps_from_args(gfx120x_args)
+        gfx110x_steps = ci.steps_from_args(gfx110x_args)
+        gfx120x_test = next(
+            step
+            for step in gfx120x_steps
+            if step.name == "Test IREE AMDGPU Loom resources"
+        )
+        gfx110x_test = next(
+            step
+            for step in gfx110x_steps
+            if step.name == "Test IREE AMDGPU Loom resources"
+        )
+
+        self.assertIn(xfail_target, gfx120x_test.argv)
+        self.assertNotIn(xfail_target, gfx110x_test.argv)
 
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
@@ -448,6 +596,8 @@ class CiTest(unittest.TestCase):
                 "iree-bazel-amdgpu-tsan",
                 "--target",
                 "//runtime/...",
+                "--target",
+                "//loom/...",
             ]
         )
 
@@ -462,7 +612,9 @@ class CiTest(unittest.TestCase):
         self.assertTrue(
             any(
                 "bazel test --config=tsan --test_tag_filters="
-                + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG
+                + ci_config.AMDGPU_RESOURCE_TAG
+                + ",-"
+                + ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL
                 in line
                 for line in command_lines
             )
@@ -478,15 +630,57 @@ class CiTest(unittest.TestCase):
                 for arg in tsan_resource_test.argv
             )
         )
+        loom_tsan_resource_test = next(
+            step
+            for step in steps
+            if step.name == "Test IREE AMDGPU Loom resources and TSAN"
+        )
+        self.assertIn(
+            "--test_tag_filters="
+            + ci_config.AMDGPU_RESOURCE_TAG
+            + ",-"
+            + ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL,
+            loom_tsan_resource_test.argv,
+        )
         self.assertFalse(
             any(
-                "-//runtime/src/iree/hal/drivers/amdgpu" in line
-                for line in command_lines
+                arg.startswith("-//runtime/src/iree/hal/drivers/amdgpu")
+                for step in steps
+                for arg in step.argv
             )
         )
         self.assertFalse(any("--config=asan" in line for line in command_lines))
         self.assertFalse(any("--config=ubsan" in line for line in command_lines))
         self.assertFalse(any("--config=msan" in line for line in command_lines))
+
+    def test_bazel_amdgpu_asan_and_ubsan_keep_all_resource_tests(self):
+        for sanitizer in ("asan", "ubsan"):
+            with self.subTest(sanitizer=sanitizer):
+                args = ci.parse_arguments(
+                    [
+                        f"iree-bazel-amdgpu-{sanitizer}",
+                        "--target",
+                        "//loom/...",
+                    ]
+                )
+
+                steps = ci.steps_from_args(args)
+                loom_resource_test = next(
+                    step
+                    for step in steps
+                    if step.name
+                    == f"Test IREE AMDGPU Loom resources and {sanitizer.upper()}"
+                )
+                self.assertIn(
+                    "--test_tag_filters=" + ci_config.AMDGPU_RESOURCE_TAG,
+                    loom_resource_test.argv,
+                )
+                self.assertFalse(
+                    any(
+                        ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL in arg
+                        for arg in loom_resource_test.argv
+                    )
+                )
 
     def test_vulkan_command_builds_and_runs_vulkan_package_tests(self):
         args = ci.parse_arguments(
@@ -906,7 +1100,7 @@ class CiTest(unittest.TestCase):
         )
 
     def test_cmake_amdgpu_command_scopes_build_and_tests_to_amdgpu(self):
-        args = ci.parse_arguments(["iree-cmake-amdgpu"])
+        args = ci.parse_arguments(["iree-cmake-amdgpu", "--amdgpu-target", "gfx1150"])
 
         steps = ci.steps_from_args(args)
         command_lines = [step.command_line() for step in steps]
@@ -918,8 +1112,11 @@ class CiTest(unittest.TestCase):
             any("-DIREE_ROCM_DEPENDENCY_MODE=pinned" in line for line in command_lines)
         )
         self.assertTrue(
+            any("-DIREE_HAL_AMDGPU_TARGETS=gfx1150" in line for line in command_lines)
+        )
+        self.assertTrue(
             any(
-                "-DIREE_HAL_AMDGPU_TARGETS=" + ci_config.AMDGPU_TARGET_SELECTOR in line
+                "-DLOOM_TARGET_AMDGPU_TARGETS=iree_hal" in line
                 for line in command_lines
             )
         )
@@ -989,6 +1186,23 @@ class CiTest(unittest.TestCase):
         self.assertIn(
             "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/tmp/rocm-root",
             configure_step.argv,
+        )
+
+    def test_cmake_amdgpu_tsan_excludes_only_host_incompatible_tests(self):
+        args = ci.parse_arguments(["iree-cmake-amdgpu-tsan"])
+
+        steps = ci.steps_from_args(args)
+        resource_test = next(
+            step
+            for step in steps
+            if step.name == "Test IREE CMake AMDGPU resource tests with TSAN"
+        )
+        self.assertIn(
+            ci.combine_ctest_regex(
+                ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+                ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL,
+            ),
+            resource_test.argv,
         )
 
     def test_cmake_amdgpu_msan_builds_driver_targets_without_test_deps(self):

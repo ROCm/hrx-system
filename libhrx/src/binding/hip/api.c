@@ -10659,11 +10659,10 @@ HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
 
   // Load module from file.
   iree_hal_streaming_module_t* stream_module = NULL;
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_PERSISTENT_CACHING |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_status_t status = iree_hal_streaming_module_create_from_file(
-      context, caching_mode, iree_make_cstring_view(fname),
+      context, load_flags, iree_make_cstring_view(fname),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -10751,8 +10750,8 @@ HIPAPI hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
 //
 // Multi-GPU: Module is loaded for the current device's architecture.
 //
-// Warning: Ensure the image buffer remains valid during loading.
-// The implementation may reference the buffer asynchronously.
+// Image lifetime: The image buffer must remain valid until this call returns
+// and may be released immediately afterward.
 //
 // See also: hipModuleLoad, hipModuleLoadData, hipModuleUnload,
 //           hipModuleGetFunction.
@@ -10846,15 +10845,12 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
     }
   }
 
-  // Cache-mode options are accepted as hints; HAL executable caching still owns
-  // the concrete code-object caching policy.
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      context, caching_mode, iree_make_const_byte_span(image, 0),
+      context, load_flags, iree_make_const_byte_span(image, 0),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {

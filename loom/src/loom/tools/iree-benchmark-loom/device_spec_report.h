@@ -10,7 +10,7 @@
 #define LOOM_TOOLS_IREE_BENCHMARK_LOOM_DEVICE_SPEC_REPORT_H_
 
 #include "iree/base/api.h"
-#include "iree/hal/device_spec.h"
+#include "iree/hal/api.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus

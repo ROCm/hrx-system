@@ -97,28 +97,12 @@ typedef struct iree_hal_vulkan_pipeline_t {
   uint32_t workgroup_size[3];
 } iree_hal_vulkan_pipeline_t;
 
-// Returns the supported Vulkan executable format inferred from
-// |executable_data|.
-iree_status_t iree_hal_vulkan_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size);
-
-// Returns whether a logical device with |enabled_features| can prepare
-// |format|.
-bool iree_hal_vulkan_executable_format_supported(
-    iree_hal_vulkan_features_t enabled_features,
-    iree_string_view_t executable_format);
-
 // Creates a prepared Vulkan executable from SPIR-V using the BDA dispatch
 // ABI.
 iree_status_t iree_hal_vulkan_executable_create(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
-    iree_hal_vulkan_features_t enabled_features,
-    iree_hal_vulkan_device_extensions_t enabled_extensions,
     VkPipelineCache pipeline_cache,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Returns true if |executable| is a Vulkan executable.

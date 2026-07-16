@@ -34,7 +34,10 @@ typedef struct iree_hal_vulkan_device_spec_params_t {
 // Encodes |spec| and adds it as a Vulkan driver-local facet to |builder|.
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_builder_add_facet(
     iree_hal_device_spec_builder_t* builder,
-    const iree_hal_vulkan_device_spec_t* spec);
+    const iree_hal_vulkan_device_spec_t* spec,
+    iree_host_size_t cooperative_matrix_property_count,
+    const iree_hal_vulkan_cooperative_matrix_property_t*
+        cooperative_matrix_properties);
 
 // Creates an immutable spec for a Vulkan HAL device.
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_create(

@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/base/internal/cpu.h"
+#include "iree/hal/local/cpu_device_spec.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
@@ -33,16 +35,6 @@ static iree_status_t iree_hal_local_device_spec_verify_params(
   return iree_ok_status();
 }
 
-static iree_host_size_t iree_hal_local_device_spec_find_executable_format(
-    iree_host_size_t format_count,
-    const iree_hal_executable_format_spec_t* formats,
-    iree_string_view_t format) {
-  for (iree_host_size_t i = 0; i < format_count; ++i) {
-    if (iree_string_view_equal(formats[i].format, format)) return i;
-  }
-  return IREE_HOST_SIZE_MAX;
-}
-
 static iree_host_size_t iree_hal_local_device_spec_find_executable_target(
     iree_host_size_t target_count, const iree_hal_executable_target_t* targets,
     const iree_hal_executable_target_t* target) {
@@ -50,18 +42,7 @@ static iree_host_size_t iree_hal_local_device_spec_find_executable_target(
     if (targets[i].kind == target->kind &&
         targets[i].priority == target->priority &&
         iree_string_view_equal(targets[i].family, target->family) &&
-        iree_string_view_equal(targets[i].architecture, target->architecture) &&
-        iree_string_view_equal(targets[i].processor, target->processor) &&
-        iree_string_view_equal(targets[i].features, target->features) &&
-        iree_string_view_equal(targets[i].artifact_format,
-                               target->artifact_format) &&
-        iree_string_view_equal(targets[i].runtime_abi, target->runtime_abi) &&
-        iree_string_view_equal(targets[i].loader_namespace,
-                               target->loader_namespace) &&
-        iree_string_view_equal(targets[i].loader_target,
-                               target->loader_target) &&
-        iree_string_view_equal(targets[i].metadata_schema,
-                               target->metadata_schema)) {
+        iree_string_view_equal(targets[i].target_key, target->target_key)) {
       return i;
     }
   }
@@ -69,34 +50,18 @@ static iree_host_size_t iree_hal_local_device_spec_find_executable_target(
 }
 
 static iree_status_t iree_hal_local_device_spec_collect_executables(
+    iree_host_size_t seed_target_count,
+    const iree_hal_executable_target_t* seed_targets,
     iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
-    iree_allocator_t host_allocator,
-    iree_hal_executable_format_spec_t** out_formats,
-    iree_host_size_t* out_format_count,
-    iree_hal_executable_target_t** out_targets,
+    iree_allocator_t host_allocator, iree_hal_executable_target_t** out_targets,
     iree_host_size_t* out_target_count) {
-  *out_formats = NULL;
-  *out_format_count = 0;
   *out_targets = NULL;
   *out_target_count = 0;
 
-  iree_host_size_t format_capacity = 0;
-  iree_host_size_t target_capacity = 0;
+  iree_host_size_t target_capacity = seed_target_count;
   for (iree_host_size_t i = 0; i < loader_count; ++i) {
     iree_hal_device_executable_spec_t executable_spec;
     iree_hal_executable_loader_query_spec(loaders[i], &executable_spec);
-    if (IREE_UNLIKELY(!iree_host_size_checked_add(
-            format_capacity, executable_spec.format_count, &format_capacity))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "local executable loader format count overflow");
-    }
-    if (IREE_UNLIKELY(executable_spec.format_count &&
-                      !executable_spec.formats)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "local executable loader returned %" PRIhsz
-                              " formats with NULL storage",
-                              executable_spec.format_count);
-    }
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             target_capacity, executable_spec.target_count, &target_capacity))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -111,18 +76,9 @@ static iree_status_t iree_hal_local_device_spec_collect_executables(
     }
   }
 
-  iree_hal_executable_format_spec_t* formats = NULL;
   iree_status_t status = iree_ok_status();
-  if (format_capacity != 0) {
-    status = iree_allocator_malloc_array(host_allocator, format_capacity,
-                                         sizeof(*formats), (void**)&formats);
-  }
-  if (iree_status_is_ok(status) && format_capacity != 0) {
-    memset(formats, 0, format_capacity * sizeof(*formats));
-  }
-
   iree_hal_executable_target_t* targets = NULL;
-  if (iree_status_is_ok(status) && target_capacity != 0) {
+  if (target_capacity != 0) {
     status = iree_allocator_malloc_array(host_allocator, target_capacity,
                                          sizeof(*targets), (void**)&targets);
   }
@@ -130,26 +86,14 @@ static iree_status_t iree_hal_local_device_spec_collect_executables(
     memset(targets, 0, target_capacity * sizeof(*targets));
   }
 
-  iree_host_size_t format_count = 0;
   iree_host_size_t target_count = 0;
   if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < seed_target_count; ++i) {
+      targets[target_count++] = seed_targets[i];
+    }
     for (iree_host_size_t i = 0; i < loader_count; ++i) {
       iree_hal_device_executable_spec_t executable_spec;
       iree_hal_executable_loader_query_spec(loaders[i], &executable_spec);
-      for (iree_host_size_t j = 0; j < executable_spec.format_count; ++j) {
-        const iree_hal_executable_format_spec_t* source_format =
-            &executable_spec.formats[j];
-        iree_host_size_t existing_ordinal =
-            iree_hal_local_device_spec_find_executable_format(
-                format_count, formats, source_format->format);
-        if (existing_ordinal != IREE_HOST_SIZE_MAX) {
-          formats[existing_ordinal].caching_modes |=
-              source_format->caching_modes;
-          formats[existing_ordinal].flags |= source_format->flags;
-          continue;
-        }
-        formats[format_count++] = *source_format;
-      }
       for (iree_host_size_t j = 0; j < executable_spec.target_count; ++j) {
         const iree_hal_executable_target_t* source_target =
             &executable_spec.targets[j];
@@ -168,14 +112,37 @@ static iree_status_t iree_hal_local_device_spec_collect_executables(
   }
 
   if (iree_status_is_ok(status)) {
-    *out_formats = formats;
-    *out_format_count = format_count;
     *out_targets = targets;
     *out_target_count = target_count;
   } else {
     iree_allocator_free(host_allocator, targets);
-    iree_allocator_free(host_allocator, formats);
   }
+  return status;
+}
+
+static iree_status_t iree_hal_local_device_spec_add_cpu_facet(
+    const iree_cpu_data_t* cpu_data, iree_hal_device_spec_builder_t* builder) {
+  iree_hal_cpu_device_spec_t cpu_spec = {
+      .cpu_data = *cpu_data,
+      .flags = IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
+  };
+  const iree_host_size_t payload_size = iree_hal_cpu_device_spec_payload_size();
+  uint8_t* payload_storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      builder->host_allocator, payload_size, (void**)&payload_storage));
+
+  iree_status_t status = iree_hal_cpu_device_spec_encode(
+      &cpu_spec, iree_make_byte_span(payload_storage, payload_size));
+  if (iree_status_is_ok(status)) {
+    const iree_hal_device_spec_facet_t facet = {
+        .schema_id = iree_make_cstring_view(IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_ID),
+        .schema_version = IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_VERSION,
+        .payload = iree_make_const_byte_span(payload_storage, payload_size),
+    };
+    status = iree_hal_device_spec_builder_add_facet(builder, &facet);
+  }
+
+  iree_allocator_free(builder->host_allocator, payload_storage);
   return status;
 }
 
@@ -186,14 +153,49 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
   *out_spec = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_local_device_spec_verify_params(params));
 
-  iree_hal_executable_format_spec_t* executable_formats = NULL;
-  iree_host_size_t executable_format_count = 0;
+  iree_cpu_data_t cpu_data;
+  iree_cpu_query_data(host_allocator, &cpu_data);
+
+  iree_string_builder_t exact_target_key_builder;
+  iree_string_builder_initialize(host_allocator, &exact_target_key_builder);
+  iree_status_t status =
+      iree_cpu_data_append_target_key(&cpu_data, &exact_target_key_builder);
+  const iree_hal_executable_target_t available_cpu_targets[] = {
+      {
+          .family = IREE_SV("cpu"),
+          .target_key = iree_string_builder_view(&exact_target_key_builder),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+          .priority = 100,
+          .physical_device_affinity = 1ull,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      },
+      {
+          .family = IREE_SV("cpu"),
+          .target_key = iree_cpu_architecture_name(cpu_data.architecture),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+          .priority = 50,
+          .physical_device_affinity = 1ull,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      },
+  };
+
+  iree_hal_executable_target_t
+      cpu_targets[IREE_ARRAYSIZE(available_cpu_targets)];
+  iree_host_size_t cpu_target_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(available_cpu_targets); ++i) {
+    if (iree_hal_query_any_executable_loader_target_support(
+            params->loader_count, params->loaders, &available_cpu_targets[i])) {
+      cpu_targets[cpu_target_count++] = available_cpu_targets[i];
+    }
+  }
+
   iree_hal_executable_target_t* executable_targets = NULL;
   iree_host_size_t executable_target_count = 0;
-  iree_status_t status = iree_hal_local_device_spec_collect_executables(
-      params->loader_count, params->loaders, host_allocator,
-      &executable_formats, &executable_format_count, &executable_targets,
-      &executable_target_count);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_local_device_spec_collect_executables(
+        cpu_target_count, cpu_targets, params->loader_count, params->loaders,
+        host_allocator, &executable_targets, &executable_target_count);
+  }
 
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(host_allocator, &builder);
@@ -285,11 +287,8 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
     status = iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
   }
 
-  if (iree_status_is_ok(status) &&
-      (executable_format_count != 0 || executable_target_count != 0)) {
+  if (iree_status_is_ok(status) && executable_target_count != 0) {
     iree_hal_device_executable_spec_t executables = {
-        .format_count = executable_format_count,
-        .formats = executable_formats,
         .target_count = executable_target_count,
         .targets = executable_targets,
         .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
@@ -298,11 +297,14 @@ IREE_API_EXPORT iree_status_t iree_hal_local_device_spec_create(
         iree_hal_device_spec_builder_set_executables(&builder, &executables);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_local_device_spec_add_cpu_facet(&cpu_data, &builder);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_finalize(&builder, out_spec);
   }
 
   iree_hal_device_spec_builder_deinitialize(&builder);
   iree_allocator_free(host_allocator, executable_targets);
-  iree_allocator_free(host_allocator, executable_formats);
+  iree_string_builder_deinitialize(&exact_target_key_builder);
   return status;
 }

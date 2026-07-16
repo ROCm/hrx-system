@@ -36,22 +36,16 @@ class DispatchPipelineTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
-
     // Load the scale_and_offset kernel:
     //   output[i] = input[i] * scale + offset
     //   2 push constants (scale, offset), 2 bindings (input, output)
-    PrepareExecutableOrSkipUnsupported(
-        executable_cache_,
+    LoadExecutableOrSkipUnsupported(
         "command_buffer_dispatch_constants_bindings_test.bin", &executable_);
   }
 
   void TearDown() override {
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -96,7 +90,6 @@ class DispatchPipelineTest : public CtsTestBase<> {
         IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, nullptr));
   }
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 

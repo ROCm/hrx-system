@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "name": "uses invocation AMDGPU target for HAL root without target attr",
+      "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {
           "name": "write-source",
@@ -29,7 +29,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"artifact_format\":\"elf\"",
                 "\"status\":\"OK\""
               ]
             }
@@ -45,6 +45,39 @@
             },
             {
               "path": "{tmp}/targetless_amdgpu.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-rdna35-exact",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/targetless_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1151",
+              "--output={tmp}/targetless_gfx1151_amdgpu.vmfb",
+              "--emit-target-artifact={tmp}/targetless_gfx1151_amdgpu.hsaco",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1151\"",
+                "\"artifact_format\":\"elf\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_gfx1151_amdgpu.vmfb",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/targetless_gfx1151_amdgpu.hsaco",
               "non_empty": true
             }
           ]
@@ -81,7 +114,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"artifact_format\":\"elf\"",
                 "\"status\":\"OK\""
               ]
             }
@@ -275,7 +308,7 @@
             "contains": {
               "unordered": [
                 "\"target_bundle\":\"gfx1100_target\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx1100\"",
+                "\"artifact_format\":\"elf\"",
                 "\"function\":\"selected_store_i32\"",
                 "\"status\":\"OK\""
               ]

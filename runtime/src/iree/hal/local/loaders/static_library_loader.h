@@ -21,14 +21,12 @@ extern "C" {
 // Creates a library loader that exposes the provided libraries to the HAL for
 // use as executables.
 //
-// This loader will handle executable formats of 'static'. Version checks will
-// ensure that the IREE compiler-produced static library version is one that the
-// runtime can support.
+// Each linked library is queried and version-checked before use.
 //
 // The name defined on each library will be used to lookup the executables and
 // must match with the names used during compilation exactly. The
-// iree_hal_executable_params_t used to reference the executables will contain
-// the library name and be used to lookup the library in the list.
+// iree_hal_executable_load_params_t used to reference an executable contains
+// the NUL-terminated library name as its executable data.
 //
 // Multiple static library loaders can be registered in cases when several
 // independent sets of libraries are linked in however duplicate names both

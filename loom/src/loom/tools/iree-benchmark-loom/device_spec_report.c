@@ -296,28 +296,6 @@ static iree_status_t iree_benchmark_loom_write_device_spec_timing_json(
   return loom_output_stream_write_cstring(stream, "}");
 }
 
-static iree_status_t iree_benchmark_loom_write_executable_formats_json(
-    const iree_hal_device_executable_spec_t* executables,
-    loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  for (iree_host_size_t i = 0; i < executables->format_count; ++i) {
-    const iree_hal_executable_format_spec_t* format = &executables->formats[i];
-    bool first_field = true;
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
-        stream, &first_field, "format", format->format));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
-        stream, &first_field, "caching_modes", format->caching_modes));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
-        stream, &first_field, "flags", format->flags));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-  }
-  return loom_output_stream_write_cstring(stream, "]");
-}
-
 static iree_status_t iree_benchmark_loom_write_executable_targets_json(
     const iree_hal_device_executable_spec_t* executables,
     loom_output_stream_t* stream) {
@@ -331,22 +309,8 @@ static iree_status_t iree_benchmark_loom_write_executable_targets_json(
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
         stream, &first_field, "family", target->family));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "architecture", target->architecture));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "processor", target->processor));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "features", target->features));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "artifact_format", target->artifact_format));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "runtime_abi", target->runtime_abi));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "loader_namespace", target->loader_namespace));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "loader_target", target->loader_target));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-        stream, &first_field, "metadata_schema", target->metadata_schema));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
+        stream, &first_field, "target_key", target->target_key));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
         stream, &first_field, "kind", target->kind));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
@@ -367,15 +331,9 @@ static iree_status_t iree_benchmark_loom_write_device_spec_executables_json(
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-      stream, &first_field, "format_count", executables->format_count));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
       stream, &first_field, "target_count", executables->target_count));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
       stream, &first_field, "flags", executables->flags));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_object_field_name(
-      stream, &first_field, "formats"));
-  IREE_RETURN_IF_ERROR(
-      iree_benchmark_loom_write_executable_formats_json(executables, stream));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_object_field_name(
       stream, &first_field, "targets"));
   IREE_RETURN_IF_ERROR(

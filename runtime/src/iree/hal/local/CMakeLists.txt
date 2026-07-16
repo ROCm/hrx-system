@@ -11,14 +11,43 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    cpu_device_spec
+  HDRS
+    "cpu_device_spec.h"
+  SRCS
+    "cpu_device_spec.c"
+  DEPS
+    iree::base
+    iree::base::core_headers
+    iree::base::cpu_data
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    cpu_device_spec_test
+  SRCS
+    "cpu_device_spec_test.cc"
+  DEPS
+    ::cpu_device_spec
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     device_spec_builder
   HDRS
     "device_spec_builder.h"
   SRCS
     "device_spec_builder.c"
   DEPS
+    ::cpu_device_spec
     ::executable_loader
     iree::base
+    iree::base::internal::cpu
     iree::hal
     iree::hal::memory::cpu_slab_provider
     iree::hal::utils::device_spec_builder
@@ -31,12 +60,26 @@ iree_cc_test(
   SRCS
     "device_spec_builder_test.cc"
   DEPS
+    ::cpu_device_spec
     ::device_spec_builder
     iree::hal
     iree::hal::local::loaders::static_library_loader
     iree::hal::memory::cpu_slab_provider
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
+    executable_data
+  HDRS
+    "executable_data.h"
+  SRCS
+    "executable_data.c"
+  DEPS
+    iree::base
+    iree::hal::utils::elf_format
+  PUBLIC
 )
 
 iree_cc_library(
@@ -56,19 +99,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    executable_format
-  HDRS
-    "executable_format.h"
-  SRCS
-    "executable_format.c"
-  DEPS
-    iree::base
-    iree::hal::utils::elf_format
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     executable_library
   HDRS
     "executable_library.h"
@@ -83,6 +113,7 @@ iree_cc_binary_benchmark(
   SRCS
     "executable_library_benchmark.c"
   DEPS
+    ::device_spec_builder
     ::executable_environment
     ::executable_library
     ::local
@@ -250,10 +281,8 @@ iree_cc_library(
     "executable_loader.h"
     "inline_command_buffer.h"
     "local_executable.h"
-    "local_executable_cache.h"
   SRCS
     "inline_command_buffer.c"
-    "local_executable_cache.c"
   DEPS
     ::executable_environment
     ::executable_library

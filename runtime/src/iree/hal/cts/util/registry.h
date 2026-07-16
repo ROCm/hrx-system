@@ -89,19 +89,52 @@ using CleanupFn = std::function<void()>;
 using ExecutableDataFn =
     iree_const_byte_span_t (*)(iree_string_view_t file_name);
 
+// Selects the device target compatible with one linked executable artifact.
+//
+// The target family owns compatibility between |artifact_target_key| and the
+// immutable targets advertised by |device_spec|. No-match and ambiguous
+// outcomes are returned in |out_result| without creating a status.
+using ExecutableTargetSelectorFn = iree_status_t (*)(
+    const iree_hal_device_spec_t* device_spec,
+    iree_string_view_t artifact_target_family,
+    iree_string_view_t artifact_target_key,
+    iree_hal_physical_device_affinity_t physical_device_affinity,
+    iree_hal_executable_target_selection_result_t* out_result);
+
+// Selects a device target by exact family-owned identity.
+inline iree_status_t SelectExactExecutableTarget(
+    const iree_hal_device_spec_t* device_spec,
+    iree_string_view_t artifact_target_family,
+    iree_string_view_t artifact_target_key,
+    iree_hal_physical_device_affinity_t physical_device_affinity,
+    iree_hal_executable_target_selection_result_t* out_result) {
+  iree_hal_executable_target_selection_t selection = {};
+  selection.family = artifact_target_family;
+  selection.target_key = artifact_target_key;
+  selection.physical_device_affinity = physical_device_affinity;
+  *out_result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
-// Executable format
+// Executable target
 //===----------------------------------------------------------------------===//
 
-// A pre-compiled executable format available for a backend.
-// Backends declare the formats they support; executable test suites expand
-// parameterizations across all available formats. This keeps non-executable
+// A pre-compiled executable target available for a backend.
+// Backends declare the targets they support; executable test suites expand
+// parameterizations across all available targets. This keeps non-executable
 // tests (allocator, semaphore, etc.) running once per device while executable
-// tests run once per (device, format) pair.
-struct ExecutableFormat {
-  std::string name;    // Suffix appended to backend name: "vmvx", "llvm_cpu".
-  const char* format;  // Format string: "vmvx-bytecode-fb".
-  ExecutableDataFn data_fn;  // Lookup function for compiled binaries.
+// tests run once per (device, target) pair.
+struct ExecutableTarget {
+  // Suffix appended to the backend name, such as "gfx942" or "spirv".
+  std::string name;
+  // HAL target family, such as "amdgpu" or "spirv".
+  const char* family;
+  // Canonical family-owned target key.
+  const char* target_key;
+  // Looks up linked executable data by CTS fixture name.
+  ExecutableDataFn data_fn;
 };
 
 //===----------------------------------------------------------------------===//
@@ -157,8 +190,10 @@ struct BackendInfo {
   std::string name;
   // Creates driver + device.
   DeviceFactory factory;
-  // E.g., "vmvx-bytecode-fb".
-  const char* executable_format = nullptr;
+  // HAL target family for the linked executable data.
+  const char* executable_target_family = nullptr;
+  // Canonical family-owned target key for the linked executable data.
+  const char* executable_target_key = nullptr;
   // Compiled executable lookup.
   ExecutableDataFn executable_data = nullptr;
   RecordingMode recording_mode = RecordingMode::kDirect;
@@ -166,13 +201,16 @@ struct BackendInfo {
   std::vector<TestExpectedFailure> expected_failures;
   // Stable key for caches that own driver/device resources.
   //
-  // Executable tests use |name| to distinguish one executable format from
+  // Executable tests use |name| to distinguish one executable target from
   // another while still running on the same physical backend. Device caches
-  // should use this key so format parameterization does not multiply expensive
+  // should use this key so target parameterization does not multiply expensive
   // device state.
   std::string device_cache_key;
   // Optional pre-device-creation host compatibility query.
   BackendHostCompatibilityFn host_compatibility_fn;
+  // Family-owned artifact compatibility selector.
+  ExecutableTargetSelectorFn executable_target_selector =
+      SelectExactExecutableTarget;
 };
 
 // Returns the stable cache key for driver/device resources owned by |info|.
@@ -212,7 +250,7 @@ struct BackendConfig {
   const char* name;               // "local_task", etc.
   BackendInfo info;               // Factory + capabilities.
   std::vector<std::string> tags;  // {"events", "indirect", ...}
-  std::vector<ExecutableFormat> executable_formats;  // Available formats.
+  std::vector<ExecutableTarget> executable_targets;  // Available targets.
 };
 
 //===----------------------------------------------------------------------===//
@@ -261,20 +299,20 @@ class CtsRegistry {
   // resources outside of the common backend cache.
   static void RegisterCleanup(CleanupFn cleanup);
 
-  // Register an executable format for an already-registered (or
-  // not-yet-registered) backend. Formats are stored in a pending list and
+  // Registers an executable target for an already-registered (or
+  // not-yet-registered) backend. Targets are stored in a pending list and
   // merged into their backends at InstantiateAll() time, so static init
-  // ordering between RegisterBackend() and RegisterExecutableFormat() does
+  // ordering between RegisterBackend() and RegisterExecutableTarget() does
   // not matter.
-  static void RegisterExecutableFormat(const char* backend_name,
-                                       ExecutableFormat format);
+  static void RegisterExecutableTarget(const char* backend_name,
+                                       ExecutableTarget target);
 
-  // Returns executable formats currently registered for |backend_name|.
+  // Returns executable targets currently registered for |backend_name|.
   //
   // This is intentionally independent from test-suite instantiation so tools
   // and benchmarks can load linked CTS-style executable data without creating
   // gtest parameterizations or requiring a BackendConfig registration.
-  static std::vector<ExecutableFormat> ListExecutableFormats(
+  static std::vector<ExecutableTarget> ListExecutableTargets(
       const char* backend_name);
 
   //===--------------------------------------------------------------------===//
@@ -454,16 +492,16 @@ inline std::string GetBackendName(
             {}}),                                                             \
        true)
 
-// Executable test registration - suite runs once per (device, format) pair.
+// Executable test registration - suite runs once per (device, target) pair.
 //
-// Backends with no executable_formats are silently skipped (the accumulator
+// Backends with no executable_targets are silently skipped (the accumulator
 // pushes nothing, and GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST handles
-// the empty suite). The "executables" tag is unnecessary — format availability
+// the empty suite). The "executables" tag is unnecessary — target availability
 // is structural, not string-based.
 //
-// For each matching backend, the accumulator iterates executable_formats and
-// pushes one BackendInfo per format with name = "backend_format",
-// executable_format and executable_data populated from the ExecutableFormat.
+// For each matching backend, the accumulator iterates executable_targets and
+// pushes one BackendInfo per target with name = "backend_target" and the
+// target identity and executable data populated from ExecutableTarget.
 #define CTS_REGISTER_EXECUTABLE_TEST_SUITE(TestClass)                         \
   GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(TestClass);                   \
   namespace {                                                                 \
@@ -482,12 +520,13 @@ inline std::string GetBackendName(
       (::iree::hal::cts::CtsRegistry::RegisterSuite(                          \
            {#TestClass,                                                       \
             [](const ::iree::hal::cts::BackendConfig& cfg) {                  \
-              for (const auto& fmt : cfg.executable_formats) {                \
+              for (const auto& target : cfg.executable_targets) {             \
                 auto info = cfg.info;                                         \
                 info.device_cache_key = cfg.name;                             \
-                info.name = std::string(cfg.name) + "_" + fmt.name;           \
-                info.executable_format = fmt.format;                          \
-                info.executable_data = fmt.data_fn;                           \
+                info.name = std::string(cfg.name) + "_" + target.name;        \
+                info.executable_target_family = target.family;                \
+                info.executable_target_key = target.target_key;               \
+                info.executable_data = target.data_fn;                        \
                 TestClass##_Backends::Get().push_back(std::move(info));       \
               }                                                               \
             },                                                                \
@@ -510,12 +549,12 @@ inline std::string GetBackendName(
        true)
 
 // Executable command buffer test registration - suite runs once per
-// (device, format, recording_mode) triple.
+// (device, target, recording_mode) triple.
 //
-// Combines executable format expansion with direct/indirect recording mode
+// Combines executable target expansion with direct/indirect recording mode
 // expansion. Creates two gtest instantiation sets:
-//   - CTS/TestClass.* with direct-mode BackendInfos for each format
-//   - CTS_Indirect/TestClass.* with indirect-mode BackendInfos for each format
+//   - CTS/TestClass.* with direct-mode BackendInfos for each target
+//   - CTS_Indirect/TestClass.* with indirect-mode BackendInfos for each target
 //     (only for backends with the "indirect" tag)
 #define CTS_REGISTER_EXECUTABLE_COMMAND_BUFFER_TEST_SUITE(TestClass)          \
   GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(TestClass);                   \
@@ -545,12 +584,13 @@ inline std::string GetBackendName(
       (::iree::hal::cts::CtsRegistry::RegisterSuite(                          \
            {#TestClass,                                                       \
             [](const ::iree::hal::cts::BackendConfig& cfg) {                  \
-              for (const auto& fmt : cfg.executable_formats) {                \
+              for (const auto& target : cfg.executable_targets) {             \
                 auto info = cfg.info;                                         \
                 info.device_cache_key = cfg.name;                             \
-                info.name = std::string(cfg.name) + "_" + fmt.name;           \
-                info.executable_format = fmt.format;                          \
-                info.executable_data = fmt.data_fn;                           \
+                info.name = std::string(cfg.name) + "_" + target.name;        \
+                info.executable_target_family = target.family;                \
+                info.executable_target_key = target.target_key;               \
+                info.executable_data = target.data_fn;                        \
                 info.recording_mode =                                         \
                     ::iree::hal::cts::RecordingMode::kDirect;                 \
                 TestClass##_DirectBackends::Get().push_back(std::move(info)); \
@@ -575,12 +615,13 @@ inline std::string GetBackendName(
        ::iree::hal::cts::CtsRegistry::RegisterSuite(                          \
            {#TestClass "_Indirect",                                           \
             [](const ::iree::hal::cts::BackendConfig& cfg) {                  \
-              for (const auto& fmt : cfg.executable_formats) {                \
+              for (const auto& target : cfg.executable_targets) {             \
                 auto info = cfg.info;                                         \
                 info.device_cache_key = cfg.name;                             \
-                info.name = std::string(cfg.name) + "_" + fmt.name;           \
-                info.executable_format = fmt.format;                          \
-                info.executable_data = fmt.data_fn;                           \
+                info.name = std::string(cfg.name) + "_" + target.name;        \
+                info.executable_target_family = target.family;                \
+                info.executable_target_key = target.target_key;               \
+                info.executable_data = target.data_fn;                        \
                 info.recording_mode =                                         \
                     ::iree::hal::cts::RecordingMode::kIndirect;               \
                 TestClass##_IndirectBackends::Get().push_back(                \

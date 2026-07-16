@@ -146,3 +146,14 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_test(
+    name = "tsan_test",
+    srcs = ["tsan_test.cc"],
+    deps = [
+        ":headers",
+        ":tsan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

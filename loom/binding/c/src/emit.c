@@ -826,7 +826,8 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
         compile_report.artifact_kind =
             LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
         compile_report.backend_name = emitter->name;
-        compile_report.executable_format = emitter->public_artifact_format;
+        compile_report.artifact_format =
+            loom_target_artifact_format_name(emitter->target_artifact_format);
         compile_report.requested_detail_flags =
             loomc_emit_compile_report_requested_detail_flags(
                 resolved_options.compile_report_mode);

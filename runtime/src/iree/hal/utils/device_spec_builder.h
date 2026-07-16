@@ -74,6 +74,16 @@ IREE_API_EXPORT iree_status_t iree_hal_device_spec_builder_set_executables(
     iree_hal_device_spec_builder_t* builder,
     const iree_hal_device_executable_spec_t* executables);
 
+// Adds an executable target to |builder|.
+//
+// A target with the same family, key, and kind as an existing target is merged
+// by unioning its physical-device affinity and flags. Duplicate targets must
+// have the same priority.
+IREE_API_EXPORT iree_status_t
+iree_hal_device_spec_builder_add_executable_target(
+    iree_hal_device_spec_builder_t* builder,
+    const iree_hal_executable_target_t* target);
+
 // Copies the sanitizer facet into |builder|.
 IREE_API_EXPORT iree_status_t iree_hal_device_spec_builder_set_sanitizer(
     iree_hal_device_spec_builder_t* builder,

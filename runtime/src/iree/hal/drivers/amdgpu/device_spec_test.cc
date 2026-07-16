@@ -100,15 +100,10 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(device_spec);
   ASSERT_NE(executables, nullptr);
-  ASSERT_GE(executables->format_count, 1);
-  EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
-                                     IREE_SV("gfx1100")));
   ASSERT_GE(executables->target_count, 1);
   EXPECT_TRUE(iree_string_view_equal(executables->targets[0].family,
                                      IREE_SV("amdgpu")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].processor,
-                                     IREE_SV("gfx1100")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].loader_target,
+  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].target_key,
                                      IREE_SV("gfx1100")));
 
   iree_hal_device_spec_release(device_spec);
@@ -153,6 +148,100 @@ TEST(DeviceSpecTest, ReportsProcessorWavefrontSupport) {
     iree_hal_device_spec_release(device_spec);
   }
 
+  iree_hal_allocator_release(allocator);
+}
+
+TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
+  iree_hal_allocator_t* allocator = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
+                                     iree_allocator_system(), &allocator));
+
+  iree_hal_amdgpu_target_id_t target_ids[2];
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
+      IREE_SV("gfx1100"), IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
+      &target_ids[0]));
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
+      IREE_SV("gfx1101"), IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
+      &target_ids[1]));
+  iree_hal_amdgpu_device_spec_physical_device_params_t physical_devices[2] = {
+      {
+          /*.target_id=*/target_ids[0],
+          /*.uuid=*/{},
+          /*.pci=*/{},
+          /*.numa=*/{},
+          /*.physical_ordinal=*/4,
+          /*.queue_count=*/1,
+          /*.compute_unit_count=*/40,
+          /*.wavefront_size=*/32,
+          /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+          /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_NONE,
+      },
+      {
+          /*.target_id=*/target_ids[1],
+          /*.uuid=*/{},
+          /*.pci=*/{},
+          /*.numa=*/{},
+          /*.physical_ordinal=*/9,
+          /*.queue_count=*/1,
+          /*.compute_unit_count=*/40,
+          /*.wavefront_size=*/32,
+          /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+          /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_NONE,
+      },
+  };
+  iree_hal_amdgpu_device_spec_params_t params = {
+      /*.logical_device_id=*/IREE_SV("amdgpu://group"),
+      /*.display_name=*/IREE_SV("AMDGPU test group"),
+      /*.timestamp_frequency_hz=*/1000000000ull,
+      /*.physical_device_count=*/IREE_ARRAYSIZE(physical_devices),
+      /*.physical_devices=*/physical_devices,
+      /*.device_memory_capacity_bytes=*/0,
+      /*.device_allocator=*/allocator,
+      /*.sanitizer=*/{},
+      /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_NONE,
+  };
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_create(
+      &params, iree_allocator_system(), &device_spec));
+
+  const iree_hal_device_executable_spec_t* executables =
+      iree_hal_device_spec_executables(device_spec);
+  ASSERT_NE(executables, nullptr);
+  ASSERT_EQ(executables->target_count, 3);
+
+  iree_hal_executable_target_selection_t selection = {
+      /*.family=*/IREE_SV("amdgpu"),
+      /*.target_key=*/IREE_SV("gfx1100"),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.physical_device_affinity=*/0,
+  };
+  iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  ASSERT_EQ(result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  ASSERT_NE(result.target, nullptr);
+  EXPECT_EQ(result.target->physical_device_affinity, 1ull);
+
+  selection.target_key = IREE_SV("gfx11-generic");
+  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC;
+  result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  ASSERT_EQ(result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  ASSERT_NE(result.target, nullptr);
+  EXPECT_EQ(result.target->physical_device_affinity, 3ull);
+
+  selection.target_key = IREE_SV("gfx1101");
+  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT;
+  result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  ASSERT_EQ(result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  ASSERT_NE(result.target, nullptr);
+  EXPECT_EQ(result.target->physical_device_affinity, 2ull);
+
+  iree_hal_device_spec_release(device_spec);
   iree_hal_allocator_release(allocator);
 }
 

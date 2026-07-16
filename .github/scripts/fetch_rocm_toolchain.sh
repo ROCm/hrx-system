@@ -35,10 +35,10 @@ export_env() {
   fi
 }
 
-append_path "${HRX_ROCM_ROOT}/lib/llvm/bin"
+# Keep the ROCm LLVM directory off PATH. Workflows select their host compiler
+# explicitly; AMDGPU device compilation receives this root through explicit
+# build configuration instead of ambient PATH order.
 append_path "${HRX_ROCM_ROOT}/bin"
-export_env "CC" "${HRX_ROCM_ROOT}/lib/llvm/bin/clang"
-export_env "CXX" "${HRX_ROCM_ROOT}/lib/llvm/bin/clang++"
 export_env "CMAKE_PREFIX_PATH" \
   "${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 export_env "IREE_HAL_AMDGPU_LIBHSA_PATH" \

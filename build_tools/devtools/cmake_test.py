@@ -192,6 +192,119 @@ class CMakeTest(unittest.TestCase):
         self.assertIn("ctest", test_plan.describe())
         self.assertIn("-R hrx", test_plan.describe())
 
+    def test_fresh_configure_preserves_configured_generator(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={REPO_ROOT}\n",
+                encoding="utf-8",
+            )
+            nested_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            nested_cache.parent.mkdir(parents=True)
+            nested_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            description = normalized_plan_description(plan)
+            self.assertIn("preserve CMake generator Ninja", description)
+            self.assertIn("-G Ninja --fresh", description)
+            self.assertFalse(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertTrue(nested_cache.is_file())
+
+    def test_fresh_configure_removes_tree_when_generator_changes(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={REPO_ROOT}\n",
+                encoding="utf-8",
+            )
+            nested_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            nested_cache.parent.mkdir(parents=True)
+            nested_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh", "-G", "Unix Makefiles"],
+                env={},
+            )
+
+            description = normalized_plan_description(plan)
+            self.assertIn(
+                "switch CMake generator from Ninja to Unix Makefiles",
+                description,
+            )
+            self.assertTrue(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertFalse(build_dir.exists())
+
+    def test_fresh_configure_removes_incomplete_build_tree(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            stale_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            stale_cache.parent.mkdir(parents=True)
+            stale_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+            marker_path = build_dir / cmake_dev.CMAKE_BUILD_TREE_MARKER
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text(
+                cmake_dev.CMAKE_BUILD_TREE_MARKER_CONTENT,
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            self.assertIn("remove incomplete CMake build tree", plan.describe())
+            self.assertTrue(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertFalse(build_dir.exists())
+
+    def test_fresh_configure_refuses_to_remove_unrecognized_directory(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            user_file = build_dir / "keep.txt"
+            user_file.write_text("not a build tree\n", encoding="utf-8")
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            self.assertEqual(plan.steps[0].run(), 1)
+            self.assertEqual(
+                user_file.read_text(encoding="utf-8"), "not a build tree\n"
+            )
+
     def test_run_plan_resolves_target_with_cmake_file_api(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
 

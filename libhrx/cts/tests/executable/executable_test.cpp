@@ -7,9 +7,8 @@
 #include <iterator>
 #include <string>
 
-#include "build_tools/amdgpu/target_map.h"
 #include "hrx_test_fixture.hpp"
-#include "libhrx/cts/amdgpu_executable_test_kernels.h"
+#include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
 namespace {
 
@@ -20,51 +19,6 @@ std::string gpu_architecture(hrx_device_t device) {
   return std::string(arch.data());
 }
 
-std::string base_gpu_target(std::string arch) {
-  const size_t feature_pos = arch.find(':');
-  if (feature_pos != std::string::npos) {
-    arch.resize(feature_pos);
-  }
-  return arch;
-}
-
-struct HsacoImage {
-  const iree_file_toc_t* file = nullptr;
-  std::string executable_format;
-};
-
-const iree_file_toc_t* find_hsaco_for_target(const std::string& target) {
-  char fragment[64] = {};
-  if (!iree_amdgpu_target_label_fragment(target.c_str(), fragment,
-                                         sizeof(fragment))) {
-    return nullptr;
-  }
-  const std::string filename =
-      std::string("hrx_cts_executable_kernel_") + fragment + ".so";
-  const iree_file_toc_t* toc = hrx_cts_amdgpu_executable_test_kernels_create();
-  for (size_t i = 0; i < hrx_cts_amdgpu_executable_test_kernels_size(); ++i) {
-    if (filename == toc[i].name) {
-      return &toc[i];
-    }
-  }
-  return nullptr;
-}
-
-HsacoImage find_hsaco(const std::string& arch) {
-  if (const iree_file_toc_t* file = find_hsaco_for_target(arch)) {
-    return HsacoImage{file, arch};
-  }
-  const char* code_object_target =
-      iree_amdgpu_code_object_target_for_exact(arch.c_str());
-  if (code_object_target && arch != code_object_target) {
-    if (const iree_file_toc_t* file =
-            find_hsaco_for_target(code_object_target)) {
-      return HsacoImage{file, code_object_target};
-    }
-  }
-  return {};
-}
-
 }  // namespace
 
 TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
@@ -73,22 +27,23 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
     return;
   }
 
-  std::string arch = base_gpu_target(gpu_architecture(device_));
+  std::string arch = gpu_architecture(device_);
   if (arch.empty() || arch == "unknown") {
     SUCCEED("Skipping native executable CTS: unknown GPU architecture");
     return;
   }
 
-  HsacoImage hsaco = find_hsaco(arch);
+  hrx_cts::AmdgpuExecutableTestImage hsaco =
+      hrx_cts::FindAmdgpuExecutableTestImage(arch);
   if (!hsaco.file) {
     SUCCEED("Skipping native executable CTS: no build-time HSACO test asset");
     return;
   }
 
   hrx_executable_t executable = nullptr;
-  REQUIRE_OK(
-      hrx().executable_load_data(device_, hsaco.file->data, hsaco.file->size,
-                                 hsaco.executable_format.c_str(), &executable));
+  REQUIRE_OK(hrx().executable_load_data(device_, hsaco.file->data,
+                                        hsaco.file->size, "amdgpu",
+                                        hsaco.target_key.c_str(), &executable));
   REQUIRE(executable != nullptr);
 
   hrx().executable_retain(executable);
@@ -96,7 +51,7 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
 
   size_t export_count = 0;
   REQUIRE_OK(hrx().executable_export_count(executable, &export_count));
-  REQUIRE(export_count == 2);
+  REQUIRE(export_count == 3);
 
   uint32_t noop_ordinal = UINT32_MAX;
   REQUIRE_OK(hrx().executable_lookup_export_by_name(executable, "hrx_noop",

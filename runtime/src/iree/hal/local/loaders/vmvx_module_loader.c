@@ -124,7 +124,7 @@ typedef struct iree_hal_vmvx_worker_state_t {
 static iree_status_t iree_hal_vmvx_worker_state_initialize(
     iree_vm_instance_t* instance, iree_host_size_t module_count,
     iree_vm_module_t** modules, iree_vm_module_t* bytecode_module,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_vmvx_worker_state_t* out_state) {
   IREE_ASSERT_ARGUMENT(out_state);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -215,7 +215,7 @@ static iree_status_t iree_hal_vmvx_executable_create(
     iree_vm_instance_t* instance, iree_host_size_t module_count,
     iree_vm_module_t** modules, iree_vm_module_t* bytecode_module,
     iree_host_size_t worker_capacity,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(instance);
   IREE_ASSERT_ARGUMENT(bytecode_module);
@@ -793,57 +793,51 @@ static void iree_hal_vmvx_module_loader_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-static iree_status_t iree_hal_vmvx_module_loader_infer_format(
+static bool iree_hal_vmvx_module_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  // Infer the total size of the bytecode archive, if needed.
-  if (executable_data.data_length == 0) {
-    IREE_RETURN_IF_ERROR(iree_vm_bytecode_archive_infer_size(
-        executable_data, out_inferred_size));
-  }
-
-  // Write the format string.
-  iree_string_view_t format = IREE_SV("vmvx-bytecode-fb");
-  if (format.size >= executable_format_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable format buffer too small");
-  }
-  memcpy(executable_format, format.data, format.size + /*NUL*/ 1);
-
-  return iree_ok_status();
-}
-
-static bool iree_hal_vmvx_module_loader_query_support(
-    iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_equal(executable_format,
-                                iree_make_cstring_view("vmvx-bytecode-fb"));
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("ireevm")) &&
+         iree_string_view_equal(target->target_key, IREE_SV("bytecode"));
 }
 
 static void iree_hal_vmvx_module_loader_query_spec(
     iree_hal_executable_loader_t* base_executable_loader,
     iree_hal_device_executable_spec_t* out_executable_spec) {
-  static const iree_hal_executable_format_spec_t executable_formats[] = {
-      {
-          .format = IREE_SVL("vmvx-bytecode-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
+  static const iree_hal_executable_target_t target = {
+      .family = IREE_SVL("ireevm"),
+      .target_key = IREE_SVL("bytecode"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+      .priority = 100,
+      .physical_device_affinity = 1ull,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   *out_executable_spec = (iree_hal_device_executable_spec_t){
-      .format_count = IREE_ARRAYSIZE(executable_formats),
-      .formats = executable_formats,
+      .target_count = 1,
+      .targets = &target,
       .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
 }
 
-static iree_status_t iree_hal_vmvx_module_loader_try_load(
+static bool iree_hal_vmvx_module_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  static const uint8_t zip_magic[] = {'P', 'K', 0x03, 0x04};
+  static const uint8_t module_identifier[] = {'I', 'R', 'E', 'E'};
+  const iree_const_byte_span_t executable_data = load_params->executable_data;
+  if (executable_data.data_length >= sizeof(zip_magic) &&
+      memcmp(executable_data.data, zip_magic, sizeof(zip_magic)) == 0) {
+    return true;
+  }
+  return executable_data.data_length >= 8 + sizeof(module_identifier) &&
+         memcmp(executable_data.data + 8, module_identifier,
+                sizeof(module_identifier)) == 0;
+}
+
+static iree_status_t iree_hal_vmvx_module_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   iree_hal_vmvx_module_loader_t* executable_loader =
       (iree_hal_vmvx_module_loader_t*)base_executable_loader;
@@ -902,8 +896,9 @@ static iree_status_t iree_hal_vmvx_module_loader_try_load(
 static const iree_hal_executable_loader_vtable_t
     iree_hal_vmvx_module_loader_vtable = {
         .destroy = iree_hal_vmvx_module_loader_destroy,
-        .infer_format = iree_hal_vmvx_module_loader_infer_format,
-        .query_support = iree_hal_vmvx_module_loader_query_support,
+        .query_target_support =
+            iree_hal_vmvx_module_loader_query_target_support,
         .query_spec = iree_hal_vmvx_module_loader_query_spec,
-        .try_load = iree_hal_vmvx_module_loader_try_load,
+        .claims_executable = iree_hal_vmvx_module_loader_claims_executable,
+        .load = iree_hal_vmvx_module_loader_load,
 };

@@ -16,7 +16,7 @@
 #include "iree/hal/drivers/metal/builtin_executables.h"
 #include "iree/hal/drivers/metal/direct_allocator.h"
 #include "iree/hal/drivers/metal/direct_command_buffer.h"
-#include "iree/hal/drivers/metal/nop_executable_cache.h"
+#include "iree/hal/drivers/metal/executable.h"
 #include "iree/hal/drivers/metal/shared_event.h"
 #include "iree/hal/drivers/metal/staging_buffer.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
@@ -394,12 +394,13 @@ static iree_status_t iree_hal_metal_device_create_event(iree_hal_device_t* base_
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "event not yet supported");
 }
 
-static iree_status_t iree_hal_metal_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_metal_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params, iree_hal_executable_t** out_executable) {
   iree_hal_metal_device_t* device = iree_hal_metal_device_cast(base_device);
-  return iree_hal_metal_nop_executable_cache_create(device->device, identifier,
-                                                    device->host_allocator, out_executable_cache);
+  return iree_hal_metal_executable_create(device->device, load_params, device->host_allocator,
+                                          out_executable);
 }
 
 static iree_status_t iree_hal_metal_device_import_file(iree_hal_device_t* base_device,
@@ -806,7 +807,7 @@ static const iree_hal_device_vtable_t iree_hal_metal_device_vtable = {
     .create_channel = iree_hal_metal_device_create_channel,
     .create_command_buffer = iree_hal_metal_device_create_command_buffer,
     .create_event = iree_hal_metal_device_create_event,
-    .create_executable_cache = iree_hal_metal_device_create_executable_cache,
+    .load_executable = iree_hal_metal_device_load_executable,
     .import_file = iree_hal_metal_device_import_file,
     .create_semaphore = iree_hal_metal_device_create_semaphore,
     .query_semaphore_compatibility = iree_hal_metal_device_query_semaphore_compatibility,

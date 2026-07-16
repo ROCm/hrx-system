@@ -6,6 +6,10 @@
 
 """Sanitizer suppression sets and Bazel test helpers."""
 
+hsa_suppressions = {
+    "lsan": "//build_tools/sanitizer:lsan_suppressions_hsa.txt",
+}
+
 rocm_suppressions = {
     "lsan": "//build_tools/sanitizer:lsan_suppressions_rocm.txt",
 }

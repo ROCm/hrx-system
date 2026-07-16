@@ -23,8 +23,8 @@ iree_cc_library(
   PUBLIC
 )
 
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
 )
 

@@ -64,8 +64,6 @@ iree_runtime_cc_library(
         "memory_pools.h",
         "native_executable.c",
         "native_executable.h",
-        "nop_executable_cache.c",
-        "nop_executable_cache.h",
         "per_device_information.h",
         "rccl_channel.c",
         "rccl_channel.h",
@@ -114,6 +112,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:executable_target",
         "//runtime/src/iree/hal/utils:device_spec_builder",
     ],
 )

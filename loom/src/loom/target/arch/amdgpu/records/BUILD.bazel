@@ -26,6 +26,10 @@ _AMDGPU_TARGET_RECORDS_VISIBILITY = [
     "//loom/src/loom/tooling/target/amdgpu:__pkg__",
 ]
 
+_AMDGPU_TARGET_RECORDS_TABLES_VISIBILITY = _AMDGPU_TARGET_RECORDS_VISIBILITY + [
+    "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+]
+
 loom_generated_textual_header(
     name = "target_records_tables_gen",
     generator = _AMDGPU_TARGET_RECORDS_GENERATOR,
@@ -35,12 +39,18 @@ loom_generated_textual_header(
 )
 
 loom_cc_library(
+    name = "target_records_tables",
+    textual_hdrs = [":target_records_tables.inl"],
+    visibility = _AMDGPU_TARGET_RECORDS_TABLES_VISIBILITY,
+)
+
+loom_cc_library(
     name = "target_records",
     srcs = ["target_records.c"],
     hdrs = ["target_records.h"],
-    textual_hdrs = [":target_records_tables.inl"],
     visibility = _AMDGPU_TARGET_RECORDS_VISIBILITY,
     deps = [
+        ":target_records_tables",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
