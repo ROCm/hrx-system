@@ -9,11 +9,45 @@ load(
     "iree_runtime_cc_binary",
     "iree_runtime_cc_library",
 )
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "lora_set",
+    srcs = ["lora_set.c"],
+    hdrs = ["lora_set.h"],
+    deps = [
+        "//experimental/id4/ideogram4:lora",
+        "//experimental/id4/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/tooling:parameter_util",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "lora_set_test",
+    srcs = ["lora_set_test.cc"],
+    tags = ["requires-filesystem"],
+    deps = [
+        ":lora_set",
+        "//experimental/id4/ideogram4:lora",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
 )
 
 iree_runtime_cc_library(

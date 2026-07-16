@@ -11,6 +11,44 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    lora_set
+  HDRS
+    "lora_set.h"
+  SRCS
+    "lora_set.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::ideogram4::lora
+    iree::experimental::id4::tooling::runtime
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::tooling::parameter_util
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    lora_set_test
+  SRCS
+    "lora_set_test.cc"
+  DEPS
+    ::lora_set
+    iree::base
+    iree::experimental::id4::ideogram4::lora
+    iree::io::file_handle
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
+)
+
+iree_cc_library(
+  NAME
     parameter_bake
   HDRS
     "parameter_bake.h"
