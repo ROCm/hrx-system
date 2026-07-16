@@ -161,72 +161,55 @@ static const char* loom_testbench_sample_issue_category_name(
 
 static iree_status_t loom_testbench_write_sample_issue_json(
     const loom_testbench_sample_issue_t* issue, loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"category\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_testbench_sample_issue_category_name(issue->category)));
-  if (!iree_string_view_is_empty(issue->provider)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"provider\":"));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, issue->provider));
-  }
-  if (!iree_string_view_is_empty(issue->stage)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"stage\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, issue->stage));
-  }
-  if (!iree_string_view_is_empty(issue->kind)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"kind\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, issue->kind));
-  }
-  if (!iree_string_view_is_empty(issue->message)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"message\":"));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, issue->message));
-  }
-  return loom_output_stream_write_cstring(stream, "}");
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("category"),
+      iree_make_cstring_view(
+          loom_testbench_sample_issue_category_name(issue->category))));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("provider"), issue->provider));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("stage"), issue->stage));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("kind"), issue->kind));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("message"), issue->message));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_testbench_write_sample_issues_json(
     const loom_testbench_case_sample_result_t* result,
-    loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"issues\":["));
+    loom_json_object_writer_t* object) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, IREE_SV("issues")));
+  loom_json_array_writer_t issues;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &issues));
   for (iree_host_size_t i = 0; i < result->issue_count; ++i) {
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_testbench_write_sample_issue_json(&result->issues[i], stream));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&issues));
+    IREE_RETURN_IF_ERROR(loom_testbench_write_sample_issue_json(
+        &result->issues[i], object->stream));
   }
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_array_end(&issues);
 }
 
 iree_status_t loom_testbench_case_sample_result_write_json(
     const loom_testbench_case_sample_result_t* result,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "\"case\":"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("case"), result->case_plan->name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("sample_ordinal"), result->sample_ordinal));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("passed"), result->passed));
   IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(stream, result->case_plan->name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"sample_ordinal\":%" PRIhsz, result->sample_ordinal));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"passed\":"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      stream, result->passed ? "true" : "false"));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"expectations\":"));
+      loom_json_object_begin_field(&object, IREE_SV("expectations")));
   IREE_RETURN_IF_ERROR(loom_testbench_expectation_report_write_json(
       result->expectation_report, stream));
   if (result->issue_count != 0) {
     IREE_RETURN_IF_ERROR(
-        loom_testbench_write_sample_issues_json(result, stream));
+        loom_testbench_write_sample_issues_json(result, &object));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-  return iree_ok_status();
+  return loom_json_object_end(&object);
 }

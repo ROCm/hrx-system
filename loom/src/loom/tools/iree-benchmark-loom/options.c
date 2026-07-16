@@ -664,8 +664,8 @@ iree_status_t iree_benchmark_loom_parse_profile_data_families(
 iree_status_t iree_benchmark_loom_write_profile_family_names_json(
     iree_hal_device_profiling_data_families_t profile_data_families,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  bool first = true;
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(iree_benchmark_loom_profile_family_names); ++i) {
     const iree_benchmark_loom_profile_family_name_t* family =
@@ -673,15 +673,10 @@ iree_status_t iree_benchmark_loom_write_profile_family_names_json(
     if (!iree_all_bits_set(profile_data_families, family->bit)) {
       continue;
     }
-    if (!first) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_cstring(stream, family->json_name));
-    first = false;
+    IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+        &array, iree_make_cstring_view(family->json_name)));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
-  return iree_ok_status();
+  return loom_json_array_end(&array);
 }
 
 iree_status_t iree_benchmark_loom_parse_i32_flag(iree_string_view_t flag_name,

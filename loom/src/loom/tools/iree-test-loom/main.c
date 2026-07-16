@@ -151,73 +151,45 @@ static bool iree_test_loom_selected_cases_have_device_event_expectation(
 static iree_status_t iree_test_loom_append_skipped_case(
     const loom_testbench_case_plan_t* case_plan,
     const loom_testbench_requirement_result_t* requirement_result,
-    iree_string_builder_t* skipped_output, bool* inout_first_skipped_case) {
-  if (!*inout_first_skipped_case) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(skipped_output, ","));
-  }
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(skipped_output, &stream);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "\"case\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(&stream, case_plan->name));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"provider\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(&stream, requirement_result->provider));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\"op\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream,
+    loom_json_array_writer_t* skipped_cases) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(skipped_cases));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(skipped_cases->stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("case"), case_plan->name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("provider"), requirement_result->provider));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("op"),
       loom_testbench_requirement_op_kind_name(requirement_result->op_kind)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\"code\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream,
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("code"),
       loom_testbench_requirement_skip_code_name(requirement_result->code)));
-  if (!iree_string_view_is_empty(requirement_result->provider_code)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(&stream, ",\"provider_code\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        &stream, requirement_result->provider_code));
-  }
-  if (!iree_string_view_is_empty(requirement_result->display_message)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(&stream, ",\"display_message\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        &stream, requirement_result->display_message));
-  }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}"));
-  *inout_first_skipped_case = false;
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("provider_code"), requirement_result->provider_code));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("display_message"),
+      requirement_result->display_message));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t iree_test_loom_append_planning_issue(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_issue_t* issue,
-    iree_string_builder_t* planning_issue_output,
-    bool* inout_first_planning_issue) {
-  if (!*inout_first_planning_issue) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(planning_issue_output, ","));
-  }
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(planning_issue_output, &stream);
-  IREE_RETURN_IF_ERROR(
-      loom_testbench_issue_write_json(module_plan, issue, &stream));
-  *inout_first_planning_issue = false;
-  return iree_ok_status();
+    loom_json_array_writer_t* planning_issues) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(planning_issues));
+  return loom_testbench_issue_write_json(module_plan, issue,
+                                         planning_issues->stream);
 }
 
 static iree_status_t iree_test_loom_append_case_planning_issues(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_builder_t* planning_issue_output,
-    bool* inout_first_planning_issue,
+    loom_json_array_writer_t* planning_issues,
     iree_host_size_t* inout_planning_issue_count) {
   for (iree_host_size_t i = 0; i < case_plan->issue_count; ++i) {
     IREE_RETURN_IF_ERROR(iree_test_loom_append_planning_issue(
-        module_plan, &case_plan->issues[i], planning_issue_output,
-        inout_first_planning_issue));
+        module_plan, &case_plan->issues[i], planning_issues));
     ++*inout_planning_issue_count;
   }
   return iree_ok_status();
@@ -278,9 +250,9 @@ static iree_status_t iree_test_loom_run_case_samples(
     const loom_tooling_config_set_t* config_set,
     const loom_sanitizer_options_t* sanitizer_options,
     loom_run_hal_testbench_context_t* hal_context,
-    iree_arena_allocator_t* arena, iree_string_builder_t* sample_output,
-    iree_string_builder_t* skipped_output, bool* inout_first_sample,
-    bool* inout_first_skipped_case, iree_host_size_t* inout_sample_count,
+    iree_arena_allocator_t* arena, loom_json_array_writer_t* samples,
+    loom_json_array_writer_t* skipped_cases,
+    iree_host_size_t* inout_sample_count,
     iree_host_size_t* inout_failed_sample_count,
     iree_host_size_t* inout_skipped_case_count) {
   const loom_testbench_case_plan_t* case_plan = &module_plan->cases[case_index];
@@ -307,8 +279,7 @@ static iree_status_t iree_test_loom_run_case_samples(
       &requirement_result));
   if (requirement_result.skipped) {
     IREE_RETURN_IF_ERROR(iree_test_loom_append_skipped_case(
-        case_plan, &requirement_result, skipped_output,
-        inout_first_skipped_case));
+        case_plan, &requirement_result, skipped_cases));
     ++*inout_skipped_case_count;
     return iree_ok_status();
   }
@@ -377,18 +348,13 @@ static iree_status_t iree_test_loom_run_case_samples(
     status = loom_testbench_run_case_sample(&executor, sample_ordinal,
                                             &sample_result);
     if (iree_status_is_ok(status)) {
-      if (!*inout_first_sample) {
-        status = iree_string_builder_append_cstring(sample_output, ",");
-      }
-      if (iree_status_is_ok(status)) {
-        loom_output_stream_t stream;
-        loom_output_stream_for_builder(sample_output, &stream);
-        status = loom_testbench_case_sample_result_write_json(&sample_result,
-                                                              &stream);
-      }
+      status = loom_json_array_begin_element(samples);
     }
     if (iree_status_is_ok(status)) {
-      *inout_first_sample = false;
+      status = loom_testbench_case_sample_result_write_json(&sample_result,
+                                                            samples->stream);
+    }
+    if (iree_status_is_ok(status)) {
       ++*inout_sample_count;
       if (!sample_result.passed) {
         ++*inout_failed_sample_count;
@@ -432,31 +398,33 @@ static iree_status_t iree_test_loom_write_report(
     iree_host_size_t planning_issue_count, iree_string_view_t samples,
     iree_string_view_t skipped_cases, iree_string_view_t planning_issues,
     iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-      output, "{\"format\":\"loom.test.v0\""));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"case_count\":%" PRIhsz, case_count));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"sample_count\":%" PRIhsz, sample_count));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"failed_sample_count\":%" PRIhsz, failed_sample_count));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"skipped_case_count\":%" PRIhsz, skipped_case_count));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"planning_issue_count\":%" PRIhsz, planning_issue_count));
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(output, &stream);
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.test.v0")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("case_count"), case_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("sample_count"), sample_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("failed_sample_count"), failed_sample_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("skipped_case_count"), skipped_case_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("planning_issue_count"), planning_issue_count));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"samples\":["));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(output, samples));
+      loom_json_object_begin_field(&object, IREE_SV("samples")));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(&stream, samples));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, "],\"skipped_cases\":["));
+      loom_json_object_begin_field(&object, IREE_SV("skipped_cases")));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(&stream, skipped_cases));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(output, skipped_cases));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, "],\"planning_issues\":["));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(output, planning_issues));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "]}\n"));
-  return iree_ok_status();
+      loom_json_object_begin_field(&object, IREE_SV("planning_issues")));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(&stream, planning_issues));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
+  return loom_output_stream_write_char(&stream, '\n');
 }
 
 static void iree_test_loom_print_agents_markdown(FILE* stream) {
@@ -580,8 +548,24 @@ int iree_test_loom_main(int argc, char** argv,
   iree_string_builder_initialize(allocator, &report_output);
   int exit_code = 0;
 
-  iree_status_t status = iree_ok_status();
-  if (argc > 2) {
+  loom_output_stream_t sample_stream;
+  loom_output_stream_for_builder(&sample_output, &sample_stream);
+  loom_json_array_writer_t samples;
+  iree_status_t status = loom_json_array_begin(&sample_stream, &samples);
+  loom_output_stream_t skipped_stream;
+  loom_output_stream_for_builder(&skipped_output, &skipped_stream);
+  loom_json_array_writer_t skipped_cases;
+  if (iree_status_is_ok(status)) {
+    status = loom_json_array_begin(&skipped_stream, &skipped_cases);
+  }
+  loom_output_stream_t planning_issue_stream;
+  loom_output_stream_for_builder(&planning_issue_output,
+                                 &planning_issue_stream);
+  loom_json_array_writer_t planning_issues;
+  if (iree_status_is_ok(status)) {
+    status = loom_json_array_begin(&planning_issue_stream, &planning_issues);
+  }
+  if (iree_status_is_ok(status) && argc > 2) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "iree-test-loom accepts at most one input file or '-' for stdin; got "
@@ -687,9 +671,6 @@ int iree_test_loom_main(int argc, char** argv,
     iree_host_size_t failed_sample_count = 0;
     iree_host_size_t skipped_case_count = 0;
     iree_host_size_t planning_issue_count = 0;
-    bool first_sample = true;
-    bool first_skipped_case = true;
-    bool first_planning_issue = true;
     for (iree_host_size_t case_index = 0;
          iree_status_is_ok(status) && case_index < module_plan.case_count;
          ++case_index) {
@@ -702,21 +683,28 @@ int iree_test_loom_main(int argc, char** argv,
       ++selected_case_count;
       if (case_plan->issue_count != 0) {
         status = iree_test_loom_append_case_planning_issues(
-            &module_plan, case_plan, &planning_issue_output,
-            &first_planning_issue, &planning_issue_count);
+            &module_plan, case_plan, &planning_issues, &planning_issue_count);
       } else {
         status = iree_test_loom_run_case_samples(
             configuration, &session, &run_module, &module_plan, case_index,
             &execution_options, &config_set, &sanitizer_options, &hal_context,
-            &execution_arena, &sample_output, &skipped_output, &first_sample,
-            &first_skipped_case, &sample_count, &failed_sample_count,
-            &skipped_case_count);
+            &execution_arena, &samples, &skipped_cases, &sample_count,
+            &failed_sample_count, &skipped_case_count);
       }
     }
     if (iree_status_is_ok(status) && selected_case_count == 0) {
       status = iree_make_status(
           IREE_STATUS_NOT_FOUND, "no check.case matched '%.*s'",
           (int)selected_case_name.size, selected_case_name.data);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_end(&samples);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_end(&skipped_cases);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_end(&planning_issues);
     }
     if (iree_status_is_ok(status)) {
       status = iree_test_loom_write_report(

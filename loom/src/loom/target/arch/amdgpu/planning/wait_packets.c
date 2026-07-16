@@ -367,22 +367,18 @@ static iree_string_view_t loom_amdgpu_wait_packet_json_function_name(
 
 static iree_status_t loom_amdgpu_wait_packet_json_write_counters(
     loom_output_stream_t* stream, uint32_t counter_mask) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  bool needs_comma = false;
+  loom_json_array_writer_t counters;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &counters));
   for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
     const uint32_t slot_mask = 1u << slot;
     if ((counter_mask & slot_mask) == 0) {
       continue;
     }
-    if (needs_comma) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
     const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        stream, loom_amdgpu_wait_counter_name(counter_id)));
-    needs_comma = true;
+    IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+        &counters, loom_amdgpu_wait_counter_name(counter_id)));
   }
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_array_end(&counters);
 }
 
 iree_status_t loom_amdgpu_wait_packet_plan_format_json(
@@ -407,11 +403,11 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
       &stream, schedule->target.descriptor_set_key));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream, ",\"packet_count\":%zu,\"packets\":[", plan->packet_count));
+      &stream, ",\"packet_count\":%zu,\"packets\":", plan->packet_count));
+  loom_json_array_writer_t packets;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &packets));
   for (iree_host_size_t i = 0; i < plan->packet_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&packets));
     const loom_amdgpu_wait_packet_t* packet = &plan->packets[i];
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
     IREE_RETURN_IF_ERROR(
@@ -433,12 +429,12 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
     IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
         &stream,
         ",\"source_action_start\":%zu,\"source_action_count\":%zu"
-        ",\"immediates\":[",
+        ",\"immediates\":",
         packet->source_action_start, packet->source_action_count));
+    loom_json_array_writer_t immediates;
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &immediates));
     for (iree_host_size_t j = 0; j < packet->immediate_count; ++j) {
-      if (j > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-      }
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&immediates));
       const iree_host_size_t immediate_index = packet->immediate_start + j;
       IREE_ASSERT_LT(immediate_index, plan->immediate_count);
       const loom_amdgpu_wait_packet_immediate_t* immediate =
@@ -451,7 +447,9 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
       IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
           &stream, ",\"value\":%" PRIu16 "}", immediate->value));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]}"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&immediates));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}"));
   }
-  return loom_output_stream_write_cstring(&stream, "]}");
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&packets));
+  return loom_output_stream_write_cstring(&stream, "}");
 }

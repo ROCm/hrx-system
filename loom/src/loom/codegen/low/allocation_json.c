@@ -572,12 +572,13 @@ static iree_status_t loom_low_allocation_json_write_failure_location(
 static iree_status_t loom_low_allocation_json_write_failure(
     const loom_low_allocation_table_t* table,
     const loom_text_print_options_t* type_print_options,
-    loom_output_stream_t* stream) {
+    loom_json_object_writer_t* object) {
   if (!loom_low_allocation_failure_is_present(&table->failure)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"failure\":"));
+      loom_json_object_begin_field(object, IREE_SV("failure")));
+  loom_output_stream_t* stream = object->stream;
   const loom_low_allocation_failure_t* failure = &table->failure;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{\"code\":"));
   IREE_RETURN_IF_ERROR(
@@ -635,129 +636,136 @@ iree_status_t loom_low_allocation_format_json(
       table->target.descriptor_set, &type_print_context);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      &stream, "\"format\":\"loom.low.allocation.v0\""));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"function\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, loom_low_allocation_json_function_name(table)));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"target\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(&stream, table->target.target_name));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"descriptor_set\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, table->target.descriptor_set_key));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"allocation_mode\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      &stream, loom_low_allocation_json_mode_name(table->allocation_mode)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      ",\"assignment_count\":%zu,\"remark_count\":%zu"
-      ",\"copy_decision_count\":%zu,\"spill_count\":%zu"
-      ",\"spill_plan_count\":%zu"
-      ",\"coalesced_copy_count\":%zu,\"materialized_copy_count\":%zu",
-      table->assignment_count, table->remark_count, table->copy_decision_count,
-      table->spill_count, table->spill_plan_count, table->coalesced_copy_count,
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.low.allocation.v0")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("function"),
+      loom_low_allocation_json_function_name(table)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("target"), table->target.target_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("descriptor_set"), table->target.descriptor_set_key));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("allocation_mode"),
+      iree_make_cstring_view(
+          loom_low_allocation_json_mode_name(table->allocation_mode))));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("assignment_count"), table->assignment_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("remark_count"), table->remark_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("copy_decision_count"), table->copy_decision_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("spill_count"), table->spill_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("spill_plan_count"), table->spill_plan_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("coalesced_copy_count"), table->coalesced_copy_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("materialized_copy_count"),
       table->materialized_copy_count));
 
   const bool has_storage_lease_details =
       loom_low_allocation_json_has_storage_lease_details(table);
   if (has_storage_lease_details) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        &stream,
-        ",\"storage_lease_count\":%zu"
-        ",\"storage_lease_instance_count\":%zu"
-        ",\"storage_release_action_count\":%zu",
-        table->storage_leases.record_count, table->storage_lease_instance_count,
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("storage_lease_count"),
+        table->storage_leases.record_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("storage_lease_instance_count"),
+        table->storage_lease_instance_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("storage_release_action_count"),
         table->storage_release_action_count));
   }
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"assignments\":["));
+      loom_json_object_begin_field(&object, IREE_SV("assignments")));
+  loom_json_array_writer_t assignments;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &assignments));
   for (iree_host_size_t i = 0; i < table->assignment_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&assignments));
     IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_assignment(
         table, &type_print_context.options, i, &stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&assignments));
 
   if (has_storage_lease_details) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(&stream, ",\"storage_leases\":["));
+        loom_json_object_begin_field(&object, IREE_SV("storage_leases")));
+    loom_json_array_writer_t storage_leases;
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &storage_leases));
     for (iree_host_size_t i = 0; i < table->storage_leases.record_count; ++i) {
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-      }
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&storage_leases));
       IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_storage_lease_record(
           table, i, &stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&storage_leases));
 
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-        &stream, ",\"storage_lease_instances\":["));
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("storage_lease_instances")));
+    loom_json_array_writer_t storage_lease_instances;
+    IREE_RETURN_IF_ERROR(
+        loom_json_array_begin(&stream, &storage_lease_instances));
     for (iree_host_size_t i = 0; i < table->storage_lease_instance_count; ++i) {
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_json_array_begin_element(&storage_lease_instances));
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_json_write_storage_lease_instance(
               table, &type_print_context.options, i, &stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&storage_lease_instances));
 
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-        &stream, ",\"storage_release_actions\":["));
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("storage_release_actions")));
+    loom_json_array_writer_t storage_release_actions;
+    IREE_RETURN_IF_ERROR(
+        loom_json_array_begin(&stream, &storage_release_actions));
     for (iree_host_size_t i = 0; i < table->storage_release_action_count; ++i) {
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_json_array_begin_element(&storage_release_actions));
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_json_write_storage_release_action(table, i,
                                                                 &stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&storage_release_actions));
   }
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"spill_plans\":["));
+      loom_json_object_begin_field(&object, IREE_SV("spill_plans")));
+  loom_json_array_writer_t spill_plans;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &spill_plans));
   for (iree_host_size_t i = 0; i < table->spill_plan_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&spill_plans));
     IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_spill_plan(
         table, &type_print_context.options, i, &stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&spill_plans));
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"copy_decisions\":["));
+      loom_json_object_begin_field(&object, IREE_SV("copy_decisions")));
+  loom_json_array_writer_t copy_decisions;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &copy_decisions));
   for (iree_host_size_t i = 0; i < table->copy_decision_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&copy_decisions));
     IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_copy_decision(
         table, &type_print_context.options, i, &stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&copy_decisions));
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"remarks\":["));
+      loom_json_object_begin_field(&object, IREE_SV("remarks")));
+  loom_json_array_writer_t remarks;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &remarks));
   for (iree_host_size_t i = 0; i < table->remark_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&remarks));
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_json_write_remark(table, i, &stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "]"));
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&remarks));
   IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_failure(
-      table, &type_print_context.options, &stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}"));
-  return iree_ok_status();
+      table, &type_print_context.options, &object));
+  return loom_json_object_end(&object);
 }

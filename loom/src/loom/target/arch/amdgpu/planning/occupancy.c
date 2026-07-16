@@ -758,24 +758,26 @@ iree_status_t loom_amdgpu_occupancy_format_json(
       &stream,
       ",\"spill_count\":%" PRIu32 ",\"scratch_spill_bytes\":%" PRIu32
       ",\"spill_store_count\":%" PRIu32 ",\"spill_reload_count\":%" PRIu32
-      ",\"register_classes\":[",
+      ",\"register_classes\":",
       table->spill_count, table->scratch_spill_bytes, table->spill_store_count,
       table->spill_reload_count));
+  loom_json_array_writer_t register_classes;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &register_classes));
   for (iree_host_size_t i = 0; i < table->register_class_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&register_classes));
     IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_register_class(
         &table->register_classes[i], &stream));
   }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&register_classes));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, "],\"pressure_resources\":["));
+      loom_output_stream_write_cstring(&stream, ",\"pressure_resources\":"));
+  loom_json_array_writer_t pressure_resources;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &pressure_resources));
   for (iree_host_size_t i = 0; i < table->pressure_resource_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&pressure_resources));
     IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_pressure_resource(
         &table->pressure_resources[i], &stream));
   }
-  return loom_output_stream_write_cstring(&stream, "]}");
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&pressure_resources));
+  return loom_output_stream_write_cstring(&stream, "}");
 }
