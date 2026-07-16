@@ -176,6 +176,23 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather(
   return iree_ok_status();
 }
 
+IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather_batch(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, gather_count);
+  if (gather_count != 0) {
+    IREE_ASSERT_ARGUMENT(gathers);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, provider->vtable->gather_batch(provider, device, queue_affinity,
+                                           gather_count, gathers));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,

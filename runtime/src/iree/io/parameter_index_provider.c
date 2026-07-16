@@ -321,8 +321,9 @@ static void iree_io_parameter_op_batch_begin(
 // Returns the entry, the span indicating source/target ranges, and optionally
 // a file (NULL if a splat). |out_file| is retained and must be released by the
 // caller if set.
-static iree_status_t iree_io_parameter_op_batch_resolve_entry(
-    const iree_io_parameter_op_batch_t* batch, iree_string_view_t scope,
+static iree_status_t iree_io_parameter_index_provider_resolve_entry(
+    iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_string_view_t scope,
     iree_io_parameter_enumerator_t enumerator, iree_host_size_t i,
     iree_hal_memory_access_t access,
     const iree_io_parameter_index_entry_t** IREE_RESTRICT out_entry,
@@ -344,8 +345,7 @@ static iree_status_t iree_io_parameter_op_batch_resolve_entry(
   const iree_io_parameter_index_entry_t* entry = NULL;
   iree_hal_file_t* file = NULL;  // retained, NULL if splat
   IREE_RETURN_IF_ERROR(iree_io_parameter_index_provider_resolve(
-      batch->provider, batch->device, batch->queue_affinity, scope, key, access,
-      &entry, &file));
+      provider, device, queue_affinity, scope, key, access, &entry, &file));
 
   // Validate the parameter range is in-bounds.
   iree_status_t status = iree_io_validate_parameter_range(
@@ -675,6 +675,294 @@ static iree_status_t iree_io_parameter_op_batch_end(
   return status;
 }
 
+typedef struct iree_io_parameter_gather_batch_group_t {
+  // Readiness semaphore for groups with multi-semaphore incoming waits.
+  iree_hal_semaphore_t* start_semaphore;
+  // Payload value signaled on |start_semaphore|.
+  uint64_t start_value;
+  // Timelines touched by this group.
+  uint8_t timeline_mask;
+  // Latest payload value used by this group on each timeline.
+  uint64_t timeline_values[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+} iree_io_parameter_gather_batch_group_t;
+
+typedef struct iree_io_parameter_gather_batch_t {
+  // Parameter provider sourcing the parameter metadata.
+  iree_io_parameter_index_provider_t* provider;
+  // Device hosting the batch operation.
+  iree_hal_device_t* device;
+  // Queue affinity indicating where batch operations can run.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Number of gather groups in |gathers|.
+  iree_host_size_t gather_count;
+  // Gather groups being scheduled. Unowned.
+  const iree_io_parameter_gather_t* gathers;
+  // Per-group readiness and completion tracking.
+  iree_io_parameter_gather_batch_group_t* groups;
+  // Number of groups that already have completion barriers submitted.
+  iree_host_size_t completed_group_count;
+  // Number of concurrent timelines available for processing the batch.
+  iree_host_size_t concurrency;
+  // Sum of byte read/writes outstanding per timeline as a proxy for work.
+  uint64_t
+      timeline_bytes_outstanding[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+  // Semaphore per timeline.
+  iree_hal_semaphore_t*
+      timeline_semaphores[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+  // Current payload per timeline.
+  uint64_t timeline_values[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+} iree_io_parameter_gather_batch_t;
+
+static iree_status_t iree_io_parameter_gather_batch_begin(
+    iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers,
+    iree_io_parameter_gather_batch_t* IREE_RESTRICT out_batch) {
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(out_batch);
+  memset(out_batch, 0, sizeof(*out_batch));
+  out_batch->provider = provider;
+  out_batch->device = device;
+  out_batch->queue_affinity = queue_affinity;
+  out_batch->gather_count = gather_count;
+  out_batch->gathers = gathers;
+  out_batch->concurrency =
+      iree_max(1, iree_min(provider->max_concurrent_operations,
+                           IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      provider->host_allocator, gather_count, sizeof(out_batch->groups[0]),
+      (void**)&out_batch->groups));
+  memset(out_batch->groups, 0, gather_count * sizeof(out_batch->groups[0]));
+  return iree_ok_status();
+}
+
+static iree_status_t iree_io_parameter_gather_batch_begin_group(
+    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index) {
+  IREE_ASSERT_ARGUMENT(batch);
+  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
+  iree_io_parameter_gather_batch_group_t* group = &batch->groups[group_index];
+  if (gather->count == 0 || gather->wait_semaphore_list.count <= 1) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      batch->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &group->start_semaphore));
+  group->start_value = 1;
+  iree_hal_semaphore_list_t start_signal_list = {
+      .count = 1,
+      .semaphores = &group->start_semaphore,
+      .payload_values = &group->start_value,
+  };
+  return iree_hal_device_queue_barrier(
+      batch->device, batch->queue_affinity, gather->wait_semaphore_list,
+      start_signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
+}
+
+typedef struct iree_io_parameter_gather_batch_step_t {
+  // Wait list for the operation.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Signal list for the operation.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Scratch wait semaphore storage.
+  iree_hal_semaphore_t* wait_semaphores[2];
+  // Scratch wait payload value storage.
+  uint64_t wait_values[2];
+  // Scratch signal payload value storage.
+  uint64_t signal_value;
+} iree_io_parameter_gather_batch_step_t;
+
+static iree_status_t iree_io_parameter_gather_batch_advance_timeline(
+    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+    uint64_t op_byte_length,
+    iree_io_parameter_gather_batch_step_t* IREE_RESTRICT out_step) {
+  IREE_ASSERT_ARGUMENT(batch);
+  IREE_ASSERT_ARGUMENT(out_step);
+  memset(out_step, 0, sizeof(*out_step));
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, op_byte_length);
+
+  uint64_t smallest_value = batch->timeline_bytes_outstanding[0];
+  iree_host_size_t timeline_index = 0;
+  for (iree_host_size_t i = 1; i < batch->concurrency; ++i) {
+    if (batch->timeline_bytes_outstanding[i] < smallest_value) {
+      smallest_value = batch->timeline_bytes_outstanding[i];
+      timeline_index = i;
+    }
+  }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)timeline_index);
+
+  iree_hal_semaphore_t* timeline_semaphore =
+      batch->timeline_semaphores[timeline_index];
+  if (!timeline_semaphore) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_semaphore_create(batch->device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                  batch->timeline_values[timeline_index],
+                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+                                  &batch->timeline_semaphores[timeline_index]));
+    timeline_semaphore = batch->timeline_semaphores[timeline_index];
+  }
+
+  const uint64_t previous_timeline_value =
+      batch->timeline_values[timeline_index];
+  const uint64_t next_timeline_value = ++batch->timeline_values[timeline_index];
+  batch->timeline_bytes_outstanding[timeline_index] += op_byte_length;
+
+  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
+  iree_io_parameter_gather_batch_group_t* group = &batch->groups[group_index];
+  const uint8_t timeline_bit = (uint8_t)(1u << timeline_index);
+  const bool group_touched_timeline =
+      iree_all_bits_set(group->timeline_mask, timeline_bit);
+
+  iree_host_size_t wait_count = 0;
+  if (!group_touched_timeline) {
+    if (group->start_semaphore) {
+      out_step->wait_semaphores[wait_count] = group->start_semaphore;
+      out_step->wait_values[wait_count++] = group->start_value;
+    } else if (gather->wait_semaphore_list.count == 1) {
+      out_step->wait_semaphores[wait_count] =
+          gather->wait_semaphore_list.semaphores[0];
+      out_step->wait_values[wait_count++] =
+          gather->wait_semaphore_list.payload_values[0];
+    }
+  }
+  if (previous_timeline_value != 0) {
+    out_step->wait_semaphores[wait_count] = timeline_semaphore;
+    out_step->wait_values[wait_count++] = previous_timeline_value;
+  }
+  out_step->wait_semaphore_list.count = wait_count;
+  out_step->wait_semaphore_list.semaphores = out_step->wait_semaphores;
+  out_step->wait_semaphore_list.payload_values = out_step->wait_values;
+
+  out_step->signal_value = next_timeline_value;
+  out_step->signal_semaphore_list.count = 1;
+  out_step->signal_semaphore_list.semaphores =
+      &batch->timeline_semaphores[timeline_index];
+  out_step->signal_semaphore_list.payload_values = &out_step->signal_value;
+
+  group->timeline_mask |= timeline_bit;
+  group->timeline_values[timeline_index] = next_timeline_value;
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_io_parameter_gather_batch_enqueue_splat(
+    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+    iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
+    iree_device_size_t length, const void* pattern,
+    iree_host_size_t pattern_length) {
+  IREE_ASSERT_ARGUMENT(batch);
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(pattern);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_io_parameter_gather_batch_step_t step;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_io_parameter_gather_batch_advance_timeline(batch, group_index,
+                                                          length, &step));
+  iree_status_t status = iree_hal_device_queue_fill(
+      batch->device, batch->queue_affinity, step.wait_semaphore_list,
+      step.signal_semaphore_list, buffer, buffer_offset, length, pattern,
+      pattern_length, IREE_HAL_FILL_FLAG_NONE);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_gather_batch_enqueue_file_read(
+    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+    iree_hal_file_t* source_file, uint64_t source_file_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_buffer_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(batch);
+  IREE_ASSERT_ARGUMENT(source_file);
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_io_parameter_gather_batch_step_t step;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_io_parameter_gather_batch_advance_timeline(batch, group_index,
+                                                          length, &step));
+  iree_status_t status = iree_hal_device_queue_read(
+      batch->device, batch->queue_affinity, step.wait_semaphore_list,
+      step.signal_semaphore_list, source_file, source_file_offset,
+      target_buffer, target_buffer_offset, length, flags);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_gather_batch_complete_group(
+    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index) {
+  IREE_ASSERT_ARGUMENT(batch);
+  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
+  const iree_io_parameter_gather_batch_group_t* group =
+      &batch->groups[group_index];
+  if (group->timeline_mask == 0) {
+    return iree_hal_device_queue_barrier(
+        batch->device, batch->queue_affinity, gather->wait_semaphore_list,
+        gather->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+  }
+
+  iree_hal_semaphore_t*
+      wait_semaphores[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+  uint64_t wait_values[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
+  iree_host_size_t wait_count = 0;
+  for (iree_host_size_t i = 0; i < batch->concurrency; ++i) {
+    const uint8_t timeline_bit = (uint8_t)(1u << i);
+    if (!iree_all_bits_set(group->timeline_mask, timeline_bit)) continue;
+    wait_semaphores[wait_count] = batch->timeline_semaphores[i];
+    wait_values[wait_count++] = group->timeline_values[i];
+  }
+  iree_hal_semaphore_list_t wait_semaphore_list = {
+      .count = wait_count,
+      .semaphores = wait_semaphores,
+      .payload_values = wait_values,
+  };
+  return iree_hal_device_queue_barrier(
+      batch->device, batch->queue_affinity, wait_semaphore_list,
+      gather->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+}
+
+static iree_status_t iree_io_parameter_gather_batch_end(
+    iree_io_parameter_gather_batch_t* batch, iree_status_t status) {
+  IREE_ASSERT_ARGUMENT(batch);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_TEXT(
+      z0, iree_status_code_string(iree_status_code(status)));
+
+  while (iree_status_is_ok(status) &&
+         batch->completed_group_count < batch->gather_count) {
+    status = iree_io_parameter_gather_batch_complete_group(
+        batch, batch->completed_group_count);
+    if (iree_status_is_ok(status)) {
+      ++batch->completed_group_count;
+    }
+  }
+
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = batch->completed_group_count;
+         i < batch->gather_count; ++i) {
+      iree_hal_semaphore_list_fail(batch->gathers[i].signal_semaphore_list,
+                                   iree_status_clone(status));
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < batch->concurrency; ++i) {
+    iree_hal_semaphore_release(batch->timeline_semaphores[i]);
+  }
+  for (iree_host_size_t i = 0; i < batch->gather_count; ++i) {
+    iree_hal_semaphore_release(batch->groups[i].start_semaphore);
+  }
+  iree_allocator_free(batch->provider->host_allocator, batch->groups);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 static void iree_io_file_handle_buffer_release(void* user_data,
                                                iree_hal_buffer_t* buffer) {
   iree_io_file_handle_release((iree_io_file_handle_t*)user_data);
@@ -710,9 +998,9 @@ static iree_status_t iree_io_parameter_index_provider_load(
     const iree_io_parameter_index_entry_t* source_entry = NULL;
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
-    status = iree_io_parameter_op_batch_resolve_entry(
-        &batch, source_scope, enumerator, i, IREE_HAL_MEMORY_ACCESS_READ,
-        &source_entry, &span, &source_file);
+    status = iree_io_parameter_index_provider_resolve_entry(
+        provider, device, queue_affinity, source_scope, enumerator, i,
+        IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
                                   source_entry->key.size);
@@ -864,9 +1152,9 @@ static iree_status_t iree_io_parameter_index_provider_gather(
     const iree_io_parameter_index_entry_t* source_entry = NULL;
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
-    status = iree_io_parameter_op_batch_resolve_entry(
-        &batch, source_scope, enumerator, i, IREE_HAL_MEMORY_ACCESS_READ,
-        &source_entry, &span, &source_file);
+    status = iree_io_parameter_index_provider_resolve_entry(
+        provider, device, queue_affinity, source_scope, enumerator, i,
+        IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
                                   source_entry->key.size);
@@ -915,6 +1203,101 @@ static iree_status_t iree_io_parameter_index_provider_gather(
   return status;
 }
 
+static iree_status_t iree_io_parameter_index_provider_gather_batch(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  iree_io_parameter_index_provider_t* provider =
+      iree_io_parameter_index_provider_cast(base_provider);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, gather_count);
+
+  iree_io_parameter_gather_batch_t batch;
+  iree_status_t status = iree_io_parameter_gather_batch_begin(
+      provider, device, queue_affinity, gather_count, gathers, &batch);
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < gather_count; ++i) {
+      iree_hal_semaphore_list_fail(gathers[i].signal_semaphore_list,
+                                   iree_status_clone(status));
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  for (iree_host_size_t group_index = 0;
+       group_index < gather_count && iree_status_is_ok(status); ++group_index) {
+    const iree_io_parameter_gather_t* gather = &gathers[group_index];
+    if (gather->count != 0 && !gather->target_buffer) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "gather batch group %" PRIhsz
+                                " requires a target buffer",
+                                group_index);
+      break;
+    }
+    status = iree_io_parameter_gather_batch_begin_group(&batch, group_index);
+  }
+
+  for (iree_host_size_t group_index = 0;
+       group_index < gather_count && iree_status_is_ok(status); ++group_index) {
+    const iree_io_parameter_gather_t* gather = &gathers[group_index];
+    for (iree_host_size_t i = 0; i < gather->count; ++i) {
+      IREE_TRACE_ZONE_BEGIN_NAMED(
+          z_entry, "iree_io_parameter_index_provider_gather_batch_entry");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z_entry, i);
+
+      const iree_io_parameter_index_entry_t* source_entry = NULL;
+      iree_io_parameter_span_t span;
+      iree_hal_file_t* source_file = NULL;
+      status = iree_io_parameter_index_provider_resolve_entry(
+          provider, device, queue_affinity, gather->source_scope,
+          gather->enumerator, i, IREE_HAL_MEMORY_ACCESS_READ, &source_entry,
+          &span, &source_file);
+      if (iree_status_is_ok(status)) {
+        IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
+                                    source_entry->key.size);
+        IREE_TRACE_ZONE_APPEND_VALUE_I64(z_entry, span.length);
+      }
+
+      if (iree_status_is_ok(status)) {
+        switch (source_entry->type) {
+          case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT: {
+            IREE_ASSERT(!source_file);
+            status = iree_io_parameter_gather_batch_enqueue_splat(
+                &batch, group_index, gather->target_buffer, span.buffer_offset,
+                span.length, source_entry->storage.splat.pattern,
+                source_entry->storage.splat.pattern_length);
+            break;
+          }
+          case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
+            IREE_ASSERT(source_file);
+            status = iree_io_parameter_gather_batch_enqueue_file_read(
+                &batch, group_index, source_file,
+                source_entry->storage.file.offset + span.parameter_offset,
+                gather->target_buffer, span.buffer_offset, span.length, 0);
+            break;
+          }
+          default: {
+            status = iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "gather not supported with parameters of type %d",
+                (int)source_entry->type);
+            break;
+          }
+        }
+      }
+
+      iree_hal_file_release(source_file);
+      IREE_TRACE_ZONE_END(z_entry);
+      if (!iree_status_is_ok(status)) break;
+    }
+  }
+
+  status = iree_io_parameter_gather_batch_end(&batch, status);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 static iree_status_t iree_io_parameter_index_provider_scatter(
     iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -944,9 +1327,9 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
     const iree_io_parameter_index_entry_t* target_entry = NULL;
     iree_io_parameter_span_t span;
     iree_hal_file_t* target_file = NULL;  // retained, NULL if splat
-    status = iree_io_parameter_op_batch_resolve_entry(
-        &batch, target_scope, enumerator, i, IREE_HAL_MEMORY_ACCESS_WRITE,
-        &target_entry, &span, &target_file);
+    status = iree_io_parameter_index_provider_resolve_entry(
+        provider, device, queue_affinity, target_scope, enumerator, i,
+        IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry, &span, &target_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, target_entry->key.data,
                                   target_entry->key.size);
@@ -994,5 +1377,6 @@ static const iree_io_parameter_provider_vtable_t
         .query_support = iree_io_parameter_index_provider_query_support,
         .load = iree_io_parameter_index_provider_load,
         .gather = iree_io_parameter_index_provider_gather,
+        .gather_batch = iree_io_parameter_index_provider_gather_batch,
         .scatter = iree_io_parameter_index_provider_scatter,
 };
