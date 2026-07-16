@@ -128,6 +128,20 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "parameter_materialization_group",
+    srcs = ["parameter_materialization_group.c"],
+    hdrs = ["parameter_materialization_group.h"],
+    deps = [
+        ":diagnostics",
+        ":parameter_binding",
+        ":parameter_materialization",
+        ":plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "parameter_residency",
     srcs = ["parameter_residency.c"],
     hdrs = ["parameter_residency.h"],
@@ -368,6 +382,21 @@ iree_runtime_cc_test(
         "//runtime/src/iree/io:parameter_index_provider",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/io/formats/irpa",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_materialization_group_test",
+    srcs = ["parameter_materialization_group_test.cc"],
+    deps = [
+        ":parameter_materialization_group",
+        ":parameter_slab",
+        ":plan",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

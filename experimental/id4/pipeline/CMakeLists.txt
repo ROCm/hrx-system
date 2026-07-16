@@ -153,6 +153,23 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_materialization_group
+  HDRS
+    "parameter_materialization_group.h"
+  SRCS
+    "parameter_materialization_group.c"
+  DEPS
+    ::diagnostics
+    ::parameter_binding
+    ::parameter_materialization
+    ::plan
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_residency
   HDRS
     "parameter_residency.h"
@@ -428,6 +445,22 @@ iree_cc_test(
     iree::io::parameter_index
     iree::io::parameter_index_provider
     iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    parameter_materialization_group_test
+  SRCS
+    "parameter_materialization_group_test.cc"
+  DEPS
+    ::parameter_materialization_group
+    ::parameter_slab
+    ::plan
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
 )
