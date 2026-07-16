@@ -55,9 +55,9 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
   }
   if (iree_status_is_ok(status)) {
     context->hal_sequence_initialized = true;
-    context->execution_options.invocation.invoke_actual =
-        (loom_testbench_invocation_callback_t){
-            .fn = iree_benchmark_loom_hal_actual_sequence_invoke,
+    context->execution_options.invocation.actual =
+        (loom_testbench_invocation_provider_t){
+            .invoke = iree_benchmark_loom_hal_actual_sequence_invoke,
             .user_data = &context->hal_sequence,
         };
     iree_benchmark_loom_configure_reference_oracles(
@@ -154,9 +154,9 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
             options->hal_context->execution.runtime.device);
     context->execution_options.materializer.buffer_params =
         loom_run_hal_testbench_host_visible_buffer_params();
-    context->execution_options.invocation.invoke_actual =
-        (loom_testbench_invocation_callback_t){
-            .fn = loom_run_hal_testbench_actual_invoke,
+    context->execution_options.invocation.actual =
+        (loom_testbench_invocation_provider_t){
+            .invoke = loom_run_hal_testbench_actual_invoke,
             .user_data = &context->hal_provider.execution,
         };
     iree_benchmark_loom_configure_reference_oracles(

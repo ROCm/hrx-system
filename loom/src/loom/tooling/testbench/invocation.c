@@ -16,17 +16,17 @@ void loom_testbench_invocation_options_initialize(
 
 static bool loom_testbench_find_oracle_provider(
     const loom_testbench_invocation_options_t* options, iree_string_view_t name,
-    loom_testbench_invocation_callback_t* out_invoke) {
+    loom_testbench_invocation_provider_t* out_provider) {
   for (iree_host_size_t provider_index = 0;
        provider_index < options->oracle_providers.count; ++provider_index) {
     const loom_testbench_oracle_provider_t* provider =
         &options->oracle_providers.values[provider_index];
     if (iree_string_view_equal(provider->name, name)) {
-      *out_invoke = provider->invoke;
+      *out_provider = provider->provider;
       return true;
     }
   }
-  memset(out_invoke, 0, sizeof(*out_invoke));
+  memset(out_provider, 0, sizeof(*out_provider));
   return false;
 }
 
@@ -51,11 +51,11 @@ iree_status_t loom_testbench_prepare_case_invocations(
        invocation_index < case_plan->invocation_count; ++invocation_index) {
     const loom_testbench_invocation_plan_t* invocation =
         &case_plan->invocations[invocation_index];
-    loom_testbench_invocation_callback_t invoke = {0};
+    loom_testbench_invocation_provider_t provider = {0};
     switch (invocation->kind) {
       case LOOM_TESTBENCH_INVOCATION_ACTUAL:
-        invoke = options->invoke_actual;
-        if (!invoke.fn) {
+        provider = options->actual;
+        if (!provider.invoke) {
           return iree_make_status(
               IREE_STATUS_UNAVAILABLE,
               "no actual invocation provider is configured");
@@ -63,13 +63,13 @@ iree_status_t loom_testbench_prepare_case_invocations(
         break;
       case LOOM_TESTBENCH_INVOCATION_ORACLE:
         if (!loom_testbench_find_oracle_provider(options, invocation->provider,
-                                                 &invoke)) {
+                                                 &provider)) {
           return iree_make_status(IREE_STATUS_UNAVAILABLE,
                                   "oracle provider `%.*s` is not configured",
                                   (int)invocation->provider.size,
                                   invocation->provider.data);
         }
-        if (!invoke.fn) {
+        if (!provider.invoke) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "oracle provider `%.*s` has no callback",
                                   (int)invocation->provider.size,
@@ -83,13 +83,12 @@ iree_status_t loom_testbench_prepare_case_invocations(
     }
 
     prepared_invocations[invocation_index].plan = invocation;
-    prepared_invocations[invocation_index].invoke = invoke;
+    prepared_invocations[invocation_index].provider = provider;
     max_input_count = iree_max(max_input_count, invocation->input_count);
     max_result_count = iree_max(max_result_count, invocation->result_count);
   }
 
   out_schedule->invocations = prepared_invocations;
-  out_schedule->query_issue = options->query_issue;
   out_schedule->invocation_count = case_plan->invocation_count;
   out_schedule->max_input_count = max_input_count;
   out_schedule->max_result_count = max_result_count;
@@ -171,13 +170,13 @@ void loom_testbench_invocation_executor_deinitialize(
 
 static iree_status_t loom_testbench_invocation_executor_query_issue(
     loom_testbench_invocation_executor_t* executor,
-    const loom_testbench_invocation_plan_t* invocation) {
-  if (executor->schedule->query_issue.fn == NULL) {
+    const loom_testbench_prepared_invocation_t* prepared) {
+  if (prepared->provider.query_issue == NULL) {
     return iree_ok_status();
   }
   loom_testbench_sample_issue_t issue = {0};
-  IREE_RETURN_IF_ERROR(executor->schedule->query_issue.fn(
-      executor->schedule->query_issue.user_data, invocation, &issue));
+  IREE_RETURN_IF_ERROR(prepared->provider.query_issue(
+      prepared->provider.user_data, prepared->plan, &issue));
   if (issue.category == LOOM_TESTBENCH_SAMPLE_ISSUE_NONE) {
     return iree_ok_status();
   }
@@ -239,13 +238,13 @@ iree_status_t loom_testbench_run_case_invocations(
     status = loom_testbench_load_invocation_inputs(invocation, table,
                                                    executor->inputs);
     if (iree_status_is_ok(status)) {
-      status = prepared->invoke.fn(prepared->invoke.user_data, invocation,
-                                   invocation->input_count, executor->inputs,
-                                   invocation->result_count, executor->results);
+      status = prepared->provider.invoke(
+          prepared->provider.user_data, invocation, invocation->input_count,
+          executor->inputs, invocation->result_count, executor->results);
     }
     if (iree_status_is_ok(status)) {
       status =
-          loom_testbench_invocation_executor_query_issue(executor, invocation);
+          loom_testbench_invocation_executor_query_issue(executor, prepared);
     }
     loom_testbench_reset_values(executor->inputs, invocation->input_count);
     if (iree_status_is_ok(status) && executor->issue_count == 0) {

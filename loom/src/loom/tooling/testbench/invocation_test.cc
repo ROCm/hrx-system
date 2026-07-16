@@ -21,6 +21,8 @@ namespace {
 typedef struct DeltaProviderState {
   // Value added to the i32 input.
   int32_t delta;
+  // Number of issue queries received by the provider.
+  iree_host_size_t issue_query_count;
 } DeltaProviderState;
 
 class InvocationTest : public ::testing::Test {
@@ -95,6 +97,16 @@ class InvocationTest : public ::testing::Test {
     return iree_ok_status();
   }
 
+  static iree_status_t QueryNoIssue(
+      void* user_data, const loom_testbench_invocation_plan_t* invocation,
+      loom_testbench_sample_issue_t* out_issue) {
+    (void)invocation;
+    DeltaProviderState* state = static_cast<DeltaProviderState*>(user_data);
+    ++state->issue_query_count;
+    *out_issue = {};
+    return iree_ok_status();
+  }
+
   static int32_t LookupI32(const loom_testbench_value_table_t* table,
                            loom_value_id_t value_id) {
     loom_testbench_value_t value = {};
@@ -154,12 +166,13 @@ check.case @invoke {
   oracle_state.delta = 20;
   loom_testbench_oracle_provider_t oracle_providers[1] = {};
   oracle_providers[0].name = IREE_SV("reference.scalar");
-  oracle_providers[0].invoke.fn = InvocationTest::InvokeDelta;
-  oracle_providers[0].invoke.user_data = &oracle_state;
+  oracle_providers[0].provider.invoke = InvocationTest::InvokeDelta;
+  oracle_providers[0].provider.user_data = &oracle_state;
   loom_testbench_invocation_options_t invocation_options = {};
   loom_testbench_invocation_options_initialize(&invocation_options);
-  invocation_options.invoke_actual.fn = InvocationTest::InvokeDelta;
-  invocation_options.invoke_actual.user_data = &actual_state;
+  invocation_options.actual.invoke = InvocationTest::InvokeDelta;
+  invocation_options.actual.query_issue = InvocationTest::QueryNoIssue;
+  invocation_options.actual.user_data = &actual_state;
   invocation_options.oracle_providers =
       loom_make_testbench_oracle_provider_list(
           oracle_providers, IREE_ARRAYSIZE(oracle_providers));
@@ -176,6 +189,9 @@ check.case @invoke {
       &schedule, iree_allocator_system(), &executor));
   IREE_ASSERT_OK(loom_testbench_run_case_invocations(&executor, &table));
   loom_testbench_invocation_executor_deinitialize(&executor);
+
+  EXPECT_EQ(actual_state.issue_query_count, 1u);
+  EXPECT_EQ(oracle_state.issue_query_count, 0u);
 
   EXPECT_EQ(LookupI32(&table, case_plan.invocations[0].result_value_ids[0]),
             15);
