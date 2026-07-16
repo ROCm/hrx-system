@@ -113,7 +113,15 @@ typedef struct hipExtent {
 #define hipMallocSignalMemory 0x2
 #define hipDeviceMallocUncached 0x3
 
-typedef enum __attribute__((annotate("HIP_nodiscard"))) hipError_t {
+// Warns C++17 callers when a HIP error result is discarded.
+#if defined(__cplusplus) && \
+    (__cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L))
+#define HRX_HIP_NODISCARD [[nodiscard]]
+#else
+#define HRX_HIP_NODISCARD
+#endif
+
+typedef enum HRX_HIP_NODISCARD hipError_t {
   hipSuccess = 0,
   hipErrorInvalidValue = 1,
   hipErrorOutOfMemory = 2,
@@ -191,6 +199,8 @@ typedef enum __attribute__((annotate("HIP_nodiscard"))) hipError_t {
   hipErrorRuntimeOther = 1053,
   hipErrorTbd = 9999  // Placeholder
 } hipError_t;
+
+#undef HRX_HIP_NODISCARD
 
 typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeCudaCompatibleBegin = 0,
