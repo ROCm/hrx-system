@@ -185,9 +185,8 @@ typedef struct iree_hal_executable_function_parameter_t {
   iree_hal_executable_function_parameter_type_t type;
   // Flags indicating parameter behavior.
   iree_hal_executable_function_parameter_flags_t flags;
-  // Size of the parameter in bytes. Does not contain padding.
-  // Widened from uint8_t so we can represent kernarg structs emitted by
-  // user toolchains.
+  // Size of the parameter in bytes. Does not contain padding and can represent
+  // large by-value argument records emitted by user toolchains.
   uint16_t size;
   // HAL dispatch offset in bytes or binding ordinal, depending on type.
   // CONSTANT and BUFFER_PTR parameters use byte offsets in the constants
