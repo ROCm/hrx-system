@@ -23,10 +23,21 @@ def _generate_build_flags_declaration(prefix: str, params: list[dict[str, object
     storage_type = c_builder_model.build_flags_storage_type(flag_count)
     bit_literal = c_builder_model.build_flag_bit_literal(flag_count)
 
-    lines = [f"enum {prefix}_build_flag_bits_e {{"]
-    for index, param in enumerate(flag_params):
-        lines.append(f"  {c_builder_model.build_flag_bit_name(prefix, param)} = {bit_literal} << {index},")
-    lines.append("};")
+    if flag_count <= 31:
+        lines = [f"enum {prefix}_build_flag_bits_e {{"]
+        for index, param in enumerate(flag_params):
+            lines.append(f"  {c_builder_model.build_flag_bit_name(prefix, param)} = {bit_literal} << {index},")
+        lines.append("};")
+    else:
+        lines = ["// Build flag values use macros because C enums cannot portably represent", "// values wider than int."]
+        for index, param in enumerate(flag_params):
+            name = c_builder_model.build_flag_bit_name(prefix, param)
+            value = f"({bit_literal} << {index})"
+            declaration = f"#define {name} {value}"
+            if len(declaration) <= 80:
+                lines.append(declaration)
+            else:
+                lines.extend((f"#define {name} \\", f"  {value}"))
     lines.append(f"typedef {storage_type} {c_builder_model.build_flags_type_name(prefix)};")
     return lines
 

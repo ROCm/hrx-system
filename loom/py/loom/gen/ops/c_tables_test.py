@@ -610,6 +610,38 @@ def test_generate_builders_use_explicit_flags_for_optional_symbol_refs() -> None
     assert "loom_op_attrs(*out_op)[0] = loom_attr_symbol(target);" in builders_c
 
 
+def test_generate_builders_use_macros_for_32_bit_build_flags() -> None:
+    op = Op(
+        "test.wide32",
+        group=Dialect("test"),
+        attrs=[AttrDef(f"value_{i}", "i64", optional=True) for i in range(32)],
+        format=[AttrDict()],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+
+    assert "enum loom_test_wide32_build_flag_bits_e" not in ops_h
+    assert "#define LOOM_TEST_WIDE32_BUILD_FLAG_HAS_VALUE_0 (1u << 0)" in ops_h
+    assert "#define LOOM_TEST_WIDE32_BUILD_FLAG_HAS_VALUE_31 (1u << 31)" in ops_h
+    assert "typedef uint32_t loom_test_wide32_build_flags_t;" in ops_h
+
+
+def test_generate_builders_use_macros_for_64_bit_build_flags() -> None:
+    op = Op(
+        "test.wide64",
+        group=Dialect("test"),
+        attrs=[AttrDef(f"value_{i}", "i64", optional=True) for i in range(33)],
+        format=[AttrDict()],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+
+    assert "enum loom_test_wide64_build_flag_bits_e" not in ops_h
+    assert "#define LOOM_TEST_WIDE64_BUILD_FLAG_HAS_VALUE_0 (UINT64_C(1) << 0)" in ops_h
+    assert "#define LOOM_TEST_WIDE64_BUILD_FLAG_HAS_VALUE_32 (UINT64_C(1) << 32)" in ops_h
+    assert "typedef uint64_t loom_test_wide64_build_flags_t;" in ops_h
+
+
 def test_generate_builders_define_mixed_fixed_results() -> None:
     op = Op(
         "test.mixed_results",
