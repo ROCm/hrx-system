@@ -126,28 +126,12 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self.iree_vmasm_module(deps=deps + ["//runtime/src:defines"], **kwargs)
 
-    def _emit_iree_hal_cts_test_suite(self, kwargs):
-        if "backends" in kwargs and "backends_lib" not in kwargs:
-            kwargs["backends_lib"] = kwargs.pop("backends")
-        self._iree_hal_cts_test_suite(**kwargs)
-
     def iree_runtime_hal_cts_test_suite(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(
             kwargs,
             include_run_requirements=True,
         )
-        self._emit_iree_hal_cts_test_suite(kwargs)
-
-    def iree_hal_cts_test_suite(self, **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(
-            kwargs,
-            include_run_requirements=True,
-        )
-        self._emit_iree_hal_cts_test_suite(kwargs)
-
-    def iree_hal_cts_testdata(self, **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(kwargs)
-        self._iree_hal_cts_testdata(**kwargs)
+        self._iree_runtime_hal_cts_test_suite(**kwargs)
 
     def iree_amdgpu_hal_cts_testdata(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)

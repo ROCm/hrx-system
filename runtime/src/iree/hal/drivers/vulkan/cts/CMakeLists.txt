@@ -58,25 +58,6 @@ iree_cc_library(
 )
 endif()
 
-if(IREE_HAL_DRIVER_VULKAN)
-iree_hal_cts_testdata(
-  TARGET_NAME
-    vulkan_spirv
-  TARGET_DEVICE
-    "vulkan"
-  IDENTIFIER
-    "iree_cts_testdata_vulkan_spirv"
-  BACKEND_NAME
-    "vulkan"
-  TARGET_FAMILY
-    "spirv"
-  TARGET_KEY
-    [=[vulkan1.3+bda]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
 iree_spirv_asm_module(
   NAME
@@ -398,8 +379,6 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
 iree_cc_test(
   NAME
     profiling_tests
@@ -408,7 +387,6 @@ iree_cc_test(
     "profiling_test.cc"
   DEPS
     ::backends
-    ::testdata_vulkan_spirv_lib
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::profile_test_util
@@ -422,8 +400,6 @@ iree_cc_test(
   RESOURCE_GROUP
     iree-hal-drivers-vulkan-tests
 )
-
-endif()
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
@@ -537,222 +513,6 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_pipeline_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_pipeline_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_reuse_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_reuse_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_constants_bindings_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_constants_bindings_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_constants_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_constants_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_indirect_parameters_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_indirect_parameters_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_multi_entrypoint_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_multi_entrypoint_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    command_buffer_dispatch_multi_workgroup_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::command_buffer::dispatch_multi_workgroup_test
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
     command_buffer_stress_tests
@@ -772,33 +532,6 @@ iree_cc_test(
   RESOURCE_GROUP
     iree-hal-drivers-vulkan-tests
 )
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    executable_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::core::all_executable_tests
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
@@ -923,66 +656,6 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    queue_dispatch_direct_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::queue::queue_dispatch_test
-    iree::hal::cts::util::profile_test_util
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  ARGS
-    "--gtest_filter=CTS/QueueDispatchTest.*"
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
-iree_cc_test(
-  NAME
-    queue_dispatch_indirect_parameters_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
-  DEPS
-    ::backends
-    ::testdata_vulkan_spirv_lib
-    iree::base::tooling::flags
-    iree::hal::cts::queue::queue_dispatch_test
-    iree::hal::cts::util::profile_test_util
-    iree::hal::cts::util::registry
-    iree::hal::cts::util::test_base
-    iree::testing::gtest
-  ARGS
-    "--gtest_filter=CTS/QueueDispatchIndirectParametersTest.*"
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
-)
-
-endif()
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
     queue_transfer_tests
@@ -1006,8 +679,6 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)
-iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
-if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vulkan_spirv_lib)
 iree_cc_test(
   NAME
     queue_descriptor_cache_tests
@@ -1016,13 +687,10 @@ iree_cc_test(
     "queue_descriptor_cache_test.cc"
   DEPS
     ::backends
-    ::testdata_vulkan_spirv_lib
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
-    iree::hal::drivers::vulkan
-    iree::hal::drivers::vulkan::headers
     iree::testing::gtest
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
@@ -1031,8 +699,6 @@ iree_cc_test(
   RESOURCE_GROUP
     iree-hal-drivers-vulkan-tests
 )
-
-endif()
 endif()
 
 if(IREE_HAL_DRIVER_VULKAN)

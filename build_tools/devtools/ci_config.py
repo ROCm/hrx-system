@@ -203,43 +203,5 @@ VULKAN_BAZEL_RESOURCE_SLICES = (
 VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
 VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
-VULKAN_XFAILS = (
-    # These generic executable CTS binaries still bind the empty compatibility
-    # testdata registration instead of real SPIR-V payloads.
-    bazel_xfail("//runtime/src/iree/hal/drivers/vulkan/cts:profiling_tests"),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_pipeline_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_reuse_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_constants_bindings_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_constants_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_indirect_parameters_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_multi_entrypoint_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_multi_workgroup_tests"
-    ),
-    bazel_xfail("//runtime/src/iree/hal/drivers/vulkan/cts:executable_tests"),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_dispatch_direct_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_dispatch_indirect_parameters_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_descriptor_cache_tests"
-    ),
-)
+VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)

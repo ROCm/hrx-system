@@ -621,7 +621,9 @@ loom_check_test_suite(
             converter.body,
         )
 
-    def test_hal_cts_test_suite_converts_location_args_to_source_paths(self):
+    def test_runtime_hal_cts_test_suite_converts_location_args_to_source_paths(
+        self,
+    ):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -630,8 +632,8 @@ loom_check_test_suite(
             repo_root="/repo",
         )
 
-        functions._iree_hal_cts_test_suite(
-            backends_lib=":backends",
+        functions._iree_runtime_hal_cts_test_suite(
+            backends=":backends",
             name="hal_cts",
             args=[
                 "$(location input.txt)",

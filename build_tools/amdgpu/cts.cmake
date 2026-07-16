@@ -34,8 +34,7 @@ endfunction()
 # NAME: Aggregate registration library target.
 # TARGET: LLVM `-target` flag.
 # TARGETS: AMDGPU target selectors to expand to exact targets.
-# FORMAT_NAME: CTS executable format prefix.
-# FORMAT_STRING: HAL executable format string with `{AMDGPU_TARGET}`.
+# TARGET_NAME: CTS executable target prefix.
 # IDENTIFIER: C identifier prefix for generated TOC functions.
 # BACKEND_NAME: CTS backend name. Defaults to "amdgpu".
 # SRCS: C sources. Each source basename maps to `<basename>.bin` in the CTS

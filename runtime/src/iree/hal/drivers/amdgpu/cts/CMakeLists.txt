@@ -438,8 +438,8 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   TESTDATA_LIBS
     ::testdata_amdgpu
