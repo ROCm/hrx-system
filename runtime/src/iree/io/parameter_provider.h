@@ -95,6 +95,21 @@ typedef struct iree_io_parameter_emitter_t {
   void* user_data;
 } iree_io_parameter_emitter_t;
 
+typedef struct iree_io_parameter_gather_t {
+  // Provider scope containing the source parameters.
+  iree_string_view_t source_scope;
+  // Target buffer populated by the gather.
+  iree_hal_buffer_t* target_buffer;
+  // Number of spans enumerated by |enumerator|.
+  iree_host_size_t count;
+  // Source keys and source/target spans to gather.
+  iree_io_parameter_enumerator_t enumerator;
+  // Semaphores that must be reached before this gather can start.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after this gather completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+} iree_io_parameter_gather_t;
+
 // Loads zero or more spans from |provider| into buffers for use on |device|.
 // The |enumerator| defines the source keys in |source_scope| and the offset and
 // length in the resulting buffer of each span. Multiple spans may reference the
@@ -166,6 +181,18 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather(
     iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
     iree_host_size_t count, iree_io_parameter_enumerator_t enumerator);
 
+// Gathers one or more independent groups from |provider| into caller-owned
+// target buffers. Implementations may batch source movement across groups, but
+// each group preserves its own wait and signal semaphore lists. This allows a
+// caller to present enough work for provider-side balancing while retaining the
+// fine-grained readiness edges needed for bounded streaming and backpressure.
+//
+// Returns IREE_STATUS_NOT_FOUND if any parameter is not found.
+IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather_batch(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers);
+
 // Scatters zero or more spans to |provider| from the given |source_buffer|.
 // The |enumerator| defines the target keys in |target_scope| and the offset and
 // length in the |source_buffer| of each span to scatter. Multiple spans may
@@ -212,6 +239,11 @@ typedef struct iree_io_parameter_provider_vtable_t {
       const iree_hal_semaphore_list_t signal_semaphore_list,
       iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
       iree_host_size_t count, iree_io_parameter_enumerator_t enumerator);
+
+  iree_status_t(IREE_API_PTR* gather_batch)(
+      iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+      iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+      const iree_io_parameter_gather_t* gathers);
 
   iree_status_t(IREE_API_PTR* scatter)(
       iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
