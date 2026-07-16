@@ -2894,6 +2894,7 @@ class BuildFileFunctions(object):
         # unused
         size="small",
         timeout=None,
+        visibility=None,
     ):
         if self._should_skip_target(tags=tags):
             return

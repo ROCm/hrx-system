@@ -16,7 +16,7 @@ IREE_FLAG(bool, agents_md, false,
           "Prints AGENTS.md guidance for iree-dump-replay and exits.");
 
 static const char kIreeDumpReplayUsage[] =
-    "Dumps information from an IREE HAL replay file.\n"
+    "Inspects records in an IREE HAL replay file.\n"
     "\n"
     "The dumper validates the replay container and emits projections without\n"
     "materializing large payload bytes. Blob data and embedded payloads are\n"

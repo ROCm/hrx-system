@@ -55,10 +55,15 @@ typedef struct iree_hal_replay_executable_substitution_t {
   // True when |executable_data| should replace the captured executable bytes.
   bool substitute;
   // Optional diagnostic source for the replacement, such as a file path.
+  // Storage must remain valid until the next substitution callback invocation
+  // or the replay execution returns, whichever occurs first.
   iree_string_view_t source;
   // Replacement target selection, or an empty selection to retain the capture.
+  // Referenced strings follow the same lifetime as |executable_data|.
   iree_hal_executable_target_selection_t target;
-  // Replacement executable data borrowed for the load call.
+  // Replacement executable data borrowed through the ensuing device load.
+  // Storage must remain valid until the next substitution callback invocation
+  // or the replay execution returns, whichever occurs first.
   iree_const_byte_span_t executable_data;
 } iree_hal_replay_executable_substitution_t;
 
@@ -84,8 +89,9 @@ typedef struct iree_hal_replay_scope_event_t {
 //
 // The callback receives the captured executable ids and parameters. It may
 // leave |out_substitution->substitute| false to use the captured payload
-// unchanged. Replacement data only needs to remain valid for the callback's
-// load call.
+// unchanged. When substituting, all storage referenced by |out_substitution|
+// must remain valid until the next callback invocation or replay execution
+// returns, whichever occurs first.
 typedef iree_status_t (*iree_hal_replay_executable_substitution_fn_t)(
     void* user_data,
     const iree_hal_replay_executable_substitution_request_t* request,

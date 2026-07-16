@@ -12,6 +12,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/hal/api.h"
 #include "iree/hal/replay/execute.h"
 #include "iree/io/file_contents.h"
 #include "iree/tooling/device_util.h"
@@ -23,10 +24,10 @@ IREE_FLAG_LIST(
 IREE_FLAG_LIST(
     string, replay_executable_substitution,
     "Substitutes a captured executable payload. Repeat as "
-    "--replay_executable_substitution=EXECUTABLE_ID=PATH to infer the format, "
-    "or --replay_executable_substitution=EXECUTABLE_ID@FORMAT=PATH when the "
-    "format must be explicit. Use all=PATH or all@FORMAT=PATH to apply one "
-    "replacement to every captured executable.");
+    "--replay_executable_substitution=EXECUTABLE_ID=PATH to retain the "
+    "captured target, or append @FAMILY/TARGET_KEY to override target "
+    "selection. Use all in place of EXECUTABLE_ID to replace every captured "
+    "executable.");
 IREE_FLAG(bool, agents_md, false,
           "Prints AGENTS.md guidance for HAL replay workflows and exits.");
 
@@ -54,9 +55,9 @@ static const char kIreeRunReplayUsage[] =
     "      replay still validates the captured file identity after remapping.\n"
     "      Repeat the flag for multiple roots.\n"
     "  --replay_executable_substitution=EXECUTABLE_ID=PATH\n"
-    "  --replay_executable_substitution=EXECUTABLE_ID@FORMAT=PATH\n"
+    "  --replay_executable_substitution=EXECUTABLE_ID@FAMILY/TARGET_KEY=PATH\n"
     "  --replay_executable_substitution=all=PATH\n"
-    "  --replay_executable_substitution=all@FORMAT=PATH\n"
+    "  --replay_executable_substitution=all@FAMILY/TARGET_KEY=PATH\n"
     "      Replaces captured executable payloads. Use iree-dump-replay to "
     "find\n"
     "      executable object ids. The all selector applies one replacement to\n"
@@ -169,9 +170,10 @@ static void iree_run_replay_print_agent_markdown(FILE* file) {
       "\n"
       "For one-executable captures, or when one replacement intentionally "
       "applies\n"
-      "to every captured executable, use the `all` selector. Add `@FORMAT` "
-      "when\n"
-      "the executable cache cannot infer the format from the file.\n"
+      "to every captured executable, use the `all` selector. Append\n"
+      "`@FAMILY/TARGET_KEY` only when the replacement should select a "
+      "different\n"
+      "device-advertised target than the captured executable.\n"
       "\n"
       "Replay validates replacement ABI before dispatch, including export "
       "counts,\n"
@@ -252,8 +254,8 @@ typedef struct iree_tooling_replay_executable_substitution_t {
   bool match_all;
   // Captured executable object id to replace.
   iree_hal_replay_object_id_t executable_id;
-  // Optional replacement executable format.
-  iree_string_view_t executable_format;
+  // Optional replacement target selection; empty retains the captured target.
+  iree_hal_executable_target_selection_t target;
   // Replacement executable file path.
   iree_string_view_t source_path;
   // Mapped replacement executable file contents.
@@ -310,24 +312,28 @@ static iree_status_t iree_tooling_parse_replay_executable_substitutions(
       status =
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "--replay_executable_substitution values must be "
-                           "EXECUTABLE_ID=PATH, EXECUTABLE_ID@FORMAT=PATH, "
-                           "all=PATH, or all@FORMAT=PATH");
+                           "EXECUTABLE_ID=PATH, "
+                           "EXECUTABLE_ID@FAMILY/TARGET_KEY=PATH, all=PATH, or "
+                           "all@FAMILY/TARGET_KEY=PATH");
       break;
     }
 
     iree_string_view_t id_string = selector;
-    iree_string_view_t executable_format = iree_string_view_empty();
-    iree_string_view_t maybe_format;
-    if (iree_string_view_split(selector, '@', &id_string, &maybe_format) >= 0) {
+    iree_hal_executable_target_selection_t target = {0};
+    iree_string_view_t target_spec;
+    if (iree_string_view_split(selector, '@', &id_string, &target_spec) >= 0) {
       if (iree_string_view_is_empty(id_string) ||
-          iree_string_view_is_empty(maybe_format)) {
+          iree_string_view_split(target_spec, '/', &target.family,
+                                 &target.target_key) < 0 ||
+          iree_string_view_is_empty(target.family) ||
+          iree_string_view_is_empty(target.target_key)) {
         status = iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "--replay_executable_substitution selector must be "
-            "EXECUTABLE_ID, EXECUTABLE_ID@FORMAT, all, or all@FORMAT");
+            "EXECUTABLE_ID, EXECUTABLE_ID@FAMILY/TARGET_KEY, all, or "
+            "all@FAMILY/TARGET_KEY");
         break;
       }
-      executable_format = maybe_format;
     }
 
     uint64_t executable_id = 0;
@@ -364,7 +370,7 @@ static iree_status_t iree_tooling_parse_replay_executable_substitutions(
     out_state->entries[i].match_all = match_all;
     out_state->entries[i].executable_id =
         (iree_hal_replay_object_id_t)executable_id;
-    out_state->entries[i].executable_format = executable_format;
+    out_state->entries[i].target = target;
     out_state->entries[i].source_path = path;
     status = iree_io_file_contents_map(path, IREE_IO_FILE_ACCESS_READ,
                                        host_allocator,
@@ -392,7 +398,7 @@ static iree_status_t iree_tooling_replay_executable_substitution_callback(
     }
     out_substitution->substitute = true;
     out_substitution->source = entry->source_path;
-    out_substitution->executable_format = entry->executable_format;
+    out_substitution->target = entry->target;
     out_substitution->executable_data = entry->file_contents->const_buffer;
     return iree_ok_status();
   }
