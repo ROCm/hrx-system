@@ -22,6 +22,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     MemorySpace,
@@ -269,6 +270,7 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_CONST,
             latency_kind=LatencyKind.EXACT,
             model_quality=ModelQuality.EXACT,
+            instruction_classes=(InstructionClass.OTHER,),
         ),
         ScheduleClass(
             _SCHEDULE_SCALAR_I32,

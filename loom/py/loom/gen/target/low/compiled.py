@@ -22,6 +22,7 @@ from loom.target.low_descriptors import (
     Hazard,
     Immediate,
     ImmediateEncodingSlice,
+    InstructionClass,
     IssueUse,
     NativeAsmValueKind,
     Operand,
@@ -57,6 +58,7 @@ class GeneratedDescriptorSet:
 class CompiledDescriptorSet:
     spec: DescriptorSet
     descriptors: list[Descriptor]
+    instruction_classes: list[tuple[InstructionClass, ...]]
     reg_classes: list[RegClass]
     register_parts: list[RegisterPart]
     resources: list[Resource]

@@ -26,6 +26,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     MemorySpace,
@@ -349,6 +350,7 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
 )
 
 TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR = Descriptor(
@@ -1027,6 +1029,7 @@ TEST_LOW_ALT_CONST_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
 )
 
 TEST_LOW_ALT_NEG_I32_DESCRIPTOR = Descriptor(

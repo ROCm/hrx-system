@@ -93,6 +93,7 @@ from loom.target.arch.amdgpu.descriptors import (
     amdgpu_descriptor_ref_keys,
     amdgpu_encoding_field_id,
 )
+from loom.target.arch.amdgpu.descriptors.api import _with_instruction_classes
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
@@ -126,6 +127,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     MemorySpace,
@@ -173,6 +175,50 @@ def _memory_descriptor(*, immediates: tuple[Immediate, ...]) -> Descriptor:
         schedule_class="amdgpu.vmem.load",
         immediates=immediates,
         effects=(Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL),),
+    )
+
+
+def test_instruction_classes_project_target_packet_families() -> None:
+    global_load = Descriptor(
+        key="amdgpu.global_load_b32",
+        mnemonic="global_load_b32",
+        semantic_tag="memory.global.load.u32",
+        operands=(),
+        schedule_class=_SCHEDULE_VMEM_LOAD,
+        effects=(Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL),),
+    )
+    private_load = Descriptor(
+        key="amdgpu.scratch_load_b32",
+        mnemonic="scratch_load_b32",
+        semantic_tag="memory.stack.load.u32",
+        operands=(),
+        schedule_class=_SCHEDULE_VMEM_LOAD,
+        effects=(Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL),),
+    )
+    staged_load = Descriptor(
+        key="amdgpu.global_load_lds_b32",
+        mnemonic="global_load_lds_b32",
+        semantic_tag="memory.global.load.u32",
+        operands=(),
+        schedule_class=_SCHEDULE_VMEM_LOAD_LDS,
+        effects=(
+            Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL),
+            Effect(EffectKind.WRITE, memory_space=MemorySpace.WORKGROUP),
+        ),
+    )
+    descriptor_set = _with_instruction_classes(
+        _descriptor_set(global_load, private_load, staged_load)
+    )
+
+    assert descriptor_set.descriptors[0].instruction_classes == (
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.GLOBAL_LOAD,
+    )
+    assert descriptor_set.descriptors[1].instruction_classes == ()
+    assert descriptor_set.descriptors[2].instruction_classes == (
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.GLOBAL_LOAD,
+        InstructionClass.LOCAL_MEMORY,
     )
 
 
