@@ -69,7 +69,6 @@ static void loom_low_lower_populate_report_descriptor(
   if (descriptor == NULL) {
     return;
   }
-  row->descriptor_id = descriptor->stable_id;
   row->descriptor_key = loom_low_lower_descriptor_string(
       context, descriptor, descriptor->key_string_offset);
   row->descriptor_semantic_tag = loom_low_lower_descriptor_string(
@@ -1537,7 +1536,6 @@ static iree_status_t loom_low_lower_record_report_row(
       .rule_index = UINT16_MAX,
       .plan_id = selected_plan->plan.id,
       .plan_key = iree_string_view_empty(),
-      .descriptor_id = LOOM_LOW_STABLE_ID_NONE,
       .descriptor_key = iree_string_view_empty(),
       .descriptor_semantic_tag = iree_string_view_empty(),
       .emitted_low_op_count = emitted_low_op_count,

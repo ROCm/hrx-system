@@ -1346,7 +1346,6 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.rule_index=*/1,
           /*.plan_id=*/UINT64_MAX,
           /*.plan_key=*/IREE_SVL("test.scalar_addi.strategy.native"),
-          /*.descriptor_id=*/7,
           /*.descriptor_key=*/IREE_SVL("test.add.i32"),
           /*.descriptor_semantic_tag=*/IREE_SVL("integer.add.i32"),
           /*.emitted_low_op_count=*/1,
@@ -1435,7 +1434,6 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.rule_set_index=*/3,
           /*.rule_index=*/4,
           /*.diagnostic_index=*/UINT16_MAX,
-          /*.descriptor_id=*/42,
           /*.descriptor_key=*/IREE_SVL("test.legalized.descriptor"),
           /*.source_rejection_bits=*/0x1,
           /*.source_rejection_detail=*/kTestSourceRejectionDetail,
@@ -2224,9 +2222,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(output, IREE_SV("strategy=reference"), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
-                                  IREE_SV("descriptor=42 descriptor_key=test."
-                                          "legalized.descriptor"),
+                                  IREE_SV("descriptor_key=test.legalized."
+                                          "descriptor"),
                                   0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV(" descriptor="), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output, IREE_SV("source_rejection_detail=4"), 0),
@@ -2959,11 +2959,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"source_rejection_detail\":4"), 0),
             IREE_STRING_VIEW_NPOS);
-  EXPECT_NE(iree_string_view_find(
-                output,
-                IREE_SV("\"descriptor_id\":42,\"descriptor_key\":\"test."
-                        "legalized.descriptor\""),
-                0),
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"descriptor_key\":\"test."
+                                          "legalized.descriptor\""),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"descriptor_id\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"created_op_count\":6,"

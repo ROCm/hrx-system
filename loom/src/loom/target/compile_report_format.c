@@ -2975,8 +2975,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           "] function=%.*s source_op=%.*s mode=%.*s policy=%.*s "
           "action=%.*s outcome=%.*s contract=%.*s legalizer=%.*s strategy=%.*s "
           "bundle=%.*s config=%.*s binding=%u case=%u rule_set=%u rule=%u "
-          "diagnostic=%u "
-          "descriptor=%" PRIu64,
+          "diagnostic=%u",
           row_index, (int)function_name.size, function_name.data,
           (int)source_op_name.size, source_op_name.data, (int)mode_name.size,
           mode_name.data, (int)policy_name.size, policy_name.data,
@@ -2987,7 +2986,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           (int)target_bundle_name.size, target_bundle_name.data,
           (int)target_config_name.size, target_config_name.data,
           row->binding_index, row->case_index, row->rule_set_index,
-          row->rule_index, row->diagnostic_index, row->descriptor_id));
+          row->rule_index, row->diagnostic_index));
       if (!iree_string_view_is_empty(row->descriptor_key)) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder, " descriptor_key=%.*s", (int)row->descriptor_key.size,
@@ -6362,8 +6361,6 @@ static iree_status_t loom_target_compile_report_format_legalization_row_json(
       stream, &first_field, "rule_index", row->rule_index));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
       stream, &first_field, "diagnostic_index", row->diagnostic_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u64_field(
-      stream, &first_field, "descriptor_id", row->descriptor_id));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "descriptor_key", row->descriptor_key));
