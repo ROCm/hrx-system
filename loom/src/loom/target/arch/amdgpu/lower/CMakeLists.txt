@@ -229,6 +229,7 @@ loom_cc_library(
     "table.h"
     "topology.h"
     "types.h"
+    "value/integer64.h"
     "values.h"
     "workgroup.h"
   TEXTUAL_HDRS
@@ -309,6 +310,7 @@ loom_cc_library(
     "system_memory.c"
     "table.c"
     "types.c"
+    "value/integer64.c"
     "values.c"
   DEPS
     ::kinds
