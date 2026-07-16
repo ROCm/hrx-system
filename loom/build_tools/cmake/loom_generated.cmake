@@ -84,7 +84,9 @@ function(loom_generated_textual_header)
     DEPENDS
       "${_OUTPUT}"
   )
-  iree_register_generated_compile_input("${_GEN_TARGET}")
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS "${_OUTPUT}"
+  )
 endfunction()
 
 function(loom_generated_cc_library)
@@ -205,7 +207,9 @@ function(loom_generated_cc_library)
     DEPENDS
       ${_OUTPUTS}
   )
-  iree_register_generated_compile_input("${_GEN_TARGET}")
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS ${_OUTPUTS}
+  )
   if(_RULE_TESTONLY)
     set(_TESTONLY_ARG TESTONLY)
   else()
