@@ -7,7 +7,9 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -26,8 +28,13 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
+#include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+
+#if IREE_FILE_IO_ENABLE
+#include <unistd.h>
+#endif  // IREE_FILE_IO_ENABLE
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -68,6 +75,16 @@ iree_allocator_t HostQueueCommandBufferTest::host_allocator_;
 iree_hal_amdgpu_libhsa_t HostQueueCommandBufferTest::libhsa_;
 iree_hal_amdgpu_topology_t HostQueueCommandBufferTest::topology_;
 
+#if IREE_FILE_IO_ENABLE
+struct TempFilePath {
+  ~TempFilePath() {
+    if (!path.empty()) unlink(path.c_str());
+  }
+
+  std::string path;
+};
+#endif  // IREE_FILE_IO_ENABLE
+
 static const uint32_t* FindPm4DispatchDirectPacket(
     const iree_hal_amdgpu_pm4_program_t* pm4_program,
     uint32_t dispatch_direct_ordinal) {
@@ -83,6 +100,100 @@ static const uint32_t* FindPm4DispatchDirectPacket(
     --dispatch_direct_ordinal;
   }
   return nullptr;
+}
+
+static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
+#if IREE_FILE_IO_ENABLE
+  size_t total_written = 0;
+  while (total_written < length) {
+    const ssize_t written =
+        write(fd, data + total_written, length - total_written);
+    if (written < 0 && errno == EINTR) continue;
+    if (written < 0) {
+      return iree_make_status(iree_status_code_from_errno(errno),
+                              "write failed after %" PRIhsz " of %" PRIhsz
+                              " bytes: %s",
+                              total_written, length, strerror(errno));
+    }
+    if (written == 0) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "write made no progress after %" PRIhsz
+                              " of %" PRIhsz " bytes",
+                              total_written, length);
+    }
+    total_written += (size_t)written;
+  }
+  return iree_ok_status();
+#else
+  (void)fd;
+  (void)data;
+  (void)length;
+  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
+#endif  // IREE_FILE_IO_ENABLE
+}
+
+static iree_status_t CreateTempFileWithContents(
+    const std::vector<uint8_t>& data, std::string* out_path) {
+#if IREE_FILE_IO_ENABLE
+  *out_path = std::string();
+  char temp_path[] = "/tmp/iree_hal_amdgpu_command_buffer_XXXXXX";
+  int fd = mkstemp(temp_path);
+  if (fd < 0) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "mkstemp failed: %s", strerror(errno));
+  }
+  iree_status_t status = WriteAll(fd, data.data(), data.size());
+  if (close(fd) != 0) {
+    status = iree_status_join(
+        status, iree_make_status(iree_status_code_from_errno(errno),
+                                 "close failed: %s", strerror(errno)));
+  }
+  if (iree_status_is_ok(status)) {
+    *out_path = temp_path;
+  } else {
+    unlink(temp_path);
+  }
+  return status;
+#else
+  (void)data;
+  *out_path = std::string();
+  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
+#endif  // IREE_FILE_IO_ENABLE
+}
+
+static iree_status_t ImportFdFile(iree_hal_device_t* device,
+                                  const std::string& path,
+                                  iree_hal_memory_access_t access,
+                                  iree_hal_file_t** out_file) {
+  iree_io_file_mode_t mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC;
+  if (iree_all_bits_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
+    mode |= IREE_IO_FILE_MODE_WRITE;
+  }
+  iree_io_file_handle_t* handle = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_io_file_handle_open(mode, iree_make_cstring_view(path.c_str()),
+                               iree_allocator_system(), &handle));
+  iree_status_t status =
+      iree_hal_file_import(device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+                           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
+  iree_io_file_handle_release(handle);
+  return status;
+}
+
+static iree_status_t QueueHostVisibleDispatchTransientBuffer(
+    iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list,
+    iree_device_size_t buffer_size, iree_hal_buffer_t** out_buffer) {
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                 IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  return iree_hal_device_queue_alloca(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      signal_list, /*pool=*/NULL, params, buffer_size,
+      IREE_HAL_ALLOCA_FLAG_NONE, out_buffer);
 }
 
 TEST_F(HostQueueCommandBufferTest, DispatchSummariesRetainPacketOrdinals) {
@@ -1927,6 +2038,163 @@ TEST_F(HostQueueCommandBufferTest,
                                           sizeof(actual)));
   EXPECT_EQ(actual, expected);
 }
+
+#if IREE_FILE_IO_ENABLE
+
+TEST_F(HostQueueCommandBufferTest,
+       HostVisibleTransientReadDispatchCompletesBeforeQueuedDealloca) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  const uint32_t input_values[4] = {1, 2, 3, 4};
+  const uint8_t* input_bytes = reinterpret_cast<const uint8_t*>(input_values);
+  std::vector<uint8_t> file_data(input_bytes,
+                                 input_bytes + sizeof(input_values));
+  TempFilePath input_file;
+  IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &input_file.path));
+
+  Ref<iree_hal_file_t> source_file;
+  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), input_file.path,
+                              IREE_HAL_MEMORY_ACCESS_READ, source_file.out()));
+
+  iree_hal_executable_cache_t* executable_cache = NULL;
+  iree_hal_executable_t* executable = NULL;
+  IREE_ASSERT_OK(LoadCtsExecutable(
+      test_device.base_device(),
+      iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
+                             "bin"),
+      &executable_cache, &executable));
+
+  Ref<iree_hal_buffer_t> output_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), sizeof(input_values), output_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_buffer_map_zero(output_buffer, /*offset=*/0,
+                                          IREE_HAL_WHOLE_BUFFER));
+
+  Ref<iree_hal_semaphore_t> alloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), alloca_signal.out()));
+  uint64_t alloca_signal_value = 1;
+  iree_hal_semaphore_t* alloca_signal_ptr = alloca_signal.get();
+  iree_hal_semaphore_list_t alloca_signal_list = {
+      /*count=*/1,
+      /*semaphores=*/&alloca_signal_ptr,
+      /*payload_values=*/&alloca_signal_value,
+  };
+  iree_hal_buffer_t* transient_raw = NULL;
+  IREE_ASSERT_OK(QueueHostVisibleDispatchTransientBuffer(
+      test_device.base_device(), alloca_signal_list, sizeof(input_values),
+      &transient_raw));
+  Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
+
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  iree_hal_buffer_ref_t binding_refs[2] = {
+      iree_hal_make_buffer_ref(transient_buffer, /*offset=*/0,
+                               sizeof(input_values)),
+      iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,
+                               sizeof(input_values)),
+  };
+  const iree_hal_buffer_ref_list_t bindings = {
+      /*count=*/IREE_ARRAYSIZE(binding_refs),
+      /*values=*/binding_refs,
+  };
+  IREE_ASSERT_OK(
+      AppendConstantsBindingsDispatch(command_buffer, executable, bindings));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  Ref<iree_hal_semaphore_t> gate_signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), gate_signal.out()));
+  uint64_t gate_signal_value = 1;
+  iree_hal_semaphore_t* read_wait_semaphores[] = {alloca_signal.get(),
+                                                  gate_signal.get()};
+  uint64_t read_wait_values[] = {alloca_signal_value, gate_signal_value};
+  iree_hal_semaphore_list_t read_wait_list = {
+      /*count=*/IREE_ARRAYSIZE(read_wait_semaphores),
+      /*semaphores=*/read_wait_semaphores,
+      /*payload_values=*/read_wait_values,
+  };
+
+  Ref<iree_hal_semaphore_t> read_signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), read_signal.out()));
+  uint64_t read_signal_value = 1;
+  iree_hal_semaphore_t* read_signal_ptr = read_signal.get();
+  iree_hal_semaphore_list_t read_signal_list = {
+      /*count=*/1,
+      /*semaphores=*/&read_signal_ptr,
+      /*payload_values=*/&read_signal_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, read_wait_list,
+      read_signal_list, source_file, /*source_offset=*/0, transient_buffer,
+      /*target_offset=*/0, sizeof(input_values), IREE_HAL_READ_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> dispatch_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dispatch_signal.out()));
+  uint64_t dispatch_signal_value = 1;
+  iree_hal_semaphore_t* dispatch_signal_ptr = dispatch_signal.get();
+  iree_hal_semaphore_list_t dispatch_wait_list = {
+      /*count=*/1,
+      /*semaphores=*/&read_signal_ptr,
+      /*payload_values=*/&read_signal_value,
+  };
+  iree_hal_semaphore_list_t dispatch_signal_list = {
+      /*count=*/1,
+      /*semaphores=*/&dispatch_signal_ptr,
+      /*payload_values=*/&dispatch_signal_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_execute(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      dispatch_wait_list, dispatch_signal_list, command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> dealloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dealloca_signal.out()));
+  uint64_t dealloca_signal_value = 1;
+  iree_hal_semaphore_t* dealloca_signal_ptr = dealloca_signal.get();
+  iree_hal_semaphore_list_t dealloca_wait_list = {
+      /*count=*/1,
+      /*semaphores=*/&dispatch_signal_ptr,
+      /*payload_values=*/&dispatch_signal_value,
+  };
+  iree_hal_semaphore_list_t dealloca_signal_list = {
+      /*count=*/1,
+      /*semaphores=*/&dealloca_signal_ptr,
+      /*payload_values=*/&dealloca_signal_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      dealloca_wait_list, dealloca_signal_list, transient_buffer,
+      IREE_HAL_DEALLOCA_FLAG_NONE));
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_signal, gate_signal_value,
+                                           /*frontier=*/NULL));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dealloca_signal, dealloca_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  const uint32_t expected_values[4] = {13, 16, 19, 22};
+  uint32_t output_values[4] = {0, 0, 0, 0};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
+  EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
+
+  iree_hal_executable_release(executable);
+  iree_hal_executable_cache_release(executable_cache);
+}
+
+#endif  // IREE_FILE_IO_ENABLE
 
 TEST_F(HostQueueCommandBufferTest,
        OneShotStaticTransientBindingRecordsBeforeAllocaCommit) {
