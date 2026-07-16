@@ -102,6 +102,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::codegen::low::planning_statistics
+    loom::util::json
     loom::util::stream
   PUBLIC
 )

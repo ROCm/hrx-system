@@ -655,67 +655,76 @@ iree_status_t loom_amdgpu_occupancy_build(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_occupancy_write_cliff_u32_or_null(
-    uint32_t value, loom_output_stream_t* stream) {
+static iree_status_t loom_amdgpu_occupancy_write_cliff_field(
+    loom_json_object_writer_t* object, iree_string_view_t name,
+    uint32_t value) {
   if (value == UINT32_MAX || value == 0) {
-    return loom_output_stream_write_cstring(stream, "null");
+    return loom_json_object_write_null_field(object, name);
   }
-  return loom_output_stream_write_format(stream, "%" PRIu32, value);
+  return loom_json_object_write_uint32_field(object, name, value);
 }
 
 static iree_status_t loom_amdgpu_occupancy_write_register_class(
     const loom_amdgpu_occupancy_register_class_t* register_class,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("register_class"), register_class->register_class));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("allocated_units"), register_class->allocated_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("rounded_units"), register_class->rounded_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("pool_units"), register_class->pool_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("allocation_granularity"),
+      register_class->allocation_granularity));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("wave_limit"), register_class->wave_limit));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_field(
+      &object, IREE_SV("next_cliff_units"), register_class->next_cliff_units));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_field(
+      &object, IREE_SV("units_until_next_cliff"),
+      register_class->units_until_next_cliff));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_count"), register_class->spill_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_bytes"), register_class->spill_bytes));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"register_class\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(stream, register_class->register_class));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      ",\"allocated_units\":%" PRIu32 ",\"rounded_units\":%" PRIu32
-      ",\"pool_units\":%" PRIu32 ",\"allocation_granularity\":%" PRIu32
-      ",\"wave_limit\":%" PRIu32 ",\"next_cliff_units\":",
-      register_class->allocated_units, register_class->rounded_units,
-      register_class->pool_units, register_class->allocation_granularity,
-      register_class->wave_limit));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_u32_or_null(
-      register_class->next_cliff_units, stream));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"units_until_next_cliff\":"));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_u32_or_null(
-      register_class->units_until_next_cliff, stream));
-  return loom_output_stream_write_format(
-      stream,
-      ",\"spill_count\":%" PRIu32 ",\"spill_bytes\":%" PRIu32
-      ",\"spill_store_count\":%" PRIu32 ",\"spill_reload_count\":%" PRIu32 "}",
-      register_class->spill_count, register_class->spill_bytes,
-      register_class->spill_store_count, register_class->spill_reload_count);
+      loom_json_object_write_uint32_field(&object, IREE_SV("spill_store_count"),
+                                          register_class->spill_store_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_reload_count"),
+      register_class->spill_reload_count));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_amdgpu_occupancy_write_pressure_resource(
     const loom_amdgpu_occupancy_pressure_resource_t* pressure_resource,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"resource\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(stream, pressure_resource->resource));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      ",\"allocated_units\":%" PRIu32 ",\"rounded_units\":%" PRIu32
-      ",\"pool_units\":%" PRIu32 ",\"allocation_granularity\":%" PRIu32
-      ",\"wave_limit\":%" PRIu32 ",\"next_cliff_units\":",
-      pressure_resource->allocated_units, pressure_resource->rounded_units,
-      pressure_resource->pool_units, pressure_resource->allocation_granularity,
-      pressure_resource->wave_limit));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_u32_or_null(
-      pressure_resource->next_cliff_units, stream));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"units_until_next_cliff\":"));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_u32_or_null(
-      pressure_resource->units_until_next_cliff, stream));
-  return loom_output_stream_write_cstring(stream, "}");
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("resource"), pressure_resource->resource));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("allocated_units"), pressure_resource->allocated_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("rounded_units"), pressure_resource->rounded_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("pool_units"), pressure_resource->pool_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("allocation_granularity"),
+      pressure_resource->allocation_granularity));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("wave_limit"), pressure_resource->wave_limit));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_field(
+      &object, IREE_SV("next_cliff_units"),
+      pressure_resource->next_cliff_units));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_write_cliff_field(
+      &object, IREE_SV("units_until_next_cliff"),
+      pressure_resource->units_until_next_cliff));
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_amdgpu_occupancy_format_json(
@@ -723,44 +732,47 @@ iree_status_t loom_amdgpu_occupancy_format_json(
     iree_string_builder_t* builder) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      &stream, "\"format\":\"loom.amdgpu.occupancy.v0\""));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.amdgpu.occupancy.v0")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("function"),
+      loom_low_diagnostic_function_name(table->allocation->module,
+                                        table->allocation->function_op)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("target"), table->allocation->target.target_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("descriptor_set"),
+      table->allocation->target.descriptor_set_key));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("processor"), table->processor));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("wave_size"), table->wave_size));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("max_waves_per_simd"), table->max_waves_per_simd));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("flat_workgroup_size"), table->flat_workgroup_size));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("waves_per_workgroup"), table->waves_per_workgroup));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("resident_waves_per_simd"),
+      table->resident_waves_per_simd));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("occupancy_percent"), table->occupancy_percent));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("limiting_resource"),
+      loom_amdgpu_occupancy_limiting_resource_name(table)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_count"), table->spill_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("scratch_spill_bytes"), table->scratch_spill_bytes));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_store_count"), table->spill_store_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("spill_reload_count"), table->spill_reload_count));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"function\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, loom_low_diagnostic_function_name(
-                   table->allocation->module, table->allocation->function_op)));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"target\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, table->allocation->target.target_name));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"descriptor_set\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, table->allocation->target.descriptor_set_key));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"processor\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(&stream, table->processor));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      ",\"wave_size\":%" PRIu32 ",\"max_waves_per_simd\":%" PRIu32
-      ",\"flat_workgroup_size\":%" PRIu32 ",\"waves_per_workgroup\":%" PRIu32
-      ",\"resident_waves_per_simd\":%" PRIu32 ",\"occupancy_percent\":%" PRIu32
-      ",\"limiting_resource\":",
-      table->wave_size, table->max_waves_per_simd, table->flat_workgroup_size,
-      table->waves_per_workgroup, table->resident_waves_per_simd,
-      table->occupancy_percent));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, loom_amdgpu_occupancy_limiting_resource_name(table)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      ",\"spill_count\":%" PRIu32 ",\"scratch_spill_bytes\":%" PRIu32
-      ",\"spill_store_count\":%" PRIu32 ",\"spill_reload_count\":%" PRIu32
-      ",\"register_classes\":",
-      table->spill_count, table->scratch_spill_bytes, table->spill_store_count,
-      table->spill_reload_count));
+      loom_json_object_begin_field(&object, IREE_SV("register_classes")));
   loom_json_array_writer_t register_classes;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &register_classes));
   for (iree_host_size_t i = 0; i < table->register_class_count; ++i) {
@@ -770,7 +782,7 @@ iree_status_t loom_amdgpu_occupancy_format_json(
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&register_classes));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"pressure_resources\":"));
+      loom_json_object_begin_field(&object, IREE_SV("pressure_resources")));
   loom_json_array_writer_t pressure_resources;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &pressure_resources));
   for (iree_host_size_t i = 0; i < table->pressure_resource_count; ++i) {
@@ -779,5 +791,5 @@ iree_status_t loom_amdgpu_occupancy_format_json(
         &table->pressure_resources[i], &stream));
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&pressure_resources));
-  return loom_output_stream_write_cstring(&stream, "}");
+  return loom_json_object_end(&object);
 }

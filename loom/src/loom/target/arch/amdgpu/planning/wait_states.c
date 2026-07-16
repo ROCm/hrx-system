@@ -2281,55 +2281,65 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
 
 static iree_status_t loom_amdgpu_wait_state_write_states_json(
     const loom_amdgpu_wait_state_plan_t* plan, loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+  loom_json_array_writer_t states;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &states));
   for (iree_host_size_t i = 0; i < plan->state_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, ','));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&states));
     const loom_amdgpu_wait_state_t* state = &plan->states[i];
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream, "{\"index\":%zu,\"reason\":%" PRIu32 ",\"reason_name\":", i,
-        (uint32_t)state->reason));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        stream, loom_amdgpu_wait_state_reason_name(state->reason)));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream,
-        ",\"action\":%" PRIu32 ",\"action_name\":", (uint32_t)state->action));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        stream, loom_amdgpu_wait_state_action_name(state->action)));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream,
-        ",\"block\":%" PRIu32 ",\"node\":%" PRIu32
-        ",\"scheduled_ordinal\":%" PRIu32 ",\"producer_node\":%" PRIu32
-        ",\"consumer_node\":%" PRIu32 ",\"required\":%" PRIu16
-        ",\"observed\":%" PRIu16 ",\"residual\":%" PRIu16
-        ",\"delay_alu_immediate\":%" PRIu16,
-        state->block_index, state->node_index, state->scheduled_ordinal,
-        state->producer_node, state->consumer_node, state->required_cycle_count,
-        state->observed_cycle_count, state->cycle_count,
+    loom_json_object_writer_t state_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &state_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &state_object, IREE_SV("index"), i));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("reason"), (uint32_t)state->reason));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &state_object, IREE_SV("reason_name"),
+        loom_amdgpu_wait_state_reason_name(state->reason)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("action"), (uint32_t)state->action));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &state_object, IREE_SV("action_name"),
+        loom_amdgpu_wait_state_action_name(state->action)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("block"), state->block_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("node"), state->node_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("scheduled_ordinal"), state->scheduled_ordinal));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("producer_node"), state->producer_node));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("consumer_node"), state->consumer_node));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("required"), state->required_cycle_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("observed"), state->observed_cycle_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("residual"), state->cycle_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &state_object, IREE_SV("delay_alu_immediate"),
         state->delay_alu_immediate));
     if (state->matrix_result_use !=
         LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_UNKNOWN) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          stream,
-          ",\"matrix_wait_profile\":%" PRIu32 ",\"matrix_wait_profile_name\":",
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &state_object, IREE_SV("matrix_wait_profile"),
           (uint32_t)state->matrix_wait_profile));
-      IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-          stream,
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &state_object, IREE_SV("matrix_wait_profile_name"),
           loom_amdgpu_matrix_wait_profile_name(state->matrix_wait_profile)));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          stream,
-          ",\"matrix_result_use\":%" PRIu32 ",\"matrix_result_use_name\":",
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &state_object, IREE_SV("matrix_result_use"),
           (uint32_t)state->matrix_result_use));
-      IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-          stream,
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &state_object, IREE_SV("matrix_result_use_name"),
           loom_amdgpu_matrix_wait_result_use_name(state->matrix_result_use)));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          stream, ",\"matrix_pass_count\":%" PRIu16, state->matrix_pass_count));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &state_object, IREE_SV("matrix_pass_count"),
+          state->matrix_pass_count));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '}'));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&state_object));
   }
-  return loom_output_stream_write_char(stream, ']');
+  return loom_json_array_end(&states);
 }
 
 iree_status_t loom_amdgpu_wait_state_plan_format_text(
@@ -2388,22 +2398,28 @@ iree_status_t loom_amdgpu_wait_state_plan_format_json(
   }
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      "{\"format\":\"loom.amdgpu.wait_state_plan.v1\",\"state_count\":%zu"
-      ",\"progress_count\":%zu,\"hazard_count\":%zu,\"states\":",
-      plan->state_count, plan->progress.record_count,
-      plan->hazard_plan.record_count));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.amdgpu.wait_state_plan.v1")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("state_count"), plan->state_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("progress_count"), plan->progress.record_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("hazard_count"), plan->hazard_plan.record_count));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("states")));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_write_states_json(plan, &stream));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"progress\":"));
+      loom_json_object_begin_field(&object, IREE_SV("progress")));
   IREE_RETURN_IF_ERROR(
       loom_low_packet_progress_write_json_array(&plan->progress, &stream));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"hazards\":"));
+      loom_json_object_begin_field(&object, IREE_SV("hazards")));
   IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_json_array(
       &plan->hazard_plan, &stream));
-  return loom_output_stream_write_char(&stream, '}');
+  return loom_json_object_end(&object);
 }
 
 uint64_t loom_amdgpu_wait_state_plan_instruction_count(

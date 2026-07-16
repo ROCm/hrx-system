@@ -387,50 +387,54 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
   const loom_low_schedule_table_t* schedule = plan->wait_plan->schedule;
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      &stream, "\"format\":\"loom.amdgpu.wait_packet_plan.v0\""));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.amdgpu.wait_packet_plan.v0")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("function"),
+      loom_amdgpu_wait_packet_json_function_name(plan)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("target"), schedule->target.target_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("descriptor_set"), schedule->target.descriptor_set_key));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("packet_count"), plan->packet_count));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"function\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, loom_amdgpu_wait_packet_json_function_name(plan)));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"target\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(&stream, schedule->target.target_name));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, ",\"descriptor_set\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      &stream, schedule->target.descriptor_set_key));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream, ",\"packet_count\":%zu,\"packets\":", plan->packet_count));
+      loom_json_object_begin_field(&object, IREE_SV("packets")));
   loom_json_array_writer_t packets;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &packets));
   for (iree_host_size_t i = 0; i < plan->packet_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&packets));
     const loom_amdgpu_wait_packet_t* packet = &plan->packets[i];
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(&stream, "\"descriptor\":"));
+    loom_json_object_writer_t packet_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &packet_object));
     IREE_ASSERT_NE(packet->descriptor, NULL);
     iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
         schedule->target.descriptor_set, packet->descriptor->key_string_offset);
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &packet_object, IREE_SV("descriptor"), descriptor_key));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &packet_object, IREE_SV("block"), packet->block_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &packet_object, IREE_SV("node"), packet->node_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &packet_object, IREE_SV("scheduled_ordinal"),
+        packet->scheduled_ordinal));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &packet_object, IREE_SV("counter_mask"), packet->counter_mask));
     IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(&stream, descriptor_key));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        &stream,
-        ",\"block\":%" PRIu32 ",\"node\":%" PRIu32
-        ",\"scheduled_ordinal\":%" PRIu32 ",\"counter_mask\":%" PRIu32
-        ",\"counters\":",
-        packet->block_index, packet->node_index, packet->scheduled_ordinal,
-        packet->counter_mask));
+        loom_json_object_begin_field(&packet_object, IREE_SV("counters")));
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_json_write_counters(
         &stream, packet->counter_mask));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        &stream,
-        ",\"source_action_start\":%zu,\"source_action_count\":%zu"
-        ",\"immediates\":",
-        packet->source_action_start, packet->source_action_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &packet_object, IREE_SV("source_action_start"),
+        packet->source_action_start));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &packet_object, IREE_SV("source_action_count"),
+        packet->source_action_count));
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&packet_object, IREE_SV("immediates")));
     loom_json_array_writer_t immediates;
     IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &immediates));
     for (iree_host_size_t j = 0; j < packet->immediate_count; ++j) {
@@ -439,17 +443,20 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
       IREE_ASSERT_LT(immediate_index, plan->immediate_count);
       const loom_amdgpu_wait_packet_immediate_t* immediate =
           &plan->immediates[immediate_index];
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          &stream, "{\"index\":%" PRIu16 ",\"name\":",
+      loom_json_object_writer_t immediate_object;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &immediate_object));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &immediate_object, IREE_SV("index"),
           immediate->descriptor_immediate_index));
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_string(&stream, immediate->name));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          &stream, ",\"value\":%" PRIu16 "}", immediate->value));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &immediate_object, IREE_SV("name"), immediate->name));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &immediate_object, IREE_SV("value"), immediate->value));
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&immediate_object));
     }
     IREE_RETURN_IF_ERROR(loom_json_array_end(&immediates));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&packet_object));
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&packets));
-  return loom_output_stream_write_cstring(&stream, "}");
+  return loom_json_object_end(&object);
 }

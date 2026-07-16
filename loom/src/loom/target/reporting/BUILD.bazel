@@ -97,6 +97,7 @@ loom_cc_library(
     hdrs = ["format_planning.h"],
     deps = [
         "//loom/src/loom/codegen/low:planning_statistics",
+        "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],
