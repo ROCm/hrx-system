@@ -367,11 +367,14 @@ normal Bazel presubmit.
 ## Continuation
 
 The current `gfx1100` path is measured against the official FP8 implementation
-in the [case study](docs/case_study.md). The next durable extensions are native
-FP8 target providers on `gfx942` and newer architectures, tensor-parallel and
-heterogeneous device placement, persistent resident LoRA variant reuse,
-persistent compiled-executable caching, and migration of the semantic C
-program into Loom scheduling IR as its host and VM facilities come online.
+in the [case study](docs/case_study.md). The
+[generalization roadmap](docs/generalization_roadmap.md) separates near-term
+target-provider, launch, execution-layout, and cache work from the larger
+migration of the semantic C program into Loom scheduling IR. The next durable
+extensions are native FP8 target providers on `gfx942` and newer architectures,
+tensor-parallel and heterogeneous device placement, persistent resident LoRA
+variant reuse, persistent compiled-executable caching, and that scheduling-IR
+migration as its host and VM facilities come online.
 
 Those extensions keep the existing contracts: dynamic request planning,
 source-native compact parameters, coarse reusable stage command buffers,
