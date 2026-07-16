@@ -27,6 +27,31 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    lora_variant
+  HDRS
+    "lora_variant.h"
+  SRCS
+    "lora_variant.c"
+  DEPS
+    ::lora_set
+    iree::base
+    iree::experimental::id4::ideogram4::lora_bake
+    iree::experimental::id4::ideogram4::lora_bake_plan
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_layout
+    iree::experimental::id4::pipeline::parameter_materialization
+    iree::experimental::id4::pipeline::parameter_materialization_group
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_provider
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     lora_set_test
@@ -81,6 +106,8 @@ iree_cc_binary(
   SRCS
     "main.c"
   DEPS
+    ::lora_set
+    ::lora_variant
     ::parameter_bake
     iree::base
     iree::base::internal
@@ -92,6 +119,7 @@ iree_cc_binary(
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::stages::ideogram4_dit_parameters
+    iree::experimental::id4::stages::ideogram4_dit_program
     iree::experimental::id4::tooling::capture
     iree::experimental::id4::tooling::diagnostics
     iree::experimental::id4::tooling::filesystem

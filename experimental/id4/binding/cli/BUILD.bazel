@@ -32,6 +32,28 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "lora_variant",
+    srcs = ["lora_variant.c"],
+    hdrs = ["lora_variant.h"],
+    deps = [
+        ":lora_set",
+        "//experimental/id4/ideogram4:lora_bake",
+        "//experimental/id4/ideogram4:lora_bake_plan",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_layout",
+        "//experimental/id4/pipeline:parameter_materialization",
+        "//experimental/id4/pipeline:parameter_materialization_group",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "lora_set_test",
     srcs = ["lora_set_test.cc"],
@@ -79,6 +101,8 @@ iree_runtime_cc_binary(
     name = "id4",
     srcs = ["main.c"],
     deps = [
+        ":lora_set",
+        ":lora_variant",
         ":parameter_bake",
         "//experimental/id4/ideogram4:request",
         "//experimental/id4/ideogram4:session",
@@ -87,6 +111,7 @@ iree_runtime_cc_binary(
         "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/pipeline:parameter_slab",
         "//experimental/id4/stages:ideogram4_dit_parameters",
+        "//experimental/id4/stages:ideogram4_dit_program",
         "//experimental/id4/tooling:capture",
         "//experimental/id4/tooling:diagnostics",
         "//experimental/id4/tooling:filesystem",
