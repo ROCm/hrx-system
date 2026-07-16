@@ -89,6 +89,10 @@ std::string WriteStructuredJson() {
   IREE_EXPECT_OK(loom_json_object_begin(&stream, &object));
   IREE_EXPECT_OK(loom_json_object_write_string_field(
       &object, IREE_SV("required"), iree_string_view_empty()));
+  IREE_EXPECT_OK(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("omitted"), iree_string_view_empty()));
+  IREE_EXPECT_OK(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("present"), IREE_SV("value")));
   IREE_EXPECT_OK(
       loom_json_object_write_null_field(&object, IREE_SV("unknown")));
   IREE_EXPECT_OK(
@@ -279,7 +283,8 @@ TEST(JsonEscape, QuotedStringWithEscapes) {
 TEST(JsonWriter, WritesNestedContainersAndTypedValues) {
   std::string json = WriteStructuredJson();
   EXPECT_EQ(json,
-            "{\"required\":\"\",\"unknown\":null,\"answer\":42,"
+            "{\"required\":\"\",\"present\":\"value\",\"unknown\":null,"
+            "\"answer\":42,"
             "\"escaped\\\"field\":[-7,true,null,{\"name\":\"nested\"}]}");
 
   iree_string_view_t object = iree_make_string_view(json.data(), json.size());
@@ -295,6 +300,9 @@ TEST(JsonWriter, WritesNestedContainersAndTypedValues) {
   uint64_t answer = 0;
   IREE_ASSERT_OK(iree_json_parse_uint64(value, &answer));
   EXPECT_EQ(answer, 42u);
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(object, IREE_SV("present"), &value));
+  EXPECT_TRUE(iree_string_view_equal(value, IREE_SV("value")));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
       iree_json_lookup_object_value(object, IREE_SV("omitted"), &value));

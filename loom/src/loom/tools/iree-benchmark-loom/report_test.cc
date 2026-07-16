@@ -85,12 +85,11 @@ TEST(BenchmarkReportTest, WritesStatusFieldJson) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
 
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "{"));
-  bool first_field = true;
+  loom_json_object_writer_t object;
+  IREE_ASSERT_OK(loom_json_object_begin(&stream, &object));
   IREE_ASSERT_OK(iree_benchmark_loom_write_status_field_json(
-      IREE_STATUS_UNAVAILABLE, IREE_SV("profile decode failed"), &stream,
-      &first_field));
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "}"));
+      IREE_STATUS_UNAVAILABLE, IREE_SV("profile decode failed"), &object));
+  IREE_ASSERT_OK(loom_json_object_end(&object));
 
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
@@ -107,12 +106,11 @@ TEST(BenchmarkReportTest, OmitsEmptyStatusCodeMessage) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
 
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "{"));
-  bool first_field = true;
+  loom_json_object_writer_t object;
+  IREE_ASSERT_OK(loom_json_object_begin(&stream, &object));
   IREE_ASSERT_OK(iree_benchmark_loom_write_status_field_json(
-      IREE_STATUS_UNAVAILABLE, iree_string_view_empty(), &stream,
-      &first_field));
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "}"));
+      IREE_STATUS_UNAVAILABLE, iree_string_view_empty(), &object));
+  IREE_ASSERT_OK(loom_json_object_end(&object));
 
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));

@@ -90,6 +90,10 @@ iree_status_t loom_json_object_begin_field(loom_json_object_writer_t* writer,
 iree_status_t loom_json_object_write_string_field(
     loom_json_object_writer_t* writer, iree_string_view_t name,
     iree_string_view_t value);
+// Writes a string field only when |value| is non-empty.
+iree_status_t loom_json_object_write_string_field_if_nonempty(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    iree_string_view_t value);
 iree_status_t loom_json_object_write_uint32_field(
     loom_json_object_writer_t* writer, iree_string_view_t name, uint32_t value);
 iree_status_t loom_json_object_write_uint64_field(

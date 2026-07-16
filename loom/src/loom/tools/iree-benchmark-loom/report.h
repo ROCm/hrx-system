@@ -14,6 +14,7 @@
 #include "loom/tooling/testbench/testbench.h"
 #include "loom/tools/iree-benchmark-loom/model.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
+#include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
@@ -62,21 +63,21 @@ typedef struct iree_benchmark_loom_summary_counts_t {
 // Writes a "status" field containing an IREE status-code object.
 iree_status_t iree_benchmark_loom_write_status_field_json(
     iree_status_code_t code, iree_string_view_t message,
-    loom_output_stream_t* stream, bool* first_field);
+    loom_json_object_writer_t* object);
 
 // Writes the run identifier field shared by every JSONL row.
 iree_status_t iree_benchmark_loom_write_run_id_field_json(
     const iree_benchmark_loom_run_identity_t* run,
-    loom_output_stream_t* stream);
+    loom_json_object_writer_t* object);
 
 // Writes stable benchmark candidate identity fields.
 iree_status_t iree_benchmark_loom_write_candidate_identity_json(
     const iree_benchmark_loom_candidate_identity_t* candidate,
-    loom_output_stream_t* stream);
+    loom_json_object_writer_t* object);
 
 // Writes a sample-compilation field when |sample_compilation| is non-empty.
 iree_status_t iree_benchmark_loom_write_sample_compilation_field_json(
-    iree_string_view_t sample_compilation, loom_output_stream_t* stream);
+    iree_string_view_t sample_compilation, loom_json_object_writer_t* object);
 
 // Writes sanitizer compiler/runtime policy as a compact JSON object.
 iree_status_t iree_benchmark_loom_write_sanitizer_options_json(
@@ -85,17 +86,17 @@ iree_status_t iree_benchmark_loom_write_sanitizer_options_json(
 // Writes fields for one concrete parameterized case sample.
 iree_status_t iree_benchmark_loom_write_sample_fields_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,
-    iree_host_size_t sample_ordinal, loom_output_stream_t* stream);
+    iree_host_size_t sample_ordinal, loom_json_object_writer_t* object);
 
 // Writes sample-plan fields for a parameterized case.
 iree_status_t iree_benchmark_loom_write_case_sample_plan_fields_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,
-    loom_output_stream_t* stream);
+    loom_json_object_writer_t* object);
 
 // Writes selected HAL context identity fields into an open JSON object.
 iree_status_t iree_benchmark_loom_write_hal_context_identity_fields_json(
     const iree_benchmark_loom_hal_context_t* context,
-    loom_output_stream_t* stream);
+    loom_json_object_writer_t* object);
 
 // Writes a HAL profile summary object.
 iree_status_t iree_benchmark_loom_write_hal_profile_summary_json(
@@ -134,64 +135,24 @@ iree_status_t iree_benchmark_loom_write_benchmark_evidence_fields_json(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_host_size_t correctness_sample_count,
     iree_host_size_t correctness_failed_sample_count,
-    loom_output_stream_t* stream, bool* first_field);
+    loom_json_object_writer_t* object);
 
 // Writes final aggregate run counts as a compact JSON object.
 iree_status_t iree_benchmark_loom_write_summary_counts_json(
     const iree_benchmark_loom_summary_counts_t* counts,
     loom_output_stream_t* stream);
 
-// Writes one field separator/name pair inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_object_field_name(
-    loom_output_stream_t* stream, bool* first_field, const char* name);
-
-// Writes a required string field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_string_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    iree_string_view_t value);
-
-// Writes a string field only when |value| is non-empty.
-iree_status_t iree_benchmark_loom_write_json_optional_string_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    iree_string_view_t value);
-
-// Writes a required uint32 field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_u32_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    uint32_t value);
-
-// Writes a required uint64 field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_u64_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    uint64_t value);
-
-// Writes a required int64 field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_i64_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    int64_t value);
-
-// Writes a required bool field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_bool_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    bool value);
-
-// Writes a required host-size field inside a JSON object.
-iree_status_t iree_benchmark_loom_write_json_size_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    iree_host_size_t value);
-
 // Writes diagnostic capture count fields and diagnostics array fields into an
 // open JSON object.
 iree_status_t iree_benchmark_loom_write_diagnostic_capture_fields_json(
     const iree_benchmark_loom_diagnostic_capture_t* diagnostics,
-    loom_output_stream_t* stream, bool* first_field);
+    loom_json_object_writer_t* object);
 
 // Writes testbench planning issue fields into an open JSON object.
 iree_status_t iree_benchmark_loom_write_planning_issue_fields_json(
     const loom_testbench_module_plan_t* testbench_plan,
     const loom_testbench_issue_t* planning_issues,
-    iree_host_size_t planning_issue_count, loom_output_stream_t* stream,
-    bool* first_field);
+    iree_host_size_t planning_issue_count, loom_json_object_writer_t* object);
 
 // Returns the number of physical dispatches recorded in one measured HAL batch.
 iree_status_t iree_benchmark_loom_hal_physical_dispatches_per_batch(
