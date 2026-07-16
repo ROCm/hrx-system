@@ -624,11 +624,21 @@ static iree_status_t iree_benchmark_loom_snapshot_append_comparison(
       event->candidate->sample_count));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("p50_ns")));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      "{\"baseline\":%" PRIi64 ",\"candidate\":%" PRIi64
-      ",\"ratio\":%.6f,\"speedup\":%.6f}",
-      baseline_p50.p50_ns, candidate_p50.p50_ns, ratio_p50, speedup_p50));
+  loom_json_object_writer_t p50_object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &p50_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_int64_field(
+      &p50_object, IREE_SV("baseline"), baseline_p50.p50_ns));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_int64_field(
+      &p50_object, IREE_SV("candidate"), candidate_p50.p50_ns));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&p50_object, IREE_SV("ratio")));
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write_format(&stream, "%.6f", ratio_p50));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&p50_object, IREE_SV("speedup")));
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write_format(&stream, "%.6f", speedup_p50));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&p50_object));
   return loom_json_object_end(&object);
 }
 
