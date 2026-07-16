@@ -38,6 +38,22 @@ typedef struct iree_hal_amdxdna_write32_constant_patch_list_t {
   iree_host_size_t count;
 } iree_hal_amdxdna_write32_constant_patch_list_t;
 
+typedef struct iree_hal_amdxdna_host_patch_table_t {
+  uint32_t* data;
+  iree_host_size_t count;
+} iree_hal_amdxdna_host_patch_table_t;
+
+void iree_hal_amdxdna_host_patch_table_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_amdxdna_host_patch_table_t* table);
+
+// Derives the host-patch optimization table from semantic DDR_PATCH operations
+// in an XAie transaction. The returned flat list contains
+// (BD byte offset, argument index, argument addend) triples.
+iree_status_t iree_hal_amdxdna_build_host_patch_table(
+    iree_allocator_t host_allocator, iree_const_byte_span_t transaction,
+    iree_hal_amdxdna_host_patch_table_t* out_table);
+
 void iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
     iree_allocator_t host_allocator,
     iree_hal_amdxdna_write32_constant_patch_list_t* list);

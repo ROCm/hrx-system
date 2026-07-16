@@ -31,6 +31,16 @@ static void iree_hal_amdxdna_write_u32(uint8_t* p, uint32_t value) {
   memcpy(p, &value, sizeof(value));
 }
 
+typedef struct iree_hal_amdxdna_bd_patch_site_t {
+  uint32_t key;
+  uint32_t byte_offset;
+} iree_hal_amdxdna_bd_patch_site_t;
+
+static uint32_t iree_hal_amdxdna_bd_patch_key(uint32_t register_address) {
+  return register_address &
+         ((0x7Fu << 25) | (0x1Fu << 20) | (0x1Fu << 5));
+}
+
 void iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
     iree_allocator_t host_allocator,
     iree_hal_amdxdna_write32_constant_patch_list_t* list) {
@@ -61,6 +71,116 @@ uint32_t iree_hal_amdxdna_txn_op_size(const uint8_t* b, size_t total,
     return iree_hal_amdxdna_read_u32(b + p + 4);
   }
   return 4;
+}
+
+void iree_hal_amdxdna_host_patch_table_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_amdxdna_host_patch_table_t* table) {
+  if (!table) return;
+  iree_allocator_free(host_allocator, table->data);
+  table->data = NULL;
+  table->count = 0;
+}
+
+iree_status_t iree_hal_amdxdna_build_host_patch_table(
+    iree_allocator_t host_allocator, iree_const_byte_span_t transaction,
+    iree_hal_amdxdna_host_patch_table_t* out_table) {
+  if (!out_table) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "amdxdna host patch table output is NULL");
+  }
+  memset(out_table, 0, sizeof(*out_table));
+  if (!transaction.data || transaction.data_length < 16 ||
+      transaction.data_length % sizeof(uint32_t) != 0 ||
+      transaction.data_length > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "amdxdna XAie transaction length is invalid");
+  }
+  const uint8_t* bytes = transaction.data;
+  const size_t total = transaction.data_length;
+  const uint32_t op_count = iree_hal_amdxdna_read_u32(bytes + 8);
+  if (op_count > (total - 16) / sizeof(uint32_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "amdxdna XAie operation count exceeds transaction");
+  }
+  if (op_count == 0) {
+    return total == 16
+               ? iree_ok_status()
+               : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "amdxdna XAie transaction has trailing bytes");
+  }
+
+  iree_hal_amdxdna_bd_patch_site_t* sites = NULL;
+  uint32_t* patches = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, op_count, sizeof(*sites), (void**)&sites));
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, op_count, 3 * sizeof(*patches), (void**)&patches);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, sites);
+    return status;
+  }
+
+  iree_host_size_t site_count = 0;
+  iree_host_size_t patch_count = 0;
+  size_t offset = 16;
+  for (uint32_t i = 0; i < op_count; ++i) {
+    const uint32_t op_size =
+        iree_hal_amdxdna_txn_op_size(bytes, total, offset);
+    if (op_size == 0 || offset + op_size > total) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "amdxdna XAie operation %u is malformed", i);
+      goto cleanup;
+    }
+    const uint8_t opcode = bytes[offset];
+    if (opcode == 1) {
+      if (op_size < 28) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "amdxdna BLOCKWRITE operation is truncated");
+        goto cleanup;
+      }
+      sites[site_count++] = (iree_hal_amdxdna_bd_patch_site_t){
+          .key = iree_hal_amdxdna_bd_patch_key(
+              iree_hal_amdxdna_read_u32(bytes + offset + 8)),
+          .byte_offset = (uint32_t)(offset + 16),
+      };
+    } else if (opcode == 0x81) {
+      if (op_size < 44) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "amdxdna DDR_PATCH operation is truncated");
+        goto cleanup;
+      }
+      const uint32_t key = iree_hal_amdxdna_bd_patch_key(
+          iree_hal_amdxdna_read_u32(bytes + offset + 24));
+      iree_host_size_t site_index = site_count;
+      while (site_index > 0 && sites[site_index - 1].key != key) --site_index;
+      if (site_index == 0) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "amdxdna DDR_PATCH has no preceding matching BLOCKWRITE");
+        goto cleanup;
+      }
+      patches[patch_count++] = sites[site_index - 1].byte_offset;
+      patches[patch_count++] =
+          iree_hal_amdxdna_read_u32(bytes + offset + 32);
+      patches[patch_count++] =
+          iree_hal_amdxdna_read_u32(bytes + offset + 40);
+    }
+    offset += op_size;
+  }
+  if (offset != total) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "amdxdna XAie transaction has trailing bytes");
+    goto cleanup;
+  }
+  out_table->data = patches;
+  out_table->count = patch_count;
+  patches = NULL;
+
+cleanup:
+  iree_allocator_free(host_allocator, patches);
+  iree_allocator_free(host_allocator, sites);
+  return status;
 }
 
 static iree_status_t iree_hal_amdxdna_visit_write32_constant_sites(

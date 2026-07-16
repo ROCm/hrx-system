@@ -42,9 +42,16 @@ function(hrx_cc_test)
 endfunction()
 
 add_subdirectory(src/libhrx)
-add_subdirectory(src/binding/common)
-add_subdirectory(src/binding/hip)
-add_subdirectory(tools)
+if(LIBHRX_BUILD_TOOLS)
+  add_subdirectory(tools)
+endif()
+
+if(LIBHRX_BUILD_HIP_BINDING OR LIBHRX_BUILD_CUDA_BINDING)
+  add_subdirectory(src/binding/common)
+endif()
+if(LIBHRX_BUILD_HIP_BINDING)
+  add_subdirectory(src/binding/hip)
+endif()
 
 if(LIBHRX_BUILD_CUDA_BINDING)
   add_subdirectory(src/binding/cuda)
@@ -72,6 +79,7 @@ install(TARGETS libhrx_src_libhrx_hrx EXPORT hrx-targets
     COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
   INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx")
 install(FILES
+  include/hrx_amdxdna.h
   include/hrx_runtime.h
   include/hrx_runtime_cxx.h
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx"

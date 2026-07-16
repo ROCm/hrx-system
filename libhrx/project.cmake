@@ -15,6 +15,10 @@ if(NOT DEFINED LIBHRX_BUILD)
 endif()
 option(LIBHRX_BUILD_PASSTHROUGH
   "Build libhrx HIP passthrough/interception tools." ON)
+option(LIBHRX_BUILD_HIP_BINDING
+  "Build the libhrx HIP runtime API compatibility binding." ON)
+option(LIBHRX_BUILD_TOOLS
+  "Build libhrx command-line tools." ON)
 option(LIBHRX_BUILD_CUDA_BINDING
   "Build libhrx CUDA runtime/driver API compatibility binding." OFF)
 option(LIBHRX_BUILD_CTS

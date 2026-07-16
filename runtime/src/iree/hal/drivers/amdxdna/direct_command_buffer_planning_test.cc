@@ -188,6 +188,104 @@ TEST(PatchWrite32ConstantsTest, PrecomputedListRejectsMalformedTruncatedOp) {
   iree_status_ignore(status);
 }
 
+// --- iree_hal_amdxdna_build_host_patch_table --------------------------------
+
+std::vector<uint32_t> MakeHostPatchTxn(uint32_t register_address,
+                                       uint32_t argument_index,
+                                       uint32_t argument_addend) {
+  constexpr uint32_t kBlockWriteSize = 32;
+  constexpr uint32_t kDdrPatchSize = 44;
+  std::vector<uint32_t> txn((16 + kBlockWriteSize + kDdrPatchSize) / 4, 0);
+  txn[2] = 2;
+  uint8_t* bytes = reinterpret_cast<uint8_t*>(txn.data());
+  size_t offset = 16;
+  bytes[offset] = 1;
+  std::memcpy(bytes + offset + 8, &register_address, sizeof(uint32_t));
+  std::memcpy(bytes + offset + 12, &kBlockWriteSize, sizeof(uint32_t));
+  offset += kBlockWriteSize;
+  bytes[offset] = 0x81;
+  std::memcpy(bytes + offset + 4, &kDdrPatchSize, sizeof(uint32_t));
+  std::memcpy(bytes + offset + 24, &register_address, sizeof(uint32_t));
+  std::memcpy(bytes + offset + 32, &argument_index, sizeof(uint32_t));
+  std::memcpy(bytes + offset + 40, &argument_addend, sizeof(uint32_t));
+  return txn;
+}
+
+TEST(BuildHostPatchTableTest, DerivesSemanticPatchTriple) {
+  auto txn = MakeHostPatchTxn(/*register_address=*/0x1D000u,
+                              /*argument_index=*/2u,
+                              /*argument_addend=*/0x40u);
+  iree_hal_amdxdna_host_patch_table_t table;
+  IREE_ASSERT_OK(iree_hal_amdxdna_build_host_patch_table(
+      iree_allocator_system(),
+      iree_make_const_byte_span(txn.data(), txn.size() * sizeof(uint32_t)),
+      &table));
+  ASSERT_EQ(table.count, 3u);
+  EXPECT_EQ(table.data[0], 32u);
+  EXPECT_EQ(table.data[1], 2u);
+  EXPECT_EQ(table.data[2], 0x40u);
+  iree_hal_amdxdna_host_patch_table_deinitialize(iree_allocator_system(),
+                                                  &table);
+}
+
+TEST(BuildHostPatchTableTest, RejectsPatchWithoutMatchingBlockWrite) {
+  auto txn = MakeHostPatchTxn(/*register_address=*/0x1D000u,
+                              /*argument_index=*/0u,
+                              /*argument_addend=*/0u);
+  uint32_t different_register = 0x201D000u;
+  std::memcpy(reinterpret_cast<uint8_t*>(txn.data()) + 16 + 32 + 24,
+              &different_register, sizeof(uint32_t));
+  iree_hal_amdxdna_host_patch_table_t table;
+  iree_status_t status = iree_hal_amdxdna_build_host_patch_table(
+      iree_allocator_system(),
+      iree_make_const_byte_span(txn.data(), txn.size() * sizeof(uint32_t)),
+      &table);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+  iree_hal_amdxdna_host_patch_table_deinitialize(iree_allocator_system(),
+                                                  &table);
+}
+
+TEST(BuildHostPatchTableTest, RejectsImpossibleOperationCount) {
+  std::vector<uint32_t> txn(4, 0);
+  txn[2] = 1;
+  iree_hal_amdxdna_host_patch_table_t table;
+  iree_status_t status = iree_hal_amdxdna_build_host_patch_table(
+      iree_allocator_system(),
+      iree_make_const_byte_span(txn.data(), txn.size() * sizeof(uint32_t)),
+      &table);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+}
+
+TEST(BuildHostPatchTableTest, RejectsNullOutputTable) {
+  auto txn = MakeHostPatchTxn(/*register_address=*/0x1D000u,
+                              /*argument_index=*/0u,
+                              /*argument_addend=*/0u);
+  iree_status_t status = iree_hal_amdxdna_build_host_patch_table(
+      iree_allocator_system(),
+      iree_make_const_byte_span(txn.data(), txn.size() * sizeof(uint32_t)),
+      nullptr);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+}
+
+TEST(BuildHostPatchTableTest, RejectsTrailingTransactionData) {
+  auto txn = MakeHostPatchTxn(/*register_address=*/0x1D000u,
+                              /*argument_index=*/0u,
+                              /*argument_addend=*/0u);
+  txn.push_back(0);
+  iree_hal_amdxdna_host_patch_table_t table;
+  iree_status_t status = iree_hal_amdxdna_build_host_patch_table(
+      iree_allocator_system(),
+      iree_make_const_byte_span(txn.data(), txn.size() * sizeof(uint32_t)),
+      &table);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+  iree_hal_amdxdna_host_patch_table_deinitialize(iree_allocator_system(),
+                                                  &table);
+}
+
 // --- iree_hal_amdxdna_apply_patch_table --------------------------------------
 
 TEST(ApplyPatchTableTest, WritesShimDmaAddressIntoDescriptor) {

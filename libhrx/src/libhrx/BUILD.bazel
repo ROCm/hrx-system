@@ -15,6 +15,7 @@ package(
 
 HRX_SRCS = [
     "allocator.c",
+    "amdxdna_executable.c",
     "buffer.c",
     "buffer_table.c",
     "buffer_view.c",
@@ -68,8 +69,20 @@ HRX_DEPS = [
     "//runtime/src/iree/vm",
     "//runtime/src/iree/vm/bytecode:module",
 ] + iree_select({
+    "//runtime/config/hal:driver_amdxdna": [
+        "//runtime/src/iree/base/internal/flatcc:building",
+        "//runtime/src/iree/hal/drivers/amdxdna",
+        "//runtime/src/iree/schemas:amdxdna_xclbin_executable_def_c_fbs",
+    ],
     "//runtime/config/hal:driver_amdgpu": [
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
+    ],
+    "//conditions:default": [],
+})
+
+HRX_AMDXDNA_COPTS = iree_select({
+    "//runtime/config/hal:driver_amdxdna": [
+        "-DHRX_HAS_IREE_AMDXDNA_DRIVER",
     ],
     "//conditions:default": [],
 })
@@ -87,7 +100,7 @@ hrx_cc_library(
     name = "hrx_static",
     srcs = HRX_SRCS,
     hdrs = HRX_HDRS,
-    copts = HRX_AMDGPU_COPTS,
+    copts = HRX_AMDGPU_COPTS + HRX_AMDXDNA_COPTS,
     includes = HRX_INCLUDES,
     tags = ["skip-bazel_to_cmake"],
     deps = HRX_DEPS,
@@ -99,7 +112,7 @@ hrx_cc_shared_library(
     hdrs = HRX_HDRS,
     copts = [
         "-DHRX_BUILDING_SHARED",
-    ] + HRX_AMDGPU_COPTS,
+    ] + HRX_AMDGPU_COPTS + HRX_AMDXDNA_COPTS,
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
 )

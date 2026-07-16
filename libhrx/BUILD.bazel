@@ -15,6 +15,7 @@ package(
 iree_cc_library(
     name = "defines",
     hdrs = [
+        "include/hrx_amdxdna.h",
         "include/hrx_runtime.h",
         "include/hrx_runtime_cxx.h",
     ],

@@ -23,6 +23,7 @@ iree_cc_library(
     "hrx_internal.h"
   SRCS
     "allocator.c"
+    "amdxdna_executable.c"
     "buffer.c"
     "buffer_table.c"
     "buffer_view.c"
@@ -89,6 +90,8 @@ if(IREE_HAL_DRIVER_AMDXDNA)
     iree::hal::drivers::amdxdna::registration
     iree::hal::drivers::amdxdna
     iree::base::tooling::flags
+    iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_xclbin_executable_def_c_fbs
   )
   target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
     HRX_HAS_IREE_AMDXDNA_DRIVER
