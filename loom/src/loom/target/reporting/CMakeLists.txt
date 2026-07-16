@@ -65,6 +65,8 @@ loom_cc_library(
     "compile_report_format.h"
   SRCS
     "compile_report_format.c"
+    "compile_report_format_json.c"
+    "compile_report_format_text.c"
     "compile_report_schema.c"
     "compile_report_schema.h"
   DEPS
