@@ -317,6 +317,30 @@ kernel.def @workgroup_barrier_rejects_lane_varying_counted_loop_bound() {
 
 // ====
 
+config.decl @runtime.valid_token_count : %value: index where [range(%value, 1, 131072)]
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @workgroup_barrier_accepts_config_derived_loop_bound() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %valid_token_count = config.get @runtime.valid_token_count : index
+  %rounded_token_count = index.add %valid_token_count, %fifteen : index
+  %tile_count = index.div %rounded_token_count, %sixteen : index
+  scf.for %tile = [%zero to %tile_count step %one] {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  kernel.return
+}
+
+// ====
+
 test.target<low_core> @test_target
 
 kernel.def @workgroup_barrier_accepts_kernel_argument_control(%enabled: i1) {

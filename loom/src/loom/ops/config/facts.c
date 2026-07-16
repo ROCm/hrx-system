@@ -132,25 +132,22 @@ iree_status_t loom_config_get_facts(loom_fact_context_t* context,
 
   result_facts[0] = loom_value_facts_unknown();
   const loom_op_t* definition_op = loom_config_get_definition(module, op);
-  if (!definition_op) return iree_ok_status();
-
   if (loom_config_def_isa(definition_op)) {
     loom_value_id_t result_value = loom_config_get_result(op);
-    if (result_value >= module->values.count) {
-      return iree_ok_status();
+    if (result_value < module->values.count) {
+      loom_value_facts_t value_facts = loom_value_facts_unknown();
+      if (loom_config_scalar_value_facts(
+              loom_module_value_type(module, result_value),
+              loom_config_def_value(definition_op), &value_facts)) {
+        result_facts[0] = value_facts;
+      }
     }
-    loom_value_facts_t value_facts = loom_value_facts_unknown();
-    if (loom_config_scalar_value_facts(
-            loom_module_value_type(module, result_value),
-            loom_config_def_value(definition_op), &value_facts)) {
-      result_facts[0] = value_facts;
-    }
-    return iree_ok_status();
-  }
-
-  if (loom_config_decl_isa(definition_op)) {
+  } else if (loom_config_decl_isa(definition_op)) {
     loom_config_get_apply_decl_predicates(module, op, definition_op,
                                           &result_facts[0]);
   }
+  // Compile-time configuration is constant across every workitem even while
+  // its numerical value remains unresolved until specialization.
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
