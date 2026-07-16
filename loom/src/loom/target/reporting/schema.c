@@ -10,7 +10,6 @@
 
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
-#include "loom/util/math.h"
 
 iree_string_view_t loom_target_compile_report_artifact_kind_name(
     loom_target_compile_artifact_kind_t kind) {
@@ -204,11 +203,11 @@ bool loom_target_compile_report_dispatch_memory_bytes(
     uint64_t dispatch_workitem_count,
     loom_target_compile_report_dispatch_memory_bytes_t* out_bytes) {
   *out_bytes = (loom_target_compile_report_dispatch_memory_bytes_t){0};
-  return loom_checked_mul_u64(read_byte_count, dispatch_workitem_count,
+  return iree_checked_mul_u64(read_byte_count, dispatch_workitem_count,
                               &out_bytes->read_byte_count) &&
-         loom_checked_mul_u64(write_byte_count, dispatch_workitem_count,
+         iree_checked_mul_u64(write_byte_count, dispatch_workitem_count,
                               &out_bytes->write_byte_count) &&
-         loom_checked_add_u64(out_bytes->read_byte_count,
+         iree_checked_add_u64(out_bytes->read_byte_count,
                               out_bytes->write_byte_count,
                               &out_bytes->total_byte_count);
 }

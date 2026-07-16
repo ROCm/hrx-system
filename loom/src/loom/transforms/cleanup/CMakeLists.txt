@@ -18,6 +18,7 @@ loom_cc_library(
     "canonicalize.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::symbolic_expr
     loom::ir
@@ -38,7 +39,6 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
     loom::util::fact_table
-    loom::util::math
     loom::util::walk
   PUBLIC
 )

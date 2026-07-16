@@ -24,7 +24,6 @@
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // State and helpers
@@ -230,7 +229,7 @@ loom_vector_memory_footprint_required_origin_upper_bound_text(
   int64_t required_origin_upper_bound = 0;
   if (!loom_vector_memory_footprint_expr_exact_i64(bound, &bound_value) ||
       !loom_vector_memory_footprint_expr_exact_i64(extent, &extent_value) ||
-      !loom_checked_sub_i64(bound_value, extent_value,
+      !iree_checked_sub_i64(bound_value, extent_value,
                             &required_origin_upper_bound)) {
     return IREE_SV("<dynamic>");
   }
@@ -1102,18 +1101,18 @@ static bool loom_vector_memory_footprint_iota_bounds_from_facts(
 
   int64_t last_lane = 0;
   int64_t last_delta = 0;
-  if (!loom_checked_sub_i64(lane_count_upper, 1, &last_lane) ||
-      !loom_checked_mul_i64(last_lane, step, &last_delta)) {
+  if (!iree_checked_sub_i64(lane_count_upper, 1, &last_lane) ||
+      !iree_checked_mul_i64(last_lane, step, &last_delta)) {
     return false;
   }
 
   if (step >= 0) {
-    if (!loom_checked_add_i64(base_upper, last_delta, out_upper)) {
+    if (!iree_checked_add_i64(base_upper, last_delta, out_upper)) {
       return false;
     }
     *out_lower = base_lower;
   } else {
-    if (!loom_checked_add_i64(base_lower, last_delta, out_lower)) {
+    if (!iree_checked_add_i64(base_lower, last_delta, out_lower)) {
       return false;
     }
     *out_upper = base_upper;

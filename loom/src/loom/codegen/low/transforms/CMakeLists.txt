@@ -87,6 +87,7 @@ loom_cc_library(
     "operand_forms.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::consumption
     loom::codegen::low::builder
@@ -108,7 +109,6 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
-    loom::util::math
   PUBLIC
 )
 

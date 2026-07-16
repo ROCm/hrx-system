@@ -17,7 +17,6 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/util/adaptive_sort.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Context storage
@@ -295,7 +294,7 @@ static bool loom_symbolic_expr_bounded_exact_i64(
 static bool loom_symbolic_expr_bounded_add_constant(int64_t scaled_value,
                                                     int64_t* inout_constant) {
   int64_t new_constant = 0;
-  if (!loom_checked_add_i64(*inout_constant, scaled_value, &new_constant)) {
+  if (!iree_checked_add_i64(*inout_constant, scaled_value, &new_constant)) {
     return false;
   }
   *inout_constant = new_constant;
@@ -305,7 +304,7 @@ static bool loom_symbolic_expr_bounded_add_constant(int64_t scaled_value,
 static bool loom_symbolic_expr_bounded_accumulate_constant(
     int64_t value, int64_t coefficient, int64_t* inout_constant) {
   int64_t scaled_value = 0;
-  return loom_checked_mul_i64(value, coefficient, &scaled_value) &&
+  return iree_checked_mul_i64(value, coefficient, &scaled_value) &&
          loom_symbolic_expr_bounded_add_constant(scaled_value, inout_constant);
 }
 
@@ -322,7 +321,7 @@ static bool loom_symbolic_expr_bounded_append_term(
   if (insert_index < *inout_term_count &&
       terms[insert_index].value_id == value_id) {
     int64_t combined_coefficient = 0;
-    if (!loom_checked_add_i64(terms[insert_index].coefficient, coefficient,
+    if (!iree_checked_add_i64(terms[insert_index].coefficient, coefficient,
                               &combined_coefficient)) {
       return false;
     }
@@ -413,7 +412,7 @@ static bool loom_symbolic_expr_bounded_normalize_raw_terms(
         relation_value_id = value_id;
       }
       int64_t next_coefficient = 0;
-      if (!loom_checked_add_i64(coefficient, terms[read_index].coefficient,
+      if (!iree_checked_add_i64(coefficient, terms[read_index].coefficient,
                                 &next_coefficient)) {
         return false;
       }
@@ -472,7 +471,7 @@ static bool loom_symbolic_expr_bounded_push_mul(
   if (loom_symbolic_expr_bounded_exact_i64(module, fact_table, left_value,
                                            &left_constant)) {
     int64_t scaled_coefficient = 0;
-    if (!loom_checked_mul_i64(coefficient, left_constant,
+    if (!iree_checked_mul_i64(coefficient, left_constant,
                               &scaled_coefficient)) {
       return false;
     }
@@ -484,7 +483,7 @@ static bool loom_symbolic_expr_bounded_push_mul(
   if (loom_symbolic_expr_bounded_exact_i64(module, fact_table, right_value,
                                            &right_constant)) {
     int64_t scaled_coefficient = 0;
-    if (!loom_checked_mul_i64(coefficient, right_constant,
+    if (!iree_checked_mul_i64(coefficient, right_constant,
                               &scaled_coefficient)) {
       return false;
     }
@@ -514,7 +513,7 @@ static bool loom_symbolic_expr_bounded_push_shli(
         result_value, coefficient);
   }
   int64_t scaled_coefficient = 0;
-  if (!loom_checked_mul_i64(coefficient, INT64_C(1) << shift_amount,
+  if (!iree_checked_mul_i64(coefficient, INT64_C(1) << shift_amount,
                             &scaled_coefficient)) {
     return false;
   }
@@ -554,7 +553,7 @@ static bool loom_symbolic_expr_bounded_finish_assume(
   const iree_host_size_t source_term_count =
       *inout_raw_term_count - frame->assume.term_count;
   int64_t source_constant = 0;
-  if (!loom_checked_sub_i64(*inout_constant, frame->assume.constant,
+  if (!iree_checked_sub_i64(*inout_constant, frame->assume.constant,
                             &source_constant)) {
     return false;
   }
@@ -571,16 +570,16 @@ static bool loom_symbolic_expr_bounded_finish_assume(
   }
 
   int64_t scaled_constant = 0;
-  if (!loom_checked_mul_i64(source_constant, frame->assume.coefficient,
+  if (!iree_checked_mul_i64(source_constant, frame->assume.coefficient,
                             &scaled_constant) ||
-      !loom_checked_add_i64(frame->assume.constant, scaled_constant,
+      !iree_checked_add_i64(frame->assume.constant, scaled_constant,
                             inout_constant)) {
     return false;
   }
   for (iree_host_size_t i = frame->assume.term_count; i < *inout_raw_term_count;
        ++i) {
     int64_t scaled_coefficient = 0;
-    if (!loom_checked_mul_i64(raw_terms[i].coefficient,
+    if (!iree_checked_mul_i64(raw_terms[i].coefficient,
                               frame->assume.coefficient, &scaled_coefficient)) {
       return false;
     }
@@ -689,7 +688,7 @@ static bool loom_symbolic_expr_bounded_accumulate_value(
         break;
       case LOOM_OP_INDEX_SUB: {
         int64_t rhs_coefficient = 0;
-        handled = loom_checked_sub_i64(0, coefficient, &rhs_coefficient) &&
+        handled = iree_checked_sub_i64(0, coefficient, &rhs_coefficient) &&
                   loom_symbolic_expr_bounded_push_expand(
                       frames, &frame_count, loom_index_sub_rhs(op),
                       rhs_coefficient, next_depth) &&
@@ -739,7 +738,7 @@ static bool loom_symbolic_expr_bounded_accumulate_value(
         break;
       case LOOM_OP_SCALAR_SUBI: {
         int64_t rhs_coefficient = 0;
-        handled = loom_checked_sub_i64(0, coefficient, &rhs_coefficient) &&
+        handled = iree_checked_sub_i64(0, coefficient, &rhs_coefficient) &&
                   loom_symbolic_expr_bounded_push_expand(
                       frames, &frame_count, loom_scalar_subi_rhs(op),
                       rhs_coefficient, next_depth) &&
@@ -757,7 +756,7 @@ static bool loom_symbolic_expr_bounded_accumulate_value(
         break;
       case LOOM_OP_SCALAR_NEGI: {
         int64_t negated_coefficient = 0;
-        handled = loom_checked_sub_i64(0, coefficient, &negated_coefficient) &&
+        handled = iree_checked_sub_i64(0, coefficient, &negated_coefficient) &&
                   loom_symbolic_expr_bounded_push_expand(
                       frames, &frame_count, loom_scalar_negi_input(op),
                       negated_coefficient, next_depth);
@@ -967,7 +966,7 @@ static iree_status_t loom_symbolic_expr_make_linear(
         relation_value_id = value_id;
       }
       int64_t new_coefficient = 0;
-      if (!loom_checked_add_i64(coefficient, terms[read_index].coefficient,
+      if (!iree_checked_add_i64(coefficient, terms[read_index].coefficient,
                                 &new_coefficient)) {
         loom_symbolic_expr_unknown(facts, out_expression);
         return iree_ok_status();
@@ -1052,9 +1051,9 @@ static iree_status_t loom_symbolic_expr_add_or_sub(
 
   int64_t constant = 0;
   bool constant_ok =
-      subtract ? loom_checked_sub_i64(left_expression->constant,
+      subtract ? iree_checked_sub_i64(left_expression->constant,
                                       right_expression->constant, &constant)
-               : loom_checked_add_i64(left_expression->constant,
+               : iree_checked_add_i64(left_expression->constant,
                                       right_expression->constant, &constant);
   if (!constant_ok) {
     loom_symbolic_expr_unknown(facts, out_expression);
@@ -1129,7 +1128,7 @@ iree_status_t loom_symbolic_expr_mul_i64(loom_symbolic_expr_context_t* context,
   }
 
   int64_t constant = 0;
-  if (!loom_checked_mul_i64(expression->constant, multiplier, &constant)) {
+  if (!iree_checked_mul_i64(expression->constant, multiplier, &constant)) {
     loom_symbolic_expr_unknown(facts, out_expression);
     return iree_ok_status();
   }
@@ -1141,7 +1140,7 @@ iree_status_t loom_symbolic_expr_mul_i64(loom_symbolic_expr_context_t* context,
       loom_symbolic_expr_ensure_scratch_terms(context, expression->term_count));
   for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
     int64_t coefficient = 0;
-    if (!loom_checked_mul_i64(expression->terms[i].coefficient, multiplier,
+    if (!iree_checked_mul_i64(expression->terms[i].coefficient, multiplier,
                               &coefficient)) {
       loom_symbolic_expr_unknown(facts, out_expression);
       return iree_ok_status();
@@ -1490,8 +1489,8 @@ static bool loom_symbolic_expr_accumulate_checked(int64_t term_min,
                                                   int64_t* inout_max) {
   int64_t new_min = 0;
   int64_t new_max = 0;
-  if (!loom_checked_add_i64(*inout_min, term_min, &new_min)) return false;
-  if (!loom_checked_add_i64(*inout_max, term_max, &new_max)) return false;
+  if (!iree_checked_add_i64(*inout_min, term_min, &new_min)) return false;
+  if (!iree_checked_add_i64(*inout_max, term_max, &new_max)) return false;
   *inout_min = new_min;
   *inout_max = new_max;
   return true;
@@ -1505,8 +1504,8 @@ static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
   if (loom_value_facts_is_unknown(rhs) || loom_value_facts_is_float(rhs)) {
     return lhs;
   }
-  int64_t lower_bound = loom_max_i64(lhs.range_lo, rhs.range_lo);
-  int64_t upper_bound = loom_min_i64(lhs.range_hi, rhs.range_hi);
+  int64_t lower_bound = iree_max(lhs.range_lo, rhs.range_lo);
+  int64_t upper_bound = iree_min(lhs.range_hi, rhs.range_hi);
   if (lower_bound > upper_bound) {
     return loom_value_facts_unknown();
   }
@@ -1539,7 +1538,7 @@ static iree_status_t loom_symbolic_expr_term_facts(
 
 static void loom_symbolic_expr_mul_interval_bound(int64_t lhs, int64_t rhs,
                                                   int64_t* out_product) {
-  if (loom_checked_mul_i64(lhs, rhs, out_product)) {
+  if (iree_checked_mul_i64(lhs, rhs, out_product)) {
     return;
   }
   *out_product = (lhs < 0) != (rhs < 0) ? INT64_MIN : INT64_MAX;
@@ -1607,7 +1606,7 @@ static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
     return iree_ok_status();
   }
 
-  if (!loom_checked_sub_i64(left_expression->constant,
+  if (!iree_checked_sub_i64(left_expression->constant,
                             right_expression->constant, out_constant)) {
     return iree_ok_status();
   }
@@ -1662,7 +1661,7 @@ static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
         relation_value_id = value_id;
       }
       int64_t new_coefficient = 0;
-      if (!loom_checked_add_i64(coefficient,
+      if (!iree_checked_add_i64(coefficient,
                                 context->scratch_terms[read_index].coefficient,
                                 &new_coefficient)) {
         return iree_ok_status();
@@ -2609,7 +2608,7 @@ static iree_status_t loom_symbolic_expr_predicate_arg_difference_from_value(
       int64_t value_constant = 0;
       if (loom_symbolic_expr_constant_value(&value_expression,
                                             &value_constant) &&
-          loom_checked_sub_i64(arg, value_constant, out_difference)) {
+          iree_checked_sub_i64(arg, value_constant, out_difference)) {
         *out_known = true;
       }
       return iree_ok_status();
@@ -2629,16 +2628,16 @@ static bool loom_symbolic_expr_scaled_upper_bound_proves_le(
   }
   int64_t effective_upper_delta = upper_minus_negative;
   if (upper_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT &&
-      !loom_checked_sub_i64(effective_upper_delta, 1, &effective_upper_delta)) {
+      !iree_checked_sub_i64(effective_upper_delta, 1, &effective_upper_delta)) {
     return false;
   }
   int64_t scaled_upper_delta = 0;
-  if (!loom_checked_mul_i64(scale, effective_upper_delta,
+  if (!iree_checked_mul_i64(scale, effective_upper_delta,
                             &scaled_upper_delta)) {
     return false;
   }
   int64_t maximum_difference = 0;
-  return loom_checked_add_i64(constant, scaled_upper_delta,
+  return iree_checked_add_i64(constant, scaled_upper_delta,
                               &maximum_difference) &&
          maximum_difference <= 0;
 }
@@ -2652,16 +2651,16 @@ static bool loom_symbolic_expr_scaled_static_upper_bound_proves_le(
   }
   int64_t effective_upper_bound = upper_bound;
   if (upper_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT &&
-      !loom_checked_sub_i64(effective_upper_bound, 1, &effective_upper_bound)) {
+      !iree_checked_sub_i64(effective_upper_bound, 1, &effective_upper_bound)) {
     return false;
   }
   int64_t scaled_upper_bound = 0;
-  if (!loom_checked_mul_i64(scale, effective_upper_bound,
+  if (!iree_checked_mul_i64(scale, effective_upper_bound,
                             &scaled_upper_bound)) {
     return false;
   }
   int64_t maximum_difference = 0;
-  return loom_checked_add_i64(constant, scaled_upper_bound,
+  return iree_checked_add_i64(constant, scaled_upper_bound,
                               &maximum_difference) &&
          maximum_difference <= 0;
 }
@@ -3180,7 +3179,7 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
   }
   int64_t false_lower_bound = 0;
   if (nonstrict_relation == LOOM_SYMBOLIC_PROOF_FALSE &&
-      loom_checked_add_i64(scale, constant, &false_lower_bound) &&
+      iree_checked_add_i64(scale, constant, &false_lower_bound) &&
       false_lower_bound > 0) {
     *out_result = LOOM_SYMBOLIC_PROOF_FALSE;
     return iree_ok_status();

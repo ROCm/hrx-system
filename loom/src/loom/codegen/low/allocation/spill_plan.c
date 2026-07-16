@@ -6,6 +6,7 @@
 
 #include "loom/codegen/low/allocation/spill_plan.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 

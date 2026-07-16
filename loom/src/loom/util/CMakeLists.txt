@@ -103,25 +103,14 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    math
-  HDRS
-    "math.h"
-  DEPS
-    iree::base
-    iree::base::internal
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     numeric_format
   HDRS
     "numeric_format.h"
   SRCS
     "numeric_format.c"
   DEPS
-    ::math
     iree::base
+    iree::base::internal
     loom::ir
   PUBLIC
 )
@@ -133,17 +122,6 @@ loom_cc_test(
     "numeric_format_test.cc"
   DEPS
     ::numeric_format
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_test(
-  NAME
-    math_test
-  SRCS
-    "math_test.cc"
-  DEPS
-    ::math
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -204,9 +182,9 @@ loom_cc_library(
     "fact_table.c"
   DEPS
     ::cfg_graph
-    ::math
     ::numeric_format
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts

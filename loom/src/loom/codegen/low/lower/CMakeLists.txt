@@ -26,6 +26,7 @@ loom_cc_library(
     "lower_rules.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
@@ -59,7 +60,6 @@ loom_cc_library(
     loom::target::types
     loom::util::cfg_graph
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

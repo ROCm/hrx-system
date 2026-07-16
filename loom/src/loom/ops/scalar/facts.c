@@ -14,12 +14,12 @@
 
 #include <math.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Macros for mechanical fact inference functions
@@ -551,11 +551,11 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
   }
 
 BIT_COUNT_FACTS(loom_scalar_ctlzi_facts, loom_scalar_ctlzi_result,
-                loom_count_leading_zeros_u64_width)
+                iree_math_count_leading_zeros_u64_width)
 BIT_COUNT_FACTS(loom_scalar_cttzi_facts, loom_scalar_cttzi_result,
-                loom_count_trailing_zeros_u64_width)
+                iree_math_count_trailing_zeros_u64_width)
 BIT_COUNT_FACTS(loom_scalar_ctpopi_facts, loom_scalar_ctpopi_result,
-                loom_count_ones_u64_width)
+                iree_math_count_ones_u64_width)
 
 #undef BIT_COUNT_FACTS
 
@@ -900,7 +900,7 @@ static bool loom_scalar_zero_extend_exact_i64(int64_t value, int32_t bitwidth,
   if (bitwidth <= 0 || bitwidth >= 63) {
     return false;
   }
-  *out_value = (int64_t)loom_mask_to_bitwidth_u64((uint64_t)value, bitwidth);
+  *out_value = (int64_t)iree_math_mask_low_bits_u64((uint64_t)value, bitwidth);
   return true;
 }
 
@@ -910,7 +910,8 @@ static bool loom_scalar_truncate_exact_i64(
   if (bitwidth <= 0 || bitwidth > 64) {
     return false;
   }
-  const uint64_t masked = loom_mask_to_bitwidth_u64((uint64_t)value, bitwidth);
+  const uint64_t masked =
+      iree_math_mask_low_bits_u64((uint64_t)value, bitwidth);
   if (result_scalar_type == LOOM_SCALAR_TYPE_I1) {
     *out_value = (int64_t)masked;
     return true;
@@ -921,7 +922,7 @@ static bool loom_scalar_truncate_exact_i64(
   }
   const uint64_t sign_bit = UINT64_C(1) << (bitwidth - 1);
   const uint64_t sign_extension_mask =
-      ~loom_mask_to_bitwidth_u64(~0ull, bitwidth);
+      ~iree_math_mask_low_bits_u64(~0ull, bitwidth);
   *out_value =
       (int64_t)((masked & sign_bit) ? masked | sign_extension_mask : masked);
   return true;
@@ -979,7 +980,7 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
     result_facts[0] = loom_value_facts_make(
         input_facts.range_lo + unsigned_extent,
         input_facts.range_hi + unsigned_extent,
-        loom_gcd_i64(input_facts.known_divisor, unsigned_extent));
+        iree_math_gcd_i64(input_facts.known_divisor, unsigned_extent));
     loom_value_facts_propagate_unary_distribution(operand_facts[0],
                                                   &result_facts[0]);
     result_facts[0] =

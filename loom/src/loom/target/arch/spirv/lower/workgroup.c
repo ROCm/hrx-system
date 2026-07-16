@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
@@ -17,7 +18,6 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 typedef enum loom_spirv_workgroup_plan_kind_e {
   LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA = 1,
@@ -49,7 +49,8 @@ typedef struct loom_spirv_workgroup_view_plan_t {
 } loom_spirv_workgroup_view_plan_t;
 
 static bool loom_spirv_workgroup_i64_is_power_of_two(int64_t value) {
-  return value > 0 && value <= UINT32_MAX && loom_is_power_of_two_i64(value);
+  return value > 0 && value <= UINT32_MAX &&
+         iree_math_is_power_of_two_i64(value);
 }
 
 static bool loom_spirv_workgroup_exact_positive_i64(loom_value_facts_t facts,

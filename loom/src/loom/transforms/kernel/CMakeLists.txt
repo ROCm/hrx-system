@@ -77,6 +77,7 @@ loom_cc_library(
     "stage_loop_carried_fragments.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::control_uniformity
     loom::codegen::low::pipeline::pass_environment
@@ -96,7 +97,6 @@ loom_cc_library(
     loom::target::launch
     loom::target::reporting::report
     loom::target::selection
-    loom::util::math
     loom::util::walk
   PUBLIC
 )

@@ -76,8 +76,8 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

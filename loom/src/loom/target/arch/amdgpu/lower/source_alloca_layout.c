@@ -75,20 +75,6 @@ static const loom_amdgpu_source_alloca_layout_t
         .flags = LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_INITIALIZED,
 };
 
-static bool loom_amdgpu_source_alloca_layout_checked_align(
-    uint64_t value, uint64_t alignment, uint64_t* out_aligned_value) {
-  *out_aligned_value = 0;
-  if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
-    return false;
-  }
-  const uint64_t alignment_mask = alignment - 1;
-  if (value > UINT64_MAX - alignment_mask) {
-    return false;
-  }
-  *out_aligned_value = (value + alignment_mask) & ~alignment_mask;
-  return true;
-}
-
 static bool loom_amdgpu_source_alloca_layout_matches(
     const loom_amdgpu_source_alloca_layout_t* layout,
     const loom_value_fact_table_t* fact_table,
@@ -146,8 +132,9 @@ static void loom_amdgpu_source_alloca_layout_record_allocation(
   }
 
   uint64_t slot_byte_offset = 0;
-  if (!loom_amdgpu_source_alloca_layout_checked_align(
-          segment->byte_size, byte_alignment, &slot_byte_offset)) {
+  if (!iree_is_power_of_two_uint64(byte_alignment) ||
+      !iree_checked_align_u64(segment->byte_size, byte_alignment,
+                              &slot_byte_offset)) {
     segment->flags &=
         (loom_amdgpu_source_alloca_layout_segment_flags_t)~LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_SEGMENT_VALID;
     return;
@@ -155,12 +142,14 @@ static void loom_amdgpu_source_alloca_layout_record_allocation(
   loom_amdgpu_source_alloca_layout_record_entry(layout->value_domain, layout,
                                                 root_value_id, memory_space,
                                                 slot_byte_offset);
-  if (slot_byte_offset > UINT64_MAX - byte_length) {
+  uint64_t next_segment_byte_size = 0;
+  if (!iree_checked_add_u64(slot_byte_offset, byte_length,
+                            &next_segment_byte_size)) {
     segment->flags &=
         (loom_amdgpu_source_alloca_layout_segment_flags_t)~LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_SEGMENT_VALID;
     return;
   }
-  segment->byte_size = slot_byte_offset + byte_length;
+  segment->byte_size = next_segment_byte_size;
 }
 
 static iree_status_t loom_amdgpu_source_alloca_layout_initialize(

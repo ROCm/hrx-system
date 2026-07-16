@@ -19,7 +19,6 @@
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
 #include "loom/util/cfg_graph.h"
-#include "loom/util/math.h"
 
 static bool loom_target_compile_report_low_branch_falls_through(
     const loom_low_schedule_table_t* schedule,
@@ -293,8 +292,8 @@ bool loom_target_compile_report_accumulate_scaled_static_mix(
 #define LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(field)             \
   do {                                                                        \
     uint64_t scaled_value = 0;                                                \
-    if (!loom_checked_mul_u64(source->field, scale, &scaled_value) ||         \
-        !loom_checked_add_u64(target->field, scaled_value, &target->field)) { \
+    if (!iree_checked_mul_u64(source->field, scale, &scaled_value) ||         \
+        !iree_checked_add_u64(target->field, scaled_value, &target->field)) { \
       return false;                                                           \
     }                                                                         \
   } while (0)
@@ -379,7 +378,7 @@ static bool loom_target_compile_report_low_exact_trip_count(
     return true;
   }
   int64_t span = 0;
-  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+  if (!iree_checked_sub_i64(upper_bound, lower_bound, &span)) {
     return false;
   }
   const uint64_t unsigned_span = (uint64_t)span;
@@ -624,7 +623,7 @@ static bool loom_target_compile_report_low_compute_trip_count(
     return true;
   }
   int64_t span = 0;
-  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+  if (!iree_checked_sub_i64(upper_bound, lower_bound, &span)) {
     return false;
   }
   const uint64_t unsigned_span = (uint64_t)span;
@@ -635,7 +634,7 @@ static bool loom_target_compile_report_low_compute_trip_count(
 
 static bool loom_target_compile_report_low_multiply_block(
     uint64_t* block_multipliers, uint16_t block_index, uint64_t multiplier) {
-  return loom_checked_mul_u64(block_multipliers[block_index], multiplier,
+  return iree_checked_mul_u64(block_multipliers[block_index], multiplier,
                               &block_multipliers[block_index]);
 }
 
@@ -788,7 +787,7 @@ static bool loom_target_compile_report_low_try_counted_loop(
   }
 
   uint64_t header_count = 0;
-  if (!loom_checked_add_u64(trip_count, 1, &header_count) ||
+  if (!iree_checked_add_u64(trip_count, 1, &header_count) ||
       !loom_target_compile_report_low_multiply_block(
           block_multipliers, header_index, header_count)) {
     return false;
@@ -910,7 +909,7 @@ bool loom_target_compile_report_low_node_execution_multiplier(
     uint64_t trip_count = 0;
     if (!loom_target_compile_report_low_exact_trip_count(fact_table, loop,
                                                          &trip_count) ||
-        !loom_checked_mul_u64(*out_multiplier, trip_count, out_multiplier)) {
+        !iree_checked_mul_u64(*out_multiplier, trip_count, out_multiplier)) {
       return false;
     }
   }

@@ -333,6 +333,7 @@ loom_cc_library(
     ::condition_facts
     ::symbolic_expr
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
@@ -346,7 +347,6 @@ loom_cc_library(
     loom::util::cfg_graph
     loom::util::dominance
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -598,13 +598,13 @@ loom_cc_library(
   DEPS
     ::view_regions
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
     loom::ops::kernel
     loom::ops::vector
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -798,6 +798,7 @@ loom_cc_library(
     ::condition_facts
     ::integer_relation
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -807,7 +808,6 @@ loom_cc_library(
     loom::ops::scf
     loom::util::adaptive_sort
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -853,6 +853,7 @@ loom_cc_library(
   DEPS
     ::symbolic_expr
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -861,7 +862,6 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

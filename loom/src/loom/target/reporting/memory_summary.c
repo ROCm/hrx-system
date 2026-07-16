@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "loom/target/reporting/row_list.h"
-#include "loom/util/math.h"
 
 static bool loom_target_compile_report_memory_interval_has_envelope(
     const loom_target_compile_report_memory_interval_t* interval) {
@@ -910,16 +909,16 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
     uint64_t dynamic_issued_read_unknown_width_count = 0;
     uint64_t dynamic_issued_write_unknown_width_count = 0;
     const bool dynamic_counts_ok =
-        loom_checked_mul_u64(source_byte_count, execution_count,
+        iree_checked_mul_u64(source_byte_count, execution_count,
                              &dynamic_source_byte_count) &&
-        loom_checked_mul_u64(row->issued_read_byte_count, execution_count,
+        iree_checked_mul_u64(row->issued_read_byte_count, execution_count,
                              &dynamic_issued_read_byte_count) &&
-        loom_checked_mul_u64(row->issued_write_byte_count, execution_count,
+        iree_checked_mul_u64(row->issued_write_byte_count, execution_count,
                              &dynamic_issued_write_byte_count) &&
-        loom_checked_mul_u64(row->issued_read_unknown_width_count,
+        iree_checked_mul_u64(row->issued_read_unknown_width_count,
                              execution_count,
                              &dynamic_issued_read_unknown_width_count) &&
-        loom_checked_mul_u64(row->issued_write_unknown_width_count,
+        iree_checked_mul_u64(row->issued_write_unknown_width_count,
                              execution_count,
                              &dynamic_issued_write_unknown_width_count);
     uint64_t new_dynamic_packet_count = summary->dynamic_packet_count;
@@ -936,29 +935,29 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
         summary->dynamic_issued_write_unknown_width_count;
     bool dynamic_accumulation_ok =
         dynamic_counts_ok &&
-        loom_checked_add_u64(new_dynamic_packet_count, execution_count,
+        iree_checked_add_u64(new_dynamic_packet_count, execution_count,
                              &new_dynamic_packet_count) &&
-        loom_checked_add_u64(new_dynamic_source_byte_count,
+        iree_checked_add_u64(new_dynamic_source_byte_count,
                              dynamic_source_byte_count,
                              &new_dynamic_source_byte_count) &&
-        loom_checked_add_u64(new_dynamic_issued_read_byte_count,
+        iree_checked_add_u64(new_dynamic_issued_read_byte_count,
                              dynamic_issued_read_byte_count,
                              &new_dynamic_issued_read_byte_count) &&
-        loom_checked_add_u64(new_dynamic_issued_write_byte_count,
+        iree_checked_add_u64(new_dynamic_issued_write_byte_count,
                              dynamic_issued_write_byte_count,
                              &new_dynamic_issued_write_byte_count) &&
-        loom_checked_add_u64(new_dynamic_issued_read_unknown_width_count,
+        iree_checked_add_u64(new_dynamic_issued_read_unknown_width_count,
                              dynamic_issued_read_unknown_width_count,
                              &new_dynamic_issued_read_unknown_width_count) &&
-        loom_checked_add_u64(new_dynamic_issued_write_unknown_width_count,
+        iree_checked_add_u64(new_dynamic_issued_write_unknown_width_count,
                              dynamic_issued_write_unknown_width_count,
                              &new_dynamic_issued_write_unknown_width_count);
     if (dynamic_accumulation_ok && is_load) {
-      dynamic_accumulation_ok = loom_checked_add_u64(
+      dynamic_accumulation_ok = iree_checked_add_u64(
           new_dynamic_read_byte_count, dynamic_source_byte_count,
           &new_dynamic_read_byte_count);
     } else if (dynamic_accumulation_ok && is_store) {
-      dynamic_accumulation_ok = loom_checked_add_u64(
+      dynamic_accumulation_ok = iree_checked_add_u64(
           new_dynamic_write_byte_count, dynamic_source_byte_count,
           &new_dynamic_write_byte_count);
     }

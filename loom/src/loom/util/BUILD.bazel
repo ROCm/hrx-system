@@ -91,22 +91,13 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "math",
-    hdrs = ["math.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-    ],
-)
-
-loom_cc_library(
     name = "numeric_format",
     srcs = ["numeric_format.c"],
     hdrs = ["numeric_format.h"],
     deps = [
-        ":math",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -115,16 +106,6 @@ loom_cc_test(
     srcs = ["numeric_format_test.cc"],
     deps = [
         ":numeric_format",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "math_test",
-    srcs = ["math_test.cc"],
-    deps = [
-        ":math",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -175,12 +156,12 @@ loom_cc_library(
     hdrs = ["fact_table.h"],
     deps = [
         ":cfg_graph",
-        ":math",
         ":numeric_format",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

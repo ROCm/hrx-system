@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
@@ -17,7 +18,6 @@
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
-#include "loom/util/math.h"
 
 static loom_scalar_type_t loom_amdgpu_scalar_type_or_none(loom_type_t type) {
   if (!loom_type_is_scalar(type)) {
@@ -498,7 +498,7 @@ static iree_status_t loom_amdgpu_emit_vgpr_zero_extend(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   return loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_source,
-      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)source_bit_count),
+      iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)source_bit_count),
       lane_type, out_low_result);
 }
 

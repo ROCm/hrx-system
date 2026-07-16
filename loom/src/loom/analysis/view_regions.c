@@ -14,7 +14,6 @@
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/view/ops.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Storage

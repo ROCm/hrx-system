@@ -28,7 +28,6 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 #define LOOM_LOW_SELECT_OPERAND_FORMS_STATISTICS(V, statistics_type)      \
   V(statistics_type, forms_selected, "forms-selected",                    \
@@ -1014,7 +1013,7 @@ static iree_status_t loom_low_select_operand_form_resolve_immediate_value(
         *out_reject_reason_key = IREE_SV("missing_source_immediate");
         return iree_ok_status();
       }
-      if (!loom_checked_add_i64(source_value, matched_value,
+      if (!iree_checked_add_i64(source_value, matched_value,
                                 &replacement_value)) {
         *out_can_rewrite = false;
         *out_reject_reason_key = IREE_SV("immediate_overflow");

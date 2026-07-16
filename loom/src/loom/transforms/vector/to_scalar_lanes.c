@@ -22,7 +22,6 @@
 #include "loom/transforms/vector/to_scalar_structural.h"
 #include "loom/transforms/vector/to_scalar_tables.h"
 #include "loom/transforms/vector/to_scalar_transforms.h"
-#include "loom/util/math.h"
 
 struct loom_vector_to_scalar_lane_cache_entry_t {
   // Vector SSA value whose lane was materialized.

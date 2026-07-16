@@ -110,7 +110,6 @@ loom_cc_library(
     loom::target::registers
     loom::util::cfg_graph
     loom::util::json
-    loom::util::math
     loom::util::segmented_storage
     loom::util::stream
   PUBLIC

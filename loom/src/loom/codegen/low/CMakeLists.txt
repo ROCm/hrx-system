@@ -655,6 +655,7 @@ loom_cc_library(
   DEPS
     ::memory_access
     iree::base
+    iree::base::internal
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::ir
@@ -664,7 +665,6 @@ loom_cc_library(
     loom::ops::vector
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

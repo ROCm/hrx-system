@@ -11,7 +11,6 @@
 
 #include "loom/target/reporting/format_planning.h"
 #include "loom/target/reporting/schema.h"
-#include "loom/util/math.h"
 
 iree_string_view_t loom_target_compile_report_text_non_empty(
     iree_string_view_t value) {
@@ -126,7 +125,7 @@ static iree_status_t loom_target_compile_report_append_economics_fields(
     const loom_target_compile_report_static_instruction_mix_t* mix,
     const loom_target_compile_report_workload_t* workload) {
   uint64_t per_workitem_total = 0;
-  if (loom_checked_add_u64(mix->memory_read_byte_count,
+  if (iree_checked_add_u64(mix->memory_read_byte_count,
                            mix->memory_write_byte_count, &per_workitem_total)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
@@ -142,13 +141,13 @@ static iree_status_t loom_target_compile_report_append_economics_fields(
     uint64_t dispatch_read_bytes = 0;
     uint64_t dispatch_write_bytes = 0;
     uint64_t dispatch_total_bytes = 0;
-    if (loom_checked_mul_u64(mix->memory_read_byte_count,
+    if (iree_checked_mul_u64(mix->memory_read_byte_count,
                              workload->dispatch_workitem_count,
                              &dispatch_read_bytes) &&
-        loom_checked_mul_u64(mix->memory_write_byte_count,
+        iree_checked_mul_u64(mix->memory_write_byte_count,
                              workload->dispatch_workitem_count,
                              &dispatch_write_bytes) &&
-        loom_checked_add_u64(dispatch_read_bytes, dispatch_write_bytes,
+        iree_checked_add_u64(dispatch_read_bytes, dispatch_write_bytes,
                              &dispatch_total_bytes)) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,

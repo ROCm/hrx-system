@@ -14,7 +14,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/cfg_graph.h"
-#include "loom/util/math.h"
 
 typedef struct loom_low_schedule_effect_frontier_t {
   // Latest ordered effect node that every later dependency effect must follow.

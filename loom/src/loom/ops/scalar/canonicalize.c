@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -710,7 +710,7 @@ iree_status_t loom_scalar_addi_canonicalize(loom_op_t* op,
   if (!loom_scalar_op_has_no_instance_flags(lhs_def)) return iree_ok_status();
 
   int64_t combined_constant = 0;
-  if (!loom_checked_add_i64(inner_constant, rhs_constant, &combined_constant)) {
+  if (!iree_checked_add_i64(inner_constant, rhs_constant, &combined_constant)) {
     return iree_ok_status();
   }
   if (combined_constant == 0) {
@@ -796,16 +796,16 @@ iree_status_t loom_scalar_muli_canonicalize(loom_op_t* op,
 
   int64_t factor = 0;
   if (loom_scalar_query_exact_i64(rewriter, lhs, &factor)) {
-    if (!loom_is_power_of_two_i64(factor)) return iree_ok_status();
+    if (!iree_math_is_power_of_two_i64(factor)) return iree_ok_status();
     return loom_scalar_replace_single_result_with_scaled_shift(
         op, rewriter, LOOM_OP_SCALAR_SHLI, /*instance_flags=*/0, rhs,
-        loom_ilog2_i64(factor), lhs);
+        iree_math_floor_log2_u64(factor), lhs);
   }
   if (loom_scalar_query_exact_i64(rewriter, rhs, &factor)) {
-    if (!loom_is_power_of_two_i64(factor)) return iree_ok_status();
+    if (!iree_math_is_power_of_two_i64(factor)) return iree_ok_status();
     return loom_scalar_replace_single_result_with_scaled_shift(
         op, rewriter, LOOM_OP_SCALAR_SHLI, /*instance_flags=*/0, lhs,
-        loom_ilog2_i64(factor), rhs);
+        iree_math_floor_log2_u64(factor), rhs);
   }
   return iree_ok_status();
 }
@@ -849,10 +849,10 @@ iree_status_t loom_scalar_divui_canonicalize(loom_op_t* op,
 
   int64_t divisor = 0;
   if (loom_scalar_query_exact_i64(rewriter, rhs, &divisor) &&
-      loom_is_power_of_two_i64(divisor)) {
+      iree_math_is_power_of_two_i64(divisor)) {
     return loom_scalar_replace_single_result_with_scaled_shift(
         op, rewriter, LOOM_OP_SCALAR_SHRUI, /*instance_flags=*/0, lhs,
-        loom_ilog2_i64(divisor), rhs);
+        iree_math_floor_log2_u64(divisor), rhs);
   }
 
   return iree_ok_status();
@@ -897,7 +897,7 @@ iree_status_t loom_scalar_remui_canonicalize(loom_op_t* op,
 
   int64_t divisor = 0;
   if (!loom_scalar_query_exact_i64(rewriter, rhs, &divisor) ||
-      !loom_is_power_of_two_i64(divisor)) {
+      !iree_math_is_power_of_two_i64(divisor)) {
     return iree_ok_status();
   }
 
@@ -1506,7 +1506,7 @@ static iree_status_t loom_scalar_shift_canonicalize(
     return iree_ok_status();
   }
   int64_t combined_amount = 0;
-  if (!loom_checked_add_i64(inner_amount, amount, &combined_amount) ||
+  if (!iree_checked_add_i64(inner_amount, amount, &combined_amount) ||
       !loom_scalar_shift_amount_is_valid(type, combined_amount)) {
     return iree_ok_status();
   }

@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -16,7 +17,6 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Numeric transform diagnostics
@@ -128,7 +128,7 @@ static bool loom_vector_to_scalar_exact_leading_element_count(
     } else {
       extent = (int64_t)loom_type_dim_static_size_at(type, axis);
     }
-    if (!loom_checked_mul_i64(*out_count, extent, out_count)) {
+    if (!iree_checked_mul_i64(*out_count, extent, out_count)) {
       return false;
     }
   }
@@ -249,7 +249,7 @@ static iree_status_t loom_vector_to_scalar_validate_iota_permutation(
   for (iree_host_size_t i = 0; i < source_lane_count_size; ++i) {
     lane_facts[i] = loom_value_facts_exact_i64(source_lane);
     if (i + 1 < source_lane_count_size &&
-        !loom_checked_add_i64(source_lane, step, &source_lane)) {
+        !iree_checked_add_i64(source_lane, step, &source_lane)) {
       return loom_vector_to_scalar_emit_out_of_bounds_transform_permutation(
           state);
     }
@@ -535,7 +535,7 @@ static iree_status_t loom_vector_to_scalar_apply_hadamard_phase(
     loom_vector_to_scalar_index_term_t output_index, int64_t input_index,
     loom_value_id_t input, loom_value_id_t* out_result) {
   if (!output_index.is_dynamic) {
-    if (loom_count_ones_u64_width(
+    if (iree_math_count_ones_u64_width(
             (uint64_t)(output_index.static_value & input_index), 64) &
         1) {
       return loom_vector_to_scalar_build_negf_lane(state, input, out_result);

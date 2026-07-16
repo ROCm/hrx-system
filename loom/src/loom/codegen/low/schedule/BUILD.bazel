@@ -106,7 +106,6 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:json",
-        "//loom/src/loom/util:math",
         "//loom/src/loom/util:segmented_storage",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

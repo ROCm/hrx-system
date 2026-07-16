@@ -29,8 +29,8 @@ loom_cc_library(
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )

@@ -34,8 +34,8 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "loom/ir/ir.h"
-#include "loom/util/math.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -649,7 +649,7 @@ static inline void loom_value_facts_meet(
   *out = loom_value_facts_make(
       a->range_lo < b->range_lo ? a->range_lo : b->range_lo,
       a->range_hi > b->range_hi ? a->range_hi : b->range_hi,
-      loom_gcd_i64(a->known_divisor, b->known_divisor));
+      iree_math_gcd_i64(a->known_divisor, b->known_divisor));
   if (preserves_subgroup_lane_mask) {
     loom_value_facts_mark_subgroup_lane_mask(out);
   }

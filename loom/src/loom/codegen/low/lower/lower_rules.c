@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/lower/lower_internal.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
@@ -20,7 +21,6 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/registers.h"
-#include "loom/util/math.h"
 
 static const loom_low_lower_rule_span_t* loom_low_lower_rule_set_find_span(
     const loom_low_lower_rule_set_t* rule_set, loom_op_kind_t source_op_kind) {
@@ -979,12 +979,12 @@ static bool loom_low_lower_rule_integer_element_range_facts(
       lane_count <= (uint64_t)INT64_MAX) {
     int64_t final_delta = 0;
     int64_t final_value = 0;
-    if (!loom_checked_mul_i64((int64_t)(lane_count - 1), step, &final_delta) ||
-        !loom_checked_add_i64(base, final_delta, &final_value)) {
+    if (!iree_checked_mul_i64((int64_t)(lane_count - 1), step, &final_delta) ||
+        !iree_checked_add_i64(base, final_delta, &final_value)) {
       return false;
     }
-    *out_facts = loom_value_facts_make(loom_min_i64(base, final_value),
-                                       loom_max_i64(base, final_value), 1);
+    *out_facts = loom_value_facts_make(iree_min(base, final_value),
+                                       iree_max(base, final_value), 1);
     return true;
   }
 
@@ -1285,7 +1285,7 @@ static bool loom_low_lower_rule_value_facts_exact_power_of_two_i64(
   }
   int64_t exact_value = 0;
   return loom_value_facts_as_exact_i64(facts, &exact_value) &&
-         loom_is_power_of_two_i64(exact_value);
+         iree_math_is_power_of_two_i64(exact_value);
 }
 
 static bool loom_low_lower_rule_value_facts_u32_divisor_magic_info(
@@ -2714,8 +2714,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         const bool has_exact_value =
             loom_value_facts_as_exact_i64(facts, &source_value);
         IREE_ASSERT(has_exact_value);
-        IREE_ASSERT(loom_is_power_of_two_i64(source_value));
-        const int64_t log2_value = loom_ilog2_i64(source_value);
+        IREE_ASSERT(iree_math_is_power_of_two_i64(source_value));
+        const int64_t log2_value = iree_math_floor_log2_u64(source_value);
         if (attr_copy->target_bit_offset == 0) {
           attrs[i].value = loom_attr_i64(log2_value);
           break;

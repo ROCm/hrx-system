@@ -1045,8 +1045,8 @@ static iree_status_t loom_vector_canonicalize_iota(loom_op_t* op,
   for (uint64_t i = 0; i < lane_count; ++i) {
     int64_t delta = 0;
     int64_t value = 0;
-    if (!loom_checked_mul_i64((int64_t)i, step, &delta) ||
-        !loom_checked_add_i64(base, delta, &value)) {
+    if (!iree_checked_mul_i64((int64_t)i, step, &delta) ||
+        !iree_checked_add_i64(base, delta, &value)) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_rewriter_build_constant(
@@ -1161,8 +1161,8 @@ static iree_status_t loom_vector_canonicalize_extract_from_iota(
           &step)) {
     int64_t delta = 0;
     int64_t value = 0;
-    if (!loom_checked_mul_i64((int64_t)lane, step, &delta) ||
-        !loom_checked_add_i64(base, delta, &value)) {
+    if (!iree_checked_mul_i64((int64_t)lane, step, &delta) ||
+        !iree_checked_add_i64(base, delta, &value)) {
       return iree_ok_status();
     }
 

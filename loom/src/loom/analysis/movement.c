@@ -9,7 +9,6 @@
 #include "loom/ir/facts.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities

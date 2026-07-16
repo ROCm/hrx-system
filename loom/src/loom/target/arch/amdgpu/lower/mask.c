@@ -21,7 +21,6 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 static const loom_amdgpu_compare_descriptor_candidate_t*
 loom_amdgpu_find_compare_descriptor_candidate(loom_op_kind_t op_kind,

@@ -481,7 +481,7 @@ static bool loom_float_facts_from_bits(loom_scalar_type_t scalar_type,
                                        loom_value_facts_t* out_facts) {
   if (!loom_float_type_is_supported(scalar_type)) return false;
   const int32_t bit_count = loom_scalar_type_bitwidth(scalar_type);
-  bits = loom_mask_to_bitwidth_u64(bits, bit_count);
+  bits = iree_math_mask_low_bits_u64(bits, bit_count);
   if (loom_float_bits_are_nan(scalar_type, bits)) {
     *out_facts = loom_value_facts_known_nan();
     return true;

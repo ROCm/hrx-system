@@ -28,7 +28,6 @@
 #include "loom/rewrite/greedy.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/rewrite/type_propagation.h"
-#include "loom/util/math.h"
 #include "loom/util/walk.h"
 
 static iree_status_t loom_canonicalize_replace_single_result_with_value(
@@ -571,7 +570,7 @@ static iree_status_t loom_canonicalize_view_axis_index_difference(
   *out_exact = false;
   if (left->value_id == LOOM_VALUE_ID_INVALID &&
       right->value_id == LOOM_VALUE_ID_INVALID) {
-    if (!loom_checked_sub_i64(left->static_index, right->static_index,
+    if (!iree_checked_sub_i64(left->static_index, right->static_index,
                               out_difference)) {
       return iree_ok_status();
     }

@@ -207,6 +207,7 @@ loom_cc_library(
     ::assignment
     ::table
     iree::base
+    iree::base::internal
     loom::ir
     loom::ops::low
   PUBLIC

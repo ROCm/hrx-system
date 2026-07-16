@@ -58,7 +58,6 @@ loom_cc_library(
     iree::tooling::numpy_io
     iree::tooling::value_io
     loom::ir
-    loom::util::math
   PUBLIC
 )
 

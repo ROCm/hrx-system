@@ -80,9 +80,9 @@ loom_cc_library(
     "storage_facts.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::ir
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

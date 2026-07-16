@@ -10,7 +10,6 @@
 
 #include "loom/target/reporting/memory_summary.h"
 #include "loom/target/reporting/row_list.h"
-#include "loom/util/math.h"
 
 void loom_target_compile_report_initialize(
     loom_target_compile_report_t* out_report, iree_allocator_t allocator) {
@@ -612,8 +611,8 @@ static bool loom_target_compile_report_checked_mul3_u32(uint32_t x, uint32_t y,
                                                         uint32_t z,
                                                         uint64_t* out_result) {
   uint64_t xy = 0;
-  return loom_checked_mul_u64(x, y, &xy) &&
-         loom_checked_mul_u64(xy, z, out_result);
+  return iree_checked_mul_u64(x, y, &xy) &&
+         iree_checked_mul_u64(xy, z, out_result);
 }
 
 void loom_target_compile_report_record_workload(
@@ -685,7 +684,7 @@ void loom_target_compile_report_record_workload(
             merged.flags,
             LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
                 LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT) &&
-        loom_checked_mul_u64(merged.flat_workgroup_size,
+        iree_checked_mul_u64(merged.flat_workgroup_size,
                              merged.dispatch_workgroup_count,
                              &merged.dispatch_workitem_count)) {
       merged.flags |=
@@ -1221,7 +1220,7 @@ loom_target_compile_report_source_low_selection_summary_from_row(
   }
   const uint64_t execution_count = row->execution_count_plus_one - 1;
   uint64_t dynamic_emitted_low_op_count = 0;
-  if (!loom_checked_mul_u64(row->emitted_low_op_count, execution_count,
+  if (!iree_checked_mul_u64(row->emitted_low_op_count, execution_count,
                             &dynamic_emitted_low_op_count)) {
     summary.unknown_dynamic_op_count = 1;
     return summary;

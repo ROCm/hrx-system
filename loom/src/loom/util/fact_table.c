@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
@@ -2264,16 +2265,16 @@ static bool loom_value_fact_counted_loop_last_reachable_iv(
   }
 
   int64_t last_possible_offset = 0;
-  if (!loom_checked_sub_i64(upper_bound.range_hi, lower_bound.range_lo,
+  if (!iree_checked_sub_i64(upper_bound.range_hi, lower_bound.range_lo,
                             &last_possible_offset) ||
-      !loom_checked_sub_i64(last_possible_offset, 1, &last_possible_offset)) {
+      !iree_checked_sub_i64(last_possible_offset, 1, &last_possible_offset)) {
     return false;
   }
 
   int64_t stepped_offset = 0;
   const int64_t trip_index = last_possible_offset / step.range_lo;
-  if (!loom_checked_mul_i64(trip_index, step.range_lo, &stepped_offset) ||
-      !loom_checked_add_i64(lower_bound.range_lo, stepped_offset, out_hi)) {
+  if (!iree_checked_mul_i64(trip_index, step.range_lo, &stepped_offset) ||
+      !iree_checked_add_i64(lower_bound.range_lo, stepped_offset, out_hi)) {
     return false;
   }
   return true;
@@ -2289,7 +2290,7 @@ static loom_value_facts_t loom_value_fact_counted_loop_iv_facts(
   }
 
   int64_t lower_divisor = loom_value_fact_loop_iv_base_divisor(lower_bound);
-  int64_t divisor = loom_gcd_i64(lower_divisor, step.known_divisor);
+  int64_t divisor = iree_math_gcd_i64(lower_divisor, step.known_divisor);
 
   int64_t hi = INT64_MAX;
   if (loom_value_fact_counted_loop_last_reachable_iv(lower_bound, upper_bound,
@@ -2297,7 +2298,7 @@ static loom_value_facts_t loom_value_fact_counted_loop_iv_facts(
     return loom_value_facts_make(lower_bound.range_lo, hi, divisor);
   }
 
-  if (loom_checked_sub_i64(upper_bound.range_hi, 1, &hi)) {
+  if (iree_checked_sub_i64(upper_bound.range_hi, 1, &hi)) {
     if (lower_bound.range_lo <= hi) {
       return loom_value_facts_make(lower_bound.range_lo, hi, divisor);
     }

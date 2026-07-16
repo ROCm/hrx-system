@@ -30,6 +30,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=scf"
   DEPS
+    iree::base::internal
     loom::analysis::availability
     loom::analysis::motion
     loom::error::emitter
@@ -40,7 +41,6 @@ loom_generated_cc_library(
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
     loom::util::fact_table
-    loom::util::math
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

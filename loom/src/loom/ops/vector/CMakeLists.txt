@@ -83,6 +83,7 @@ loom_generated_cc_library(
     "--dialect=vector"
   DEPS
     iree::base
+    iree::base::internal
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -98,7 +99,6 @@ loom_generated_cc_library(
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
     loom::util::fact_table
-    loom::util::math
     loom::util::numeric_format
     loom::util::stable_id
 )

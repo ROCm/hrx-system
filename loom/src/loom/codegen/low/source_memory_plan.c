@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/memory_access.h"
@@ -17,7 +18,6 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
-#include "loom/util/math.h"
 
 static bool loom_low_source_memory_static_view_vector_type(
     loom_type_t view_type, loom_type_t* out_vector_type,
@@ -133,7 +133,7 @@ static uint32_t loom_low_source_memory_clamp_alignment(uint64_t alignment) {
 static uint32_t loom_low_source_memory_combine_alignment(uint32_t alignment,
                                                          int64_t byte_offset) {
   if (byte_offset == 0) return alignment == 0 ? 1 : alignment;
-  return (uint32_t)loom_gcd_i64((int64_t)alignment, byte_offset);
+  return (uint32_t)iree_math_gcd_i64((int64_t)alignment, byte_offset);
 }
 
 static void loom_low_source_memory_access_finalize_alignment(
@@ -463,9 +463,9 @@ static loom_value_facts_t loom_low_source_memory_access_intersect_index_facts(
     return index_facts;
   }
   const int64_t lower_bound =
-      loom_max_i64(index_facts.range_lo, domain_facts.range_lo);
+      iree_max(index_facts.range_lo, domain_facts.range_lo);
   const int64_t upper_bound =
-      loom_min_i64(index_facts.range_hi, domain_facts.range_hi);
+      iree_min(index_facts.range_hi, domain_facts.range_hi);
   if (lower_bound > upper_bound) {
     return loom_value_facts_unknown();
   }
@@ -507,9 +507,9 @@ static bool loom_low_source_memory_access_scale_domain_down(
   }
   int64_t scaled_range_lo = 0;
   int64_t scaled_range_hi = 0;
-  if (!loom_checked_sub_i64(inout_domain_facts->range_lo, offset,
+  if (!iree_checked_sub_i64(inout_domain_facts->range_lo, offset,
                             &scaled_range_lo) ||
-      !loom_checked_sub_i64(inout_domain_facts->range_hi, offset,
+      !iree_checked_sub_i64(inout_domain_facts->range_hi, offset,
                             &scaled_range_hi)) {
     return false;
   }
@@ -710,7 +710,7 @@ static bool loom_low_source_memory_access_affine_index_terms_from_value(
     return false;
   }
   int64_t offset = 0;
-  if (!loom_checked_add_i64(*inout_offset, expression.constant, &offset)) {
+  if (!iree_checked_add_i64(*inout_offset, expression.constant, &offset)) {
     return false;
   }
   *inout_offset = offset;
@@ -808,9 +808,9 @@ static bool loom_low_source_memory_access_scaled_dynamic_index(
   int64_t new_static_byte_offset = 0;
   if (!iree_checked_mul_i64(byte_stride, scaled_index.multiplier,
                             &scaled_byte_stride) ||
-      !loom_checked_mul_i64(byte_stride, scaled_index.offset,
+      !iree_checked_mul_i64(byte_stride, scaled_index.offset,
                             &static_offset_delta) ||
-      !loom_checked_add_i64(static_byte_offset, static_offset_delta,
+      !iree_checked_add_i64(static_byte_offset, static_offset_delta,
                             &new_static_byte_offset)) {
     return false;
   }
@@ -935,7 +935,7 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
     return false;
   }
   int64_t static_byte_offset = 0;
-  if (!loom_checked_add_i64(*inout_static_byte_offset,
+  if (!iree_checked_add_i64(*inout_static_byte_offset,
                             view_region->begin_byte_offset.constant,
                             &static_byte_offset)) {
     diagnostic->rejection_bits |=
@@ -1075,9 +1075,9 @@ bool loom_low_source_memory_access_plan_lane_byte_envelope(
                             plan->vector_lane_byte_stride, &last_lane_offset)) {
     return false;
   }
-  int64_t begin_offset = loom_min_i64(0, last_lane_offset);
+  int64_t begin_offset = iree_min(0, last_lane_offset);
   int64_t end_offset = 0;
-  if (!iree_checked_add_i64(loom_max_i64(0, last_lane_offset),
+  if (!iree_checked_add_i64(iree_max(0, last_lane_offset),
                             (int64_t)plan->element_byte_count, &end_offset)) {
     return false;
   }
@@ -1323,9 +1323,9 @@ static bool loom_low_source_memory_access_plan_from_components(
     int64_t affine_static_byte_offset = static_byte_offset;
     if (affine_expanded) {
       int64_t static_offset_delta = 0;
-      if (!loom_checked_mul_i64(byte_stride, affine_index_offset,
+      if (!iree_checked_mul_i64(byte_stride, affine_index_offset,
                                 &static_offset_delta) ||
-          !loom_checked_add_i64(static_byte_offset, static_offset_delta,
+          !iree_checked_add_i64(static_byte_offset, static_offset_delta,
                                 &affine_static_byte_offset) ||
           (static_byte_offset >= 0 && affine_static_byte_offset < 0)) {
         affine_expanded = false;

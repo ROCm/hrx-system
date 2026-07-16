@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/packet.h"
@@ -18,7 +19,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
-#include "loom/util/math.h"
 
 typedef struct loom_target_compile_report_pressure_origin_info_t {
   // Structured pressure origin kind.

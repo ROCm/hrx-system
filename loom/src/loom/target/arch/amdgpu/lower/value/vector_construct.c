@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
@@ -24,7 +25,6 @@
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/util/math.h"
 
 typedef enum loom_amdgpu_vector_construct_source_kind_e {
   LOOM_AMDGPU_VECTOR_CONSTRUCT_SOURCE_KIND_NONE = 0,
@@ -240,7 +240,7 @@ static bool loom_amdgpu_exact_integer_lane_bits(
           loom_value_fact_table_lookup(fact_table, source_value), &value)) {
     return false;
   }
-  *out_bits = loom_mask_to_bitwidth_u32((uint32_t)value, (int32_t)bit_count);
+  *out_bits = iree_math_mask_low_bits_u32((uint32_t)value, (int32_t)bit_count);
   return true;
 }
 
@@ -254,7 +254,7 @@ static bool loom_amdgpu_pack_exact_integer_elements(
   const uint32_t element_bit_count = plan->element_bit_count;
   const uint32_t elements_per_register = 32u / element_bit_count;
   const uint32_t element_mask =
-      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)element_bit_count);
+      iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)element_bit_count);
   for (uint32_t register_index = 0; register_index < plan->register_count;
        ++register_index) {
     uint32_t bit_pattern = 0;
@@ -1633,7 +1633,7 @@ static iree_status_t loom_amdgpu_replace_packed_vector_register_lane(
   const uint32_t register_lane = lane_ordinal % lanes_per_register;
   const uint32_t lane_bit_offset = register_lane * lane_bit_count;
   const uint32_t lane_mask =
-      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)lane_bit_count)
+      iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)lane_bit_count)
       << lane_bit_offset;
   const uint32_t preserved_mask = ~lane_mask;
 
@@ -1683,7 +1683,7 @@ static iree_status_t loom_amdgpu_lower_packed_vector_insert(
     IREE_ASSERT_EQ(integer_bit_count, plan->lane_bit_count);
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_value,
-        loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)plan->lane_bit_count),
+        iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)plan->lane_bit_count),
         register_type, &low_value));
   }
 
@@ -1758,7 +1758,8 @@ static iree_status_t loom_amdgpu_lower_vector_insert(
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
           low_value,
-          loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)plan->lane_bit_count),
+          iree_math_mask_low_bits_u32(UINT32_MAX,
+                                      (int32_t)plan->lane_bit_count),
           lane_type, &low_value));
     }
     return loom_low_lower_bind_value(context, plan->result, low_value);

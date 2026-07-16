@@ -6,7 +6,7 @@
 
 #include "loom/util/numeric_format.h"
 
-#include "loom/util/math.h"
+#include "iree/base/internal/math.h"
 
 enum {
   LOOM_NUMERIC_FORMAT_INFO_COUNT = 40,
@@ -252,7 +252,7 @@ bool loom_numeric_format_info(loom_value_fact_numeric_format_flags_t format,
     return false;
   }
   const iree_host_size_t index =
-      (iree_host_size_t)loom_count_trailing_zeros_u64_width(format, 64);
+      (iree_host_size_t)iree_math_count_trailing_zeros_u64_width(format, 64);
   if (index >= IREE_ARRAYSIZE(kLoomNumericFormatInfos)) {
     return false;
   }

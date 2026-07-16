@@ -78,6 +78,7 @@ loom_cc_library(
     "to_scalar_transforms.h"
   DEPS
     iree::base
+    iree::base::internal
     loom::analysis::contract
     loom::analysis::matrix_fragment_layout
     loom::error::error_defs
@@ -94,7 +95,6 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
-    loom::util::math
   PUBLIC
 )
 

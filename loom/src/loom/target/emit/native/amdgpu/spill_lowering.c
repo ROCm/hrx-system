@@ -85,17 +85,6 @@ typedef struct loom_amdgpu_spill_lowering_context_t {
   loom_amdgpu_spill_lowering_result_t* result;
 } loom_amdgpu_spill_lowering_context_t;
 
-static iree_status_t loom_amdgpu_spill_lowering_checked_add_u64(
-    uint64_t lhs, uint64_t rhs, uint64_t* out_result) {
-  *out_result = 0;
-  if (lhs > UINT64_MAX - rhs) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU scratch spill offset overflows");
-  }
-  *out_result = lhs + rhs;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_spill_lowering_resolve_descriptor_ref(
     loom_rewriter_t* rewriter, const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref,
@@ -294,11 +283,12 @@ static iree_status_t loom_amdgpu_spill_lowering_resolve_access(
               "spill access range must fit before chunk lowering");
 
   uint64_t absolute_offset = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_checked_add_u64(
-      storage_reference->reservation.byte_offset,
-      storage_reference->byte_offset, &absolute_offset));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_checked_add_u64(
-      absolute_offset, access_offset, &absolute_offset));
+  if (!iree_checked_add_u64(storage_reference->reservation.byte_offset,
+                            storage_reference->byte_offset, &absolute_offset) ||
+      !iree_checked_add_u64(absolute_offset, access_offset, &absolute_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU scratch spill offset overflows");
+  }
   if (absolute_offset > INT64_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU scratch spill offset %" PRIu64

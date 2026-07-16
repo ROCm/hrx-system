@@ -38,6 +38,6 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
+        "//runtime/src/iree/base/internal",
     ],
 )

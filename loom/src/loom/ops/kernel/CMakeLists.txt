@@ -31,6 +31,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=kernel"
   DEPS
+    iree::base::internal
     loom::analysis::control_uniformity
     loom::analysis::symbol_facts
     loom::error::emitter
@@ -51,7 +52,6 @@ loom_generated_cc_library(
     loom::target::capability_facts
     loom::target::types
     loom::util::fact_table
-    loom::util::math
     loom::util::walk
 )
 

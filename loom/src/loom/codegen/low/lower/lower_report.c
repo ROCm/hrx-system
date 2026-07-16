@@ -12,7 +12,6 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/util/cfg_graph.h"
-#include "loom/util/math.h"
 
 enum {
   // Default allocation block size for source-memory report rows.
@@ -78,7 +77,7 @@ static bool loom_low_lower_memory_expr_key_append_term(
   if (insert_index < key->term_count &&
       key->terms[insert_index].value_id == value_id) {
     int64_t combined_coefficient = 0;
-    if (!loom_checked_add_i64(key->terms[insert_index].coefficient, coefficient,
+    if (!iree_checked_add_i64(key->terms[insert_index].coefficient, coefficient,
                               &combined_coefficient)) {
       return false;
     }
@@ -111,7 +110,7 @@ static bool loom_low_lower_memory_expr_key_from_source_plan(
   if (source_plan->dynamic_term_count == 0) {
     return false;
   }
-  if (!loom_checked_add_i64(source_plan->static_byte_offset, lane_offset,
+  if (!iree_checked_add_i64(source_plan->static_byte_offset, lane_offset,
                             &out_key->constant)) {
     return false;
   }
@@ -241,7 +240,7 @@ static bool loom_low_lower_memory_report_exact_trip_count(
     return true;
   }
   int64_t span = 0;
-  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+  if (!iree_checked_sub_i64(upper_bound, lower_bound, &span)) {
     return false;
   }
   const uint64_t unsigned_span = (uint64_t)span;
@@ -443,7 +442,7 @@ static bool loom_low_lower_memory_report_compute_trip_count(
     return true;
   }
   int64_t span = 0;
-  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+  if (!iree_checked_sub_i64(upper_bound, lower_bound, &span)) {
     return false;
   }
   const uint64_t unsigned_span = (uint64_t)span;

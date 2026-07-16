@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ops/index/ops.h"
@@ -18,7 +19,6 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/util/math.h"
 
 bool loom_amdgpu_module_value_as_exact_index_constant(
     const loom_module_t* module, loom_value_id_t value_id, int64_t* out_value) {
@@ -222,8 +222,8 @@ bool loom_amdgpu_source_lane_as_u32_bits(
     int64_t value = 0;
     return loom_value_facts_as_exact_i64(iota.base, &base) &&
            loom_value_facts_as_exact_i64(iota.step, &step) &&
-           loom_checked_mul_i64((int64_t)lane, step, &delta) &&
-           loom_checked_add_i64(base, delta, &value) &&
+           iree_checked_mul_i64((int64_t)lane, step, &delta) &&
+           iree_checked_add_i64(base, delta, &value) &&
            loom_amdgpu_i64_value_as_u32_bits(value, out_bits);
   }
 
@@ -387,12 +387,13 @@ static uint32_t loom_amdgpu_integer_sign_extended_bits(int64_t value,
   IREE_ASSERT_GT(bit_count, 0);
   IREE_ASSERT_LT(bit_count, 32);
   const uint32_t low_bits =
-      loom_mask_to_bitwidth_u32((uint32_t)value, (int32_t)bit_count);
+      iree_math_mask_low_bits_u32((uint32_t)value, (int32_t)bit_count);
   const uint32_t sign_bit = UINT32_C(1) << (bit_count - 1u);
   if ((low_bits & sign_bit) == 0) {
     return low_bits;
   }
-  return low_bits | ~loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)bit_count);
+  return low_bits |
+         ~iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)bit_count);
 }
 
 static bool loom_amdgpu_sub32_integer_payload_bit_count(
@@ -541,7 +542,7 @@ static uint32_t loom_amdgpu_repeated_integer_lane_pattern(uint32_t lane_bits,
                                                           uint32_t bit_count) {
   IREE_ASSERT(bit_count == 8 || bit_count == 16);
   const uint32_t masked_lane_bits =
-      lane_bits & loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)bit_count);
+      lane_bits & iree_math_mask_low_bits_u32(UINT32_MAX, (int32_t)bit_count);
   uint32_t bit_pattern = 0;
   for (uint32_t bit_offset = 0; bit_offset < 32; bit_offset += bit_count) {
     bit_pattern |= masked_lane_bits << bit_offset;
@@ -581,7 +582,7 @@ static iree_status_t loom_amdgpu_select_packed_integer_constant_plan(
       (storage.element_bit_count != 8 && storage.element_bit_count != 16)) {
     return iree_ok_status();
   }
-  const uint32_t lane_bits = loom_mask_to_bitwidth_u32(
+  const uint32_t lane_bits = iree_math_mask_low_bits_u32(
       (uint32_t)value.i64, (int32_t)storage.element_bit_count);
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_u32_bit_pattern_constant_plan(
       context,

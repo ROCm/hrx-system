@@ -57,9 +57,9 @@ loom_cc_library(
     "row_list.h"
   DEPS
     iree::base
+    iree::base::internal
     loom::codegen::low::planning_statistics
     loom::target::types
-    loom::util::math
   PUBLIC
 )
 
@@ -84,10 +84,10 @@ loom_cc_library(
     ::format_planning
     ::report
     iree::base
+    iree::base::internal
     loom::ir
     loom::target::math_policy
     loom::util::json
-    loom::util::math
     loom::util::stream
   PUBLIC
 )
@@ -123,6 +123,7 @@ loom_cc_library(
   DEPS
     ::report
     iree::base
+    iree::base::internal
     loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
@@ -135,7 +136,6 @@ loom_cc_library(
     loom::target::registers
     loom::util::cfg_graph
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

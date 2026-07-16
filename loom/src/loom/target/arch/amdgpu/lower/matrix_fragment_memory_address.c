@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
@@ -368,7 +369,7 @@ bool loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
   int64_t static_byte_offset = plan->source.static_byte_offset;
   if (loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
           plan, /*term_index=*/0) &&
-      !loom_checked_sub_i64(static_byte_offset,
+      !iree_checked_sub_i64(static_byte_offset,
                             plan->source.static_view_base_byte_offset,
                             &static_byte_offset)) {
     return false;

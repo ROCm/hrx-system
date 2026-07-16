@@ -8,12 +8,12 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/capability_facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 #define LOOM_KERNEL_DEFAULT_MAX_SUBGROUP_SIZE 128u
 
@@ -72,8 +72,8 @@ static loom_value_facts_t loom_kernel_positive_u32_extent_facts(
   if (loom_value_facts_is_float(facts)) {
     return loom_value_facts_make(1, maximum, 1);
   }
-  const int64_t lower_bound = loom_max_i64(facts.range_lo, 1);
-  const int64_t upper_bound = loom_min_i64(facts.range_hi, maximum);
+  const int64_t lower_bound = iree_max(facts.range_lo, 1);
+  const int64_t upper_bound = iree_min(facts.range_hi, maximum);
   if (lower_bound > upper_bound) {
     return loom_value_facts_make(1, maximum, 1);
   }
@@ -91,14 +91,15 @@ static loom_value_facts_t loom_kernel_intersect_integer_facts(
   if (loom_value_facts_is_float(rhs)) {
     return lhs;
   }
-  const int64_t lower_bound = loom_max_i64(lhs.range_lo, rhs.range_lo);
-  const int64_t upper_bound = loom_min_i64(lhs.range_hi, rhs.range_hi);
+  const int64_t lower_bound = iree_max(lhs.range_lo, rhs.range_lo);
+  const int64_t upper_bound = iree_min(lhs.range_hi, rhs.range_hi);
   if (lower_bound > upper_bound) {
     return loom_value_facts_unknown();
   }
   int64_t divisor = 1;
-  if (!loom_lcm_i64(lhs.known_divisor, rhs.known_divisor, &divisor)) {
-    divisor = loom_gcd_i64(lhs.known_divisor, rhs.known_divisor);
+  if (!iree_math_checked_lcm_i64(lhs.known_divisor, rhs.known_divisor,
+                                 &divisor)) {
+    divisor = iree_math_gcd_i64(lhs.known_divisor, rhs.known_divisor);
   }
   loom_value_facts_t facts =
       loom_value_facts_make(lower_bound, upper_bound, divisor);
@@ -450,7 +451,7 @@ static loom_value_facts_t loom_kernel_launch_workitem_dispatch_id_facts(
       loom_kernel_launch_workgroup_size_facts(context, module, dimension);
 
   int64_t upper_bound = 0;
-  if (!loom_checked_mul_i64(count_facts.range_hi, size_facts.range_hi,
+  if (!iree_checked_mul_i64(count_facts.range_hi, size_facts.range_hi,
                             &upper_bound) ||
       upper_bound < 1) {
     return target_facts;

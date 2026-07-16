@@ -22,7 +22,6 @@
 #include "loom/target/reporting/low_names.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 static bool loom_target_compile_report_facts_have_finite_range(
     loom_value_facts_t facts) {
@@ -54,7 +53,7 @@ loom_target_compile_report_source_interval(
   if (iree_all_bits_set(source_interval->precision_flags,
                         LOOM_LOW_BYTE_INTERVAL_PRECISION_EXACT_LENGTH)) {
     int64_t exact_length = 0;
-    if (loom_checked_sub_i64(source_interval->end_facts.range_lo,
+    if (iree_checked_sub_i64(source_interval->end_facts.range_lo,
                              source_interval->begin_facts.range_lo,
                              &exact_length) &&
         exact_length > 0) {
@@ -395,8 +394,8 @@ static bool loom_target_compile_report_mul3_u32(uint32_t x, uint32_t y,
                                                 uint32_t z,
                                                 uint64_t* out_result) {
   uint64_t xy = 0;
-  return loom_checked_mul_u64(x, y, &xy) &&
-         loom_checked_mul_u64(xy, z, out_result);
+  return iree_checked_mul_u64(x, y, &xy) &&
+         iree_checked_mul_u64(xy, z, out_result);
 }
 
 static void loom_target_compile_report_record_static_workload(
@@ -427,7 +426,7 @@ static void loom_target_compile_report_record_static_workload(
           workload.flags,
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT) &&
-      loom_checked_mul_u64(workload.flat_workgroup_size,
+      iree_checked_mul_u64(workload.flat_workgroup_size,
                            workload.dispatch_workgroup_count,
                            &workload.dispatch_workitem_count)) {
     workload.flags |=

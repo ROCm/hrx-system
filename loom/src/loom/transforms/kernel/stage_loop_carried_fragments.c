@@ -31,7 +31,6 @@
 #include "loom/target/launch.h"
 #include "loom/target/reporting/report.h"
 #include "loom/target/selection.h"
-#include "loom/util/math.h"
 #include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//
@@ -437,15 +436,15 @@ static bool loom_stage_loop_carried_fragments_compute_layout(
   int64_t staged_column_count = 0;
   int64_t logical_element_count = 0;
   int64_t byte_count = 0;
-  if (!loom_checked_mul_i64(base->column_count, staged_fragments->count,
+  if (!iree_checked_mul_i64(base->column_count, staged_fragments->count,
                             &per_subgroup_column_count) ||
-      !loom_checked_mul_i64(per_subgroup_column_count, subgroup_count,
+      !iree_checked_mul_i64(per_subgroup_column_count, subgroup_count,
                             &staged_column_count) ||
-      !loom_checked_mul_i64(base->row_count, staged_column_count,
+      !iree_checked_mul_i64(base->row_count, staged_column_count,
                             &logical_element_count) ||
-      !loom_checked_mul_i64(base->block_count, logical_element_count,
+      !iree_checked_mul_i64(base->block_count, logical_element_count,
                             &logical_element_count) ||
-      !loom_checked_mul_i64(logical_element_count, element_bit_count / 8,
+      !iree_checked_mul_i64(logical_element_count, element_bit_count / 8,
                             &byte_count)) {
     return false;
   }

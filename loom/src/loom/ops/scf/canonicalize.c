@@ -14,7 +14,6 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -85,7 +84,7 @@ static bool loom_scf_lookup_default_row_may_match(
   }
 
   int64_t span = 0;
-  if (!loom_checked_sub_i64(selector_facts.range_hi, selector_facts.range_lo,
+  if (!iree_checked_sub_i64(selector_facts.range_hi, selector_facts.range_lo,
                             &span) ||
       span < 0 || span > 4096) {
     return true;
@@ -1464,7 +1463,7 @@ static bool loom_scf_for_has_single_trip_count(loom_op_t* op,
 
   if (lower_bound.range_hi >= upper_bound.range_lo) return false;
   int64_t next_iv_lower_bound = 0;
-  if (!loom_checked_add_i64(lower_bound.range_lo, step.range_lo,
+  if (!iree_checked_add_i64(lower_bound.range_lo, step.range_lo,
                             &next_iv_lower_bound)) {
     return false;
   }

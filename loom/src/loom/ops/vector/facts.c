@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
@@ -28,7 +29,6 @@
 #include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 #include "loom/util/numeric_format.h"
 
 #define LOOM_VECTOR_FACT_STATIC_LOOP_LIMIT 1024
@@ -42,7 +42,7 @@ typedef void (*loom_vector_ternary_transfer_fn_t)(const loom_value_facts_t* a,
                                                   const loom_value_facts_t* b,
                                                   const loom_value_facts_t* c,
                                                   loom_value_facts_t* out);
-typedef int64_t (*loom_vector_bit_count_fn_t)(uint64_t value, int32_t bitwidth);
+typedef int (*loom_vector_bit_count_fn_t)(uint64_t value, int32_t bitwidth);
 typedef void (*loom_vector_float_unary_fact_transfer_fn_t)(
     loom_scalar_type_t scalar_type, const loom_value_facts_t* input,
     const void* user_data, loom_value_facts_t* out);
@@ -126,8 +126,8 @@ static bool loom_vector_facts_query_iota_lane(
   }
   int64_t delta = 0;
   int64_t value = 0;
-  if (!loom_checked_mul_i64((int64_t)lane, step, &delta) ||
-      !loom_checked_add_i64(base, delta, &value)) {
+  if (!iree_checked_mul_i64((int64_t)lane, step, &delta) ||
+      !iree_checked_add_i64(base, delta, &value)) {
     return false;
   }
   *out_element = loom_value_facts_exact_i64(value);
@@ -214,11 +214,11 @@ static bool loom_vector_mask_range_exact_lane(int64_t lower_bound,
                                               bool* out_value) {
   if (lane_ordinal > (uint64_t)INT64_MAX) return false;
   int64_t lane_delta = 0;
-  if (!loom_checked_mul_i64((int64_t)lane_ordinal, step, &lane_delta)) {
+  if (!iree_checked_mul_i64((int64_t)lane_ordinal, step, &lane_delta)) {
     return false;
   }
   int64_t lane_value = 0;
-  if (!loom_checked_add_i64(lower_bound, lane_delta, &lane_value)) {
+  if (!iree_checked_add_i64(lower_bound, lane_delta, &lane_value)) {
     return false;
   }
   *out_value = lane_value < upper_bound;
@@ -1250,7 +1250,7 @@ static bool loom_vector_transform_hadamard_lane_facts(
     }
 
     int64_t output_index = result_indices[last_axis];
-    if (loom_count_ones_u64_width(
+    if (iree_math_count_ones_u64_width(
             (uint64_t)(output_index & (int64_t)input_index), 64) &
         1) {
       loom_value_facts_t negated = loom_value_facts_unknown();
@@ -1300,7 +1300,7 @@ static iree_status_t loom_vector_transform_hadamard_facts(
       !loom_vector_static_last_axis_extent(source_type, &input_extent) ||
       result_lane_count > LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT ||
       input_extent > LOOM_VECTOR_FACT_STATIC_LOOP_LIMIT ||
-      !loom_is_power_of_two_i64((int64_t)input_extent)) {
+      !iree_math_is_power_of_two_i64((int64_t)input_extent)) {
     return loom_vector_make_unknown_facts(result_facts);
   }
 
@@ -2228,7 +2228,7 @@ iree_status_t loom_vector_slice_facts(loom_fact_context_t* context,
   for (iree_host_size_t lane = 0; lane < result_lane_count; ++lane) {
     loom_vector_static_indices_from_ordinal(result_type, lane, source_indices);
     for (uint8_t axis = 0; axis < rank; ++axis) {
-      if (!loom_checked_add_i64(source_indices[axis],
+      if (!iree_checked_add_i64(source_indices[axis],
                                 static_offsets.i64_array[axis],
                                 &source_indices[axis])) {
         return loom_vector_make_unknown_facts(result_facts);
@@ -2284,7 +2284,7 @@ iree_status_t loom_vector_concat_facts(loom_fact_context_t* context,
       int64_t input_axis_size =
           loom_type_dim_static_size_at(input_type, (iree_host_size_t)axis);
       int64_t next_axis_base = 0;
-      if (!loom_checked_add_i64(axis_base, input_axis_size, &next_axis_base)) {
+      if (!iree_checked_add_i64(axis_base, input_axis_size, &next_axis_base)) {
         return loom_vector_make_unknown_facts(result_facts);
       }
       if (axis_index < next_axis_base) {
@@ -2437,9 +2437,9 @@ iree_status_t loom_vector_deinterleave_facts(
     for (iree_host_size_t lane = 0; lane < result_lane_count; ++lane) {
       loom_vector_static_indices_from_ordinal(result_type, lane,
                                               source_indices);
-      if (!loom_checked_mul_i64(source_indices[axis], 2,
+      if (!iree_checked_mul_i64(source_indices[axis], 2,
                                 &source_indices[axis]) ||
-          !loom_checked_add_i64(source_indices[axis], result_index,
+          !iree_checked_add_i64(source_indices[axis], result_index,
                                 &source_indices[axis])) {
         return loom_vector_make_unknown_result_facts(result_facts,
                                                      op->result_count);
@@ -3164,11 +3164,11 @@ LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_shrsi_facts,
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_shrui_facts,
                                  loom_value_facts_shrui)
 LOOM_VECTOR_BIT_COUNT_FACTS(loom_vector_ctlzi_facts, loom_vector_ctlzi_result,
-                            loom_count_leading_zeros_u64_width)
+                            iree_math_count_leading_zeros_u64_width)
 LOOM_VECTOR_BIT_COUNT_FACTS(loom_vector_cttzi_facts, loom_vector_cttzi_result,
-                            loom_count_trailing_zeros_u64_width)
+                            iree_math_count_trailing_zeros_u64_width)
 LOOM_VECTOR_BIT_COUNT_FACTS(loom_vector_ctpopi_facts, loom_vector_ctpopi_result,
-                            loom_count_ones_u64_width)
+                            iree_math_count_ones_u64_width)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_expf_facts, expf, exp)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_exp2f_facts, exp2f, exp2)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_expm1f_facts, expm1f, expm1)
@@ -3726,7 +3726,7 @@ static bool loom_vector_bitfield_insert_element(
     *out_element = loom_value_facts_unknown();
     return true;
   }
-  uint64_t field_mask = loom_mask_to_bitwidth_u64(UINT64_MAX, (int32_t)width);
+  uint64_t field_mask = iree_math_mask_low_bits_u64(UINT64_MAX, (int32_t)width);
   uint64_t target_mask = field_mask << offset;
   uint64_t raw_bits =
       (base_bits & ~target_mask) | ((field_bits & field_mask) << offset);
@@ -3832,7 +3832,7 @@ static bool loom_vector_read_logical_bitstream(
       return false;
     }
     uint64_t piece =
-        loom_mask_to_bitwidth_u64(lane_bits >> source_shift, piece_bits);
+        iree_math_mask_low_bits_u64(lane_bits >> source_shift, piece_bits);
     bits |= piece << destination_shift;
     bit_position += (uint64_t)piece_bits;
     destination_shift += piece_bits;
