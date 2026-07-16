@@ -39,6 +39,10 @@
 //===----------------------------------------------------------------------===//
 
 #define LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_STATISTICS(V, statistics_type)     \
+  V(statistics_type, candidate_loops, "candidate-loops",                     \
+    "Number of structurally eligible scf.for loops discovered.")             \
+  V(statistics_type, analysis_runs, "analysis-runs",                         \
+    "Number of function value-fact analyses performed.")                     \
   V(statistics_type, loops_staged, "loops-staged",                           \
     "Number of scf.for loops rebuilt with workgroup-staged fragments.")      \
   V(statistics_type, fragments_staged, "fragments-staged",                   \
@@ -110,6 +114,17 @@ typedef struct loom_stage_loop_carried_fragment_list_t {
   uint16_t count;
 } loom_stage_loop_carried_fragment_list_t;
 
+typedef struct loom_stage_loop_carried_candidate_list_t {
+  // Structurally eligible loops in source preorder.
+  loom_op_t** values;
+
+  // Number of loops in |values|.
+  iree_host_size_t count;
+
+  // Allocated capacity of |values|.
+  iree_host_size_t capacity;
+} loom_stage_loop_carried_candidate_list_t;
+
 typedef struct loom_stage_loop_carried_fragments_layout_t {
   // Number of independent subgroup frames in the staging allocation.
   uint32_t subgroup_count;
@@ -143,17 +158,19 @@ typedef struct loom_stage_loop_carried_fragments_context_t {
   // Rewriter owning IR mutations.
   loom_rewriter_t* rewriter;
 
+  // Resettable storage for one candidate collection and rewrite attempt.
+  iree_arena_allocator_t* scratch_arena;
+
   // Execution-uniformity analysis sharing the rewriter's value facts.
   loom_control_uniformity_info_t* control_uniformity;
 } loom_stage_loop_carried_fragments_context_t;
 
 static iree_status_t loom_stage_loop_carried_fragments_fact_scope(
     loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
+    loom_target_bundle_storage_t* bundle_storage,
     loom_pass_value_fact_scope_t* out_scope) {
   *out_scope = loom_pass_value_fact_scope_function(function);
-  loom_target_bundle_storage_t* bundle_storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(pass->arena, sizeof(*bundle_storage),
-                                           (void**)&bundle_storage));
+  memset(bundle_storage, 0, sizeof(*bundle_storage));
   bool resolved = false;
   IREE_RETURN_IF_ERROR(loom_target_pass_capability_resolve_function_bundle(
       pass->environment, module, function, pass->diagnostic_emitter,
@@ -458,7 +475,7 @@ static iree_status_t loom_stage_loop_carried_fragments_collect(
 
   loom_stage_loop_carried_fragment_t* candidates = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(context->pass->arena, op->result_count,
+      iree_arena_allocate_array(context->scratch_arena, op->result_count,
                                 sizeof(*candidates), (void**)&candidates));
 
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -618,8 +635,8 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   uint16_t* staged_index_by_ordinal = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, op->result_count, sizeof(*staged_index_by_ordinal),
-      (void**)&staged_index_by_ordinal));
+      context->scratch_arena, op->result_count,
+      sizeof(*staged_index_by_ordinal), (void**)&staged_index_by_ordinal));
   for (uint16_t i = 0; i < op->result_count; ++i) {
     staged_index_by_ordinal[i] = UINT16_MAX;
   }
@@ -632,10 +649,10 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
   loom_type_t* kept_result_types = NULL;
   if (kept_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, kept_count, sizeof(*kept_iter_args),
+        context->scratch_arena, kept_count, sizeof(*kept_iter_args),
         (void**)&kept_iter_args));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, kept_count, sizeof(*kept_result_types),
+        context->scratch_arena, kept_count, sizeof(*kept_result_types),
         (void**)&kept_result_types));
   }
   uint16_t kept_ordinal = 0;
@@ -723,7 +740,7 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   loom_value_id_t* slot_columns = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(context->pass->arena, staged_fragments->count,
+      iree_arena_allocate_array(context->scratch_arena, staged_fragments->count,
                                 sizeof(*slot_columns), (void**)&slot_columns));
 
   loom_value_id_t subgroup_column_base = LOOM_VALUE_ID_INVALID;
@@ -787,7 +804,7 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
-      context->module, context->module, context->pass->arena,
+      context->module, context->module, context->scratch_arena,
       &(loom_ir_remap_options_t){
           .allow_unmapped_values = true,
           .remap_symbol = loom_ir_remap_symbol_callback_empty(),
@@ -823,13 +840,13 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   loom_value_id_t* replacement_values = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, op->result_count, sizeof(*replacement_values),
+      context->scratch_arena, op->result_count, sizeof(*replacement_values),
       (void**)&replacement_values));
 
   loom_value_id_t* kept_yield_values = NULL;
   if (kept_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, kept_count, sizeof(*kept_yield_values),
+        context->scratch_arena, kept_count, sizeof(*kept_yield_values),
         (void**)&kept_yield_values));
   }
 
@@ -946,31 +963,50 @@ static iree_status_t loom_stage_loop_carried_fragments_try_rewrite(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_stage_loop_carried_fragments_find_structural_candidate(
+typedef struct loom_stage_loop_carried_candidate_collect_t {
+  // Arena retaining the candidate list for the function pass invocation.
+  iree_arena_allocator_t* arena;
+
+  // Candidate list populated in source preorder.
+  loom_stage_loop_carried_candidate_list_t* candidates;
+} loom_stage_loop_carried_candidate_collect_t;
+
+static iree_status_t loom_stage_loop_carried_fragments_collect_candidate(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
   (void)context;
-  bool* has_candidate = (bool*)user_data;
-  if (loom_stage_loop_carried_fragments_match_structural_loop(op, NULL)) {
-    *has_candidate = true;
-    *out_result = LOOM_WALK_ABORT;
+  *out_result = LOOM_WALK_CONTINUE;
+  if (!loom_stage_loop_carried_fragments_match_structural_loop(op, NULL)) {
     return iree_ok_status();
   }
-  *out_result = LOOM_WALK_CONTINUE;
+
+  loom_stage_loop_carried_candidate_collect_t* collect =
+      (loom_stage_loop_carried_candidate_collect_t*)user_data;
+  loom_stage_loop_carried_candidate_list_t* candidates = collect->candidates;
+  if (candidates->count == candidates->capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        collect->arena, candidates->count, candidates->count + 1,
+        sizeof(*candidates->values), &candidates->capacity,
+        (void**)&candidates->values));
+  }
+  candidates->values[candidates->count++] = op;
   return iree_ok_status();
 }
 
-static iree_status_t loom_stage_loop_carried_fragments_has_structural_candidate(
+static iree_status_t loom_stage_loop_carried_fragments_collect_candidates(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
-    bool* out_has_candidate) {
-  *out_has_candidate = false;
+    loom_stage_loop_carried_candidate_list_t* out_candidates) {
+  memset(out_candidates, 0, sizeof(*out_candidates));
+  loom_stage_loop_carried_candidate_collect_t collect = {
+      .arena = pass->arena,
+      .candidates = out_candidates,
+  };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   return loom_walk_function(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){
-          .fn = loom_stage_loop_carried_fragments_find_structural_candidate,
-          .user_data = out_has_candidate,
+          .fn = loom_stage_loop_carried_fragments_collect_candidate,
+          .user_data = &collect,
       },
       pass->arena, &walk_result);
 }
@@ -988,39 +1024,60 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
       loom_low_pass_capability_from_pass(pass);
   loom_target_compile_report_t* compile_report =
       loom_low_pass_capability_compile_report(low_capability);
+
+  loom_stage_loop_carried_candidate_list_t candidates = {0};
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_collect_candidates(
+      pass, module, function, &candidates));
+  statistics->candidate_loops += (int64_t)candidates.count;
+  if (candidates.count == 0) return iree_ok_status();
+
+  loom_target_bundle_storage_t bundle_storage = {0};
   loom_pass_value_fact_scope_t fact_scope =
       loom_pass_value_fact_scope_function(function);
-  bool fact_scope_resolved = false;
-  bool changed = false;
-  do {
-    bool has_candidate = false;
-    IREE_RETURN_IF_ERROR(
-        loom_stage_loop_carried_fragments_has_structural_candidate(
-            pass, module, function, &has_candidate));
-    if (!has_candidate) break;
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_fact_scope(
+      pass, module, function, &bundle_storage, &fact_scope));
 
-    if (!fact_scope_resolved) {
-      IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_fact_scope(
-          pass, module, function, &fact_scope));
-      fact_scope_resolved = true;
+  loom_value_fact_table_t* facts = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_pass_value_facts_prepare(pass, module, fact_scope, &facts));
+
+  iree_arena_allocator_t scratch_arena = {0};
+  iree_arena_initialize(pass->arena->block_pool, &scratch_arena);
+  // Retain one pool block across attempts while discarding any larger
+  // candidate-specific growth at each checkpoint restore.
+  void* scratch_anchor = NULL;
+  iree_status_t status =
+      iree_arena_allocate(&scratch_arena, 1, &scratch_anchor);
+  (void)scratch_anchor;
+  const iree_arena_checkpoint_t scratch_checkpoint =
+      iree_arena_checkpoint_save(&scratch_arena);
+
+  loom_rewriter_t rewriter = {0};
+  bool rewriter_initialized = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_rewriter_initialize(&rewriter, module, pass->arena);
+  }
+  if (iree_status_is_ok(status)) {
+    rewriter_initialized = true;
+    status = loom_rewriter_enable_analysis(&rewriter, function, facts);
+  }
+  if (iree_status_is_ok(status)) {
+    ++statistics->analysis_runs;
+    // The rewriter pops from the end. Seed in reverse source order so outer
+    // loops are processed before their nested loops and siblings remain in
+    // source order. Cloned descendants re-enter through the builder callback.
+    for (iree_host_size_t i = candidates.count; i > 0; --i) {
+      status =
+          loom_rewriter_add_to_worklist(&rewriter, candidates.values[i - 1]);
+      if (!iree_status_is_ok(status)) break;
     }
+  }
 
-    changed = false;
-    loom_value_fact_table_t* facts = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_pass_value_facts_acquire(pass, module, fact_scope, &facts));
-
-    loom_rewriter_t rewriter;
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_initialize(&rewriter, module, pass->arena));
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_enable_analysis(&rewriter, function, facts));
-    IREE_RETURN_IF_ERROR(loom_rewriter_seed_function(&rewriter, function));
-
+  bool changed = false;
+  if (iree_status_is_ok(status)) {
     loom_control_uniformity_info_t control_uniformity;
     loom_control_uniformity_info_initialize(module, facts, pass->arena,
                                             &control_uniformity);
-
     loom_stage_loop_carried_fragments_context_t context = {
         .pass = pass,
         .statistics = statistics,
@@ -1028,21 +1085,26 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
         .function = function,
         .report = compile_report,
         .rewriter = &rewriter,
+        .scratch_arena = &scratch_arena,
         .control_uniformity = &control_uniformity,
     };
-    iree_status_t status = iree_ok_status();
     loom_op_t* op = NULL;
     while (iree_status_is_ok(status) && (op = loom_rewriter_pop(&rewriter))) {
       if (!loom_scf_for_isa(op)) continue;
-      status =
-          loom_stage_loop_carried_fragments_try_rewrite(&context, op, &changed);
-      if (changed) break;
+      bool op_changed = false;
+      status = loom_stage_loop_carried_fragments_try_rewrite(&context, op,
+                                                             &op_changed);
+      changed |= op_changed;
+      iree_arena_checkpoint_restore(&scratch_checkpoint);
     }
+  }
+
+  if (rewriter_initialized) {
     loom_rewriter_deinitialize(&rewriter);
-    if (!iree_status_is_ok(status)) return status;
-    if (changed) {
-      loom_pass_value_fact_owner_invalidate(pass->value_facts);
-    }
-  } while (changed);
-  return iree_ok_status();
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  if ((changed || !iree_status_is_ok(status)) && pass->value_facts) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+  }
+  return status;
 }
