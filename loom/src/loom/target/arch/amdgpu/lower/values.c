@@ -27,6 +27,7 @@
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/util/math.h"
 
 typedef enum loom_amdgpu_structural_value_source_kind_e {
   LOOM_AMDGPU_STRUCTURAL_VALUE_SOURCE_KIND_NONE = 0,
@@ -228,17 +229,6 @@ typedef struct loom_amdgpu_vector_insert_plan_t {
   bool is_dynamic;
 } loom_amdgpu_vector_insert_plan_t;
 
-static uint32_t loom_amdgpu_integer_bit_mask(uint32_t bit_count) {
-  IREE_ASSERT_GT(bit_count, 0);
-  IREE_ASSERT_LE(bit_count, 32);
-  return bit_count == 32 ? UINT32_MAX : ((UINT32_C(1) << bit_count) - 1u);
-}
-
-static uint32_t loom_amdgpu_integer_low_bits(int64_t value,
-                                             uint32_t bit_count) {
-  return (uint32_t)((uint64_t)value & loom_amdgpu_integer_bit_mask(bit_count));
-}
-
 static bool loom_amdgpu_exact_integer_lane_bits(
     loom_low_lower_context_t* context, loom_value_id_t source_value,
     uint32_t bit_count, uint32_t* out_bits) {
@@ -253,7 +243,7 @@ static bool loom_amdgpu_exact_integer_lane_bits(
           loom_value_fact_table_lookup(fact_table, source_value), &value)) {
     return false;
   }
-  *out_bits = loom_amdgpu_integer_low_bits(value, bit_count);
+  *out_bits = loom_mask_to_bitwidth_u32((uint32_t)value, (int32_t)bit_count);
   return true;
 }
 
@@ -266,7 +256,8 @@ static bool loom_amdgpu_pack_exact_integer_elements(
   }
   const uint32_t element_bit_count = plan->element_bit_count;
   const uint32_t elements_per_register = 32u / element_bit_count;
-  const uint32_t element_mask = loom_amdgpu_integer_bit_mask(element_bit_count);
+  const uint32_t element_mask =
+      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)element_bit_count);
   for (uint32_t register_index = 0; register_index < plan->register_count;
        ++register_index) {
     uint32_t bit_pattern = 0;
@@ -1109,12 +1100,13 @@ static uint32_t loom_amdgpu_integer_sign_extended_bits(int64_t value,
                                                        uint32_t bit_count) {
   IREE_ASSERT_GT(bit_count, 0);
   IREE_ASSERT_LT(bit_count, 32);
-  const uint32_t low_bits = loom_amdgpu_integer_low_bits(value, bit_count);
+  const uint32_t low_bits =
+      loom_mask_to_bitwidth_u32((uint32_t)value, (int32_t)bit_count);
   const uint32_t sign_bit = UINT32_C(1) << (bit_count - 1u);
   if ((low_bits & sign_bit) == 0) {
     return low_bits;
   }
-  return low_bits | ~loom_amdgpu_integer_bit_mask(bit_count);
+  return low_bits | ~loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)bit_count);
 }
 
 static bool loom_amdgpu_sub32_integer_payload_bit_count(
@@ -1263,7 +1255,7 @@ static uint32_t loom_amdgpu_repeated_integer_lane_pattern(uint32_t lane_bits,
                                                           uint32_t bit_count) {
   IREE_ASSERT(bit_count == 8 || bit_count == 16);
   const uint32_t masked_lane_bits =
-      lane_bits & loom_amdgpu_integer_bit_mask(bit_count);
+      lane_bits & loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)bit_count);
   uint32_t bit_pattern = 0;
   for (uint32_t bit_offset = 0; bit_offset < 32; bit_offset += bit_count) {
     bit_pattern |= masked_lane_bits << bit_offset;
@@ -1303,8 +1295,8 @@ static iree_status_t loom_amdgpu_select_packed_integer_constant_plan(
       (storage.element_bit_count != 8 && storage.element_bit_count != 16)) {
     return iree_ok_status();
   }
-  const uint32_t lane_bits =
-      loom_amdgpu_integer_low_bits(value.i64, storage.element_bit_count);
+  const uint32_t lane_bits = loom_mask_to_bitwidth_u32(
+      (uint32_t)value.i64, (int32_t)storage.element_bit_count);
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_u32_bit_pattern_constant_plan(
       context,
       loom_amdgpu_repeated_integer_lane_pattern(lane_bits,
@@ -5322,8 +5314,9 @@ static iree_status_t loom_amdgpu_replace_packed_vector_register_lane(
   const uint32_t lanes_per_register = 32u / lane_bit_count;
   const uint32_t register_lane = lane_ordinal % lanes_per_register;
   const uint32_t lane_bit_offset = register_lane * lane_bit_count;
-  const uint32_t lane_mask = loom_amdgpu_integer_bit_mask(lane_bit_count)
-                             << lane_bit_offset;
+  const uint32_t lane_mask =
+      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)lane_bit_count)
+      << lane_bit_offset;
   const uint32_t preserved_mask = ~lane_mask;
 
   loom_value_id_t preserved = LOOM_VALUE_ID_INVALID;
@@ -5372,8 +5365,8 @@ static iree_status_t loom_amdgpu_lower_packed_vector_insert(
     IREE_ASSERT_EQ(integer_bit_count, plan->lane_bit_count);
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_value,
-        loom_amdgpu_integer_bit_mask(plan->lane_bit_count), register_type,
-        &low_value));
+        loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)plan->lane_bit_count),
+        register_type, &low_value));
   }
 
   loom_value_id_t registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
@@ -5446,7 +5439,8 @@ static iree_status_t loom_amdgpu_lower_vector_insert(
       IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-          low_value, loom_amdgpu_integer_bit_mask(plan->lane_bit_count),
+          low_value,
+          loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)plan->lane_bit_count),
           lane_type, &low_value));
     }
     return loom_low_lower_bind_value(context, plan->result, low_value);
@@ -8753,8 +8747,8 @@ static iree_status_t loom_amdgpu_emit_vgpr_zero_extend(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   return loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_source,
-      loom_amdgpu_integer_bit_mask(source_bit_count), lane_type,
-      out_low_result);
+      loom_mask_to_bitwidth_u32(UINT32_MAX, (int32_t)source_bit_count),
+      lane_type, out_low_result);
 }
 
 static iree_status_t loom_amdgpu_lookup_scalar_conversion_source_for_result(

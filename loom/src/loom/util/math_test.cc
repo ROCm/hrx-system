@@ -250,8 +250,17 @@ TEST(Ilog2I64, NonPowers) {
 }
 
 //===----------------------------------------------------------------------===//
-// Bit-width-limited counts
+// Bit-width-limited operations
 //===----------------------------------------------------------------------===//
+
+TEST(MaskToBitwidthU32, MasksToDeclaredWidth) {
+  EXPECT_EQ(loom_mask_to_bitwidth_u32(UINT32_MAX, 0), 0u);
+  EXPECT_EQ(loom_mask_to_bitwidth_u32(UINT32_MAX, 8), UINT32_C(0xFF));
+  EXPECT_EQ(loom_mask_to_bitwidth_u32(UINT32_C(0x12345678), 16),
+            UINT32_C(0x5678));
+  EXPECT_EQ(loom_mask_to_bitwidth_u32(UINT32_C(0x12345678), 32),
+            UINT32_C(0x12345678));
+}
 
 TEST(CountLeadingZerosU64Width, UsesDeclaredWidth) {
   EXPECT_EQ(loom_count_leading_zeros_u64_width(1, 32), 31);

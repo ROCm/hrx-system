@@ -141,6 +141,15 @@ static inline bool loom_lcm_i64(int64_t a, int64_t b, int64_t* out) {
 // Bit operations
 //===----------------------------------------------------------------------===//
 
+// Masks a raw unsigned value to the low |bitwidth| bits. A bitwidth of 32 keeps
+// the value unchanged.
+static inline uint32_t loom_mask_to_bitwidth_u32(uint32_t value,
+                                                 int32_t bitwidth) {
+  if (bitwidth <= 0) return 0;
+  if (bitwidth >= 32) return value;
+  return value & ((((uint32_t)1) << bitwidth) - 1);
+}
+
 // Masks a raw unsigned value to the low |bitwidth| bits. A bitwidth of 64 keeps
 // the value unchanged.
 static inline uint64_t loom_mask_to_bitwidth_u64(uint64_t value,
