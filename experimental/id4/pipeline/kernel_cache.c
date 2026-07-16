@@ -970,8 +970,44 @@ void id4_pipeline_kernel_cache_release(
   }
 }
 
-iree_string_view_t id4_pipeline_kernel_cache_default_target_processor(void) {
-  return IREE_SV("gfx1100");
+iree_status_t id4_pipeline_kernel_cache_select_amdgpu_target_processor(
+    const iree_hal_device_spec_t* device_spec,
+    iree_string_view_t* out_target_processor) {
+  IREE_ASSERT_ARGUMENT(out_target_processor);
+  *out_target_processor = iree_string_view_empty();
+  if (!device_spec) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL device specification is required");
+  }
+
+  const iree_hal_executable_target_selection_t selection = {
+      // Select the exact target describing the physical device.
+      .policy = IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
+      // ID4 currently emits native AMDGPU executables through Loom.
+      .family = IREE_SV("amdgpu"),
+  };
+  const iree_hal_executable_target_t* target = NULL;
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection,
+                                                    &target);
+  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "selected HAL device has no exact AMDGPU executable target");
+  }
+  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected HAL device advertises multiple equally-ranked exact AMDGPU "
+        "executable targets");
+  }
+  if (!target || iree_string_view_is_empty(target->processor)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected HAL device exact AMDGPU target has no processor");
+  }
+  *out_target_processor = target->processor;
+  return iree_ok_status();
 }
 
 iree_string_view_t id4_pipeline_kernel_cache_target_processor(

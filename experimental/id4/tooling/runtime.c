@@ -112,6 +112,7 @@ iree_status_t id4_tooling_runtime_context_initialize_from_flags(
   memset(out_context, 0, sizeof(*out_context));
   IREE_RETURN_IF_ERROR(id4_tooling_runtime_validate_context_options(options));
   out_context->host_allocator = host_allocator;
+  iree_string_view_t target_processor = iree_string_view_empty();
 
   iree_status_t status = iree_async_proactor_pool_create(
       /*node_count=*/1, /*node_ids=*/NULL,
@@ -131,6 +132,12 @@ iree_status_t id4_tooling_runtime_context_initialize_from_flags(
   if (iree_status_is_ok(status)) {
     iree_hal_device_t* primary_device =
         id4_tooling_runtime_context_primary_device(out_context);
+    status = id4_pipeline_kernel_cache_select_amdgpu_target_processor(
+        iree_hal_device_spec(primary_device), &target_processor);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_device_t* primary_device =
+        id4_tooling_runtime_context_primary_device(out_context);
     status = iree_hal_executable_cache_create(
         primary_device, options->executable_cache_identifier,
         &out_context->executable_cache);
@@ -139,8 +146,7 @@ iree_status_t id4_tooling_runtime_context_initialize_from_flags(
     id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
     memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
     kernel_cache_options.structure_size = sizeof(kernel_cache_options);
-    kernel_cache_options.target_processor =
-        id4_pipeline_kernel_cache_default_target_processor();
+    kernel_cache_options.target_processor = target_processor;
     kernel_cache_options.entry_limit =
         ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
     status = id4_pipeline_kernel_cache_create(

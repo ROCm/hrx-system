@@ -60,7 +60,9 @@ typedef struct id4_pipeline_kernel_cache_create_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Explicit target processor key used to build the Loom target profile.
+  // Target processor key used to build the Loom target profile.
+  // Runtime callers derive this from the selected HAL device specification;
+  // offline compiler callers may provide an explicit processor.
   iree_string_view_t target_processor;
   // Maximum retained entries before evicting the oldest prepared executable.
   // Zero disables prepared-executable retention.
@@ -103,9 +105,13 @@ iree_status_t id4_pipeline_kernel_cache_create(
     iree_allocator_t host_allocator,
     id4_pipeline_kernel_cache_t** out_kernel_cache);
 
-// Returns the temporary target processor used until HAL target enumeration is
-// available.
-iree_string_view_t id4_pipeline_kernel_cache_default_target_processor(void);
+// Selects the exact AMDGPU processor advertised by |device_spec|.
+//
+// The returned view is borrowed from |device_spec| and remains valid for the
+// lifetime of that specification.
+iree_status_t id4_pipeline_kernel_cache_select_amdgpu_target_processor(
+    const iree_hal_device_spec_t* device_spec,
+    iree_string_view_t* out_target_processor);
 
 // Retains |kernel_cache| for the caller.
 void id4_pipeline_kernel_cache_retain(

@@ -592,8 +592,7 @@ class SessionTest : public ::testing::Test {
     id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
     std::memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
     kernel_cache_options.structure_size = sizeof(kernel_cache_options);
-    kernel_cache_options.target_processor =
-        id4_pipeline_kernel_cache_default_target_processor();
+    kernel_cache_options.target_processor = IREE_SV("gfx1100");
     kernel_cache_options.entry_limit =
         ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
     IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(

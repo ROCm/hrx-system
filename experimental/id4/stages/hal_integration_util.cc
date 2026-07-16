@@ -1287,11 +1287,14 @@ static iree_status_t InitializeLiveStageContextFromFlags(
   id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
   memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
   kernel_cache_options.structure_size = sizeof(kernel_cache_options);
-  kernel_cache_options.target_processor =
-      id4_pipeline_kernel_cache_default_target_processor();
   kernel_cache_options.entry_limit =
       ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_select_amdgpu_target_processor(
+        iree_hal_device_spec(out_context->device.get()),
+        &kernel_cache_options.target_processor);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_cache_create(
         &kernel_cache_options, iree_allocator_system(), &kernel_cache);

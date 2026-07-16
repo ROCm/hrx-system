@@ -92,8 +92,7 @@ static id4_pipeline_kernel_cache_t* CreateKernelCache() {
   id4_pipeline_kernel_cache_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.target_processor =
-      id4_pipeline_kernel_cache_default_target_processor();
+  options.target_processor = IREE_SV("gfx1100");
   options.entry_limit = ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
