@@ -692,12 +692,12 @@ static iree_status_t loom_opt_append_reproducer_metadata(
     status = loom_opt_format_pass_selection_json(&metadata_stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream,
-                                              ",\n  \"failure_status\": ");
+    status =
+        loom_output_stream_write_cstring(&metadata_stream, ",\n  \"status\": ");
   }
   if (iree_status_is_ok(status)) {
-    status = loom_json_write_escaped_cstring(
-        &metadata_stream, iree_status_code_string(failure_status_code));
+    status = loom_json_write_status_object(
+        &metadata_stream, failure_status_code, iree_string_view_empty());
   }
   if (iree_status_is_ok(status)) {
     status = loom_output_stream_write_cstring(&metadata_stream,

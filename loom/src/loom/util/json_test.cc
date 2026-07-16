@@ -60,6 +60,24 @@ std::string EscapeQuoted(const char* input) {
   return result;
 }
 
+std::string WriteStatusObject(iree_status_code_t code,
+                              iree_string_view_t message) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+
+  iree_status_t status = loom_json_write_status_object(&stream, code, message);
+  std::string result;
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t view = iree_string_builder_view(&builder);
+    result.assign(view.data, view.size);
+  }
+  IREE_EXPECT_OK(status);
+  iree_string_builder_deinitialize(&builder);
+  return result;
+}
+
 //===----------------------------------------------------------------------===//
 // Basic escaping
 //===----------------------------------------------------------------------===//
@@ -215,6 +233,22 @@ TEST(JsonEscape, MixedContent) {
 
 TEST(JsonEscape, QuotedStringWithEscapes) {
   EXPECT_EQ(EscapeQuoted("line1\nline2"), "\"line1\\nline2\"");
+}
+
+//===----------------------------------------------------------------------===//
+// IREE status objects
+//===----------------------------------------------------------------------===//
+
+TEST(JsonStatus, WritesCanonicalObject) {
+  EXPECT_EQ(WriteStatusObject(IREE_STATUS_UNAVAILABLE,
+                              IREE_SV("profile \"decode\" failed")),
+            "{\"code\":14,\"name\":\"UNAVAILABLE\","
+            "\"message\":\"profile \\\"decode\\\" failed\"}");
+}
+
+TEST(JsonStatus, OmitsUnavailableMessage) {
+  EXPECT_EQ(WriteStatusObject(IREE_STATUS_OK, iree_string_view_empty()),
+            "{\"code\":0,\"name\":\"OK\"}");
 }
 
 //===----------------------------------------------------------------------===//

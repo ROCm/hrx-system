@@ -36,7 +36,7 @@
                 "\"artifact_kind\":\"target-artifact\"",
                 "\"backend\":\"llvmir-text\"",
                 "\"artifact_format\":\"llvmir_text\"",
-                "\"status_code\":0"
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           ]

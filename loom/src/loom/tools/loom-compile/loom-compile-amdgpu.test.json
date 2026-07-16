@@ -35,7 +35,7 @@
                 "\"candidate_target_count\":1",
                 "\"candidate_target_symbol\":\"nearby_wave64\"",
                 "\"candidate_target_subgroup_size\":64",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -72,7 +72,7 @@
               "unordered": [
                 "\"target_key\":\"gfx1151\"",
                 "\"artifact_format\":\"elf\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -123,7 +123,7 @@
                 "\"config_bindings\":{\"count\":2,\"rows\":[",
                 "\"key\":\"smoke.workgroups_x\",\"value\":\"2\"",
                 "\"key\":\"smoke.workgroup_size_x\",\"value\":\"64\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -193,7 +193,7 @@
                 "\"subgroup_size\":",
                 "\"occupancy_percent\":",
                 "\"limiting_resource\":",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -252,7 +252,7 @@
                 "\"occupancy_percent\":",
                 "\"limiting_resource\":",
                 "\"pressure_rows\":{\"count\":",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -296,7 +296,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_branch_mix\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"branch_count\":3",
                 "\"control_count\":3"
@@ -332,7 +332,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_loop_memory_economics\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"memory_read_byte_count\":20",
                 "\"memory_write_byte_count\":4",
@@ -385,7 +385,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_carried_loop_memory_economics\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"memory_read_byte_count\":20",
                 "\"memory_write_byte_count\":8",
@@ -440,7 +440,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_loop_matrix_mix\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"matrix_count\":1",
                 "\"wmma_count\":1",
@@ -490,7 +490,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"report_materialized_fragment_spills\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"spill_count\":0,\"spill_plan_count\":0",
                 {
                   "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
@@ -547,7 +547,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"report_materialized_fragment_spills\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"spill_count\":0,\"spill_plan_count\":0",
                 {
                   "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
@@ -638,7 +638,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_dispatch_memory_economics\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"workload\":{\"workgroup_size\":{\"x\":8,\"y\":1,\"z\":1,\"flat\":8},\"workgroup_count\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"dispatch_workitem_count\":8}",
                 "\"economics\":{\"operations\":{\"per_workitem\":{\"scalar_alu_count\":35,\"vector_alu_count\":4,\"branch_count\":10,\"control_count\":10},\"dispatch\":{\"scalar_alu_count\":280,\"vector_alu_count\":32,\"branch_count\":80,\"control_count\":80}}",
                 "\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
@@ -686,7 +686,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_private_memory_mix\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"memory_read_byte_count\":24",
                 "\"memory_write_byte_count\":8",
@@ -729,7 +729,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_complex_loop_memory_economics\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"memory_read_byte_count\":20",
                 "\"memory_write_byte_count\":4",
@@ -774,7 +774,7 @@
                 "\"target_bundle\":\"gfx1100_target\"",
                 "\"artifact_format\":\"elf\"",
                 "\"function\":\"selected_store_i32\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             },
             "not_contains": [
@@ -826,7 +826,7 @@
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -866,7 +866,7 @@
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -906,7 +906,7 @@
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -946,7 +946,7 @@
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -1018,10 +1018,10 @@
           },
           "stdout": {
             "contains": [
-              "\"status\":\"FAILED_PRECONDITION\""
+              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
             ],
             "not_contains": [
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "stderr": {

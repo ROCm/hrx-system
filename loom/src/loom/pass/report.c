@@ -447,8 +447,8 @@ iree_status_t loom_pass_report_format_json(const loom_pass_report_t* report,
         ",\"changed\":%s,\"status\":",
         invocation->instruction_index, invocation->duration_nanoseconds,
         invocation->changed ? "true" : "false"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-        stream, iree_status_code_string(invocation->status_code)));
+    IREE_RETURN_IF_ERROR(loom_json_write_status_object(
+        stream, invocation->status_code, iree_string_view_empty()));
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write_cstring(stream, ",\"statistics\":{"));
     for (uint16_t j = 0; j < invocation->statistic_count; ++j) {

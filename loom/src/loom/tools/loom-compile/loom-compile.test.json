@@ -63,8 +63,7 @@
             "save": "{tmp}/compile_report.json",
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
@@ -117,8 +116,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
@@ -147,8 +145,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ],
             "not_contains": [
               "no_provider"
@@ -288,8 +285,7 @@
           "stdout": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           }
         }
@@ -322,10 +318,10 @@
           },
           "stdout": {
             "contains": [
-              "\"status\":\"FAILED_PRECONDITION\""
+              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
             ],
             "not_contains": [
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "stderr": {

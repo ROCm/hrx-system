@@ -6,6 +6,8 @@
 
 #include "loom/util/json.h"
 
+#include <inttypes.h>
+
 #include "iree/base/internal/unicode.h"
 
 //===----------------------------------------------------------------------===//
@@ -131,4 +133,19 @@ iree_status_t loom_json_write_escaped_string(loom_output_stream_t* stream,
   IREE_RETURN_IF_ERROR(loom_output_stream_write(&escape_stream, value));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '"'));
   return iree_ok_status();
+}
+
+iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,
+                                            iree_status_code_t code,
+                                            iree_string_view_t message) {
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+      stream, "{\"code\":%" PRIu32 ",\"name\":", (uint32_t)code));
+  IREE_RETURN_IF_ERROR(
+      loom_json_write_escaped_cstring(stream, iree_status_code_string(code)));
+  if (!iree_string_view_is_empty(message)) {
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_cstring(stream, ",\"message\":"));
+    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, message));
+  }
+  return loom_output_stream_write_char(stream, '}');
 }
