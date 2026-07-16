@@ -48,6 +48,23 @@ static void ExpectObjectValueEquals(iree_string_view_t object,
   EXPECT_TRUE(iree_string_view_equal(LookupObject(object, key), expected));
 }
 
+static void ExpectStatusObject(iree_string_view_t status,
+                               iree_status_code_t expected_code,
+                               iree_string_view_t expected_message) {
+  std::string code = std::to_string(static_cast<uint32_t>(expected_code));
+  ExpectObjectValueEquals(status, IREE_SV("code"),
+                          iree_make_cstring_view(code.c_str()));
+  ExpectObjectValueEquals(
+      status, IREE_SV("name"),
+      iree_make_cstring_view(iree_status_code_string(expected_code)));
+  if (iree_string_view_is_empty(expected_message)) {
+    EXPECT_TRUE(
+        iree_string_view_is_empty(TryLookupObject(status, IREE_SV("message"))));
+  } else {
+    ExpectObjectValueEquals(status, IREE_SV("message"), expected_message);
+  }
+}
+
 static bool JsonArrayContainsString(iree_string_view_t array,
                                     iree_string_view_t expected) {
   iree_host_size_t count = 0;
@@ -78,14 +95,8 @@ TEST(BenchmarkReportTest, WritesStatusFieldJson) {
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  std::string expected_code =
-      std::to_string(static_cast<uint32_t>(IREE_STATUS_UNAVAILABLE));
-  EXPECT_TRUE(
-      iree_string_view_equal(LookupObject(status, IREE_SV("code")),
-                             iree_make_cstring_view(expected_code.c_str())));
-  ExpectObjectValueEquals(status, IREE_SV("name"), IREE_SV("UNAVAILABLE"));
-  ExpectObjectValueEquals(status, IREE_SV("message"),
-                          IREE_SV("profile decode failed"));
+  ExpectStatusObject(status, IREE_STATUS_UNAVAILABLE,
+                     IREE_SV("profile decode failed"));
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -106,9 +117,7 @@ TEST(BenchmarkReportTest, OmitsEmptyStatusCodeMessage) {
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  ExpectObjectValueEquals(status, IREE_SV("name"), IREE_SV("UNAVAILABLE"));
-  EXPECT_TRUE(
-      iree_string_view_is_empty(TryLookupObject(status, IREE_SV("message"))));
+  ExpectStatusObject(status, IREE_STATUS_UNAVAILABLE, iree_string_view_empty());
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -133,15 +142,8 @@ TEST(BenchmarkReportTest, WritesHalProfileErrorWithStatusCodeFields) {
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  std::string expected_code =
-      std::to_string(static_cast<uint32_t>(IREE_STATUS_RESOURCE_EXHAUSTED));
-  EXPECT_TRUE(
-      iree_string_view_equal(LookupObject(status, IREE_SV("code")),
-                             iree_make_cstring_view(expected_code.c_str())));
-  ExpectObjectValueEquals(status, IREE_SV("name"),
-                          IREE_SV("RESOURCE_EXHAUSTED"));
-  ExpectObjectValueEquals(status, IREE_SV("message"),
-                          IREE_SV("profile collection failed"));
+  ExpectStatusObject(status, IREE_STATUS_RESOURCE_EXHAUSTED,
+                     IREE_SV("profile collection failed"));
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -252,6 +254,8 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       LookupObject(root, IREE_SV("compile_report"));
   ExpectObjectValueEquals(compile_report, IREE_SV("artifact_kind"),
                           IREE_SV("vm-archive"));
+  ExpectStatusObject(LookupObject(compile_report, IREE_SV("status")),
+                     IREE_STATUS_OK, iree_string_view_empty());
   ExpectObjectValueEquals(compile_report, IREE_SV("backend"),
                           IREE_SV("amdgpu-hal"));
   ExpectObjectValueEquals(compile_report, IREE_SV("target_family"),

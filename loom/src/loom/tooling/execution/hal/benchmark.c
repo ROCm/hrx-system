@@ -204,25 +204,14 @@ static void loom_run_hal_profile_summary_record_error(
     loom_run_hal_profile_summary_t* profile, const iree_status_t status) {
   profile->has_error = true;
   profile->error_code = iree_status_code(status);
-  iree_host_size_t required_length = 0;
-  if (iree_status_format(status, sizeof(profile->error_message),
-                         profile->error_message, &required_length)) {
-    profile->error_message_length = required_length;
-    if (profile->error_message_length >= sizeof(profile->error_message)) {
-      profile->error_message_length = sizeof(profile->error_message) - 1;
-    }
-  } else {
-    const char* error_code_string =
-        iree_status_code_string(profile->error_code);
-    iree_host_size_t index = 0;
-    for (; error_code_string[index] != '\0' &&
-           index + 1 < sizeof(profile->error_message);
-         ++index) {
-      profile->error_message[index] = error_code_string[index];
-    }
-    profile->error_message[index] = '\0';
-    profile->error_message_length = index;
+  const iree_string_view_t message = iree_status_message(status);
+  const iree_host_size_t copy_length = iree_min(
+      message.size, (iree_host_size_t)sizeof(profile->error_message) - 1);
+  if (copy_length != 0) {
+    memcpy(profile->error_message, message.data, copy_length);
   }
+  profile->error_message[copy_length] = '\0';
+  profile->error_message_length = copy_length;
 }
 
 static void loom_run_hal_profile_summary_copy_artifact_path(

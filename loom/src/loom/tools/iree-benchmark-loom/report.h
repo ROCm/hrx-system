@@ -59,19 +59,10 @@ typedef struct iree_benchmark_loom_summary_counts_t {
   iree_host_size_t hal_executable_count;
 } iree_benchmark_loom_summary_counts_t;
 
-// Writes an IREE status-code object: {"code":N,"name":"...","message":"..."}.
-iree_status_t iree_benchmark_loom_write_status_code_json(
-    iree_status_code_t code, iree_string_view_t message,
-    loom_output_stream_t* stream);
-
 // Writes a "status" field containing an IREE status-code object.
 iree_status_t iree_benchmark_loom_write_status_field_json(
     iree_status_code_t code, iree_string_view_t message,
     loom_output_stream_t* stream, bool* first_field);
-
-// Writes a borrowed status as a structured JSON object.
-iree_status_t iree_benchmark_loom_write_status_object_json(
-    const iree_status_t status, loom_output_stream_t* stream);
 
 // Writes the run identifier field shared by every JSONL row.
 iree_status_t iree_benchmark_loom_write_run_id_field_json(

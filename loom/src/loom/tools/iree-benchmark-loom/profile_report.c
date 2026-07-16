@@ -18,15 +18,6 @@
 #include "loom/tools/iree-benchmark-loom/report.h"
 #include "loom/util/json.h"
 
-typedef struct iree_benchmark_loom_status_json_error_t {
-  // Terminal status code consumed into structured JSON.
-  iree_status_code_t code;
-  // Length of |message| in bytes.
-  iree_host_size_t message_length;
-  // Formatted status message, truncated when necessary.
-  char message[512];
-} iree_benchmark_loom_status_json_error_t;
-
 typedef struct iree_benchmark_loom_profile_counter_decode_summary_t {
   // Total non-empty JSONL rows decoded from the raw profile bundle.
   iree_host_size_t total_count;
@@ -85,31 +76,6 @@ static iree_status_t iree_benchmark_loom_read_file_into_builder(
                             strerror(errno));
   }
   return iree_ok_status();
-}
-
-static void iree_benchmark_loom_format_status_json_error(
-    const iree_status_t status,
-    iree_benchmark_loom_status_json_error_t* out_error) {
-  out_error->code = iree_status_code(status);
-  memset(out_error->message, 0, sizeof(out_error->message));
-  iree_host_size_t required_length = 0;
-  if (iree_status_format(status, sizeof(out_error->message), out_error->message,
-                         &required_length)) {
-    out_error->message_length = required_length;
-    if (out_error->message_length >= sizeof(out_error->message)) {
-      out_error->message_length = sizeof(out_error->message) - 1;
-    }
-  } else {
-    const char* error_code_string = iree_status_code_string(out_error->code);
-    iree_host_size_t index = 0;
-    for (; error_code_string[index] != '\0' &&
-           index + 1 < sizeof(out_error->message);
-         ++index) {
-      out_error->message[index] = error_code_string[index];
-    }
-    out_error->message[index] = '\0';
-    out_error->message_length = index;
-  }
 }
 
 static iree_status_t iree_benchmark_loom_write_profile_artifact_identity_json(
@@ -448,15 +414,13 @@ iree_benchmark_loom_append_profile_summary_state_from_error(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_string_view_t state, iree_string_view_t state_code,
     iree_status_t error_status, iree_string_builder_t* profile_output) {
-  iree_benchmark_loom_status_json_error_t error = {0};
-  iree_benchmark_loom_format_status_json_error(error_status, &error);
+  const iree_status_code_t error_code = iree_status_code(error_status);
+  const iree_string_view_t error_message = iree_status_message(error_status);
   iree_status_t append_status =
       iree_benchmark_loom_append_profile_summary_state_row(
           run, candidate, work_item_index, module, benchmark_plan, case_plan,
           policy, benchmark_result, /*decode_summary=*/NULL, state, state_code,
-          error.code,
-          iree_make_string_view(error.message, error.message_length),
-          profile_output);
+          error_code, error_message, profile_output);
   iree_status_free(error_status);
   return append_status;
 }
@@ -644,15 +608,13 @@ iree_benchmark_loom_append_profile_counter_state_from_error(
     const iree_benchmark_loom_benchmark_result_t* benchmark_result,
     iree_string_view_t state, iree_string_view_t state_code,
     iree_status_t error_status, iree_string_builder_t* profile_output) {
-  iree_benchmark_loom_status_json_error_t error = {0};
-  iree_benchmark_loom_format_status_json_error(error_status, &error);
+  const iree_status_code_t error_code = iree_status_code(error_status);
+  const iree_string_view_t error_message = iree_status_message(error_status);
   iree_status_t append_status =
       iree_benchmark_loom_append_profile_counter_state_row(
           run, candidate, work_item_index, module, benchmark_plan, case_plan,
           policy, benchmark_result, /*decode_summary=*/NULL, state, state_code,
-          error.code,
-          iree_make_string_view(error.message, error.message_length),
-          profile_output);
+          error_code, error_message, profile_output);
   iree_status_free(error_status);
   return append_status;
 }

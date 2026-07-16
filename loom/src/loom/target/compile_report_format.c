@@ -6533,11 +6533,10 @@ iree_status_t loom_target_compile_report_format_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
       stream, &first_field, "artifact_kind",
       loom_target_compile_report_artifact_kind_name(report->artifact_kind)));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_int_field(
-      stream, &first_field, "status_code", (int)report->status_code));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
-      stream, &first_field, "status",
-      iree_make_cstring_view(iree_status_code_string(report->status_code))));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+      stream, &first_field, "status"));
+  IREE_RETURN_IF_ERROR(loom_json_write_status_object(
+      stream, report->status_code, iree_string_view_empty()));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "detail_flags", report->detail_flags));
   if (report->config_binding_rows.count != 0) {

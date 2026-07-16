@@ -288,8 +288,8 @@ static iree_status_t loom_pass_trace_write_jsonl(
       ",\"event_ordinal\":%" PRIhsz ",\"invocation_ordinal\":%" PRIhsz
       ",\"instruction_index\":%" PRIhsz ",\"status\":",
       event_ordinal, event->invocation_ordinal, event->instruction_index));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, iree_status_code_string(event->status_code)));
+  IREE_RETURN_IF_ERROR(loom_json_write_status_object(stream, event->status_code,
+                                                     iree_string_view_empty()));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream,
       ",\"changed\":%s,\"diagnostics\":{\"errors\":%" PRIu32

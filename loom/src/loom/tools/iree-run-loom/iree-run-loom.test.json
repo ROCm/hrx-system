@@ -137,8 +137,7 @@
             "contains": [
               "EXEC @branchy",
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           }
         }

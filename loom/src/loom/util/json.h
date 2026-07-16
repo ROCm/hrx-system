@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// JSON string escaping utilities for loom output streams.
+// JSON serialization utilities for loom output streams.
 //
 // Provides a streaming JSON escape adapter per RFC 8259: wraps an inner
 // loom_output_stream_t and escapes all incoming text before forwarding.
@@ -64,6 +64,12 @@ void loom_json_escape_stream_init(loom_output_stream_t* inner,
 // Writes a JSON-escaped string value (with surrounding quotes).
 iree_status_t loom_json_write_escaped_string(loom_output_stream_t* stream,
                                              iree_string_view_t value);
+
+// Writes an IREE status value as {"code":N,"name":"...","message":"..."}.
+// The message field is omitted when |message| is empty.
+iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,
+                                            iree_status_code_t code,
+                                            iree_string_view_t message);
 
 // Writes a JSON-escaped C string value (with surrounding quotes).
 // Prefer loom_json_write_escaped_string with a known-length string_view.

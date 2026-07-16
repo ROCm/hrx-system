@@ -36,50 +36,12 @@ static iree_string_view_t iree_benchmark_loom_selected_device_uri(
   return iree_string_view_empty();
 }
 
-iree_status_t iree_benchmark_loom_write_status_code_json(
-    iree_status_code_t code, iree_string_view_t message,
-    loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  bool first_field = true;
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
-      stream, &first_field, "code", (uint32_t)code));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
-      stream, &first_field, "name",
-      iree_make_cstring_view(iree_status_code_string(code))));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "message", message));
-  return loom_output_stream_write_cstring(stream, "}");
-}
-
 iree_status_t iree_benchmark_loom_write_status_field_json(
     iree_status_code_t code, iree_string_view_t message,
     loom_output_stream_t* stream, bool* first_field) {
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_object_field_name(
       stream, first_field, "status"));
-  return iree_benchmark_loom_write_status_code_json(code, message, stream);
-}
-
-iree_status_t iree_benchmark_loom_write_status_object_json(
-    const iree_status_t status, loom_output_stream_t* stream) {
-  const iree_status_code_t code = iree_status_code(status);
-  char message[512];
-  iree_host_size_t required_length = 0;
-  if (!iree_status_format(status, sizeof(message), message, &required_length)) {
-    const char* status_string = iree_status_code_string(code);
-    iree_host_size_t index = 0;
-    for (; status_string[index] != '\0' && index + 1 < sizeof(message);
-         ++index) {
-      message[index] = status_string[index];
-    }
-    message[index] = '\0';
-    required_length = index;
-  }
-  if (required_length >= sizeof(message)) {
-    required_length = sizeof(message) - 1;
-  }
-
-  return iree_benchmark_loom_write_status_code_json(
-      code, iree_make_string_view(message, required_length), stream);
+  return loom_json_write_status_object(stream, code, message);
 }
 
 iree_status_t iree_benchmark_loom_write_run_id_field_json(
