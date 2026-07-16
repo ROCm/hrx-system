@@ -2086,9 +2086,11 @@ TEST_F(HostQueueCommandBufferTest,
       /*semaphores=*/&alloca_signal_ptr,
       /*payload_values=*/&alloca_signal_value,
   };
+  static constexpr iree_device_size_t kTransientByteLength = 201326592;
+  static constexpr iree_device_size_t kDispatchInputOffset = 100663296;
   iree_hal_buffer_t* transient_raw = NULL;
   IREE_ASSERT_OK(QueueHostVisibleDispatchTransientBuffer(
-      test_device.base_device(), alloca_signal_list, sizeof(input_values),
+      test_device.base_device(), alloca_signal_list, kTransientByteLength,
       &transient_raw));
   Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
 
@@ -2099,7 +2101,7 @@ TEST_F(HostQueueCommandBufferTest,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   iree_hal_buffer_ref_t binding_refs[2] = {
-      iree_hal_make_buffer_ref(transient_buffer, /*offset=*/0,
+      iree_hal_make_buffer_ref(transient_buffer, kDispatchInputOffset,
                                sizeof(input_values)),
       iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,
                                sizeof(input_values)),
@@ -2136,7 +2138,7 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(iree_hal_device_queue_read(
       test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, read_wait_list,
       read_signal_list, source_file, /*source_offset=*/0, transient_buffer,
-      /*target_offset=*/0, sizeof(input_values), IREE_HAL_READ_FLAG_NONE));
+      kDispatchInputOffset, sizeof(input_values), IREE_HAL_READ_FLAG_NONE));
 
   Ref<iree_hal_semaphore_t> dispatch_signal;
   IREE_ASSERT_OK(
