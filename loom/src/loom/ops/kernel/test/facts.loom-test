@@ -1,5 +1,128 @@
 // RUN: pass canonicalize
 
+kernel.def @execution_uniform_scope_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %subgroup_i32 = index.cast %subgroup : index to i32
+  %sum = scalar.addi %subgroup_i32, %arg : i32
+  %arg_is_subgroup_uniform = test.fact_subgroup_uniform %arg : i32 -> i1
+  %arg_is_workgroup_uniform = test.fact_workgroup_uniform %arg : i32 -> i1
+  %workgroup_is_subgroup_uniform = test.fact_subgroup_uniform %workgroup : index -> i1
+  %workgroup_is_workgroup_uniform = test.fact_workgroup_uniform %workgroup : index -> i1
+  %subgroup_is_subgroup_uniform = test.fact_subgroup_uniform %subgroup : index -> i1
+  %subgroup_is_workgroup_uniform = test.fact_workgroup_uniform %subgroup : index -> i1
+  %sum_is_subgroup_uniform = test.fact_subgroup_uniform %sum : i32 -> i1
+  %sum_is_workgroup_uniform = test.fact_workgroup_uniform %sum : i32 -> i1
+  test.use %arg_is_subgroup_uniform, %arg_is_workgroup_uniform, %workgroup_is_subgroup_uniform, %workgroup_is_workgroup_uniform, %subgroup_is_subgroup_uniform, %subgroup_is_workgroup_uniform, %sum_is_subgroup_uniform, %sum_is_workgroup_uniform : i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @execution_uniform_scope_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %arg_is_subgroup_uniform = scalar.constant true : i1
+  %arg_is_workgroup_uniform = scalar.constant true : i1
+  %workgroup_is_subgroup_uniform = scalar.constant true : i1
+  %workgroup_is_workgroup_uniform = scalar.constant true : i1
+  %subgroup_is_subgroup_uniform = scalar.constant true : i1
+  %subgroup_is_workgroup_uniform = scalar.constant false : i1
+  %sum_is_subgroup_uniform = scalar.constant true : i1
+  %sum_is_workgroup_uniform = scalar.constant false : i1
+  test.use %arg_is_subgroup_uniform, %arg_is_workgroup_uniform, %workgroup_is_subgroup_uniform, %workgroup_is_workgroup_uniform, %subgroup_is_subgroup_uniform, %subgroup_is_workgroup_uniform, %sum_is_subgroup_uniform, %sum_is_workgroup_uniform : i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ====
+
+func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32) {
+  %is_subgroup_uniform = test.fact_subgroup_uniform %arg : i32 -> i1
+  %is_workgroup_uniform = test.fact_workgroup_uniform %arg : i32 -> i1
+  test.use %is_subgroup_uniform, %is_workgroup_uniform : i1, i1
+  func.return
+}
+
+// ----
+func.def @ordinary_function_argument_has_unknown_uniform_scope(%arg: i32) {
+  %is_subgroup_uniform = scalar.constant false : i1
+  %is_workgroup_uniform = scalar.constant false : i1
+  test.use %is_subgroup_uniform, %is_workgroup_uniform : i1, i1
+  func.return
+}
+
+// ====
+
+kernel.def @collective_uniform_scope_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %zero = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %predicate = index.cmp eq, %lane, %zero : index
+  %broadcast = kernel.subgroup.broadcast %lane_i32 from %zero_i32 : i32, i32
+  %broadcast_first = kernel.subgroup.broadcast.first %lane_i32 : i32
+  %broadcast_uniform = kernel.subgroup.broadcast %arg from %lane_i32 : i32, i32
+  %subgroup_sum = kernel.subgroup.reduce<addi> %lane_i32 : i32
+  %subgroup_prefix = kernel.subgroup.scan<addi> %lane_i32 {mode = inclusive, direction = forward} : i32
+  %workgroup_sum = kernel.workgroup.reduce<addi> %lane_i32 : i32
+  %workgroup_prefix = kernel.workgroup.scan<addi> %lane_i32 {mode = inclusive, direction = forward} : i32
+  %workgroup_any = kernel.workgroup.vote.any %predicate : i1
+  %subgroup_sum_is_subgroup_uniform = test.fact_subgroup_uniform %subgroup_sum : i32 -> i1
+  %subgroup_sum_is_workgroup_uniform = test.fact_workgroup_uniform %subgroup_sum : i32 -> i1
+  %subgroup_prefix_is_varying = test.fact_lane_varying %subgroup_prefix : i32 -> i1
+  %workgroup_sum_is_workgroup_uniform = test.fact_workgroup_uniform %workgroup_sum : i32 -> i1
+  %workgroup_prefix_is_varying = test.fact_lane_varying %workgroup_prefix : i32 -> i1
+  %workgroup_any_is_workgroup_uniform = test.fact_workgroup_uniform %workgroup_any : i1 -> i1
+  %broadcast_is_subgroup_uniform = test.fact_subgroup_uniform %broadcast : i32 -> i1
+  %broadcast_first_is_subgroup_uniform = test.fact_subgroup_uniform %broadcast_first : i32 -> i1
+  %broadcast_uniform_is_workgroup_uniform = test.fact_workgroup_uniform %broadcast_uniform : i32 -> i1
+  test.use %subgroup_sum_is_subgroup_uniform, %subgroup_sum_is_workgroup_uniform, %subgroup_prefix_is_varying, %workgroup_sum_is_workgroup_uniform, %workgroup_prefix_is_varying, %workgroup_any_is_workgroup_uniform, %broadcast_is_subgroup_uniform, %broadcast_first_is_subgroup_uniform, %broadcast_uniform_is_workgroup_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @collective_uniform_scope_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %zero = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %predicate = index.cmp eq, %lane, %zero : index
+  %broadcast = kernel.subgroup.broadcast %lane_i32 from %zero_i32 : i32, i32
+  %broadcast_first = kernel.subgroup.broadcast.first %lane_i32 : i32
+  %broadcast_uniform = kernel.subgroup.broadcast %arg from %lane_i32 : i32, i32
+  %subgroup_sum = kernel.subgroup.reduce<addi> %lane_i32 : i32
+  %subgroup_prefix = kernel.subgroup.scan<addi> %lane_i32 {direction = forward, mode = inclusive} : i32
+  %workgroup_sum = kernel.workgroup.reduce<addi> %lane_i32 : i32
+  %workgroup_prefix = kernel.workgroup.scan<addi> %lane_i32 {direction = forward, mode = inclusive} : i32
+  %workgroup_any = kernel.workgroup.vote.any %predicate : i1
+  %subgroup_sum_is_subgroup_uniform = scalar.constant true : i1
+  %subgroup_sum_is_workgroup_uniform = scalar.constant false : i1
+  %subgroup_prefix_is_varying = scalar.constant true : i1
+  %workgroup_sum_is_workgroup_uniform = scalar.constant true : i1
+  %workgroup_prefix_is_varying = scalar.constant true : i1
+  %workgroup_any_is_workgroup_uniform = scalar.constant true : i1
+  %broadcast_is_subgroup_uniform = scalar.constant true : i1
+  %broadcast_first_is_subgroup_uniform = scalar.constant true : i1
+  %broadcast_uniform_is_workgroup_uniform = scalar.constant true : i1
+  test.use %subgroup_sum_is_subgroup_uniform, %subgroup_sum_is_workgroup_uniform, %subgroup_prefix_is_varying, %workgroup_sum_is_workgroup_uniform, %workgroup_prefix_is_varying, %workgroup_any_is_workgroup_uniform, %broadcast_is_subgroup_uniform, %broadcast_first_is_subgroup_uniform, %broadcast_uniform_is_workgroup_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ====
+
 kernel.def @fixed_workgroup_query_facts() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
@@ -294,19 +417,19 @@ kernel.def @subgroup_mask_distribution_facts() {
   %match_any = kernel.subgroup.match.any %lane_i32 : i32 -> i64
   %match_all_mask, %match_all = kernel.subgroup.match.all %lane_i32 : i32 -> i64, i1
   %predicate_is_lane = test.fact_lane_predicate %predicate : i1 -> i1
-  %any_is_uniform = test.fact_uniform %any : i1 -> i1
+  %any_is_uniform = test.fact_subgroup_uniform %any : i1 -> i1
   %any_is_lane = test.fact_lane_predicate %any : i1 -> i1
-  %all_is_uniform = test.fact_uniform %all : i1 -> i1
+  %all_is_uniform = test.fact_subgroup_uniform %all : i1 -> i1
   %ballot_is_mask = test.fact_subgroup_lane_mask %ballot : i64 -> i1
-  %ballot_is_uniform = test.fact_uniform %ballot : i64 -> i1
+  %ballot_is_uniform = test.fact_subgroup_uniform %ballot : i64 -> i1
   %ballot_is_varying = test.fact_lane_varying %ballot : i64 -> i1
   %active_is_mask = test.fact_subgroup_lane_mask %active : i64 -> i1
-  %active_is_uniform = test.fact_uniform %active : i64 -> i1
+  %active_is_uniform = test.fact_subgroup_uniform %active : i64 -> i1
   %match_any_is_mask = test.fact_subgroup_lane_mask %match_any : i64 -> i1
   %match_any_is_varying = test.fact_lane_varying %match_any : i64 -> i1
   %match_all_mask_is_mask = test.fact_subgroup_lane_mask %match_all_mask : i64 -> i1
-  %match_all_mask_is_uniform = test.fact_uniform %match_all_mask : i64 -> i1
-  %match_all_is_uniform = test.fact_uniform %match_all : i1 -> i1
+  %match_all_mask_is_uniform = test.fact_subgroup_uniform %match_all_mask : i64 -> i1
+  %match_all_is_uniform = test.fact_subgroup_uniform %match_all : i1 -> i1
   test.use %predicate_is_lane, %any_is_uniform, %any_is_lane, %all_is_uniform, %ballot_is_mask, %ballot_is_uniform, %ballot_is_varying, %active_is_mask, %active_is_uniform, %match_any_is_mask, %match_any_is_varying, %match_all_mask_is_mask, %match_all_mask_is_uniform, %match_all_is_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
   kernel.return
 }
@@ -363,7 +486,7 @@ kernel.def @lane_predicate_bitwise_facts() {
   %both_is_predicate = test.fact_lane_predicate %both : i1 -> i1
   %either_is_predicate = test.fact_lane_predicate %either : i1 -> i1
   %one_is_predicate = test.fact_lane_predicate %one : i1 -> i1
-  %both_is_uniform = test.fact_uniform %both : i1 -> i1
+  %both_is_uniform = test.fact_subgroup_uniform %both : i1 -> i1
   %either_hi = test.fact_range_hi %either : i1 -> i64
   test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %one_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
   kernel.return
@@ -399,7 +522,7 @@ kernel.def @lane_predicate_cmpf_facts() {
   %varying = scf.select %condition, %lhs, %rhs : f32
   %predicate = scalar.cmpf olt, %varying, %lhs : f32
   %predicate_is_lane = test.fact_lane_predicate %predicate : i1 -> i1
-  %predicate_is_uniform = test.fact_uniform %predicate : i1 -> i1
+  %predicate_is_uniform = test.fact_subgroup_uniform %predicate : i1 -> i1
   test.use %predicate_is_lane, %predicate_is_uniform : i1, i1
   kernel.return
 }

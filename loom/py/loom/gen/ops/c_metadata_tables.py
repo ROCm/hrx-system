@@ -409,6 +409,11 @@ def generate_tables_c(
                     if buffer_arg_memory_space != "global":
                         raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported buffer_arg_memory_space '{buffer_arg_memory_space}'")
                     region_flags.append("LOOM_REGION_GLOBAL_BUFFER_ARGS")
+                arg_uniform_scope = region_def.arg_uniform_scope
+                if arg_uniform_scope is not None:
+                    if arg_uniform_scope != "workgroup":
+                        raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported arg_uniform_scope '{arg_uniform_scope}'")
+                    region_flags.append("LOOM_REGION_WORKGROUP_UNIFORM_ARGS")
                 flags = " | ".join(region_flags) if region_flags else "0"
                 terminator = c_traits.region_terminator_kind(op, region_def, ops_by_name)
                 lines.append(f"    {{{terminator}, {implicit_terminator}, {flags}}},")

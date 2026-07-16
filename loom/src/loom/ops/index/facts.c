@@ -287,14 +287,10 @@ LOOM_INDEX_BIT_COUNT_FACTS(loom_index_ctpopi_facts, loom_index_ctpopi_result,
 
 static void loom_index_mark_compare_distribution(
     const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts) {
-  if (loom_value_facts_is_lane_predicate(operand_facts[0]) ||
-      loom_value_facts_is_lane_predicate(operand_facts[1]) ||
-      loom_value_facts_is_lane_varying(operand_facts[0]) ||
-      loom_value_facts_is_lane_varying(operand_facts[1])) {
+  loom_value_facts_propagate_binary_distribution(
+      operand_facts[0], operand_facts[1], result_facts);
+  if (loom_value_facts_is_lane_varying(*result_facts)) {
     loom_value_facts_mark_lane_predicate(result_facts);
-  } else if (loom_value_facts_is_uniform(operand_facts[0]) &&
-             loom_value_facts_is_uniform(operand_facts[1])) {
-    loom_value_facts_mark_uniform(result_facts);
   }
 }
 

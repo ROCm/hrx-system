@@ -31,6 +31,8 @@ loom_generated_cc_library(
   ARGS
     "--dialect=kernel"
   DEPS
+    loom::analysis::control_uniformity
+    loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -43,6 +45,7 @@ loom_generated_cc_library(
     loom::ops::index
     loom::ops::op_defs
     loom::ops::scf
+    loom::ops::target
     loom::ops::view
     loom::rewrite::rewriter
     loom::target::capability_facts

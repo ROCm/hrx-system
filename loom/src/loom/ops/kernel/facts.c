@@ -561,7 +561,7 @@ iree_status_t loom_kernel_workgroup_id_facts(
   result_facts[0] = loom_kernel_coordinate_from_extent_facts(
       loom_kernel_launch_workgroup_count_facts(
           context, module, loom_kernel_workgroup_id_dimension(op)));
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   loom_kernel_mark_workgroup_topology_domain(
       loom_kernel_workgroup_id_dimension(op), &result_facts[0]);
   return iree_ok_status();
@@ -574,7 +574,7 @@ iree_status_t loom_kernel_workgroup_size_facts(
   (void)operand_facts;
   result_facts[0] = loom_kernel_launch_workgroup_size_facts(
       context, module, loom_kernel_workgroup_size_dimension(op));
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -585,7 +585,7 @@ iree_status_t loom_kernel_workgroup_count_facts(
   (void)operand_facts;
   result_facts[0] = loom_kernel_launch_workgroup_count_facts(
       context, module, loom_kernel_workgroup_count_dimension(op));
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -631,7 +631,7 @@ iree_status_t loom_kernel_subgroup_size_facts(
   const uint32_t max_subgroup_size =
       loom_kernel_max_subgroup_size(context, module);
   result_facts[0] = loom_value_facts_make(1, (int64_t)max_subgroup_size, 1);
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -643,8 +643,12 @@ iree_status_t loom_kernel_subgroup_id_facts(
   (void)operand_facts;
   uint32_t exact_count = 0;
   if (loom_kernel_exact_subgroup_count(context, module, &exact_count)) {
-    result_facts[0] = loom_value_facts_make(0, (int64_t)exact_count - 1, 1);
-    loom_value_facts_mark_uniform(&result_facts[0]);
+    if (exact_count == 1) {
+      result_facts[0] = loom_value_facts_exact_i64(0);
+    } else {
+      result_facts[0] = loom_value_facts_make(0, (int64_t)exact_count - 1, 1);
+      loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
+    }
     return iree_ok_status();
   }
   const uint32_t max_subgroup_count =
@@ -655,7 +659,7 @@ iree_status_t loom_kernel_subgroup_id_facts(
     result_facts[0] =
         loom_value_facts_make(0, (int64_t)max_subgroup_count - 1, 1);
   }
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -683,7 +687,7 @@ iree_status_t loom_kernel_subgroup_count_facts(
     result_facts[0] = loom_value_facts_make((int64_t)min_subgroup_count,
                                             (int64_t)max_subgroup_count, 1);
   }
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -696,7 +700,7 @@ iree_status_t loom_kernel_subgroup_vote_any_facts(
   (void)op;
   (void)operand_facts;
   result_facts[0] = loom_value_facts_make(0, 1, 1);
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -709,7 +713,7 @@ iree_status_t loom_kernel_subgroup_vote_all_facts(
   (void)op;
   (void)operand_facts;
   result_facts[0] = loom_value_facts_make(0, 1, 1);
-  loom_value_facts_mark_uniform(&result_facts[0]);
+  loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -722,7 +726,7 @@ iree_status_t loom_kernel_subgroup_vote_ballot_facts(
   result_facts[0] = loom_kernel_subgroup_lane_mask_facts(
       module, loom_kernel_subgroup_vote_ballot_mask(op));
   if (loom_value_facts_is_subgroup_lane_mask(result_facts[0])) {
-    loom_value_facts_mark_uniform(&result_facts[0]);
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   }
   return iree_ok_status();
 }
@@ -736,7 +740,7 @@ iree_status_t loom_kernel_subgroup_active_mask_facts(
   result_facts[0] = loom_kernel_subgroup_lane_mask_facts(
       module, loom_kernel_subgroup_active_mask_mask(op));
   if (loom_value_facts_is_subgroup_lane_mask(result_facts[0])) {
-    loom_value_facts_mark_uniform(&result_facts[0]);
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   }
   return iree_ok_status();
 }
@@ -751,8 +755,8 @@ iree_status_t loom_kernel_subgroup_match_any_facts(
   if (!loom_value_facts_is_subgroup_lane_mask(result_facts[0])) {
     return iree_ok_status();
   }
-  if (loom_value_facts_is_uniform(operand_facts[0])) {
-    loom_value_facts_mark_uniform(&result_facts[0]);
+  if (loom_value_facts_is_subgroup_uniform(operand_facts[0])) {
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   } else {
     loom_value_facts_mark_lane_varying(&result_facts[0]);
   }
@@ -768,9 +772,113 @@ iree_status_t loom_kernel_subgroup_match_all_facts(
   result_facts[0] = loom_kernel_subgroup_lane_mask_facts(
       module, loom_kernel_subgroup_match_all_mask(op));
   if (loom_value_facts_is_subgroup_lane_mask(result_facts[0])) {
-    loom_value_facts_mark_uniform(&result_facts[0]);
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
   }
   result_facts[1] = loom_value_facts_make(0, 1, 1);
-  loom_value_facts_mark_uniform(&result_facts[1]);
+  loom_value_facts_mark_subgroup_uniform(&result_facts[1]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_subgroup_broadcast_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  result_facts[0] = operand_facts[0];
+  const loom_value_fact_uniform_scope_t value_scope =
+      loom_value_facts_uniform_scope(operand_facts[0]);
+  if (value_scope != LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+    loom_value_facts_mark_uniform_at_scope(&result_facts[0], value_scope);
+  } else if (loom_value_facts_is_subgroup_uniform(operand_facts[1])) {
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
+  } else {
+    loom_value_facts_propagate_binary_distribution(
+        operand_facts[0], operand_facts[1], &result_facts[0]);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_subgroup_broadcast_first_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  result_facts[0] = operand_facts[0];
+  loom_value_facts_mark_uniform_at_scope(
+      &result_facts[0],
+      iree_max(LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP,
+               loom_value_facts_uniform_scope(operand_facts[0])));
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_subgroup_reduce_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_unknown();
+  const bool has_cluster_size = !loom_attr_is_absent(
+      loom_op_attrs(op)[loom_kernel_subgroup_reduce_cluster_size_ATTR_INDEX]);
+  const bool has_cluster_stride = !loom_attr_is_absent(
+      loom_op_attrs(op)[loom_kernel_subgroup_reduce_cluster_stride_ATTR_INDEX]);
+  if (!has_cluster_size && !has_cluster_stride) {
+    loom_value_facts_mark_subgroup_uniform(&result_facts[0]);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_workgroup_reduce_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_workgroup_vote_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)operand_facts;
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(op)[0]);
+  if (loom_type_is_scalar(result_type) &&
+      loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+    result_facts[0] = loom_value_facts_make(0, 1, 1);
+  } else {
+    result_facts[0] = loom_value_facts_make(0, INT64_MAX, 1);
+  }
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_scan_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)operand_facts;
+  result_facts[0] = loom_value_facts_unknown();
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(op)[0]);
+  if (loom_type_is_scalar(result_type) &&
+      loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+    loom_value_facts_mark_lane_predicate(&result_facts[0]);
+  } else {
+    loom_value_facts_mark_lane_varying(&result_facts[0]);
+  }
   return iree_ok_status();
 }

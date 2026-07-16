@@ -388,7 +388,7 @@ TEST(FloatFacts, MeetPreservesSharedFloatClassFacts) {
   EXPECT_TRUE(loom_value_facts_is_float(finite));
   EXPECT_FALSE(loom_value_facts_is_exact(finite));
   EXPECT_TRUE(loom_value_facts_is_finite(finite));
-  EXPECT_TRUE(loom_value_facts_is_uniform(finite));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(finite));
 
   loom_value_facts_t raw_nan = loom_value_facts_known_nan();
   loom_value_facts_t exact_nan = loom_value_facts_exact_float(

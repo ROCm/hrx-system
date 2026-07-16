@@ -32,12 +32,13 @@ static int64_t loom_value_facts_exact_i64_divisor(int64_t value) {
 void loom_value_facts_propagate_unary_distribution(loom_value_facts_t input,
                                                    loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_uniform(out);
+    loom_value_facts_mark_workgroup_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(input) ||
              loom_value_facts_is_lane_varying(input)) {
     loom_value_facts_mark_lane_varying(out);
-  } else if (loom_value_facts_is_uniform(input)) {
-    loom_value_facts_mark_uniform(out);
+  } else {
+    loom_value_facts_mark_uniform_at_scope(
+        out, loom_value_facts_uniform_scope(input));
   }
 }
 
@@ -45,15 +46,17 @@ void loom_value_facts_propagate_binary_distribution(loom_value_facts_t lhs,
                                                     loom_value_facts_t rhs,
                                                     loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_uniform(out);
+    loom_value_facts_mark_workgroup_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(lhs) ||
              loom_value_facts_is_lane_predicate(rhs) ||
              loom_value_facts_is_lane_varying(lhs) ||
              loom_value_facts_is_lane_varying(rhs)) {
     loom_value_facts_mark_lane_varying(out);
-  } else if (loom_value_facts_is_uniform(lhs) &&
-             loom_value_facts_is_uniform(rhs)) {
-    loom_value_facts_mark_uniform(out);
+  } else {
+    const loom_value_fact_uniform_scope_t uniform_scope =
+        iree_min(loom_value_facts_uniform_scope(lhs),
+                 loom_value_facts_uniform_scope(rhs));
+    loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
   }
 }
 
@@ -62,7 +65,7 @@ void loom_value_facts_propagate_ternary_distribution(loom_value_facts_t a,
                                                      loom_value_facts_t c,
                                                      loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_uniform(out);
+    loom_value_facts_mark_workgroup_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(a) ||
              loom_value_facts_is_lane_predicate(b) ||
              loom_value_facts_is_lane_predicate(c) ||
@@ -70,9 +73,12 @@ void loom_value_facts_propagate_ternary_distribution(loom_value_facts_t a,
              loom_value_facts_is_lane_varying(b) ||
              loom_value_facts_is_lane_varying(c)) {
     loom_value_facts_mark_lane_varying(out);
-  } else if (loom_value_facts_is_uniform(a) && loom_value_facts_is_uniform(b) &&
-             loom_value_facts_is_uniform(c)) {
-    loom_value_facts_mark_uniform(out);
+  } else {
+    const loom_value_fact_uniform_scope_t uniform_scope =
+        iree_min(loom_value_facts_uniform_scope(a),
+                 iree_min(loom_value_facts_uniform_scope(b),
+                          loom_value_facts_uniform_scope(c)));
+    loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
   }
 }
 
@@ -86,7 +92,7 @@ loom_value_facts_t loom_value_facts_exact_i64(int64_t value) {
   facts.range_hi = value;
   facts.known_divisor = loom_value_facts_exact_i64_divisor(value);
   facts.flags = loom_value_facts_compute_flags(value, value);
-  loom_value_facts_mark_uniform(&facts);
+  loom_value_facts_mark_workgroup_uniform(&facts);
   return facts;
 }
 
@@ -231,7 +237,7 @@ loom_value_facts_t loom_value_facts_clamp_domain(loom_value_facts_t facts,
           : 0;
   result.flags |=
       (facts.flags &
-       (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+       (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING |
         LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK)) |
       preserved_topology_flags;
   result.extension_id = facts.extension_id;
@@ -365,7 +371,7 @@ void loom_value_facts_recompute_flags(loom_value_facts_t* facts) {
   uint32_t preserved =
       facts->flags &
       (LOOM_VALUE_FACT_POWER_OF_TWO | LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK |
-       LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+       LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING |
        LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK |
        LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK);
   facts->flags =
@@ -1071,17 +1077,7 @@ static void loom_value_facts_propagate_bitwise_flags(
     loom_value_facts_mark_subgroup_lane_mask(out);
   }
 
-  if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_uniform(out);
-  } else if (loom_value_facts_is_lane_predicate(*lhs) ||
-             loom_value_facts_is_lane_predicate(*rhs) ||
-             loom_value_facts_is_lane_varying(*lhs) ||
-             loom_value_facts_is_lane_varying(*rhs)) {
-    loom_value_facts_mark_lane_varying(out);
-  } else if (loom_value_facts_is_uniform(*lhs) &&
-             loom_value_facts_is_uniform(*rhs)) {
-    loom_value_facts_mark_uniform(out);
-  }
+  loom_value_facts_propagate_binary_distribution(*lhs, *rhs, out);
 }
 
 void loom_value_facts_andi(const loom_value_facts_t* lhs,
@@ -1405,17 +1401,17 @@ loom_value_facts_t loom_value_facts_non_negative_extent(
     loom_value_facts_t facts) {
   if (loom_value_facts_is_float(facts) || facts.range_hi < 0) {
     loom_value_facts_t result = loom_value_facts_make(0, INT64_MAX, 1);
-    result.flags |=
-        facts.flags & (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
-                       LOOM_VALUE_FACT_LANE_PREDICATE);
+    result.flags |= facts.flags & (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK |
+                                   LOOM_VALUE_FACT_LANE_VARYING |
+                                   LOOM_VALUE_FACT_LANE_PREDICATE);
     return result;
   }
   int64_t lo = loom_max_i64(facts.range_lo, 0);
   loom_value_facts_t result =
       loom_value_facts_make(lo, facts.range_hi, facts.known_divisor);
-  result.flags |=
-      facts.flags & (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
-                     LOOM_VALUE_FACT_LANE_PREDICATE);
+  result.flags |= facts.flags & (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK |
+                                 LOOM_VALUE_FACT_LANE_VARYING |
+                                 LOOM_VALUE_FACT_LANE_PREDICATE);
   return result;
 }
 

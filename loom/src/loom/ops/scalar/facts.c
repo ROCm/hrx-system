@@ -37,7 +37,7 @@ static void loom_scalar_expand_result_facts_to_domain_on_overflow(
     if (facts->range_lo < domain_lo || facts->range_hi > domain_hi) {
       const uint32_t preserved_flags =
           facts->flags &
-          (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+          (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING |
            LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
       const int64_t known_divisor = facts->known_divisor;
       *facts = loom_value_facts_make(domain_lo, domain_hi, known_divisor);
@@ -565,14 +565,10 @@ BIT_COUNT_FACTS(loom_scalar_ctpopi_facts, loom_scalar_ctpopi_result,
 
 static void loom_scalar_mark_compare_distribution(
     const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts) {
-  if (loom_value_facts_is_lane_predicate(operand_facts[0]) ||
-      loom_value_facts_is_lane_predicate(operand_facts[1]) ||
-      loom_value_facts_is_lane_varying(operand_facts[0]) ||
-      loom_value_facts_is_lane_varying(operand_facts[1])) {
+  loom_value_facts_propagate_binary_distribution(
+      operand_facts[0], operand_facts[1], result_facts);
+  if (loom_value_facts_is_lane_varying(*result_facts)) {
     loom_value_facts_mark_lane_predicate(result_facts);
-  } else if (loom_value_facts_is_uniform(operand_facts[0]) &&
-             loom_value_facts_is_uniform(operand_facts[1])) {
-    loom_value_facts_mark_uniform(result_facts);
   }
 }
 

@@ -365,7 +365,7 @@ kernel.def @select_lane_predicate_different_values_is_varying() {
   %condition = index.cmp eq, %lane, %zero : index
   %selected = scf.select %condition, %lhs, %rhs : i32
   %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
-  %selected_is_uniform = test.fact_uniform %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
   test.use %selected_is_varying, %selected_is_uniform : i1, i1
   kernel.return
 }
@@ -395,7 +395,7 @@ kernel.def @select_lane_predicate_boolean_result_is_predicate() {
   %condition = index.cmp eq, %lane, %zero : index
   %selected = scf.select %condition, %lhs, %rhs : i1
   %selected_is_predicate = test.fact_lane_predicate %selected : i1 -> i1
-  %selected_is_uniform = test.fact_uniform %selected : i1 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i1 -> i1
   test.use %selected_is_predicate, %selected_is_uniform : i1, i1
   kernel.return
 }

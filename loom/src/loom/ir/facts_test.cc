@@ -781,6 +781,57 @@ TEST(FactsApplyPredicate, ComposedTilePredicate) {
 }
 
 //===----------------------------------------------------------------------===//
+// Execution distribution
+//===----------------------------------------------------------------------===//
+
+TEST(ExecutionDistribution, ExactValuesAreWorkgroupUniform) {
+  const loom_value_facts_t facts = loom_value_facts_exact_i64(7);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(facts));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+}
+
+TEST(ExecutionDistribution, UnaryPreservesSubgroupScope) {
+  loom_value_facts_t input = loom_value_facts_unknown();
+  loom_value_facts_mark_subgroup_uniform(&input);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_unary_distribution(input, &output);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_workgroup_uniform(output));
+}
+
+TEST(ExecutionDistribution, BinaryUsesWeakestUniformScope) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_mark_subgroup_uniform(&rhs);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_workgroup_uniform(output));
+}
+
+TEST(ExecutionDistribution, UnknownInputPreventsUniformProof) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  const loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_lane_varying(output));
+}
+
+TEST(ExecutionDistribution, LaneVaryingInputDominatesUniformScope) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&rhs);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(output));
+  EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(output));
+}
+
+//===----------------------------------------------------------------------===//
 // Transfer functions: addi
 //===----------------------------------------------------------------------===//
 
@@ -821,7 +872,7 @@ TEST(AddiTransfer, Overflow) {
   loom_value_facts_addi(&a, &b, &out);
   EXPECT_EQ(out.range_lo, INT64_MIN);
   EXPECT_EQ(out.range_hi, INT64_MAX);
-  EXPECT_TRUE(loom_value_facts_is_uniform(out));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(out));
 }
 
 TEST(AddiTransfer, InPlaceAccumulation) {

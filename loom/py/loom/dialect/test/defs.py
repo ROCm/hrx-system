@@ -528,16 +528,28 @@ test_fact_not_subnormal = Op(
     examples=["%not_subnormal = test.fact_not_subnormal %x : f32 -> i1"],
 )
 
-test_fact_uniform = Op(
-    "test.fact_uniform",
+test_fact_subgroup_uniform = Op(
+    "test.fact_subgroup_uniform",
     group=test_ops,
-    doc="Returns 1 if the input is provably uniform across active lanes, 0 otherwise.",
+    doc="Returns 1 if the input is provably uniform across a subgroup, 0 otherwise.",
     operands=[Operand("value", ANY)],
     results=[Result("result", I1)],
     traits=[PURE],
-    facts="loom_test_fact_uniform_facts",
+    facts="loom_test_fact_subgroup_uniform_facts",
     format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
-    examples=["%uniform = test.fact_uniform %x : index -> i1"],
+    examples=["%uniform = test.fact_subgroup_uniform %x : index -> i1"],
+)
+
+test_fact_workgroup_uniform = Op(
+    "test.fact_workgroup_uniform",
+    group=test_ops,
+    doc="Returns 1 if the input is provably uniform across a workgroup, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_workgroup_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_workgroup_uniform %x : index -> i1"],
 )
 
 test_fact_lane_varying = Op(
@@ -2429,7 +2441,8 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_non_zero,
     test_fact_positive,
     test_fact_power_of_two,
-    test_fact_uniform,
+    test_fact_subgroup_uniform,
+    test_fact_workgroup_uniform,
     test_fact_lane_varying,
     test_fact_lane_predicate,
     test_fact_subgroup_lane_mask,

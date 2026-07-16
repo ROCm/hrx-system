@@ -800,6 +800,9 @@ enum loom_region_flag_bits_e {
   // This is a region signature contract, not a property of the generic buffer
   // type.
   LOOM_REGION_GLOBAL_BUFFER_ARGS = 1u << 3,
+  // Scalar entry block arguments are identical across the workgroup. This is
+  // a region signature contract and does not apply to nested region arguments.
+  LOOM_REGION_WORKGROUP_UNIFORM_ARGS = 1u << 4,
 };
 typedef uint8_t loom_region_flags_t;
 

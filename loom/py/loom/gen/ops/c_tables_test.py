@@ -763,6 +763,34 @@ def test_generate_builders_use_explicit_flags_for_optional_regions() -> None:
     assert "LOOM_REGION_OPTIONAL" in tables_c
 
 
+def test_generate_tables_encodes_region_argument_uniform_scope() -> None:
+    op = Op(
+        "test.kernel_region",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="workgroup")],
+        format=[Region("body")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_REGION_WORKGROUP_UNIFORM_ARGS" in tables_c
+
+
+def test_generate_tables_rejects_unknown_region_argument_uniform_scope() -> None:
+    op = Op(
+        "test.bad_region_scope",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="device")],
+        format=[Region("body")],
+    )
+
+    with _raises_value_error(
+        r"Op 'test\.bad_region_scope' region 'body' has unsupported "
+        r"arg_uniform_scope 'device'"
+    ):
+        generate_tables_c("test", 0, [op])
+
+
 def test_has_parent_generates_direct_parent_placement() -> None:
     parent = Op(
         "test.parent",

@@ -737,6 +737,9 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
+    arg_uniform_scope: Optional execution scope over which scalar entry block
+        arguments are identical. This is a region boundary contract rather
+        than a property inferred from argument types.
     """
 
     name: str
@@ -748,6 +751,7 @@ class RegionDef:
     implicit_args: tuple[tuple[str, str], ...] = ()
     arg_source: str | None = None
     buffer_arg_memory_space: str | None = None
+    arg_uniform_scope: str | None = None
 
 
 # ============================================================================

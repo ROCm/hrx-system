@@ -973,7 +973,7 @@ static bool loom_amdgpu_source_value_facts_are_uniform_i1(
           loom_module_value_type(module, source_value_id))) {
     return false;
   }
-  return loom_value_facts_is_uniform(
+  return loom_value_facts_is_subgroup_uniform(
       loom_value_fact_table_lookup(fact_table, source_value_id));
 }
 
@@ -2119,7 +2119,7 @@ bool loom_amdgpu_source_value_is_uniform_subgroup_lane_mask(
   loom_value_facts_t facts = loom_value_facts_unknown();
   return loom_amdgpu_source_value_facts_are_subgroup_lane_mask(
              module, fact_table, source_value_id, &facts) &&
-         loom_value_facts_is_uniform(facts);
+         loom_value_facts_is_subgroup_uniform(facts);
 }
 
 bool loom_amdgpu_source_value_is_divergent_subgroup_lane_mask(
