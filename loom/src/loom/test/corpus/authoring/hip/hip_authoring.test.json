@@ -216,7 +216,7 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
             "\"status\":\"OK\"",
             "\"local_memory_bytes\":256",
             "\"local_memory_count\":2",
@@ -309,7 +309,7 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
             "\"status\":\"OK\"",
             "\"function\":\"shared_memory_wave_i32_roundtrip\"",
             "\"function\":\"shared_memory_wave_i32_roundtrip_static_offset\"",
@@ -401,7 +401,7 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx1100\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx1100\"",
+            "\"artifact_format\":\"elf\"",
             "\"status\":\"OK\"",
             "\"function\":\"wave64_workgroup_reduce_sub_wave\"",
             "\"function\":\"wave64_workgroup_reduce_full_wave\"",
@@ -485,7 +485,7 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
             "\"status\":\"OK\"",
             "\"local_memory_bytes\":512",
             "\"local_memory_count\":4",
@@ -566,7 +566,7 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
             "\"status\":\"OK\"",
             "\"local_memory_bytes\":1024",
             "\"local_memory_count\":2",

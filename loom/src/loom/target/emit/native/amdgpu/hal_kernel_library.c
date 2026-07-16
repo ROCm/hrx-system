@@ -931,7 +931,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       entry_reports[i].backend_name = report->backend_name;
       entry_reports[i].target_family_name = report->target_family_name;
       entry_reports[i].target_key = report->target_key;
-      entry_reports[i].executable_format = report->executable_format;
+      entry_reports[i].artifact_format = report->artifact_format;
     }
   }
   loom_amdgpu_hal_kernel_library_kernel_plan_t* plans = NULL;

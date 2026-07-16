@@ -29,7 +29,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"artifact_format\":\"elf\"",
                 "\"status\":\"OK\""
               ]
             }
@@ -81,7 +81,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"artifact_format\":\"elf\"",
                 "\"status\":\"OK\""
               ]
             }
@@ -275,7 +275,7 @@
             "contains": {
               "unordered": [
                 "\"target_bundle\":\"gfx1100_target\"",
-                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx1100\"",
+                "\"artifact_format\":\"elf\"",
                 "\"function\":\"selected_store_i32\"",
                 "\"status\":\"OK\""
               ]

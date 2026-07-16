@@ -238,8 +238,8 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
                                      IREE_SV("fake-hal")));
   EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.target_key,
                                      IREE_SV("fake-hal")));
-  EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.executable_format,
-                                     IREE_SV("fake-hal-target")));
+  EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.artifact_format,
+                                     IREE_SV("elf")));
   EXPECT_EQ(candidate.compile_report.artifact_size,
             sizeof(kFakeHalExecutableData));
   EXPECT_EQ(report.artifact_size, candidate.compile_report.artifact_size);
@@ -298,8 +298,8 @@ TEST_F(HalCandidateTest, EmitsModuleTargetCandidate) {
   EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
                                      IREE_SV("fake-hal-target")));
   EXPECT_TRUE(iree_string_view_is_empty(candidate.compile_report.target_key));
-  EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.executable_format,
-                                     IREE_SV("fake-hal-target")));
+  EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.artifact_format,
+                                     IREE_SV("elf")));
   EXPECT_EQ(report.artifact_size, sizeof(kFakeHalExecutableData));
 
   g_fake_hal_expect_module_target = false;

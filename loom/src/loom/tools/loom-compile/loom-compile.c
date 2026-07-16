@@ -868,8 +868,8 @@ static iree_status_t loom_compile_emit_target(
     compile_options->report->artifact_kind =
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
     compile_options->report->backend_name = target_emitter->name;
-    compile_options->report->executable_format =
-        target_emitter->public_artifact_format;
+    compile_options->report->artifact_format = loom_target_artifact_format_name(
+        target_emitter->target_artifact_format);
   }
   const loom_target_emit_request_t request = {
       .target_environment =
