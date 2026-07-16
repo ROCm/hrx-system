@@ -205,8 +205,7 @@ static const loomc_artifact_t* find_result_artifact(
   return NULL;
 }
 
-static loomc_status_t create_hal_device_and_cache(
-    emit_spirv_iree_hal_state_t* state) {
+static loomc_status_t create_hal_device(emit_spirv_iree_hal_state_t* state) {
   iree_allocator_t host_allocator = iree_allocator_system();
   iree_status_t iree_status = iree_hal_register_all_available_drivers(
       iree_hal_driver_registry_default());
@@ -545,7 +544,7 @@ static loomc_status_t run_emit_spirv_iree_hal_example(const char* device_uri,
   emit_spirv_iree_hal_state_t state;
   emit_spirv_iree_hal_state_initialize(&state, device_uri, output_path);
 
-  loomc_status_t status = create_hal_device_and_cache(&state);
+  loomc_status_t status = create_hal_device(&state);
   if (loomc_status_is_ok(status) && !state.skipped) {
     status = create_resources(&state);
   }

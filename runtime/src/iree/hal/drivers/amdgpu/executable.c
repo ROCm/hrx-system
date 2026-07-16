@@ -974,7 +974,7 @@ typedef struct iree_hal_amdgpu_executable_t {
   bool requires_queue_scope;
   // Number of entries in |queue_scopes|.
   iree_host_size_t queue_scope_count;
-  // Immutable queue identities copied from the executable cache.
+  // Immutable queue identities captured from the owning logical device.
   iree_hal_amdgpu_queue_scope_t* queue_scopes;
   // Loaded code-object host/device ranges indexed by physical device ordinal.
   iree_hal_amdgpu_loaded_code_object_range_t*

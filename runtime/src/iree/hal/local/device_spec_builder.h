@@ -31,7 +31,7 @@ typedef struct iree_hal_local_device_spec_params_t {
   iree_host_size_t default_queue_worker_count;
   // Number of executable loaders in |loaders|.
   iree_host_size_t loader_count;
-  // Borrowed executable loaders used by the local executable cache.
+  // Borrowed executable loaders used to advertise supported target families.
   iree_hal_executable_loader_t** loaders;
 } iree_hal_local_device_spec_params_t;
 

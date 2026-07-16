@@ -274,7 +274,8 @@ iree_status_t iree_hal_hip_native_executable_create(
 
   *out_executable = NULL;
 
-  // TODO: move to the executable cache to avoid repeated queries.
+  // TODO: capture these immutable limits during device creation to avoid
+  // repeated queries on each executable load.
   iree_hal_hip_limits_t limits = {0};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_query_limits(symbols, topology.devices[0].hip_device,

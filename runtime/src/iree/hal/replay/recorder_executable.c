@@ -169,7 +169,7 @@ iree_status_t iree_hal_replay_recorder_executable_recorded_ordinal(
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "replay recording requires an executable created by the replay "
-        "recorder executable cache");
+        "recorder device load path");
   }
 
   iree_hal_replay_recorder_executable_t* recorder_executable =

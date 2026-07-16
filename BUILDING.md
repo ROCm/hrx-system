@@ -268,9 +268,9 @@ Older shared selectors such as `gfx9-generic`, `gfx90a`, `gfx908`,
 AMDGPU tooling, but they are not Loom compiler targets until matching Loom
 descriptor sets exist. The `iree_hal` source selector narrows Loom AMDGPU
 support to the descriptor-backed subset requested by the runtime
-`IREE_HAL_AMDGPU_TARGETS` setting. That is useful for executable-cache builds
-that want Loom linked with exactly the runtime HAL target horizon, while normal
-compiler and `loom-compile` builds should usually keep `loom_defaults`.
+`IREE_HAL_AMDGPU_TARGETS` setting. That is useful for runtime-integrated JIT
+builds that want Loom linked with exactly the runtime HAL target horizon, while
+normal compiler and `loom-compile` builds should usually keep `loom_defaults`.
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |
