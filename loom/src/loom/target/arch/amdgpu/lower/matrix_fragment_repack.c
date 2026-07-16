@@ -19,7 +19,7 @@
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/bf16.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"

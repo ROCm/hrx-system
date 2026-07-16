@@ -42,6 +42,7 @@
 #include "loom/target/arch/amdgpu/lower/async.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/buffer.h"
+#include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/control.h"
 #include "loom/target/arch/amdgpu/lower/dot.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -53,6 +54,7 @@
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_plan.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_repack.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/preamble.h"
 #include "loom/target/arch/amdgpu/lower/sanitizer.h"
 #include "loom/target/arch/amdgpu/lower/sanitizer_race.h"
@@ -61,7 +63,11 @@
 #include "loom/target/arch/amdgpu/lower/sync.h"
 #include "loom/target/arch/amdgpu/lower/table.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
-#include "loom/target/arch/amdgpu/lower/values.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
+#include "loom/target/arch/amdgpu/lower/value/scalar_conversion.h"
+#include "loom/target/arch/amdgpu/lower/value/storage.h"
+#include "loom/target/arch/amdgpu/lower/value/vector_construct.h"
+#include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/workgroup.h"
 
 typedef struct loom_amdgpu_lower_dispatch_row_t
@@ -89,8 +95,8 @@ typedef uint8_t loom_amdgpu_lower_policy_bits_t;
 enum loom_amdgpu_storage_policy_e {
   // Conservative target-plan behavior: keep every source operand available.
   LOOM_AMDGPU_STORAGE_SOURCE_OPERANDS = 0,
-  // Structural value lowering owns its source operand demand policy.
-  LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN = 1,
+  // Selected value-lowering plans own their source operand demand policy.
+  LOOM_AMDGPU_STORAGE_VALUE_PLAN = 1,
   // Vector register-map plans own their mapped source-value demand policy.
   LOOM_AMDGPU_STORAGE_VECTOR_REGISTER_MAP_PLAN = 2,
   // Target plan data starts with row-declared source values.
@@ -111,15 +117,17 @@ enum loom_amdgpu_storage_policy_e {
   LOOM_AMDGPU_STORAGE_ASYNC_GATHER = 10,
   // Sanitizer access plans own their source operand demand policy.
   LOOM_AMDGPU_STORAGE_SANITIZER_ACCESS = 11,
+  // Vector-construction plans own their exact source-value demand policy.
+  LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN = 12,
   // Maximum storage-policy value accepted by dispatch row policy bits.
-  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_SANITIZER_ACCESS,
+  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN,
 };
 
 enum loom_amdgpu_preselect_policy_e {
   // The row does not need target-owned preselection before generated rules.
   LOOM_AMDGPU_PRESELECT_NONE = 0,
-  // Invoke structural value preselection for value-constructor special cases.
-  LOOM_AMDGPU_PRESELECT_STRUCTURAL_VALUE_PLAN = 1,
+  // Invoke vector-construction preselection for FMA-mix combines.
+  LOOM_AMDGPU_PRESELECT_VECTOR_CONSTRUCT_PLAN = 1,
   // Invoke the target-owned plan selector before generated rules.
   LOOM_AMDGPU_PRESELECT_TARGET_PLAN = 2,
   // Invoke the target-owned plan selector and emit FMA literal diagnostics when
@@ -222,19 +230,19 @@ static_assert(sizeof(loom_amdgpu_lower_dispatch_table_t) == 16,
     return emit_fn(context, source_op, (const plan_type*)plan.target_data); \
   }
 
-static iree_status_t loom_amdgpu_select_structural_value_dispatch(
+static iree_status_t loom_amdgpu_select_vector_construct_dispatch(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_lower_dispatch_row_t* row,
     loom_low_lower_plan_t* out_plan) {
   (void)row;
-  return loom_amdgpu_select_structural_value_plan(context, source_op, out_plan);
+  return loom_amdgpu_select_vector_construct_plan(context, source_op, out_plan);
 }
 
-static iree_status_t loom_amdgpu_emit_structural_value_dispatch(
+static iree_status_t loom_amdgpu_emit_vector_construct_dispatch(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_lower_dispatch_row_t* row, loom_low_lower_plan_t plan) {
   (void)row;
-  return loom_amdgpu_lower_structural_value_op(context, source_op, plan);
+  return loom_amdgpu_lower_vector_construct_op(context, source_op, plan);
 }
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_index_constant_dispatch,
@@ -1179,8 +1187,8 @@ static iree_status_t loom_amdgpu_preselect_op(void* user_data,
   const loom_amdgpu_preselect_policy_t preselect_policy =
       loom_amdgpu_dispatch_row_preselect_policy(row);
   switch (preselect_policy) {
-    case LOOM_AMDGPU_PRESELECT_STRUCTURAL_VALUE_PLAN:
-      return loom_amdgpu_preselect_structural_value_plan(context, source_op,
+    case LOOM_AMDGPU_PRESELECT_VECTOR_CONSTRUCT_PLAN:
+      return loom_amdgpu_preselect_vector_construct_plan(context, source_op,
                                                          out_plan);
     case LOOM_AMDGPU_PRESELECT_TARGET_PLAN:
     case LOOM_AMDGPU_PRESELECT_TARGET_PLAN_FMA_DIAGNOSTIC: {
@@ -1256,8 +1264,11 @@ static void loom_amdgpu_mark_plan_storage_demands(
           context,
           (const loom_amdgpu_sanitizer_access_plan_t*)plan.target_data);
       return;
-    case LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN:
-      loom_amdgpu_mark_structural_value_plan_storage_demands(context, source_op,
+    case LOOM_AMDGPU_STORAGE_VALUE_PLAN:
+      loom_amdgpu_mark_value_plan_storage_demands(context, source_op, plan);
+      return;
+    case LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN:
+      loom_amdgpu_mark_vector_construct_plan_storage_demands(context, source_op,
                                                              plan);
       return;
     default:

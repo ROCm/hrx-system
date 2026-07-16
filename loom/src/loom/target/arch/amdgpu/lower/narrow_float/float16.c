@@ -4,11 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/lower/narrow_float/bf16.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
 
 #include "iree/base/bitfield.h"
 #include "loom/ir/attribute.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -264,4 +265,69 @@ iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16(
   return loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
       context, source_op, descriptors, low_source_lane, high_source_lane,
       lane_type, out_packed);
+}
+
+iree_status_t loom_amdgpu_extract_bf16_register_lane_as_f32_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_register, uint32_t register_lane,
+    loom_type_t result_lane_type, loom_value_id_t* out_lane) {
+  *out_lane = LOOM_VALUE_ID_INVALID;
+  if (register_lane == 0) {
+    return loom_amdgpu_emit_vgpr_shift(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
+        source_register, result_lane_type, out_lane);
+  }
+  return loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+      source_register, UINT32_C(0xFFFF0000), result_lane_type, out_lane);
+}
+
+iree_status_t loom_amdgpu_extract_bf16_range_lane_as_f32_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t source_register_count,
+    uint32_t lane_index, loom_type_t source_lane_type,
+    loom_type_t result_lane_type, loom_value_id_t* out_lane) {
+  const uint32_t register_index = lane_index / 2u;
+  loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+      context, source_op, low_source, source_register_count, register_index,
+      source_lane_type, &source_register));
+  return loom_amdgpu_extract_bf16_register_lane_as_f32_bits(
+      context, source_op, source_register, lane_index % 2u, result_lane_type,
+      out_lane);
+}
+
+iree_status_t loom_amdgpu_extract_f16_lane_as_low_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t source_register_count,
+    uint32_t lane_index, loom_type_t lane_type, loom_value_id_t* out_lane) {
+  *out_lane = LOOM_VALUE_ID_INVALID;
+  const uint32_t register_index = lane_index / 2u;
+  const uint32_t register_bit_offset = (lane_index % 2u) * 16u;
+  loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+      context, source_op, low_source, source_register_count, register_index,
+      lane_type, &source_register));
+  if (register_bit_offset == 0) {
+    *out_lane = source_register;
+    return iree_ok_status();
+  }
+  return loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+      register_bit_offset, source_register, lane_type, out_lane);
+}
+
+iree_status_t loom_amdgpu_pack_f32_lane_to_f16_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_lane, uint32_t register_lane, loom_type_t lane_type,
+    loom_value_id_t* inout_packed) {
+  loom_value_id_t half_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_F32, source_lane,
+      lane_type, &half_lane));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
+      context, source_op, half_lane, &half_lane));
+  return loom_amdgpu_pack_bits_into_register(context, source_op, half_lane,
+                                             register_lane * 16u, lane_type,
+                                             inout_packed);
 }

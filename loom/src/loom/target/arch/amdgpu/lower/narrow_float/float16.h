@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU narrow floating-point payload lowering for BF16 storage.
+// AMDGPU narrow floating-point payload lowering for F16 and BF16 storage.
 //
-// This shard owns packet materialization for BF16 lanes and packed BF16
-// registers. FP8/BF8 decode, matrix-fragment stores, and vector fptrunc all
-// share this path once they need to form BF16 payloads from F32 lanes.
+// This shard owns packet materialization and packed-register extraction for
+// 16-bit floating-point lanes. FP8/BF8 decode, matrix-fragment stores, vector
+// construction, and vector conversion share these physical payload helpers.
 
-#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_BF16_H_
-#define LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_BF16_H_
+#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FLOAT16_H_
+#define LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FLOAT16_H_
 
 #include <stdint.h>
 
@@ -103,8 +103,35 @@ iree_status_t loom_amdgpu_emit_packed_bf16_lane_pair(
     loom_value_id_t low_lane, loom_value_id_t high_lane, loom_type_t lane_type,
     loom_value_id_t* out_packed);
 
+// Extracts one packed BF16 register lane and aligns its bits as an F32 payload.
+iree_status_t loom_amdgpu_extract_bf16_register_lane_as_f32_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_register, uint32_t register_lane,
+    loom_type_t result_lane_type, loom_value_id_t* out_lane);
+
+// Extracts one lane from a packed BF16 register range and aligns its bits as an
+// F32 payload.
+iree_status_t loom_amdgpu_extract_bf16_range_lane_as_f32_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t source_register_count,
+    uint32_t lane_index, loom_type_t source_lane_type,
+    loom_type_t result_lane_type, loom_value_id_t* out_lane);
+
+// Extracts one lane from a packed F16 register range into the low 16 bits of a
+// one-unit VGPR.
+iree_status_t loom_amdgpu_extract_f16_lane_as_low_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t source_register_count,
+    uint32_t lane_index, loom_type_t lane_type, loom_value_id_t* out_lane);
+
+// Converts one F32 lane to F16 and packs it into one half of |inout_packed|.
+iree_status_t loom_amdgpu_pack_f32_lane_to_f16_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_lane, uint32_t register_lane, loom_type_t lane_type,
+    loom_value_id_t* inout_packed);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_BF16_H_
+#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FLOAT16_H_

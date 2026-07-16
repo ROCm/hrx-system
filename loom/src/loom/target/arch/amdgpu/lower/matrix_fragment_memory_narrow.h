@@ -10,7 +10,7 @@
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_MATRIX_FRAGMENT_MEMORY_NARROW_H_
 
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_access.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/bf16.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
 
 #ifdef __cplusplus
 extern "C" {

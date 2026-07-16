@@ -170,7 +170,7 @@ def test_validate_dispatch_rows_rejects_wrong_report_key_namespace() -> None:
                 "emit",
                 "verify",
                 "1",
-                "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
+                "LOOM_AMDGPU_STORAGE_VALUE_PLAN",
             ),
         ),
     )
@@ -233,7 +233,7 @@ def test_validate_dispatch_rows_rejects_bad_source_count() -> None:
                 "select",
                 "emit",
                 "verify",
-                "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
+                "LOOM_AMDGPU_STORAGE_VALUE_PLAN",
             ),
         ),
     )
@@ -264,7 +264,7 @@ def test_validate_dispatch_rows_rejects_policy_in_non_policy_slot() -> None:
             macro_name="RECIPE_DATA_ROW",
             arguments=(
                 "LOOM_OP_VECTOR_CONCAT",
-                "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
+                "LOOM_AMDGPU_STORAGE_VALUE_PLAN",
                 "select",
                 "emit",
                 "verify",
@@ -329,7 +329,7 @@ def test_validate_dispatch_rows_rejects_generated_recipe() -> None:
         )
 
 
-def test_validate_dispatch_rows_accepts_structural_value_policy() -> None:
+def test_validate_dispatch_rows_accepts_vector_construct_policy() -> None:
     rows = (
         DispatchRow(
             op_kind="LOOM_OP_VECTOR_INSERT",
@@ -340,8 +340,8 @@ def test_validate_dispatch_rows_accepts_structural_value_policy() -> None:
                 "select",
                 "emit",
                 "verify",
-                "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
-                "LOOM_AMDGPU_PRESELECT_STRUCTURAL_VALUE_PLAN",
+                "LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN",
+                "LOOM_AMDGPU_PRESELECT_VECTOR_CONSTRUCT_PLAN",
             ),
         ),
     )
@@ -403,7 +403,7 @@ def test_validate_dispatch_rows_accepts_generated_direct_preselect() -> None:
                 "select",
                 "emit",
                 "verify",
-                "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
+                "LOOM_AMDGPU_STORAGE_VALUE_PLAN",
                 "LOOM_AMDGPU_PRESELECT_TARGET_PLAN",
             ),
         ),

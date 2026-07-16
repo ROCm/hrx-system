@@ -21,7 +21,7 @@
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_narrow.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_packet.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
-#include "loom/target/arch/amdgpu/lower/narrow_float/bf16.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
