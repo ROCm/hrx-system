@@ -21,9 +21,7 @@ extern "C" {
 // Creates a library loader that exposes the provided libraries to the HAL for
 // use as executables.
 //
-// This loader will handle executable formats of 'static'. Version checks will
-// ensure that the IREE compiler-produced static library version is one that the
-// runtime can support.
+// Each linked library is queried and version-checked before use.
 //
 // The name defined on each library will be used to lookup the executables and
 // must match with the names used during compilation exactly. The

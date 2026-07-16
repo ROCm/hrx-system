@@ -21,8 +21,8 @@
 #include "iree/io/file_contents.h"
 #include "iree/testing/benchmark.h"
 
-IREE_FLAG(string, executable_format, "",
-          "Format of the executable file being loaded.");
+IREE_FLAG(string, executable_loader, "",
+          "Name of the executable loader to use.");
 IREE_FLAG(string, executable_file, "",
           "Path to the executable library file to load.");
 
@@ -137,7 +137,7 @@ static iree_status_t iree_hal_executable_library_run(
   // Register the loader used to load (or find) the executable.
   iree_hal_executable_loader_t* executable_loader = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_create_executable_loader_by_name(
-      iree_make_cstring_view(FLAG_executable_format), plugin_manager,
+      iree_make_cstring_view(FLAG_executable_loader), plugin_manager,
       host_allocator, &executable_loader));
 
   // Build the same target set a local HAL device would advertise for the
@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
       "etc).\n"
       "\n"
       "Example --flagfile:\n"
-      "  --executable_format=embedded-elf\n"
+      "  --executable_loader=embedded-elf\n"
       "  --executable_file=iree/hal/local/elf/testdata/"
       "elementwise_mul_x86_64.so\n"
       "  --export_ordinal=0\n"
