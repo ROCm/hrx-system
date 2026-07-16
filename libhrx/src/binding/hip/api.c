@@ -10750,8 +10750,8 @@ HIPAPI hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
 //
 // Multi-GPU: Module is loaded for the current device's architecture.
 //
-// Warning: Ensure the image buffer remains valid during loading.
-// The implementation may reference the buffer asynchronously.
+// Image lifetime: The image buffer must remain valid until this call returns
+// and may be released immediately afterward.
 //
 // See also: hipModuleLoad, hipModuleLoadData, hipModuleUnload,
 //           hipModuleGetFunction.
@@ -10846,7 +10846,6 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
   }
 
   iree_hal_executable_load_flags_t load_flags =
-      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
       IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;

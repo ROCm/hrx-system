@@ -1402,7 +1402,6 @@ class QueueBenchmark : public benchmark::Fixture {
 
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
-    load_params.flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
     load_params.executable_data = executable_data;
     return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
                                            target_result.target, &load_params,
@@ -1452,7 +1451,6 @@ class QueueBenchmark : public benchmark::Fixture {
 
       iree_hal_executable_load_params_t load_params;
       iree_hal_executable_load_params_initialize(&load_params);
-      load_params.flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
       load_params.executable_data = executable_data;
       return iree_hal_device_load_executable(
           device_, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,

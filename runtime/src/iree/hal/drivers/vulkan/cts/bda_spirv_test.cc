@@ -168,8 +168,7 @@ class BdaSpirvTest : public CtsTestBase<> {
   iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
                                      iree_hal_executable_t** out_executable) {
     return PrepareBdaExecutable(
-        executable_data, IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA,
-        out_executable);
+        executable_data, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE, out_executable);
   }
 
   void CreateInputOutputBuffers(Ref<iree_hal_buffer_t>* input_buffer,
@@ -422,9 +421,7 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(PrepareBdaExecutable(
       BdaSpirvFixture(kBdaSpirvNoopWithoutPushConstantRoot),
-      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
-          IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION,
-      executable.out()));
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION, executable.out()));
 
   iree_hal_buffer_ref_list_t bindings = iree_hal_buffer_ref_list_empty();
   SemaphoreList dispatch_signal(device_, {0}, {1});

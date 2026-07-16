@@ -585,8 +585,7 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   // Create the module from the mapped memory.
   iree_hal_streaming_module_t* module = NULL;
   status = iree_hal_streaming_module_create_from_memory(
-      context, load_flags | IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA,
-      image, host_allocator, &module);
+      context, load_flags, image, host_allocator, &module);
 
   if (iree_status_is_ok(status)) {
     module->file_mapping = file_mapping;
@@ -632,8 +631,7 @@ static void iree_hal_streaming_module_destroy(
   // Drop fat-binary / offload-bundle unpacking buffers.
   iree_hal_streaming_fat_binary_extract_reset(&module->fat_extract);
 
-  // Drop mapped module images after executable refs owned by the module. The
-  // executable may alias file-backed data when loaded with ALIAS_PROVIDED_DATA.
+  // Drop the mapped module image.
   iree_io_file_mapping_release(module->file_mapping);
 
   // Release context.

@@ -164,7 +164,7 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   payload.target_physical_device_affinity = 1;
   payload.executable_data_length = sizeof(executable_data);
   payload.constant_count = IREE_ARRAYSIZE(constants);
-  payload.load_flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+  payload.load_flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING;
   payload.target_kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL;
   payload.target_family_length = sizeof(target_family) - 1;
   payload.target_key_length = sizeof(target_key) - 1;

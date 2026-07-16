@@ -358,7 +358,6 @@ iree_status_t PrepareExecutableFromArtifact(
 
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
-  load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
   load_params.executable_data = iree_make_const_byte_span(
       artifact->contents.data, artifact->contents.data_length);
   return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,

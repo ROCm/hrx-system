@@ -521,7 +521,7 @@ class CtsTestBase : public BaseType {
     }
 
     IREE_ASSERT_OK(LoadExecutable(
-        result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA,
+        result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
         executable_data(iree_make_cstring_view(file_name)), out_executable));
   }
 

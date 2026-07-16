@@ -74,11 +74,9 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
 
   iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
                                      iree_hal_executable_t** out_executable) {
-    return LoadExecutable(
-        executable_target_,
-        IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
-            IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION,
-        executable_data, out_executable);
+    return LoadExecutable(executable_target_,
+                          IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION,
+                          executable_data, out_executable);
   }
 
   iree_status_t CreateInputOutputBuffers(

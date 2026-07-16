@@ -47,9 +47,7 @@ devices, and supplies backend-native handles to executable construction.
 
 Executable creation parses and validates the native artifact synchronously so
 malformed input and unsupported features are reported at load time. Artifact
-bytes and specialization constants are borrowed for the call unless
-`IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA` explicitly extends their
-lifetime through executable destruction.
+bytes and specialization constants are borrowed only for the load call.
 
 ## Build Setup
 

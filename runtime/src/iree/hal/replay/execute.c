@@ -1109,8 +1109,7 @@ static iree_status_t iree_hal_replay_executor_load_executable(
   };
   iree_hal_executable_load_params_t params;
   iree_hal_executable_load_params_initialize(&params);
-  params.flags =
-      payload.load_flags & ~IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
+  params.flags = payload.load_flags;
   params.executable_data = iree_make_const_byte_span(
       record->payload.data + data_offset,
       (iree_host_size_t)payload.executable_data_length);

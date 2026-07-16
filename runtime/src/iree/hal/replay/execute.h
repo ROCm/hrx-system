@@ -85,8 +85,7 @@ typedef struct iree_hal_replay_scope_event_t {
 // The callback receives the captured executable ids and parameters. It may
 // leave |out_substitution->substitute| false to use the captured payload
 // unchanged. Replacement data only needs to remain valid for the callback's
-// load call; replay clears ALIAS_PROVIDED_DATA before handing captured or
-// substituted executable data to the HAL.
+// load call.
 typedef iree_status_t (*iree_hal_replay_executable_substitution_fn_t)(
     void* user_data,
     const iree_hal_replay_executable_substitution_request_t* request,

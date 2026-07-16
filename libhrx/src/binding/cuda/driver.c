@@ -2074,7 +2074,6 @@ CUDAAPI CUresult cuModuleLoadDataEx(CUmodule* module, const void* image,
 
   // TODO: Determine load flags from JIT options if available.
   iree_hal_executable_load_flags_t load_flags =
-      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
       IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;

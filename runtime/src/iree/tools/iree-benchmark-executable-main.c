@@ -450,7 +450,6 @@ static iree_status_t iree_benchmark_executable_from_flags(
 
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
-  load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
 
   // Load the executable data into memory.
   // In normal usage this would be mapped from the containing module file (which

@@ -282,7 +282,6 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   Ref<iree_hal_executable_t> executable;
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
-  load_params.flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
   load_params.executable_data = executable_data;
   IREE_ASSERT_OK(iree_hal_device_load_executable(
       asan_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,

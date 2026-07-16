@@ -52,7 +52,6 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
 
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
-    load_params.flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
     load_params.executable_data = GetParam().executable_data(
         iree_make_cstring_view("tsan_executable_test.bin"));
     IREE_ASSERT_OK(iree_hal_device_load_executable(

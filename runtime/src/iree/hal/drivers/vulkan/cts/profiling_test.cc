@@ -186,7 +186,7 @@ TEST_P(VulkanProfilingTest, ExecutableMetadataRecordsDirectDispatchFunctions) {
 
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(LoadExecutable(
-      target_result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA,
+      target_result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
       executable_data(
           IREE_SV("command_buffer_dispatch_constants_bindings_test.bin")),
       executable.out()));

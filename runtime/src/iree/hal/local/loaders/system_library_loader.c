@@ -92,8 +92,7 @@ static const iree_hal_local_executable_vtable_t
     iree_hal_system_executable_vtable;
 
 // Loads the executable and optional debug database from the given
-// |executable_data| in memory. The memory must remain live for the lifetime
-// of the executable.
+// |executable_data| in memory. The data is borrowed only for this call.
 static iree_status_t iree_hal_system_executable_load(
     iree_hal_system_executable_t* executable,
     iree_const_byte_span_t executable_data, iree_allocator_t host_allocator) {

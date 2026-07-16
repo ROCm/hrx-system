@@ -611,7 +611,6 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   // fprintf(stderr, "[REGISTRY] lazy module load from binary %p\n",
   //         registration->module_binary);
   iree_hal_executable_load_flags_t load_flags =
-      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
       IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_const_byte_span_t module_data =
       iree_make_const_byte_span((const uint8_t*)registration->module_binary,

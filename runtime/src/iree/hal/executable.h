@@ -30,19 +30,20 @@ typedef uint32_t iree_hal_executable_load_flags_t;
 typedef enum iree_hal_executable_load_flag_bits_e {
   // No optional executable loading behavior is enabled.
   IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE = 0u,
-  // Allows the executable to retain |executable_data| after loading returns.
-  // The caller must keep the storage valid until the executable is destroyed.
-  IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA = 1u << 0,
   // Allows expensive load-time optimization intended to improve execution.
-  IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION = 1u << 1,
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION = 1u << 0,
   // Retains debugging information and enables debugging hooks when supported.
-  IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING = 1u << 2,
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING = 1u << 1,
   // Disables executable verification for diagnostic and recovery tooling.
   // Production callers should leave verification enabled.
-  IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION = 1u << 3,
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION = 1u << 2,
 } iree_hal_executable_load_flag_bits_t;
 
 // Native executable artifact and load-time specialization parameters.
+//
+// All referenced storage is borrowed only for the duration of the load call.
+// Executable implementations must finish consuming or copy any retained data
+// before returning from iree_hal_device_load_executable.
 typedef struct iree_hal_executable_load_params_t {
   // Optional executable loading behavior.
   iree_hal_executable_load_flags_t flags;

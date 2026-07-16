@@ -194,7 +194,6 @@ iree_status_t loom_run_hal_artifact_prepare(
 
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
-  load_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA;
   load_params.executable_data = artifact->executable_data;
   return iree_hal_device_load_executable(
       runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, artifact->hal_target,

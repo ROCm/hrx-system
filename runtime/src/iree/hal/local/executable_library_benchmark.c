@@ -168,8 +168,7 @@ static iree_status_t iree_hal_executable_library_run(
 
   iree_hal_executable_load_params_t executable_params;
   iree_hal_executable_load_params_initialize(&executable_params);
-  executable_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA |
-                             IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION;
+  executable_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION;
 
   // Load the executable data.
   iree_io_file_contents_t* file_contents = NULL;

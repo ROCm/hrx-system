@@ -687,9 +687,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
 // device selected by the backend.
 //
 // The executable data and constants are borrowed only for the duration of the
-// call unless IREE_HAL_EXECUTABLE_LOAD_FLAG_ALIAS_PROVIDED_DATA is set. Loading
-// is a cold path and implementations may parse, verify, link, or optimize the
-// native artifact before returning.
+// call. Implementations must finish consuming or copy any retained data before
+// returning. Loading is a cold path and implementations may parse, verify,
+// link, or optimize the native artifact before returning.
 IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_executable_target_t* target,
