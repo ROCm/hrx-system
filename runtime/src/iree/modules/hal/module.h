@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/device_group.h"
 #include "iree/modules/hal/debugging.h"
 #include "iree/modules/hal/types.h"
 #include "iree/vm/api.h"

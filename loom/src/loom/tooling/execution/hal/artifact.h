@@ -17,7 +17,7 @@
 #define LOOM_TOOLING_EXECUTION_HAL_ARTIFACT_H_
 
 #include "iree/base/api.h"
-#include "iree/hal/device_spec.h"
+#include "iree/hal/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/compile_report.h"

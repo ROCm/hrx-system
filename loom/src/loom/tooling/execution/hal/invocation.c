@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "iree/hal/buffer_transfer.h"
-#include "iree/hal/buffer_view_util.h"
 #include "loom/target/launch.h"
 
 enum {

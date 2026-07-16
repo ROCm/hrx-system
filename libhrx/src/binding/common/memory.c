@@ -7,7 +7,6 @@
 #include "common/graph.h"
 #include "common/internal.h"
 #include "iree/base/internal/atomics.h"
-#include "iree/hal/buffer_transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Memory management
