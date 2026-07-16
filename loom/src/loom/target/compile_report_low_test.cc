@@ -50,20 +50,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       kMatrixSwmmacTagOffset + sizeof("matrix.swmmac.f32");
   constexpr uint32_t kRegisterClassGprOffset =
       kMatrixSmfmacTagOffset + sizeof("matrix.smfmac.f32");
-  constexpr uint32_t kBufferLoadKeyOffset =
-      kRegisterClassGprOffset + sizeof("test.gpr");
-  constexpr uint32_t kGlobalLoadKeyOffset =
-      kBufferLoadKeyOffset + sizeof("amdgpu.buffer_load_dword");
-  constexpr uint32_t kScheduleValuOffset =
-      kGlobalLoadKeyOffset + sizeof("amdgpu.global_load_b32_saddr");
-  constexpr uint32_t kScheduleVmemLoadOffset =
-      kScheduleValuOffset + sizeof("amdgpu.valu");
-  constexpr uint32_t kScheduleVmemStoreOffset =
-      kScheduleVmemLoadOffset + sizeof("amdgpu.vmem.load");
-  constexpr uint32_t kScheduleWmmaOffset =
-      kScheduleVmemStoreOffset + sizeof("amdgpu.vmem.store");
-  constexpr uint32_t kScheduleMfmaOffset =
-      kScheduleWmmaOffset + sizeof("amdgpu.wmma");
   static const uint8_t kDescriptorStringTable[] =
       "\x11"
       "register.copy.b32"
@@ -80,21 +66,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       "\x11"
       "matrix.smfmac.f32"
       "\x08"
-      "test.gpr"
-      "\x18"
-      "amdgpu.buffer_load_dword"
-      "\x1c"
-      "amdgpu.global_load_b32_saddr"
-      "\x0b"
-      "amdgpu.valu"
-      "\x10"
-      "amdgpu.vmem.load"
-      "\x11"
-      "amdgpu.vmem.store"
-      "\x0b"
-      "amdgpu.wmma"
-      "\x0b"
-      "amdgpu.mfma";
+      "test.gpr";
   loom_low_descriptor_t descriptors[] = {
       {
           /*.key_string_offset=*/{},
@@ -103,7 +75,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.semantic_tag_string_offset=*/kRegisterCopyTagOffset,
       },
       {
-          /*.key_string_offset=*/kGlobalLoadKeyOffset,
+          /*.key_string_offset=*/{},
           /*.stable_id=*/{},
           /*.mnemonic_string_offset=*/{},
           /*.semantic_tag_string_offset=*/kMemoryGlobalTagOffset,
@@ -153,7 +125,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.semantic_tag_string_offset=*/kMatrixWmmaTagOffset,
       },
       {
-          /*.key_string_offset=*/kBufferLoadKeyOffset,
+          /*.key_string_offset=*/{},
           /*.stable_id=*/{},
           /*.mnemonic_string_offset=*/{},
           /*.semantic_tag_string_offset=*/kMemoryGlobalTagOffset,
@@ -189,23 +161,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.width_bits=*/128,
       },
   };
-  const loom_low_schedule_class_t schedule_classes[] = {
-      {
-          /*.name_string_offset=*/kScheduleValuOffset,
-      },
-      {
-          /*.name_string_offset=*/kScheduleVmemLoadOffset,
-      },
-      {
-          /*.name_string_offset=*/kScheduleVmemStoreOffset,
-      },
-      {
-          /*.name_string_offset=*/kScheduleWmmaOffset,
-      },
-      {
-          /*.name_string_offset=*/kScheduleMfmaOffset,
-      },
-  };
+  const loom_low_schedule_class_t schedule_classes[5] = {};
   const loom_low_reg_class_t reg_classes[] = {
       {
           /*.name_string_offset=*/kRegisterClassGprOffset,
@@ -284,6 +240,30 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   descriptors[5].schedule_class_id = 1;
   descriptors[6].schedule_class_id = 3;
   descriptors[7].schedule_class_id = 4;
+  descriptors[0].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE;
+  descriptors[1].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD;
+  descriptors[2].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY;
+  descriptors[3].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY;
+  descriptors[4].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA;
+  descriptors[5].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD;
+  descriptors[6].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC;
+  descriptors[7].instruction_class_flags =
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA |
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC;
   loom_low_schedule_node_t schedule_nodes[13] = {};
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),

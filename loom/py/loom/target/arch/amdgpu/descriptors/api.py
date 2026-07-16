@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.encoding import (
     amdgpu_gfx125x_vgpr_msb_slot,
     amdgpu_supplemental_encoding_format_names,
 )
+from loom.target.low_descriptors import InstructionClass
 
 from .categories import *
 from .common import *
@@ -888,6 +889,63 @@ def _with_storage_lease_rows(descriptor_set: DescriptorSet) -> DescriptorSet:
     )
 
 
+_AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
+    _SCHEDULE_SMEM_LOAD: (InstructionClass.SCALAR_MEMORY,),
+    _SCHEDULE_SMEM_STORE: (InstructionClass.SCALAR_MEMORY,),
+    _SCHEDULE_VMEM_LOAD: (InstructionClass.GLOBAL_MEMORY,),
+    _SCHEDULE_VMEM_LOAD_LDS: (
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.LOCAL_MEMORY,
+    ),
+    _SCHEDULE_VMEM_STORE: (InstructionClass.GLOBAL_MEMORY,),
+    _SCHEDULE_VMEM_ATOMIC_RETURN: (InstructionClass.GLOBAL_MEMORY,),
+    _SCHEDULE_VMEM_ATOMIC_NO_RETURN: (InstructionClass.GLOBAL_MEMORY,),
+    _SCHEDULE_LDS_LOAD: (InstructionClass.LOCAL_MEMORY,),
+    _SCHEDULE_LDS_STORE: (InstructionClass.LOCAL_MEMORY,),
+    _SCHEDULE_LDS_ATOMIC: (InstructionClass.LOCAL_MEMORY,),
+    _SCHEDULE_LDS_CROSSLANE: (InstructionClass.LOCAL_MEMORY,),
+    _SCHEDULE_MFMA: (InstructionClass.MFMA,),
+    _SCHEDULE_WMMA: (InstructionClass.WMMA,),
+    _SCHEDULE_WMMA_SCALE: (InstructionClass.WMMA,),
+}
+
+_AMDGPU_KEY_INSTRUCTION_CLASSES = (
+    ("amdgpu.global_load_", InstructionClass.GLOBAL_LOAD),
+    ("amdgpu.global_store_", InstructionClass.GLOBAL_STORE),
+    ("amdgpu.buffer_load_", InstructionClass.BUFFER_LOAD),
+    ("amdgpu.buffer_store_", InstructionClass.BUFFER_STORE),
+    ("amdgpu.flat_load_", InstructionClass.FLAT_MEMORY),
+    ("amdgpu.flat_store_", InstructionClass.FLAT_MEMORY),
+)
+
+
+def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
+    descriptors = []
+    for descriptor in descriptor_set.descriptors:
+        instruction_classes = set(descriptor.instruction_classes)
+        instruction_classes.update(
+            _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(descriptor.schedule_class, ())
+        )
+        semantic_tag = descriptor.semantic_tag or ""
+        if semantic_tag.startswith(("memory.stack.", "memory.private.")):
+            instruction_classes.discard(InstructionClass.GLOBAL_MEMORY)
+        for key_prefix, instruction_class in _AMDGPU_KEY_INSTRUCTION_CLASSES:
+            if descriptor.key.startswith(key_prefix):
+                instruction_classes.add(instruction_class)
+                break
+        descriptors.append(
+            replace(
+                descriptor,
+                instruction_classes=tuple(
+                    instruction_class
+                    for instruction_class in InstructionClass
+                    if instruction_class in instruction_classes
+                ),
+            )
+        )
+    return replace(descriptor_set, descriptors=tuple(descriptors))
+
+
 @dataclass(frozen=True, slots=True)
 class _AmdgpuCoreDescriptorSetBuilder:
     base: DescriptorSet
@@ -955,6 +1013,7 @@ def build_amdgpu_core_descriptor_set_from_spec(
     if target == "rdna4_gfx125x":
         descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
     descriptor_set = _with_storage_lease_rows(descriptor_set)
+    descriptor_set = _with_instruction_classes(descriptor_set)
     _validate_descriptor_encoding_formats(target, spec, descriptor_set)
     _validate_dpp_control_fields(descriptor_set)
     _validate_matrix_high_half_select_fields(descriptor_set)

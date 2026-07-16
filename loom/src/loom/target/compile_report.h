@@ -301,12 +301,12 @@ typedef struct loom_target_compile_report_move_cause_counts_t {
 
 // Static feature counters for low packets that survive target emission.
 //
-// These counters are compile-time proxies derived from descriptor semantic
-// tags, schedule classes, schedule resources, and structural low terminators.
-// They are intentionally separate from measured HAL profiling counters and may
-// overlap: for example an AMDGPU global atomic packet is both global memory and
-// atomic. Byte counts are static descriptor-effect widths for one issue of the
-// emitted low stream, not evaluated dynamic workload traffic.
+// These counters are compile-time proxies derived from generated descriptor
+// instruction classes and structural low terminators. They are intentionally
+// separate from measured HAL profiling counters and may overlap: for example a
+// global atomic packet is both global memory and atomic. Byte counts are static
+// descriptor-effect widths for one issue of the emitted low stream, not
+// evaluated dynamic workload traffic.
 typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed schedule nodes inspected for feature classification.
   uint64_t descriptor_count;
@@ -330,15 +330,15 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t dot_count;
   // Descriptor-backed nodes identified as global or vector-memory operations.
   uint64_t global_memory_count;
-  // Descriptor-backed AMDGPU global_load-family memory instructions.
+  // Descriptor-backed raw global-load-family memory instructions.
   uint64_t global_load_count;
-  // Descriptor-backed AMDGPU global_store-family memory instructions.
+  // Descriptor-backed raw global-store-family memory instructions.
   uint64_t global_store_count;
-  // Descriptor-backed AMDGPU buffer_load-family memory instructions.
+  // Descriptor-backed resource-buffer-load-family memory instructions.
   uint64_t buffer_load_count;
-  // Descriptor-backed AMDGPU buffer_store-family memory instructions.
+  // Descriptor-backed resource-buffer-store-family memory instructions.
   uint64_t buffer_store_count;
-  // Descriptor-backed AMDGPU flat-memory instructions.
+  // Descriptor-backed flat-memory-family instructions.
   uint64_t flat_memory_count;
   // Descriptor-backed nodes identified as local/shared/workgroup memory ops.
   uint64_t local_memory_count;

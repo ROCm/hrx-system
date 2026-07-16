@@ -39,6 +39,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateEncodingSlice,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     NativeAsmValue,
     NativeAsmValueKind,
@@ -48,9 +49,158 @@ from loom.target.low_descriptors import (
     OperandRole,
     PressureDelta,
     RegClassAltFlag,
+    Resource,
+    ResourceKind,
+    ScheduleClass,
+    ScheduleClassFlag,
     StorageLease,
     descriptor_stable_id,
 )
+
+_SEMANTIC_INSTRUCTION_CLASSES = (
+    ("matrix.smfmac", (InstructionClass.SMFMAC,)),
+    ("matrix.mfma", (InstructionClass.MFMA,)),
+    ("matrix.swmmac", (InstructionClass.SWMMAC,)),
+    ("matrix.wmma", (InstructionClass.WMMA,)),
+    ("matrix", (InstructionClass.MATRIX,)),
+    ("dot", (InstructionClass.DOT,)),
+    ("memory.cache", (InstructionClass.CACHE,)),
+    ("memory.global", (InstructionClass.GLOBAL_MEMORY,)),
+    ("memory.workgroup", (InstructionClass.LOCAL_MEMORY,)),
+    ("memory.stack", (InstructionClass.PRIVATE_MEMORY,)),
+    ("memory.private", (InstructionClass.PRIVATE_MEMORY,)),
+    ("memory.generic", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.load", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.store", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.hal", (InstructionClass.GENERIC_MEMORY,)),
+    ("control.branch", (InstructionClass.BRANCH,)),
+    ("control.cond_branch", (InstructionClass.BRANCH,)),
+    ("control.return", (InstructionClass.BRANCH,)),
+    ("control.call", (InstructionClass.BRANCH,)),
+    ("control.barrier", (InstructionClass.BARRIER,)),
+    ("control", (InstructionClass.CONTROL,)),
+    ("convert", (InstructionClass.CONVERSION,)),
+    ("register.copy", (InstructionClass.REGISTER_MOVE,)),
+    ("integer.move", (InstructionClass.REGISTER_MOVE,)),
+)
+
+_RESOURCE_INSTRUCTION_CLASSES = {
+    ResourceKind.SCALAR_ALU: InstructionClass.SCALAR_ALU,
+    ResourceKind.VECTOR_ALU: InstructionClass.VECTOR_ALU,
+    ResourceKind.MATRIX: InstructionClass.MATRIX,
+    ResourceKind.CONTROL: InstructionClass.CONTROL,
+}
+
+_MEMORY_INSTRUCTION_CLASSES = frozenset(
+    {
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.GLOBAL_LOAD,
+        InstructionClass.GLOBAL_STORE,
+        InstructionClass.BUFFER_LOAD,
+        InstructionClass.BUFFER_STORE,
+        InstructionClass.FLAT_MEMORY,
+        InstructionClass.LOCAL_MEMORY,
+        InstructionClass.SCALAR_MEMORY,
+        InstructionClass.PRIVATE_MEMORY,
+        InstructionClass.GENERIC_MEMORY,
+    }
+)
+
+_INSTRUCTION_CLASS_IMPLICATIONS = {
+    InstructionClass.SMFMAC: (InstructionClass.MFMA,),
+    InstructionClass.MFMA: (InstructionClass.MATRIX,),
+    InstructionClass.SWMMAC: (InstructionClass.WMMA,),
+    InstructionClass.WMMA: (InstructionClass.MATRIX,),
+    InstructionClass.BRANCH: (InstructionClass.CONTROL,),
+    InstructionClass.BARRIER: (InstructionClass.CONTROL,),
+    InstructionClass.GLOBAL_LOAD: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.GLOBAL_STORE: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.BUFFER_LOAD: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.BUFFER_STORE: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.FLAT_MEMORY: (InstructionClass.GLOBAL_MEMORY,),
+}
+
+
+def _semantic_tag_has_prefix(semantic_tag: str, prefix: str) -> bool:
+    return semantic_tag == prefix or semantic_tag.startswith(f"{prefix}.")
+
+
+def _derive_instruction_classes(
+    descriptor: Descriptor,
+    schedule_class: ScheduleClass,
+    resources: dict[str, Resource],
+) -> tuple[InstructionClass, ...]:
+    classes = set(descriptor.instruction_classes)
+    if len(classes) != len(descriptor.instruction_classes):
+        raise ValueError(f"descriptor '{descriptor.key}' repeats an instruction class")
+    if len(set(schedule_class.instruction_classes)) != len(schedule_class.instruction_classes):
+        raise ValueError(f"schedule class '{schedule_class.name}' repeats an instruction class")
+    classes.update(schedule_class.instruction_classes)
+
+    for issue_use in schedule_class.issue_uses:
+        resource = resources.get(issue_use.resource)
+        if resource is None:
+            raise ValueError(f"descriptor '{descriptor.key}' schedule class '{schedule_class.name}' references unknown resource '{issue_use.resource}'")
+        instruction_class = _RESOURCE_INSTRUCTION_CLASSES.get(resource.kind)
+        if instruction_class is not None:
+            classes.add(instruction_class)
+    if ScheduleClassFlag.CONTROL in schedule_class.flags:
+        classes.add(InstructionClass.CONTROL)
+
+    semantic_tag = descriptor.semantic_tag
+    if semantic_tag is not None:
+        for prefix, semantic_classes in _SEMANTIC_INSTRUCTION_CLASSES:
+            if _semantic_tag_has_prefix(semantic_tag, prefix):
+                classes.update(semantic_classes)
+        if "atomic" in semantic_tag.split("."):
+            classes.add(InstructionClass.ATOMIC)
+
+    effect_kinds = {effect.kind for effect in descriptor.effects}
+    if EffectKind.BARRIER in effect_kinds:
+        classes.add(InstructionClass.BARRIER)
+    if EffectKind.CALL in effect_kinds:
+        classes.add(InstructionClass.BRANCH)
+    if EffectKind.CONTROL in effect_kinds:
+        classes.add(InstructionClass.CONTROL)
+
+    has_memory_effect = bool({EffectKind.READ, EffectKind.WRITE}.intersection(effect_kinds))
+    has_memory_resource = any(resources[issue_use.resource].kind in (ResourceKind.LOAD, ResourceKind.STORE) for issue_use in schedule_class.issue_uses)
+    if (has_memory_effect or has_memory_resource) and not _MEMORY_INSTRUCTION_CLASSES.intersection(classes):
+        classes.add(InstructionClass.GENERIC_MEMORY)
+
+    pending_classes = list(classes)
+    while pending_classes:
+        instruction_class = pending_classes.pop()
+        for implied_class in _INSTRUCTION_CLASS_IMPLICATIONS.get(instruction_class, ()):
+            if implied_class not in classes:
+                classes.add(implied_class)
+                pending_classes.append(implied_class)
+
+    if InstructionClass.OTHER in classes and len(classes) != 1:
+        class_names = ", ".join(sorted(item.name for item in classes))
+        raise ValueError(f"descriptor '{descriptor.key}' combines the exclusive OTHER instruction class with {class_names}")
+    if not classes:
+        raise ValueError(f"descriptor '{descriptor.key}' has no generated instruction class; classify it explicitly or use OTHER")
+    if InstructionClass.PRIVATE_MEMORY in classes and InstructionClass.GLOBAL_MEMORY in classes:
+        raise ValueError(f"descriptor '{descriptor.key}' combines private and global memory instruction classes")
+    if InstructionClass.ATOMIC in classes and not has_memory_effect:
+        raise ValueError(f"descriptor '{descriptor.key}' has the atomic instruction class without a read or write effect")
+    if InstructionClass.BARRIER in classes and EffectKind.BARRIER not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has the barrier instruction class without a barrier effect")
+    read_classes = {
+        InstructionClass.GLOBAL_LOAD,
+        InstructionClass.BUFFER_LOAD,
+    }
+    if read_classes.intersection(classes) and EffectKind.READ not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has a load instruction class without a read effect")
+    write_classes = {
+        InstructionClass.GLOBAL_STORE,
+        InstructionClass.BUFFER_STORE,
+    }
+    if write_classes.intersection(classes) and EffectKind.WRITE not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has a store instruction class without a write effect")
+
+    return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
 def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
@@ -743,6 +893,15 @@ def compile_descriptor_set(
                 raise ValueError(f"schedule class '{schedule_name}' references unknown pressure register class '{pressure_delta.reg_class}'")
             used_reg_class_names.add(pressure_delta.reg_class)
 
+    instruction_classes = [
+        _derive_instruction_classes(
+            descriptor,
+            schedule_inputs[descriptor.schedule_class],
+            resource_inputs,
+        )
+        for descriptor in selected_descriptors
+    ]
+
     changed = True
     while changed:
         changed = False
@@ -1005,6 +1164,7 @@ def compile_descriptor_set(
     return CompiledDescriptorSet(
         spec=spec,
         descriptors=selected_descriptors,
+        instruction_classes=instruction_classes,
         reg_classes=reg_classes,
         register_parts=register_parts,
         resources=resources,

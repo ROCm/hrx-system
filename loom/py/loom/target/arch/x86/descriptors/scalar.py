@@ -17,6 +17,7 @@ from loom.target.low_descriptors import (
     EnumDomain,
     EnumValue,
     Immediate,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     ModelQuality,
@@ -739,6 +740,7 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
+            instruction_classes=(InstructionClass.SCALAR_ALU,),
         ),
         ScheduleClass(
             _SCHEDULE_MEMORY_LOAD_GPR32,

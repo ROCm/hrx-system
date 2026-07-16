@@ -39,6 +39,7 @@ from loom.target.low_descriptors import (
     ImmediateEncodingSlice,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     NativeAsmValue,
     NativeAsmValueKind,
     OperandAddressMapKind,
@@ -496,6 +497,118 @@ def test_compiler_derives_early_clobber_descriptor_flag() -> None:
     assert DescriptorFlag.EARLY_CLOBBER in compiled.descriptors[0].flags
 
 
+def test_compiler_derives_instruction_classes_from_structured_metadata() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag="dot.s8s8.i32x1",
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.instruction_classes == [(InstructionClass.SCALAR_ALU, InstructionClass.DOT)]
+
+
+def test_compiler_closes_instruction_class_hierarchies() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        instruction_classes=(InstructionClass.SMFMAC,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.instruction_classes == [
+        (
+            InstructionClass.SCALAR_ALU,
+            InstructionClass.MATRIX,
+            InstructionClass.MFMA,
+            InstructionClass.SMFMAC,
+        )
+    ]
+
+
+def test_compiler_requires_explicit_other_instruction_class() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        instruction_classes=(),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' has no generated instruction class; classify it explicitly or use OTHER"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_other_with_derived_instruction_class() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        semantic_tag="control.return",
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' combines the exclusive OTHER instruction class"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_contradictory_memory_instruction_classes() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        effects=(Effect(EffectKind.READ),),
+        instruction_classes=(
+            InstructionClass.GLOBAL_MEMORY,
+            InstructionClass.PRIVATE_MEMORY,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' combines private and global memory instruction classes"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_load_instruction_class_without_read_effect() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        instruction_classes=(InstructionClass.GLOBAL_LOAD,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has a load instruction class without a read effect"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_compiler_rejects_early_clobber_flag_without_constraint() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -794,6 +907,7 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"test.low"' in generated.source
     assert '"test.spv.op_iadd.i32"' in generated.source
     assert '"OpIAdd"' in generated.source
+    assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
 
 
 def test_generator_resolves_symbolic_hazard_resources() -> None:

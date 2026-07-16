@@ -71,17 +71,6 @@ static iree_string_view_t loom_target_compile_report_descriptor_semantic_tag(
                                         descriptor->semantic_tag_string_offset);
 }
 
-static iree_string_view_t loom_target_compile_report_descriptor_key(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  if (descriptor_set == NULL || descriptor == NULL ||
-      descriptor->key_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
-    return iree_string_view_empty();
-  }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_offset);
-}
-
 static bool loom_target_compile_report_facts_have_finite_range(
     loom_value_facts_t facts) {
   return facts.range_lo != INT64_MIN && facts.range_hi != INT64_MAX;
@@ -136,49 +125,6 @@ loom_target_compile_report_source_interval(
   return target_interval;
 }
 
-static bool loom_target_compile_report_string_contains(
-    iree_string_view_t value, iree_string_view_t needle) {
-  return iree_string_view_find(value, needle, /*pos=*/0) !=
-         IREE_STRING_VIEW_NPOS;
-}
-
-static iree_string_view_t loom_target_compile_report_schedule_class_name(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_schedule_node_t* node) {
-  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
-  if (schedule_class == NULL ||
-      schedule_class->name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
-    return iree_string_view_empty();
-  }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        schedule_class->name_string_offset);
-}
-
-static bool loom_target_compile_report_schedule_class_uses_resource_kind(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_schedule_class_t* schedule_class,
-    loom_low_resource_kind_t kind) {
-  if (descriptor_set == NULL || schedule_class == NULL) {
-    return false;
-  }
-  const uint32_t end = (uint32_t)schedule_class->issue_use_start +
-                       schedule_class->issue_use_count;
-  if (end > descriptor_set->issue_use_count) {
-    return false;
-  }
-  for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
-    const loom_low_issue_use_t* issue_use =
-        &descriptor_set->issue_uses[schedule_class->issue_use_start + i];
-    if (issue_use->resource_id >= descriptor_set->resource_count) {
-      continue;
-    }
-    if (descriptor_set->resources[issue_use->resource_id].kind == kind) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool loom_target_compile_report_low_branch_falls_through(
     const loom_low_schedule_table_t* schedule,
     const loom_low_schedule_node_t* node, const loom_block_t* dest) {
@@ -221,197 +167,6 @@ loom_target_compile_report_low_structural_control_transfer_count(
   return true_fallthrough || false_fallthrough ? 1 : 2;
 }
 
-typedef struct loom_target_compile_report_low_node_features_t {
-  // Node contributes scalar ALU work.
-  bool scalar_alu;
-  // Node contributes vector ALU work.
-  bool vector_alu;
-  // Node contributes matrix or tensor-core-like work.
-  bool matrix;
-  // Node contributes MFMA-family work.
-  bool mfma;
-  // Node contributes scaled MFMA-family work.
-  bool smfmac;
-  // Node contributes WMMA-family work.
-  bool wmma;
-  // Node contributes scaled WMMA-family work.
-  bool swmmac;
-  // Node contributes dot-product work.
-  bool dot;
-  // Node contributes global-memory work.
-  bool global_memory;
-  // Node contributes AMDGPU global_load-family work.
-  bool global_load;
-  // Node contributes AMDGPU global_store-family work.
-  bool global_store;
-  // Node contributes AMDGPU buffer_load-family work.
-  bool buffer_load;
-  // Node contributes AMDGPU buffer_store-family work.
-  bool buffer_store;
-  // Node contributes AMDGPU flat-memory-family work.
-  bool flat_memory;
-  // Node contributes local or workgroup-memory work.
-  bool local_memory;
-  // Node contributes scalar-memory work.
-  bool scalar_memory;
-  // Node contributes private or stack memory work.
-  bool private_memory;
-  // Node contributes memory work without a more specific memory family.
-  bool generic_memory;
-  // Node contributes atomic-memory work.
-  bool atomic;
-  // Node contributes branch work.
-  bool branch;
-  // Node contributes barrier or synchronization work.
-  bool barrier;
-  // Node contributes control-flow work.
-  bool control;
-  // Node contributes numeric conversion work.
-  bool conversion;
-  // Node contributes cache or prefetch work.
-  bool cache;
-  // Node contributes register-move or repair work.
-  bool register_move;
-} loom_target_compile_report_low_node_features_t;
-
-static loom_target_compile_report_low_node_features_t
-loom_target_compile_report_classify_low_node_features(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_schedule_node_t* node) {
-  loom_target_compile_report_low_node_features_t features = {0};
-  if (node->kind != LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR ||
-      node->descriptor == NULL) {
-    return features;
-  }
-  const loom_low_descriptor_t* descriptor = node->descriptor;
-  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
-  const iree_string_view_t schedule_class_name =
-      loom_target_compile_report_schedule_class_name(descriptor_set, node);
-  const iree_string_view_t semantic_tag =
-      loom_target_compile_report_descriptor_semantic_tag(descriptor_set,
-                                                         descriptor);
-  const iree_string_view_t descriptor_key =
-      loom_target_compile_report_descriptor_key(descriptor_set, descriptor);
-
-  features.scalar_alu =
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.salu")) ||
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_SCALAR_ALU);
-  features.vector_alu =
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.valu")) ||
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_VECTOR_ALU);
-  features.matrix =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.")) ||
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.mfma")) ||
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.wmma")) ||
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_MATRIX);
-  features.smfmac =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.smfmac."));
-  features.mfma =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.mfma.")) ||
-      features.smfmac ||
-      iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.mfma"));
-  features.swmmac =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.swmmac."));
-  features.wmma =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.wmma.")) ||
-      features.swmmac ||
-      iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.wmma"));
-  features.dot = iree_string_view_starts_with(semantic_tag, IREE_SV("dot."));
-  features.cache =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.cache."));
-  features.global_memory =
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.vmem")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.global."));
-  features.global_load = iree_string_view_starts_with(
-      descriptor_key, IREE_SV("amdgpu.global_load_"));
-  features.global_store = iree_string_view_starts_with(
-      descriptor_key, IREE_SV("amdgpu.global_store_"));
-  features.buffer_load = iree_string_view_starts_with(
-      descriptor_key, IREE_SV("amdgpu.buffer_load_"));
-  features.buffer_store = iree_string_view_starts_with(
-      descriptor_key, IREE_SV("amdgpu.buffer_store_"));
-  features.flat_memory = iree_string_view_starts_with(
-                             descriptor_key, IREE_SV("amdgpu.flat_load_")) ||
-                         iree_string_view_starts_with(
-                             descriptor_key, IREE_SV("amdgpu.flat_store_"));
-  features.local_memory =
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.lds")) ||
-      iree_string_view_equal(schedule_class_name,
-                             IREE_SV("amdgpu.vmem.load.lds")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.workgroup."));
-  features.scalar_memory =
-      iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.smem"));
-  features.private_memory =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.stack.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.private."));
-  if (features.private_memory) {
-    features.global_memory = false;
-  }
-  features.generic_memory =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.generic.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.load.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.store.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.hal."));
-  const bool memory_resource =
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_LOAD) ||
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_STORE);
-  if (memory_resource && !features.global_memory && !features.local_memory &&
-      !features.scalar_memory && !features.private_memory &&
-      !features.generic_memory) {
-    features.generic_memory = true;
-  }
-  features.atomic = loom_target_compile_report_string_contains(
-      semantic_tag, IREE_SV(".atomic."));
-  features.branch =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("control.branch")) ||
-      iree_string_view_starts_with(semantic_tag,
-                                   IREE_SV("control.cond_branch")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("control.return")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("control.call"));
-  features.barrier =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("control.barrier")) ||
-      iree_string_view_starts_with(schedule_class_name,
-                                   IREE_SV("amdgpu.barrier"));
-  features.control =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("control.")) ||
-      (schedule_class != NULL &&
-       iree_all_bits_set(schedule_class->flags,
-                         LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL)) ||
-      loom_target_compile_report_schedule_class_uses_resource_kind(
-          descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_CONTROL);
-  features.conversion =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("convert."));
-  features.register_move =
-      iree_string_view_starts_with(semantic_tag, IREE_SV("register.copy.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("integer.move."));
-  return features;
-}
-
-static bool loom_target_compile_report_low_node_features_are_known(
-    const loom_target_compile_report_low_node_features_t* features) {
-  return features->scalar_alu || features->vector_alu || features->matrix ||
-         features->mfma || features->smfmac || features->wmma ||
-         features->swmmac || features->dot || features->global_memory ||
-         features->global_load || features->global_store ||
-         features->buffer_load || features->buffer_store ||
-         features->flat_memory || features->local_memory ||
-         features->scalar_memory || features->private_memory ||
-         features->generic_memory || features->atomic || features->branch ||
-         features->barrier || features->control || features->conversion ||
-         features->cache || features->register_move;
-}
-
 static uint64_t loom_target_compile_report_low_effect_byte_count(
     const loom_low_effect_t* effect, bool* out_known) {
   *out_known = effect->width_bits != 0 && (effect->width_bits % 8u) == 0;
@@ -420,7 +175,7 @@ static uint64_t loom_target_compile_report_low_effect_byte_count(
 
 static void loom_target_compile_report_accumulate_low_memory_effect(
     const loom_low_effect_t* effect,
-    const loom_target_compile_report_low_node_features_t* features,
+    loom_low_instruction_class_flags_t instruction_classes,
     loom_target_compile_report_static_instruction_mix_t* mix) {
   if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
       effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
@@ -438,20 +193,32 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
       return;
     }
     total_byte_count = &mix->memory_read_byte_count;
-    if (features->global_load) {
+    if (iree_all_bits_set(instruction_classes,
+                          LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD)) {
       family_byte_count = &mix->global_load_byte_count;
-    } else if (features->buffer_load) {
+    } else if (iree_all_bits_set(instruction_classes,
+                                 LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD)) {
       family_byte_count = &mix->buffer_load_byte_count;
-    } else if (features->flat_memory) {
+    } else if (iree_all_bits_set(instruction_classes,
+                                 LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY)) {
       family_byte_count = &mix->flat_read_byte_count;
-    } else if (features->local_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY)) {
       family_byte_count = &mix->local_read_byte_count;
-    } else if (features->scalar_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY)) {
       family_byte_count = &mix->scalar_read_byte_count;
-    } else if (features->private_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY)) {
       family_byte_count = &mix->private_read_byte_count;
-    } else if (features->generic_memory || features->global_memory ||
-               features->atomic) {
+    } else if (iree_any_bit_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY |
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC)) {
       family_byte_count = &mix->unclassified_read_byte_count;
     }
   } else {
@@ -460,20 +227,33 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
       return;
     }
     total_byte_count = &mix->memory_write_byte_count;
-    if (features->global_store) {
+    if (iree_all_bits_set(instruction_classes,
+                          LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_STORE)) {
       family_byte_count = &mix->global_store_byte_count;
-    } else if (features->buffer_store) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_STORE)) {
       family_byte_count = &mix->buffer_store_byte_count;
-    } else if (features->flat_memory) {
+    } else if (iree_all_bits_set(instruction_classes,
+                                 LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY)) {
       family_byte_count = &mix->flat_write_byte_count;
-    } else if (features->local_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY)) {
       family_byte_count = &mix->local_write_byte_count;
-    } else if (features->scalar_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY)) {
       family_byte_count = &mix->scalar_write_byte_count;
-    } else if (features->private_memory) {
+    } else if (iree_all_bits_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY)) {
       family_byte_count = &mix->private_write_byte_count;
-    } else if (features->generic_memory || features->global_memory ||
-               features->atomic) {
+    } else if (iree_any_bit_set(
+                   instruction_classes,
+                   LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY |
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC)) {
       family_byte_count = &mix->unclassified_write_byte_count;
     }
   }
@@ -486,15 +266,17 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
 static void loom_target_compile_report_accumulate_low_memory_effects(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
-    const loom_target_compile_report_low_node_features_t* features,
     loom_target_compile_report_static_instruction_mix_t* mix) {
+  if (descriptor->effect_count == 0) {
+    return;
+  }
   IREE_ASSERT_LE((uint64_t)descriptor->effect_start + descriptor->effect_count,
                  descriptor_set->effect_count);
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const uint32_t effect_index = descriptor->effect_start + i;
     const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
-    loom_target_compile_report_accumulate_low_memory_effect(effect, features,
-                                                            mix);
+    loom_target_compile_report_accumulate_low_memory_effect(
+        effect, descriptor->instruction_class_flags, mix);
   }
 }
 
@@ -516,38 +298,43 @@ static void loom_target_compile_report_accumulate_low_node_static_mix(
     return;
   }
   ++mix->descriptor_count;
-  const loom_target_compile_report_low_node_features_t features =
-      loom_target_compile_report_classify_low_node_features(descriptor_set,
-                                                            node);
+  const loom_low_instruction_class_flags_t instruction_classes =
+      node->descriptor->instruction_class_flags;
   loom_target_compile_report_accumulate_low_memory_effects(
-      descriptor_set, node->descriptor, &features, mix);
-  mix->scalar_alu_count += features.scalar_alu ? 1 : 0;
-  mix->vector_alu_count += features.vector_alu ? 1 : 0;
-  mix->matrix_count += features.matrix ? 1 : 0;
-  mix->mfma_count += features.mfma ? 1 : 0;
-  mix->smfmac_count += features.smfmac ? 1 : 0;
-  mix->wmma_count += features.wmma ? 1 : 0;
-  mix->swmmac_count += features.swmmac ? 1 : 0;
-  mix->dot_count += features.dot ? 1 : 0;
-  mix->global_memory_count += features.global_memory ? 1 : 0;
-  mix->global_load_count += features.global_load ? 1 : 0;
-  mix->global_store_count += features.global_store ? 1 : 0;
-  mix->buffer_load_count += features.buffer_load ? 1 : 0;
-  mix->buffer_store_count += features.buffer_store ? 1 : 0;
-  mix->flat_memory_count += features.flat_memory ? 1 : 0;
-  mix->local_memory_count += features.local_memory ? 1 : 0;
-  mix->scalar_memory_count += features.scalar_memory ? 1 : 0;
-  mix->private_memory_count += features.private_memory ? 1 : 0;
-  mix->generic_memory_count += features.generic_memory ? 1 : 0;
-  mix->atomic_count += features.atomic ? 1 : 0;
-  mix->branch_count += features.branch ? 1 : 0;
-  mix->barrier_count += features.barrier ? 1 : 0;
-  mix->control_count += features.control ? 1 : 0;
-  mix->conversion_count += features.conversion ? 1 : 0;
-  mix->cache_count += features.cache ? 1 : 0;
-  mix->register_move_count += features.register_move ? 1 : 0;
-  mix->unknown_count +=
-      loom_target_compile_report_low_node_features_are_known(&features) ? 0 : 1;
+      descriptor_set, node->descriptor, mix);
+#define LOOM_ACCUMULATE_INSTRUCTION_CLASS_(field, flag)         \
+  mix->field##_count +=                                         \
+      iree_all_bits_set(instruction_classes,                    \
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_##flag) \
+          ? 1                                                   \
+          : 0
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(unknown, OTHER);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(scalar_alu, SCALAR_ALU);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(vector_alu, VECTOR_ALU);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(matrix, MATRIX);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(mfma, MFMA);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(smfmac, SMFMAC);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(wmma, WMMA);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(swmmac, SWMMAC);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(dot, DOT);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(global_memory, GLOBAL_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(global_load, GLOBAL_LOAD);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(global_store, GLOBAL_STORE);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(buffer_load, BUFFER_LOAD);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(buffer_store, BUFFER_STORE);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(flat_memory, FLAT_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(local_memory, LOCAL_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(scalar_memory, SCALAR_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(private_memory, PRIVATE_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(generic_memory, GENERIC_MEMORY);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(atomic, ATOMIC);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(branch, BRANCH);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(barrier, BARRIER);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(control, CONTROL);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(conversion, CONVERSION);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(cache, CACHE);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(register_move, REGISTER_MOVE);
+#undef LOOM_ACCUMULATE_INSTRUCTION_CLASS_
 }
 
 static void loom_target_compile_report_accumulate_static_mix(
@@ -1416,48 +1203,63 @@ typedef struct loom_target_compile_report_pressure_origin_info_t {
 } loom_target_compile_report_pressure_origin_info_t;
 
 static loom_target_compile_report_pressure_origin_kind_t
-loom_target_compile_report_pressure_origin_from_low_node_features(
-    const loom_target_compile_report_low_node_features_t* features) {
-  if (features->dot) {
+loom_target_compile_report_pressure_origin_from_instruction_classes(
+    loom_low_instruction_class_flags_t instruction_classes) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_DOT)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT;
   }
-  if (features->matrix) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX;
   }
-  if (features->local_memory) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY;
   }
-  if (features->global_memory) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GLOBAL_MEMORY;
   }
-  if (features->scalar_memory) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SCALAR_MEMORY;
   }
-  if (features->private_memory) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_PRIVATE_MEMORY;
   }
-  if (features->generic_memory) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GENERIC_MEMORY;
   }
-  if (features->register_move) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE;
   }
-  if (features->conversion) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION;
   }
-  if (features->barrier) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER;
   }
-  if (features->control || features->branch) {
+  if (iree_any_bit_set(instruction_classes,
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL |
+                           LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL;
   }
-  if (features->cache) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CACHE;
   }
-  if (features->scalar_alu) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SCALAR_ALU;
   }
-  if (features->vector_alu) {
+  if (iree_all_bits_set(instruction_classes,
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_VECTOR_ALU;
   }
   return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_UNKNOWN;
@@ -1505,12 +1307,9 @@ loom_target_compile_report_pressure_origin_from_node(
   };
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR &&
       node->descriptor != NULL) {
-    const loom_target_compile_report_low_node_features_t features =
-        loom_target_compile_report_classify_low_node_features(descriptor_set,
-                                                              node);
     info.kind =
-        loom_target_compile_report_pressure_origin_from_low_node_features(
-            &features);
+        loom_target_compile_report_pressure_origin_from_instruction_classes(
+            node->descriptor->instruction_class_flags);
     if (info.kind == LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_UNKNOWN) {
       info.kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION;
     }

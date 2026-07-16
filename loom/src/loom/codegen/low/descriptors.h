@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 26u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 27u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -392,6 +392,64 @@ typedef uint16_t loom_low_descriptor_flags_t;
 // Descriptor has at least one result that clobbers inputs before reading them.
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
 
+// Target-neutral semantic classes attached to generated low descriptors.
+// Multiple classes may be present when a packet contributes to several
+// aggregates, such as a buffer load also contributing global-memory work.
+typedef uint32_t loom_low_instruction_class_flags_t;
+
+// Descriptor is intentionally outside the classified instruction families.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_OTHER ((uint32_t)1u << 0)
+// Descriptor contributes scalar ALU work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU ((uint32_t)1u << 1)
+// Descriptor contributes vector ALU work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU ((uint32_t)1u << 2)
+// Descriptor contributes matrix or tensor-core-like work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX ((uint32_t)1u << 3)
+// Descriptor contributes MFMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA ((uint32_t)1u << 4)
+// Descriptor contributes scaled MFMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC ((uint32_t)1u << 5)
+// Descriptor contributes WMMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA ((uint32_t)1u << 6)
+// Descriptor contributes scaled WMMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC ((uint32_t)1u << 7)
+// Descriptor contributes dot-product work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_DOT ((uint32_t)1u << 8)
+// Descriptor contributes global-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY ((uint32_t)1u << 9)
+// Descriptor is a raw global-load-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD ((uint32_t)1u << 10)
+// Descriptor is a raw global-store-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_STORE ((uint32_t)1u << 11)
+// Descriptor is a resource-buffer-load-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD ((uint32_t)1u << 12)
+// Descriptor is a resource-buffer-store-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_STORE ((uint32_t)1u << 13)
+// Descriptor is a flat-memory-family instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY ((uint32_t)1u << 14)
+// Descriptor contributes local, shared, or workgroup-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY ((uint32_t)1u << 15)
+// Descriptor contributes scalar-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY ((uint32_t)1u << 16)
+// Descriptor contributes private or stack-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY ((uint32_t)1u << 17)
+// Descriptor contributes memory work without a more specific family.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY ((uint32_t)1u << 18)
+// Descriptor contributes atomic-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC ((uint32_t)1u << 19)
+// Descriptor contributes a branch, return, or call control transfer.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH ((uint32_t)1u << 20)
+// Descriptor contributes barrier or synchronization work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER ((uint32_t)1u << 21)
+// Descriptor contributes control-flow or other control work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL ((uint32_t)1u << 22)
+// Descriptor contributes numeric conversion work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION ((uint32_t)1u << 23)
+// Descriptor contributes cache maintenance or prefetch work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE ((uint32_t)1u << 24)
+// Descriptor contributes register-move or repair work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE ((uint32_t)1u << 25)
+
 typedef struct loom_low_reg_class_t {
   // String-table offset for the stable register-class name.
   loom_bstring_table_offset_t name_string_offset;
@@ -726,6 +784,8 @@ typedef struct loom_low_descriptor_t {
   uint16_t schedule_class_id;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
+  // Generated target-neutral semantic instruction classes.
+  loom_low_instruction_class_flags_t instruction_class_flags;
   // Unique canonical asm form ordinal for descriptor-driven text emission, or
   // LOOM_LOW_ASM_FORM_ORDINAL_NONE when no unambiguous form exists.
   uint32_t canonical_asm_form_ordinal;
