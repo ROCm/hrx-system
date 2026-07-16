@@ -11,12 +11,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/id4/binding/cli/lora_set.h"
+#include "experimental/id4/binding/cli/lora_variant.h"
 #include "experimental/id4/binding/cli/parameter_bake.h"
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/json.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
+#include "experimental/id4/stages/ideogram4_dit_program.h"
 #include "experimental/id4/tooling/capture.h"
 #include "experimental/id4/tooling/diagnostics.h"
 #include "experimental/id4/tooling/filesystem.h"
@@ -34,6 +37,12 @@
 #include "iree/tokenizer/tokenizer.h"
 
 IREE_FLAG(string, tokenizer, "", "Path to the HuggingFace tokenizer JSON.");
+IREE_FLAG_LIST(string, lora,
+               "Ideogram 4 LoRA safetensors path. Repeat to compose LoRAs.");
+IREE_FLAG_LIST(
+    string, lora_strength,
+    "Finite LoRA strength ordered with --lora. Repeat once per LoRA or omit "
+    "to use 1.0 for every adapter.");
 IREE_FLAG(string, prompt, "", "Plain text prompt payload for one generation.");
 IREE_FLAG(string, prompt_json, "",
           "Full JSON prompt/configuration payload for one generation.");
@@ -876,6 +885,11 @@ static iree_status_t id4_cli_validate_execution_flags(void) {
 }
 
 static iree_status_t id4_cli_validate_parameter_bake_flags(void) {
+  if (FLAG_lora_list().count != 0 || FLAG_lora_strength_list().count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--lora inputs are not supported while baking parameters");
+  }
   if (strlen(FLAG_output) != 0 || strlen(FLAG_dump_result_summary) != 0 ||
       strlen(FLAG_dump_result_tensors) != 0) {
     return iree_make_status(
@@ -1703,6 +1717,7 @@ static iree_status_t id4_cli_prepare_issue_release_generation_phase(
 static iree_status_t id4_cli_issue_generation_full(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_request_t* request, iree_tokenizer_t* tokenizer,
+    const id4_cli_lora_set_t* lora_set,
     id4_ideogram4_generation_issue_policy_t issue_policy,
     iree_hal_semaphore_list_t prepare_wait_list,
     iree_hal_semaphore_list_t completion_signal_list,
@@ -1716,6 +1731,8 @@ static iree_status_t id4_cli_issue_generation_full(
   issue_options.request = request;
   issue_options.tokenizer = tokenizer;
   issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  issue_options.lora_strength_count = id4_cli_lora_set_adapter_count(lora_set);
+  issue_options.lora_strengths = id4_cli_lora_set_strengths(lora_set);
   issue_options.issue_policy = issue_policy;
   issue_options.stage_issue_flags = stage_issue_flags;
   issue_options.parameter_load_prefetch_segment_distance =
@@ -1730,7 +1747,7 @@ static iree_status_t id4_cli_issue_generation_full(
 static iree_status_t id4_cli_issue_generation_phases(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_request_t* request, iree_tokenizer_t* tokenizer,
-    iree_hal_semaphore_t* prepare_semaphore,
+    const id4_cli_lora_set_t* lora_set, iree_hal_semaphore_t* prepare_semaphore,
     uint64_t* inout_prepare_payload_value,
     iree_hal_semaphore_t* completion_semaphore,
     uint64_t* inout_completion_payload_value,
@@ -1756,6 +1773,8 @@ static iree_status_t id4_cli_issue_generation_phases(
   begin_options.request = request;
   begin_options.tokenizer = tokenizer;
   begin_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  begin_options.lora_strength_count = id4_cli_lora_set_adapter_count(lora_set);
+  begin_options.lora_strengths = id4_cli_lora_set_strengths(lora_set);
   begin_options.wait_semaphore_list = begin_wait_list;
   begin_options.signal_semaphore_list = begin_signal_list;
   begin_options.diagnostics_sink = diagnostics_sink;
@@ -1954,7 +1973,7 @@ static iree_io_parameter_index_t** id4_cli_parameter_source_index_out(
 
 static iree_status_t id4_cli_create_parameter_sources(
     id4_pipeline_parameter_source_kind_t source_kind,
-    iree_allocator_t host_allocator,
+    const id4_cli_lora_set_t* lora_set, iree_allocator_t host_allocator,
     id4_ideogram4_generation_parameter_sources_t* out_sources) {
   memset(out_sources, 0, sizeof(*out_sources));
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
@@ -2025,6 +2044,27 @@ static iree_status_t id4_cli_create_parameter_sources(
   };
   iree_status_t status = id4_tooling_create_parameter_providers_from_flags(
       IREE_ARRAYSIZE(requests), requests, host_allocator);
+  if (iree_status_is_ok(status) &&
+      id4_cli_lora_set_adapter_count(lora_set) != 0) {
+    if (source_kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT) {
+      iree_io_parameter_provider_t* conditioned_provider = NULL;
+      status = id4_cli_lora_set_create_conditioned_provider(
+          lora_set, conditioned_scope,
+          out_sources->dit_conditioned.storage.checkpoint.provider,
+          host_allocator, &conditioned_provider);
+      if (iree_status_is_ok(status)) {
+        iree_io_parameter_provider_release(
+            out_sources->dit_conditioned.storage.checkpoint.provider);
+        out_sources->dit_conditioned.storage.checkpoint.provider =
+            conditioned_provider;
+      }
+    } else if (source_kind !=
+               ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--lora requires checkpoint or execution-layout sources");
+    }
+  }
   if (!iree_status_is_ok(status)) {
     id4_cli_release_parameter_sources(out_sources);
   }
@@ -2036,6 +2076,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_ideogram4_request_t request;
   memset(&request, 0, sizeof(request));
   iree_tokenizer_t* tokenizer = NULL;
+  id4_cli_lora_set_t* lora_set = NULL;
   id4_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
   bool runtime_context_initialized = false;
@@ -2075,6 +2116,11 @@ static iree_status_t id4_cli_run_generation_dry_run(
   if (iree_status_is_ok(status)) {
     status =
         id4_cli_parse_generation_parameter_source_kind(&parameter_source_kind);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_lora_set_create(
+        id4_ideogram4_dit_program_ideogram4_model_config(), FLAG_lora_list(),
+        FLAG_lora_strength_list(), host_allocator, &lora_set);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_non_negative_host_size_flag(
@@ -2132,6 +2178,10 @@ static iree_status_t id4_cli_run_generation_dry_run(
     plan_options.request = &request;
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    plan_options.lora_topology =
+        parameter_source_kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT
+            ? id4_cli_lora_set_topology(lora_set)
+            : NULL;
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
     plan_options.region_per_dispatch_stage_mask =
         region_per_dispatch_stage_mask;
@@ -2167,13 +2217,15 @@ static iree_status_t id4_cli_run_generation_dry_run(
               " qwen_capacity=%" PRIu32 " image_tokens=%" PRIu32
               " dit_cond_tokens=%" PRIu32 " dit_cond_capacity=%" PRIu32
               " dit_uncond_tokens=%" PRIu32 " dit_uncond_capacity=%" PRIu32
-              " latent=%" PRIu64 "x%" PRIu64 "x%" PRIu64 " image=%" PRIu64
-              "x%" PRIu64 " steps=%" PRIu32 "\n",
+              " loras=%" PRIhsz " lora_targets=%" PRIhsz " latent=%" PRIu64
+              "x%" PRIu64 "x%" PRIu64 " image=%" PRIu64 "x%" PRIu64
+              " steps=%" PRIu32 "\n",
               summary.qwen_token_count, summary.qwen_token_capacity,
               summary.image_token_count, summary.conditioned_dit_token_count,
               summary.conditioned_dit_token_capacity,
               summary.unconditioned_dit_token_count,
               summary.unconditioned_dit_token_capacity,
+              summary.lora_adapter_count, summary.lora_target_count,
               summary.diffusion_latent_shape.dims[0],
               summary.diffusion_latent_shape.dims[1],
               summary.diffusion_latent_shape.dims[2],
@@ -2198,6 +2250,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
   }
   id4_cli_generation_diagnostic_taps_deinitialize(&diagnostic_taps,
                                                   host_allocator);
+  id4_cli_lora_set_release(lora_set);
   iree_tokenizer_free(tokenizer);
   id4_ideogram4_request_deinitialize(&request, host_allocator);
   return status;
@@ -2231,6 +2284,29 @@ static iree_status_t id4_cli_write_decoded_image(
   return id4_tooling_write_f32_rgb_ppm(&image_options);
 }
 
+static iree_status_t id4_cli_find_generation_stage_plan(
+    const id4_ideogram4_generation_plan_t* generation_plan,
+    iree_string_view_t requested_stage_key,
+    const id4_pipeline_plan_t** out_stage_plan) {
+  IREE_ASSERT_ARGUMENT(out_stage_plan);
+  *out_stage_plan = NULL;
+  const iree_host_size_t stage_count =
+      id4_ideogram4_generation_plan_stage_count(generation_plan);
+  for (iree_host_size_t i = 0; i < stage_count; ++i) {
+    iree_string_view_t stage_key = iree_string_view_empty();
+    const id4_pipeline_plan_t* stage_plan = NULL;
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_stage_at(
+        generation_plan, i, &stage_key, &stage_plan));
+    if (iree_string_view_equal(stage_key, requested_stage_key)) {
+      *out_stage_plan = stage_plan;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND, "generation stage plan `%.*s` was not found",
+      (int)requested_stage_key.size, requested_stage_key.data);
+}
+
 static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   const bool bakes_parameter_layouts =
       strlen(FLAG_bake_parameter_layout_directory) != 0;
@@ -2238,6 +2314,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_ideogram4_request_t request;
   memset(&request, 0, sizeof(request));
   iree_tokenizer_t* tokenizer = NULL;
+  id4_cli_lora_set_t* lora_set = NULL;
+  id4_cli_lora_variant_t* lora_variant = NULL;
   id4_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
   bool runtime_context_initialized = false;
@@ -2311,6 +2389,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         "parameter baking requires --generation_parameter_source=checkpoint");
   }
   if (iree_status_is_ok(status)) {
+    status = id4_cli_lora_set_create(
+        id4_ideogram4_dit_program_ideogram4_model_config(), FLAG_lora_list(),
+        FLAG_lora_strength_list(), host_allocator, &lora_set);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_cli_parse_non_negative_host_size_flag(
         FLAG_parameter_load_prefetch_segment_distance,
         IREE_SV("--parameter_load_prefetch_segment_distance"),
@@ -2370,7 +2453,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_create_parameter_sources(
-        parameter_source_kind, host_allocator, &parameter_sources);
+        parameter_source_kind, lora_set, host_allocator, &parameter_sources);
   }
   if (iree_status_is_ok(status) && executes_generation) {
     iree_hal_device_t* device =
@@ -2400,6 +2483,10 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     plan_options.request = &request;
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    plan_options.lora_topology =
+        parameter_source_kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT
+            ? id4_cli_lora_set_topology(lora_set)
+            : NULL;
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
     plan_options.region_per_dispatch_stage_mask =
         region_per_dispatch_stage_mask;
@@ -2465,6 +2552,36 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_cli_begin_profile_statistics(
         device, host_allocator, &profile_statistics_sink, &profile_started);
   }
+  if (iree_status_is_ok(status) && executes_generation &&
+      parameter_source_kind ==
+          ID4_PIPELINE_PARAMETER_SOURCE_KIND_EXECUTION_LAYOUT &&
+      id4_cli_lora_set_adapter_count(lora_set) != 0) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
+    const id4_pipeline_plan_t* conditioned_dit_plan = NULL;
+    status = id4_cli_find_generation_stage_plan(
+        generation_plan, IREE_SV("dit_conditioned"), &conditioned_dit_plan);
+    if (iree_status_is_ok(status)) {
+      id4_cli_lora_variant_create_options_t variant_options;
+      memset(&variant_options, 0, sizeof(variant_options));
+      variant_options.structure_size = sizeof(variant_options);
+      variant_options.conditioned_dit_plan = conditioned_dit_plan;
+      variant_options.base_parameter_source = parameter_sources.dit_conditioned;
+      variant_options.lora_set = lora_set;
+      variant_options.kernel_cache = runtime_context.kernel_cache;
+      variant_options.executable_cache = runtime_context.executable_cache;
+      variant_options.kernel_library = kernel_library;
+      variant_options.working_set_byte_capacity = 256 * 1024 * 1024;
+      variant_options.diagnostics_sink = &diagnostics_sink;
+      status = id4_cli_lora_variant_create(&variant_options, host_allocator,
+                                           &lora_variant);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(
+          &diagnostics_sink, IREE_SV("cli.bake_lora_variant"),
+          IREE_SV("baked resident LoRA parameter variant"), phase_start_time_ns,
+          iree_time_now());
+    }
+  }
   iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
   uint64_t prepare_signal_payload_storage = 1;
   uint64_t prepare_payload_storage = prepare_signal_payload_storage;
@@ -2479,6 +2596,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
     prepare_options.parameter_sources = parameter_sources;
+    if (lora_variant) {
+      prepare_options.parameter_sources.dit_conditioned =
+          id4_pipeline_resident_parameter_source(
+              id4_cli_lora_variant_parameter_slabs(lora_variant));
+    }
     prepare_options.kernel_library = kernel_library;
     prepare_options.maximum_parameter_window_byte_length =
         maximum_parameter_window_byte_length;
@@ -2508,6 +2630,10 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_hal_semaphore_t* completion_semaphore_storage = NULL;
   uint64_t completion_payload_storage = 0;
   iree_hal_semaphore_list_t completion_list = iree_hal_semaphore_list_empty();
+  const id4_cli_lora_set_t* dynamic_lora_set =
+      parameter_source_kind == ID4_PIPELINE_PARAMETER_SOURCE_KIND_CHECKPOINT
+          ? lora_set
+          : NULL;
   if (iree_status_is_ok(status) && executes_generation) {
     const iree_time_t phase_start_time_ns = iree_time_now();
     completion_list = id4_cli_single_semaphore_list(
@@ -2517,7 +2643,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       case ID4_CLI_GENERATION_ISSUE_MODE_FULL: {
         ++completion_payload_storage;
         status = id4_cli_issue_generation_full(
-            session, generation_bundle, &request, tokenizer,
+            session, generation_bundle, &request, tokenizer, dynamic_lora_set,
             id4_cli_generation_issue_policy(generation_issue_mode),
             prepare_signal_list, completion_list, stage_issue_flags,
             parameter_load_prefetch_segment_distance, &diagnostics_sink,
@@ -2527,7 +2653,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       case ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL: {
         ++completion_payload_storage;
         status = id4_cli_issue_generation_full(
-            session, generation_bundle, &request, tokenizer,
+            session, generation_bundle, &request, tokenizer, dynamic_lora_set,
             id4_cli_generation_issue_policy(generation_issue_mode),
             prepare_signal_list, completion_list, stage_issue_flags,
             parameter_load_prefetch_segment_distance, &diagnostics_sink,
@@ -2536,8 +2662,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       }
       case ID4_CLI_GENERATION_ISSUE_MODE_PHASES: {
         status = id4_cli_issue_generation_phases(
-            session, generation_bundle, &request, tokenizer, prepare_semaphore,
-            &prepare_payload_storage, completion_semaphore,
+            session, generation_bundle, &request, tokenizer, dynamic_lora_set,
+            prepare_semaphore, &prepare_payload_storage, completion_semaphore,
             &completion_payload_storage, stage_issue_flags,
             parameter_load_prefetch_segment_distance, &diagnostics_sink,
             &execution);
@@ -2836,11 +2962,26 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_ideogram4_generation_execution_release(execution);
   id4_ideogram4_generation_bundle_release(generation_bundle);
   id4_ideogram4_generation_plan_release(generation_plan);
+  id4_ideogram4_session_release(session);
+  session = NULL;
+  if (lora_variant) {
+    const iree_hal_semaphore_list_t last_use_wait_list =
+        generation_was_issued ? completion_list
+                              : iree_hal_semaphore_list_empty();
+    iree_status_t retire_status = id4_cli_lora_variant_retire(
+        lora_variant, last_use_wait_list, &diagnostics_sink);
+    const bool retired = iree_status_is_ok(retire_status);
+    status = iree_status_join(status, retire_status);
+    if (retired) {
+      id4_cli_lora_variant_release(lora_variant);
+      lora_variant = NULL;
+    }
+  }
   iree_hal_semaphore_release(prepare_semaphore);
   iree_hal_semaphore_release(completion_semaphore);
   iree_hal_profile_statistics_sink_release(profile_statistics_sink);
-  id4_ideogram4_session_release(session);
   id4_cli_release_parameter_sources(&parameter_sources);
+  id4_cli_lora_set_release(lora_set);
   id4_pipeline_kernel_library_release(kernel_library);
   if (runtime_context_initialized) {
     id4_tooling_runtime_context_deinitialize(&runtime_context);
@@ -2870,7 +3011,8 @@ int main(int argc, char** argv) {
       "Pass exactly one of --prompt=..., --prompt_json=..., or "
       "--prompt_json_file=....\n"
       "Plain --prompt requests also require --generation_* flags.\n"
-      "Model parameters are loaded with standard --parameters= flags.\n");
+      "Model parameters are loaded with standard --parameters= flags.\n"
+      "Repeat --lora=... and --lora_strength=... to compose adapters.\n");
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_allocator_t host_allocator = iree_allocator_system();
