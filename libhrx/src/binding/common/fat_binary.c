@@ -547,13 +547,158 @@ static bool hrx_fat_triple_matches_any_target(
     const iree_hal_streaming_fat_binary_target_t* targets,
     iree_host_size_t* out_target_index) {
   for (iree_host_size_t i = 0; i < target_count; ++i) {
-    if (iree_string_view_is_empty(targets[i].target_key)) continue;
-    if (hrx_fat_triple_matches(triple, targets[i].target_key)) {
+    const iree_hal_executable_target_t* target = targets[i].executable_target;
+    if (target == NULL || iree_string_view_is_empty(target->target_key)) {
+      continue;
+    }
+    if (hrx_fat_triple_matches(triple, target->target_key)) {
       *out_target_index = i;
       return true;
     }
   }
   return false;
+}
+
+typedef struct hrx_amdgpu_target_key_t {
+  iree_string_view_t processor;
+  hrx_amdgpu_feature_state_t sramecc;
+  hrx_amdgpu_feature_state_t xnack;
+} hrx_amdgpu_target_key_t;
+
+static iree_status_t hrx_fat_parse_amdgpu_target_key(
+    iree_string_view_t value, hrx_amdgpu_target_key_t* out_target_key) {
+  memset(out_target_key, 0, sizeof(*out_target_key));
+  out_target_key->sramecc = HRX_AMDGPU_FEATURE_STATE_ANY;
+  out_target_key->xnack = HRX_AMDGPU_FEATURE_STATE_ANY;
+
+  iree_string_view_t feature_list = iree_string_view_empty();
+  if (iree_string_view_split(value, ':', &out_target_key->processor,
+                             &feature_list) != -1 &&
+      (iree_string_view_is_empty(feature_list) ||
+       value.data[value.size - 1] == ':')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU target key has an empty feature suffix");
+  }
+  if (!iree_string_view_starts_with(out_target_key->processor,
+                                    IREE_SV("gfx"))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT, "invalid AMDGPU target processor '%.*s'",
+        (int)out_target_key->processor.size, out_target_key->processor.data);
+  }
+
+  while (!iree_string_view_is_empty(feature_list)) {
+    iree_string_view_t feature = feature_list;
+    iree_string_view_t remaining_features = iree_string_view_empty();
+    if (iree_string_view_split(feature_list, ':', &feature,
+                               &remaining_features) == -1) {
+      feature = feature_list;
+    }
+    feature_list = remaining_features;
+    if (feature.size < 2) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU target feature suffix is empty");
+    }
+
+    const char selector = feature.data[feature.size - 1];
+    hrx_amdgpu_feature_state_t state = HRX_AMDGPU_FEATURE_STATE_ANY;
+    if (selector == '+') {
+      state = HRX_AMDGPU_FEATURE_STATE_ON;
+    } else if (selector == '-') {
+      state = HRX_AMDGPU_FEATURE_STATE_OFF;
+    } else {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU target feature suffix is missing +/-: %.*s",
+          (int)feature.size, feature.data);
+    }
+
+    const iree_string_view_t name =
+        iree_string_view_remove_suffix(feature, /*n=*/1);
+    hrx_amdgpu_feature_state_t* feature_state = NULL;
+    if (iree_string_view_equal(name, IREE_SV("sramecc"))) {
+      feature_state = &out_target_key->sramecc;
+    } else if (iree_string_view_equal(name, IREE_SV("xnack"))) {
+      feature_state = &out_target_key->xnack;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported AMDGPU target feature: %.*s",
+                              (int)feature.size, feature.data);
+    }
+    if (*feature_state != HRX_AMDGPU_FEATURE_STATE_ANY) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "duplicate AMDGPU target feature: %.*s",
+                              (int)name.size, name.data);
+    }
+    *feature_state = state;
+  }
+  return iree_ok_status();
+}
+
+static bool hrx_fat_amdgpu_feature_is_compatible(
+    hrx_amdgpu_feature_state_t code_object_feature,
+    hrx_amdgpu_feature_state_t device_feature) {
+  if (code_object_feature == HRX_AMDGPU_FEATURE_STATE_ON ||
+      code_object_feature == HRX_AMDGPU_FEATURE_STATE_OFF) {
+    return code_object_feature == device_feature;
+  }
+  return true;
+}
+
+static bool hrx_fat_amdgpu_target_is_compatible(
+    const hrx_amdgpu_target_key_t* code_object_target,
+    const hrx_amdgpu_target_key_t* device_target) {
+  return iree_string_view_equal(code_object_target->processor,
+                                device_target->processor) &&
+         hrx_fat_amdgpu_feature_is_compatible(code_object_target->sramecc,
+                                              device_target->sramecc) &&
+         hrx_fat_amdgpu_feature_is_compatible(code_object_target->xnack,
+                                              device_target->xnack);
+}
+
+static iree_status_t hrx_fat_validate_targets(
+    iree_host_size_t target_count,
+    const iree_hal_streaming_fat_binary_target_t* targets) {
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const iree_hal_executable_target_t* target = targets[i].executable_target;
+    if (target == NULL ||
+        !iree_string_view_equal(target->family, IREE_SV("amdgpu")) ||
+        iree_string_view_is_empty(target->target_key)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "fat-binary target candidate[%" PRIhsz
+                              "] is not a concrete AMDGPU target",
+                              i);
+    }
+    hrx_amdgpu_target_key_t parsed_target;
+    IREE_RETURN_IF_ERROR(
+        hrx_fat_parse_amdgpu_target_key(target->target_key, &parsed_target));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t hrx_fat_find_compatible_target(
+    iree_string_view_t code_object_target_key, iree_host_size_t target_count,
+    const iree_hal_streaming_fat_binary_target_t* targets,
+    iree_host_size_t* out_target_index,
+    const iree_hal_executable_target_t** out_executable_target) {
+  *out_target_index = IREE_HOST_SIZE_MAX;
+  *out_executable_target = NULL;
+
+  hrx_amdgpu_target_key_t code_object_target;
+  IREE_RETURN_IF_ERROR(hrx_fat_parse_amdgpu_target_key(code_object_target_key,
+                                                       &code_object_target));
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const iree_hal_executable_target_t* target = targets[i].executable_target;
+    hrx_amdgpu_target_key_t device_target;
+    IREE_RETURN_IF_ERROR(
+        hrx_fat_parse_amdgpu_target_key(target->target_key, &device_target));
+    if (hrx_fat_amdgpu_target_is_compatible(&code_object_target,
+                                            &device_target)) {
+      *out_target_index = i;
+      *out_executable_target = target;
+      break;
+    }
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -573,7 +718,8 @@ static void hrx_fat_extract_clear_matches(
 static iree_status_t hrx_fat_extract_push(
     iree_hal_streaming_fat_binary_extract_t* extract,
     iree_const_byte_span_t elf_data, iree_string_view_t triple,
-    const char* target_key) {
+    iree_string_view_t code_object_target_key,
+    const iree_hal_executable_target_t* executable_target) {
   if (extract->match_count == extract->match_capacity) {
     iree_host_size_t new_capacity =
         extract->match_capacity ? extract->match_capacity * 2 : 4;
@@ -589,17 +735,26 @@ static iree_status_t hrx_fat_extract_push(
     extract->matches = (iree_hal_streaming_fat_binary_elf_t*)new_matches;
     extract->match_capacity = new_capacity;
   }
-  extract->matches[extract->match_count].data = elf_data;
-  extract->matches[extract->match_count].triple = triple;
-  memcpy(extract->matches[extract->match_count].target_key, target_key,
-         HRX_FAT_TARGET_KEY_CAPACITY);
+  if (code_object_target_key.size >= HRX_FAT_TARGET_KEY_CAPACITY) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU code-object target key is too long");
+  }
+  iree_hal_streaming_fat_binary_elf_t* match =
+      &extract->matches[extract->match_count];
+  memset(match, 0, sizeof(*match));
+  match->data = elf_data;
+  match->triple = triple;
+  match->executable_target = executable_target;
+  memcpy(match->code_object_target_key, code_object_target_key.data,
+         code_object_target_key.size);
+  match->code_object_target_key[code_object_target_key.size] = '\0';
   extract->match_count++;
   return iree_ok_status();
 }
 
 // Walks an uncompressed __CLANG_OFFLOAD_BUNDLE__ and appends every entry
-// whose triple matches the best-ranked target into |extract|. Entry payloads
-// must be valid AMDGPU ELFs; other entries (host, cpu, ...) are simply skipped.
+// compatible with the best-ranked target into |extract|. Entry payloads must be
+// valid AMDGPU ELFs; other entries (host, cpu, ...) are simply skipped.
 static iree_status_t hrx_fat_extract_from_bundle(
     iree_const_byte_span_t bundle, iree_host_size_t target_count,
     const iree_hal_streaming_fat_binary_target_t* targets,
@@ -645,15 +800,10 @@ static iree_status_t hrx_fat_extract_from_bundle(
                               "offload bundle entry[%" PRIu64 "] out of range",
                               i);
     }
-    iree_host_size_t target_index = IREE_HOST_SIZE_MAX;
+    iree_host_size_t triple_target_index = IREE_HOST_SIZE_MAX;
     if (!hrx_fat_triple_matches_any_target(triple, target_count, targets,
-                                           &target_index)) {
+                                           &triple_target_index)) {
       continue;
-    }
-    if (target_index > selected_target_index) continue;
-    if (target_index < selected_target_index) {
-      hrx_fat_extract_clear_matches(extract);
-      selected_target_index = target_index;
     }
 
     iree_const_byte_span_t entry_bytes =
@@ -669,10 +819,24 @@ static iree_status_t hrx_fat_extract_from_bundle(
     iree_host_size_t elf_size = 0;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
         entry_bytes, sizeof(target_key), target_key, &elf_size));
+    iree_host_size_t target_index = IREE_HOST_SIZE_MAX;
+    const iree_hal_executable_target_t* executable_target = NULL;
+    IREE_RETURN_IF_ERROR(hrx_fat_find_compatible_target(
+        iree_make_cstring_view(target_key), target_count, targets,
+        &target_index, &executable_target));
+    if (executable_target == NULL || target_index != triple_target_index) {
+      continue;
+    }
+    if (target_index > selected_target_index) continue;
+    if (target_index < selected_target_index) {
+      hrx_fat_extract_clear_matches(extract);
+      selected_target_index = target_index;
+    }
     iree_const_byte_span_t tight_elf =
         iree_make_const_byte_span(entry_bytes.data, elf_size);
-    IREE_RETURN_IF_ERROR(
-        hrx_fat_extract_push(extract, tight_elf, triple, target_key));
+    IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
+        extract, tight_elf, triple, iree_make_cstring_view(target_key),
+        executable_target));
   }
   return iree_ok_status();
 }
@@ -682,10 +846,31 @@ static iree_status_t hrx_fat_extract_from_bundle(
 // them in a Clang offload bundle. Preserve every ELF so hipModuleGetFunction
 // can find kernels that live after the first image.
 static iree_status_t hrx_fat_extract_concatenated_elves(
-    iree_const_byte_span_t data,
+    iree_const_byte_span_t data, iree_host_size_t target_count,
+    const iree_hal_streaming_fat_binary_target_t* targets,
     iree_hal_streaming_fat_binary_extract_t* extract) {
+  if (data.data_length == 0) {
+    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
+    iree_host_size_t elf_size = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+        data, sizeof(target_key), target_key, &elf_size));
+    iree_host_size_t target_index = IREE_HOST_SIZE_MAX;
+    const iree_hal_executable_target_t* executable_target = NULL;
+    IREE_RETURN_IF_ERROR(hrx_fat_find_compatible_target(
+        iree_make_cstring_view(target_key), target_count, targets,
+        &target_index, &executable_target));
+    if (executable_target != NULL) {
+      IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
+          extract, iree_make_const_byte_span(data.data, elf_size),
+          iree_string_view_empty(), iree_make_cstring_view(target_key),
+          executable_target));
+    }
+    return iree_ok_status();
+  }
+
   iree_host_size_t offset = 0;
-  const iree_host_size_t initial_match_count = extract->match_count;
+  iree_host_size_t elf_count = 0;
+  iree_host_size_t selected_target_index = IREE_HOST_SIZE_MAX;
   while (offset + 4 <= data.data_length) {
     iree_const_byte_span_t remaining = iree_make_const_byte_span(
         data.data + offset, data.data_length - offset);
@@ -701,17 +886,30 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
     iree_host_size_t elf_size = 0;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
         remaining, sizeof(target_key), target_key, &elf_size));
+    ++elf_count;
     if (elf_size == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "ELF at offset %" PRIhsz " has zero size",
                               offset);
     }
-    IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
-        extract, iree_make_const_byte_span(remaining.data, elf_size),
-        iree_string_view_empty(), target_key));
+    iree_host_size_t target_index = IREE_HOST_SIZE_MAX;
+    const iree_hal_executable_target_t* executable_target = NULL;
+    IREE_RETURN_IF_ERROR(hrx_fat_find_compatible_target(
+        iree_make_cstring_view(target_key), target_count, targets,
+        &target_index, &executable_target));
+    if (executable_target != NULL && target_index <= selected_target_index) {
+      if (target_index < selected_target_index) {
+        hrx_fat_extract_clear_matches(extract);
+        selected_target_index = target_index;
+      }
+      IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
+          extract, iree_make_const_byte_span(remaining.data, elf_size),
+          iree_string_view_empty(), iree_make_cstring_view(target_key),
+          executable_target));
+    }
     offset += elf_size;
   }
-  return extract->match_count > initial_match_count
+  return elf_count > 0
              ? iree_ok_status()
              : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "no ELF images found in concatenated payload");
@@ -784,7 +982,8 @@ static iree_status_t hrx_fat_extract_from_ccob(
   iree_const_byte_span_t decompressed =
       iree_make_const_byte_span(out_buffer, (iree_host_size_t)actual);
   if (hrx_fat_is_elf(decompressed)) {
-    return hrx_fat_extract_concatenated_elves(decompressed, extract);
+    return hrx_fat_extract_concatenated_elves(decompressed, target_count,
+                                              targets, extract);
   }
   if (hrx_fat_is_uncompressed_bundle(decompressed)) {
     return hrx_fat_extract_from_bundle(decompressed, target_count, targets,
@@ -825,6 +1024,7 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "at least one fat-binary target is required");
   }
+  IREE_RETURN_IF_ERROR(hrx_fat_validate_targets(target_count, targets));
 
   // Peel the HIP fat-binary wrapper if present.
   iree_const_byte_span_t inner = data;
@@ -854,16 +1054,8 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
     status =
         hrx_fat_extract_from_bundle(inner, target_count, targets, out_extract);
   } else if (hrx_fat_is_elf(inner)) {
-    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
-    iree_host_size_t elf_size = 0;
-    status = iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-        inner, sizeof(target_key), target_key, &elf_size);
-    if (iree_status_is_ok(status)) {
-      iree_const_byte_span_t tight =
-          iree_make_const_byte_span(inner.data, elf_size);
-      status = hrx_fat_extract_push(out_extract, tight,
-                                    iree_string_view_empty(), target_key);
-    }
+    status = hrx_fat_extract_concatenated_elves(inner, target_count, targets,
+                                                out_extract);
   } else {
     const uint8_t* head =
         inner.data_length >= 4 ? (const uint8_t*)inner.data : NULL;
@@ -877,11 +1069,12 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
   }
 
   if (iree_status_is_ok(status) && out_extract->match_count == 0) {
-    status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no ELF in fat binary matches any of %" PRIhsz
-                              " target candidates (first '%.*s')",
-                              target_count, (int)targets[0].target_key.size,
-                              targets[0].target_key.data);
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "no ELF in fat binary matches any of %" PRIhsz
+        " target candidates (first '%.*s')",
+        target_count, (int)targets[0].executable_target->target_key.size,
+        targets[0].executable_target->target_key.data);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_streaming_fat_binary_extract_reset(out_extract);

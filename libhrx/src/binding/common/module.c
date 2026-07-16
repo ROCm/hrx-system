@@ -18,13 +18,15 @@
 static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
     iree_hal_streaming_fat_binary_target_t* targets,
     iree_host_size_t target_capacity, iree_host_size_t* target_count,
-    iree_string_view_t value) {
-  if (iree_string_view_is_empty(value)) {
+    const iree_hal_executable_target_t* executable_target) {
+  if (executable_target == NULL ||
+      iree_string_view_is_empty(executable_target->target_key)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "fat-binary target value is empty");
+                            "fat-binary target is missing its target key");
   }
   for (iree_host_size_t i = 0; i < *target_count; ++i) {
-    if (iree_string_view_equal(targets[i].target_key, value)) {
+    if (iree_string_view_equal(targets[i].executable_target->target_key,
+                               executable_target->target_key)) {
       return iree_ok_status();
     }
   }
@@ -32,7 +34,7 @@ static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "fat-binary target capacity exceeded");
   }
-  targets[*target_count].target_key = value;
+  targets[*target_count].executable_target = executable_target;
   *target_count += 1;
   return iree_ok_status();
 }
@@ -66,7 +68,7 @@ static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
         "AMDGPU HAL device spec reports ambiguous exact executable targets");
   }
   IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
-      targets, target_capacity, &target_count, result.target->target_key));
+      targets, target_capacity, &target_count, result.target));
 
   selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC;
   result =
@@ -79,7 +81,7 @@ static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
   }
   if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
     IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
-        targets, target_capacity, &target_count, result.target->target_key));
+        targets, target_capacity, &target_count, result.target));
   }
 
   *out_target_count = target_count;
@@ -416,36 +418,17 @@ static void iree_hal_streaming_module_destroy(
 
 static iree_status_t iree_hal_streaming_module_load_executable(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_load_flags_t load_flags, iree_string_view_t target_key,
+    iree_hal_executable_load_flags_t load_flags,
+    const iree_hal_executable_target_t* executable_target,
     iree_const_byte_span_t executable_data,
     iree_hal_executable_t** out_executable) {
-  iree_hal_executable_target_selection_t selection = {
-      .family = IREE_SV("amdgpu"),
-      .target_key = target_key,
-  };
-  const iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(
-          iree_hal_device_spec(context->device), &selection);
-  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "device does not support AMDGPU executable target `%.*s`",
-        (int)target_key.size, target_key.data);
-  } else if (result.outcome ==
-             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "device reports ambiguous AMDGPU executable target `%.*s`",
-        (int)target_key.size, target_key.data);
-  }
-
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
   load_params.flags = load_flags;
   load_params.executable_data = executable_data;
-  return iree_hal_device_load_executable(context->device,
-                                         context->queue_affinity, result.target,
-                                         &load_params, out_executable);
+  return iree_hal_device_load_executable(
+      context->device, context->queue_affinity, executable_target, &load_params,
+      out_executable);
 }
 
 iree_status_t iree_hal_streaming_module_create_from_memory(
@@ -458,9 +441,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   *out_module = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Allocate module structure up-front — we stash the fat-binary extract
-  // directly on it so the (possibly decompressed) ELF backing store lives
-  // as long as the HAL executable that may still alias it.
+  // Allocate the module structure up-front for terminal cleanup.
   iree_hal_streaming_module_t* module = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -476,8 +457,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // __CLANG_OFFLOAD_BUNDLE__ archives, CCOB (zstd-compressed bundles), and
   // __hipFatBinaryWrapper-wrapped combinations of those. Unwrap everything here
   // and only forward raw ELF plus its selected target to the HAL device.
-  iree_const_byte_span_t executable_data = image;
-  const char* target_key = NULL;
+  iree_hal_streaming_fat_binary_extract_t fat_extract = {0};
   const bool try_fat_unwrap = context->device_entry != NULL &&
                               iree_hal_streaming_fat_binary_is_supported(image);
   iree_status_t status = iree_ok_status();
@@ -489,14 +469,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
         &target_count);
     if (iree_status_is_ok(status)) {
       status = iree_hal_streaming_fat_binary_extract_for_targets(
-          image, target_count, targets, host_allocator, &module->fat_extract);
-    }
-    if (iree_status_is_ok(status)) {
-      // Multiple matches are possible (e.g. Tensile feature-specialized
-      // kernels). Load all of them below and merge their exports into one HIP
-      // module namespace.
-      executable_data = module->fat_extract.matches[0].data;
-      target_key = module->fat_extract.matches[0].target_key;
+          image, target_count, targets, host_allocator, &fat_extract);
     }
   } else {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -507,16 +480,16 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // Create HAL executable from binary.
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_module_load_executable(
-        context, load_flags, iree_make_cstring_view(target_key),
-        executable_data, &module->executable);
+        context, load_flags, fat_extract.matches[0].executable_target,
+        fat_extract.matches[0].data, &module->executable);
   }
 
   // If the fat binary had multiple matching HSACO entries, prepare all of
   // them and expose their exports through the same hipModule_t. Native HIP lets
   // libraries such as hipBLAS/Tensile probe one module handle for a kernel that
   // may live in a later matching code object.
-  if (iree_status_is_ok(status) && module->fat_extract.match_count > 1) {
-    module->executable_count = module->fat_extract.match_count;
+  if (iree_status_is_ok(status) && fat_extract.match_count > 1) {
+    module->executable_count = fat_extract.match_count;
     status = iree_allocator_malloc(
         host_allocator, module->executable_count * sizeof(*module->executables),
         (void**)&module->executables);
@@ -527,12 +500,9 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     }
     for (iree_host_size_t i = 1;
          iree_status_is_ok(status) && i < module->executable_count; ++i) {
-      iree_const_byte_span_t match_data = module->fat_extract.matches[i].data;
-
       status = iree_hal_streaming_module_load_executable(
-          context, load_flags,
-          iree_make_cstring_view(module->fat_extract.matches[i].target_key),
-          match_data, &module->executables[i]);
+          context, load_flags, fat_extract.matches[i].executable_target,
+          fat_extract.matches[i].data, &module->executables[i]);
     }
   }
 
@@ -541,6 +511,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     status = iree_hal_streaming_module_extract_metadata(module);
   }
 
+  iree_hal_streaming_fat_binary_extract_reset(&fat_extract);
   if (iree_status_is_ok(status)) {
     *out_module = module;
   } else {
@@ -587,12 +558,8 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   status = iree_hal_streaming_module_create_from_memory(
       context, load_flags, image, host_allocator, &module);
 
-  if (iree_status_is_ok(status)) {
-    module->file_mapping = file_mapping;
-    *out_module = module;
-  } else {
-    iree_io_file_mapping_release(file_mapping);
-  }
+  iree_io_file_mapping_release(file_mapping);
+  if (iree_status_is_ok(status)) *out_module = module;
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -616,9 +583,7 @@ static void iree_hal_streaming_module_destroy(
   iree_allocator_free(host_allocator, module->globals);
   iree_slim_mutex_deinitialize(&module->global_mutex);
 
-  // Release executable before the fat-binary extract: the HAL's code
-  // object reader may still alias pointers into the (possibly owned)
-  // backing store held by the extract until the executable drops.
+  // Release loaded executables.
   if (module->executables) {
     for (iree_host_size_t i = 0; i < module->executable_count; ++i) {
       iree_hal_executable_release(module->executables[i]);
@@ -627,12 +592,6 @@ static void iree_hal_streaming_module_destroy(
   } else {
     iree_hal_executable_release(module->executable);
   }
-
-  // Drop fat-binary / offload-bundle unpacking buffers.
-  iree_hal_streaming_fat_binary_extract_reset(&module->fat_extract);
-
-  // Drop the mapped module image.
-  iree_io_file_mapping_release(module->file_mapping);
 
   // Release context.
   iree_hal_streaming_context_release(module->context);
