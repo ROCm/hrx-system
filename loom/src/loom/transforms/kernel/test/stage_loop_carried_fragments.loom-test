@@ -521,3 +521,78 @@ COMPILE-REPORT: source_low_transform[0] function=decline_subgroup_dependent_loop
 COMPILE-REPORT: source_low_transform[1] function=decline_subgroup_dependent_branch source_op=scf.for transform=stage-loop-carried-fragments outcome=declined reason=control_not_workgroup_uniform candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 inserted_loads=2 inserted_stores=2 barriers=2
 COMPILE-REPORT: source_low_transform[2] function=decline_lane_dependent_cfg_arm source_op=scf.for transform=stage-loop-carried-fragments outcome=declined reason=control_not_workgroup_uniform candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 inserted_loads=2 inserted_stores=2 barriers=2
 COMPILE-REPORT: source_low_transform[3] function=stage_exact_single_subgroup_control source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+
+// ====
+// RUN: pass-report stage-loop-carried-fragments,dce
+
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_fragment_loop_chain() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result0 = scf.for %tile0 = [%zero to %four step %one](%acc0 = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next0 : vector<8xf32>
+  }
+  %result1 = scf.for %tile1 = [%zero to %four step %one](%acc1 = %result0 : vector<8xf32>) -> (vector<8xf32>) {
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next1 : vector<8xf32>
+  }
+  %result2 = scf.for %tile2 = [%zero to %four step %one](%acc2 = %result1 : vector<8xf32>) -> (vector<8xf32>) {
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next2 : vector<8xf32>
+  }
+  %result3 = scf.for %tile3 = [%zero to %four step %one](%acc3 = %result2 : vector<8xf32>) -> (vector<8xf32>) {
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next3 : vector<8xf32>
+  }
+  test.use %result3 : vector<8xf32>
+  kernel.return
+}
+
+kernel.def target(@target) @stage_nested_fragment_loops() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %outer_result = scf.for %outer = [%zero to %four step %one](%outer_acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %inner_result = scf.for %inner = [%zero to %four step %one](%inner_acc = %outer_acc : vector<8xf32>) -> (vector<8xf32>) {
+      %next = vector.mma %lhs, %rhs, %inner_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    scf.yield %inner_result : vector<8xf32>
+  }
+  test.use %outer_result : vector<8xf32>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
+COMPILE-REPORT: source_low_transforms rows=6
+COMPILE-REPORT: source_low_transform[0] function=stage_fragment_loop_chain source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[1] function=stage_fragment_loop_chain source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[2] function=stage_fragment_loop_chain source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[3] function=stage_fragment_loop_chain source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[4] function=stage_nested_fragment_loops source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[5] function=stage_nested_fragment_loops source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
