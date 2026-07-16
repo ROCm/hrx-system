@@ -80,6 +80,26 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "lora_bake",
+    srcs = ["lora_bake.c"],
+    hdrs = ["lora_bake.h"],
+    deps = [
+        ":lora_bake_plan",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:parameter_layout",
+        "//experimental/id4/pipeline:parameter_materialization",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "request",
     srcs = ["request.c"],
     hdrs = ["request.h"],

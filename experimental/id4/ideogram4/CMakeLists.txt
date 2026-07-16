@@ -87,6 +87,29 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    lora_bake
+  HDRS
+    "lora_bake.h"
+  SRCS
+    "lora_bake.c"
+  DEPS
+    ::lora_bake_plan
+    iree::base
+    iree::base::internal
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_layout
+    iree::experimental::id4::pipeline::parameter_materialization
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_provider
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     request
   HDRS
     "request.h"

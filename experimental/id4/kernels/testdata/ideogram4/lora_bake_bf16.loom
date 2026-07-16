@@ -52,6 +52,62 @@ check.case public @id4_ideogram4_lora_bake_decode_fp8_f32_small_case {
   check.return
 }
 
+check.case public @id4_ideogram4_lora_bake_decode_dense_fp8_f32_small_case {
+  %weight = check.generate.fill value(2.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(0.5) : tensor<16xf32>
+  %effective_weight = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(1.0) : tensor<16x16xf32>
+  func.call @id4_ideogram4_lora_bake_decode_dense_fp8_f32(%weight, %scale, %effective_weight) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<16x16xf32>)
+  check.expect.close actual(%effective_weight) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_encode_f32_dense_fp8_small_case {
+  %scale = check.generate.fill value(0.5) : tensor<16xf32>
+  %effective_weight = check.generate.fill value(224.0) : tensor<16x16xf32>
+  %weight = check.generate.fill value(0) : tensor<16x16xi8>
+  %decoded = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(224.0) : tensor<16x16xf32>
+  func.call @id4_ideogram4_lora_bake_encode_f32_dense_fp8(%effective_weight, %scale, %weight) : (tensor<16x16xf32>, tensor<16xf32>, tensor<16x16xi8>)
+  func.call @id4_ideogram4_lora_bake_decode_dense_fp8_f32(%weight, %scale, %decoded) : (tensor<16x16xi8>, tensor<16xf32>, tensor<16x16xf32>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+
+  // Values above the exact subnormal midpoint round to the minimum E4M3FN
+  // subnormal; exact midpoint ties round to even zero.
+  %unit_scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %subnormal_source = check.generate.fill value(0.001171875) : tensor<16x16xf32>
+  %subnormal_weight = check.generate.fill value(0) : tensor<16x16xi8>
+  %subnormal_decoded = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %subnormal_expected = check.generate.fill value(0.001953125) : tensor<16x16xf32>
+  func.call @id4_ideogram4_lora_bake_encode_f32_dense_fp8(%subnormal_source, %unit_scale, %subnormal_weight) : (tensor<16x16xf32>, tensor<16xf32>, tensor<16x16xi8>)
+  func.call @id4_ideogram4_lora_bake_decode_dense_fp8_f32(%subnormal_weight, %unit_scale, %subnormal_decoded) : (tensor<16x16xi8>, tensor<16xf32>, tensor<16x16xf32>)
+  check.expect.close actual(%subnormal_decoded) expected(%subnormal_expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+
+  %tie_source = check.generate.fill value(0.0009765625) : tensor<16x16xf32>
+  %tie_weight = check.generate.fill value(1) : tensor<16x16xi8>
+  %tie_decoded = check.generate.fill value(1.0) : tensor<16x16xf32>
+  %tie_expected = check.generate.fill value(0.0) : tensor<16x16xf32>
+  func.call @id4_ideogram4_lora_bake_encode_f32_dense_fp8(%tie_source, %unit_scale, %tie_weight) : (tensor<16x16xf32>, tensor<16xf32>, tensor<16x16xi8>)
+  func.call @id4_ideogram4_lora_bake_decode_dense_fp8_f32(%tie_weight, %unit_scale, %tie_decoded) : (tensor<16x16xi8>, tensor<16xf32>, tensor<16x16xf32>)
+  check.expect.close actual(%tie_decoded) expected(%tie_expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_lora_bake_encode_layout_parity_case {
+  %effective_weight = check.generate.iota offset(-1.0) step(0.00390625) : tensor<16x32xf32>
+  %scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %dense_weight = check.generate.fill value(0) : tensor<16x32xi8>
+  %compact_weight = check.generate.fill value(0) : tensor<512xi8>
+  %dense_decoded = check.generate.fill value(0.0) : tensor<16x32xf32>
+  %compact_decoded = check.generate.fill value(0.0) : tensor<16x32xf32>
+  func.call @id4_ideogram4_lora_bake_encode_f32_dense_fp8(%effective_weight, %scale, %dense_weight) : (tensor<16x32xf32>, tensor<16xf32>, tensor<16x32xi8>)
+  func.call @id4_ideogram4_lora_bake_encode_f32_fp8(%effective_weight, %scale, %compact_weight) : (tensor<16x32xf32>, tensor<16xf32>, tensor<512xi8>)
+  func.call @id4_ideogram4_lora_bake_decode_dense_fp8_f32(%dense_weight, %scale, %dense_decoded) : (tensor<16x32xi8>, tensor<16xf32>, tensor<16x32xf32>)
+  func.call @id4_ideogram4_lora_bake_decode_fp8_f32(%compact_weight, %scale, %compact_decoded) : (tensor<512xi8>, tensor<16xf32>, tensor<16x32xf32>)
+  check.expect.close actual(%compact_decoded) expected(%dense_decoded) atol(0.0) rtol(0.0) nan(same) : tensor<16x32xf32>
+  check.return
+}
+
 check.case public @id4_ideogram4_lora_bake_pack_down_bf16_small_case {
   %source = check.generate.fill value(0.5) : tensor<16x16xbf16>
   %target = check.generate.fill value(0.0) : tensor<256xbf16>
@@ -113,6 +169,12 @@ check.case public @id4_ideogram4_lora_bake_scale_f32_fp8_small_case {
 }
 
 check.benchmark<@id4_ideogram4_lora_bake_decode_fp8_f32_small_case> @id4_ideogram4_lora_bake_decode_fp8_f32_small
+
+check.benchmark<@id4_ideogram4_lora_bake_decode_dense_fp8_f32_small_case> @id4_ideogram4_lora_bake_decode_dense_fp8_f32_small
+
+check.benchmark<@id4_ideogram4_lora_bake_encode_f32_dense_fp8_small_case> @id4_ideogram4_lora_bake_encode_f32_dense_fp8_small
+
+check.benchmark<@id4_ideogram4_lora_bake_encode_layout_parity_case> @id4_ideogram4_lora_bake_encode_layout_parity
 
 check.benchmark<@id4_ideogram4_lora_bake_pack_down_bf16_small_case> @id4_ideogram4_lora_bake_pack_down_bf16_small
 

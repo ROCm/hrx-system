@@ -18,6 +18,18 @@ enum {
   ID4_IDEOGRAM4_LORA_BAKE_WORKING_ALIGNMENT = 16,
 };
 
+iree_string_view_t id4_ideogram4_lora_bake_weight_layout_name(
+    id4_ideogram4_lora_bake_weight_layout_t layout) {
+  switch (layout) {
+    case ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_DENSE_ROW_MAJOR:
+      return IREE_SV("dense_row_major");
+    case ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_COMPACT_RHS_TILE:
+      return IREE_SV("compact_rhs_tile");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 struct id4_ideogram4_lora_bake_plan_t {
   // Reference count for shared bake-plan ownership.
   iree_atomic_ref_count_t ref_count;
@@ -335,14 +347,30 @@ static iree_status_t id4_ideogram4_lora_bake_plan_target(
   if (weight_tensor->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3 ||
       !id4_ideogram4_lora_bake_shape_matches(weight_tensor->layout.shape, 2,
                                              source_target->output_size,
-                                             source_target->input_size) ||
-      weight_parameter->encoding !=
-          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE) {
+                                             source_target->input_size)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "LoRA bake target `%.*s` is not a compact FP8 RHS weight",
+        "LoRA bake target `%.*s` is not an FP8 weight with the expected "
+        "shape",
         (int)source_target->base_parameter_key.size,
         source_target->base_parameter_key.data);
+  }
+  id4_ideogram4_lora_bake_weight_layout_t weight_layout =
+      ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_INVALID;
+  switch (weight_parameter->encoding) {
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT:
+      weight_layout = ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_DENSE_ROW_MAJOR;
+      break;
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE:
+      weight_layout = ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_COMPACT_RHS_TILE;
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "LoRA bake target `%.*s` uses unsupported parameter encoding %u",
+          (int)source_target->base_parameter_key.size,
+          source_target->base_parameter_key.data,
+          (unsigned)weight_parameter->encoding);
   }
   id4_ideogram4_lora_bake_parameter_range_t weight_range;
   IREE_RETURN_IF_ERROR(id4_ideogram4_lora_bake_validate_parameter_range(
@@ -447,6 +475,7 @@ static iree_status_t id4_ideogram4_lora_bake_plan_target(
 
   *out_target = (id4_ideogram4_lora_bake_target_t){
       .base_parameter_key = source_target->base_parameter_key,
+      .weight_layout = weight_layout,
       .weight_range = weight_range,
       .scale_range = scale_range,
       .input_size = source_target->input_size,
@@ -626,6 +655,11 @@ iree_status_t id4_ideogram4_lora_bake_plan_format_json(
         builder, "{\"ordinal\":%" PRIhsz ",\"parameter\":", i));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_json_append_string(builder, target->base_parameter_key));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"weight_layout\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_json_append_string(
+        builder,
+        id4_ideogram4_lora_bake_weight_layout_name(target->weight_layout)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"input_size\":%" PRIu32 ",\"output_size\":%" PRIu32

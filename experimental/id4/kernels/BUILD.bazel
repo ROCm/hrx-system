@@ -34,6 +34,39 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_lora_bake_decode_fp8_f32_small",
     },
     {
+        "actual_case": "@id4_ideogram4_lora_bake_decode_dense_fp8_f32_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_decode_dense_fp8_f32_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=1",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_decode_dense_fp8_f32_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_encode_f32_dense_fp8_small_case",
+        "benchmark": "@id4_ideogram4_lora_bake_encode_f32_dense_fp8_small",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=16",
+            "--config=id4.ideogram4.lora_bake.rank=1",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_encode_f32_dense_fp8_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_lora_bake_encode_layout_parity_case",
+        "benchmark": "@id4_ideogram4_lora_bake_encode_layout_parity",
+        "configs": [
+            "--config=id4.ideogram4.lora_bake.output_row_count=16",
+            "--config=id4.ideogram4.lora_bake.input_size=32",
+            "--config=id4.ideogram4.lora_bake.rank=1",
+        ],
+        "source": "ideogram4/lora_bake_bf16.loom",
+        "target_name": "ideogram4_lora_bake_encode_layout_parity",
+    },
+    {
         "actual_case": "@id4_ideogram4_lora_bake_pack_down_bf16_small_case",
         "benchmark": "@id4_ideogram4_lora_bake_pack_down_bf16_small",
         "configs": [

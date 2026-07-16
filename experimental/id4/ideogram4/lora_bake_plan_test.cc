@@ -325,6 +325,8 @@ TEST(Ideogram4LoraBakePlan, PlansBoundedCompactTargetWindows) {
   ASSERT_NE(target, nullptr);
   EXPECT_TRUE(iree_string_view_equal(target->base_parameter_key,
                                      IREE_SV("layers.0.attention.qkv.weight")));
+  EXPECT_EQ(target->weight_layout,
+            ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_COMPACT_RHS_TILE);
   EXPECT_EQ(target->input_size, 32u);
   EXPECT_EQ(target->output_size, 96u);
   EXPECT_EQ(target->total_rank, 2u);
@@ -442,6 +444,30 @@ TEST(Ideogram4LoraBakePlan, WorkingBudgetControlsWindowShape) {
   id4_pipeline_plan_release(base_plan);
 }
 
+TEST(Ideogram4LoraBakePlan, PlansDenseRowMajorTargetWindows) {
+  id4_pipeline_plan_t* base_plan = CreatePlan({
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      BASE_PROGRAM_FLAG_INCLUDE_SCALE,
+  });
+  id4_ideogram4_lora_topology_t* topology = CreateTopology();
+  id4_ideogram4_lora_bake_plan_t* bake_plan = nullptr;
+  IREE_ASSERT_OK(CreateBakePlan(base_plan, topology,
+                                /*working_set_byte_capacity=*/4096,
+                                &bake_plan));
+
+  const id4_ideogram4_lora_bake_target_t* target =
+      id4_ideogram4_lora_bake_plan_target_at(bake_plan, 0);
+  ASSERT_NE(target, nullptr);
+  EXPECT_EQ(target->weight_layout,
+            ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_DENSE_ROW_MAJOR);
+  EXPECT_EQ(target->weight_range.length, 96u * 32u);
+  EXPECT_EQ(target->scale_range.length, 96u * sizeof(float));
+
+  id4_ideogram4_lora_bake_plan_release(bake_plan);
+  id4_ideogram4_lora_topology_release(topology);
+  id4_pipeline_plan_release(base_plan);
+}
+
 TEST(Ideogram4LoraBakePlan, RejectsInsufficientWorkingBudget) {
   id4_pipeline_plan_t* base_plan = CreatePlan({
       ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE,
@@ -452,22 +478,6 @@ TEST(Ideogram4LoraBakePlan, RejectsInsufficientWorkingBudget) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       CreateBakePlan(base_plan, topology, /*working_set_byte_capacity=*/128,
-                     &bake_plan));
-  EXPECT_EQ(bake_plan, nullptr);
-  id4_ideogram4_lora_topology_release(topology);
-  id4_pipeline_plan_release(base_plan);
-}
-
-TEST(Ideogram4LoraBakePlan, RejectsNonCompactBaseWeight) {
-  id4_pipeline_plan_t* base_plan = CreatePlan({
-      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
-      BASE_PROGRAM_FLAG_INCLUDE_SCALE,
-  });
-  id4_ideogram4_lora_topology_t* topology = CreateTopology();
-  id4_ideogram4_lora_bake_plan_t* bake_plan = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      CreateBakePlan(base_plan, topology, /*working_set_byte_capacity=*/4096,
                      &bake_plan));
   EXPECT_EQ(bake_plan, nullptr);
   id4_ideogram4_lora_topology_release(topology);

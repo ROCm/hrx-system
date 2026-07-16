@@ -42,11 +42,27 @@ typedef struct id4_ideogram4_lora_bake_working_set_t {
   iree_device_size_t byte_length;
 } id4_ideogram4_lora_bake_working_set_t;
 
-// Planned bounded bake work for one compact FP8 linear weight.
+// Physical execution layout retained by a baked FP8 weight.
+typedef enum id4_ideogram4_lora_bake_weight_layout_e {
+  // Invalid or unspecified weight layout.
+  ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_INVALID = 0,
+  // Dense output-major rows matching the logical checkpoint layout.
+  ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_DENSE_ROW_MAJOR = 1,
+  // Compact 16x16 RHS tiles consumed directly by WMMA linear kernels.
+  ID4_IDEOGRAM4_LORA_BAKE_WEIGHT_LAYOUT_COMPACT_RHS_TILE = 2,
+} id4_ideogram4_lora_bake_weight_layout_t;
+
+// Returns the stable diagnostic name for |layout|.
+iree_string_view_t id4_ideogram4_lora_bake_weight_layout_name(
+    id4_ideogram4_lora_bake_weight_layout_t layout);
+
+// Planned bounded bake work for one resident FP8 linear weight.
 typedef struct id4_ideogram4_lora_bake_target_t {
   // Canonical base parameter key patched by this target.
   iree_string_view_t base_parameter_key;
-  // Compact FP8 weight range in the patchable parameter slab.
+  // Physical execution layout preserved by the baked weight.
+  id4_ideogram4_lora_bake_weight_layout_t weight_layout;
+  // FP8 weight range in the patchable parameter slab.
   id4_ideogram4_lora_bake_parameter_range_t weight_range;
   // F32 output-row scale range in the patchable parameter slab.
   id4_ideogram4_lora_bake_parameter_range_t scale_range;
@@ -66,7 +82,7 @@ typedef struct id4_ideogram4_lora_bake_target_t {
   id4_ideogram4_lora_bake_working_set_t working_set;
 } id4_ideogram4_lora_bake_target_t;
 
-// Options for deriving a compact-weight LoRA bake schedule.
+// Options for deriving a resident-weight LoRA bake schedule.
 typedef struct id4_ideogram4_lora_bake_plan_create_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
@@ -82,8 +98,10 @@ typedef struct id4_ideogram4_lora_bake_plan_create_options_t {
 
 // Derives a bounded bake schedule from a base conditioned-DiT plan.
 //
-// The base plan must use compact FP8 linear weights and contain exactly one
-// `lora_patchable` parameter slab. It must not already contain dynamic LoRA
+// Each target must use the production FP8 execution layout selected by the
+// base plan: dense row-major storage for vector projections or compact RHS
+// tiles for matrix projections. The plan must contain exactly one
+// `lora_patchable` parameter slab and must not already contain dynamic LoRA
 // execution, because baking and dynamic residual application are mutually
 // exclusive execution policies.
 iree_status_t id4_ideogram4_lora_bake_plan_create(
@@ -120,7 +138,7 @@ iree_device_size_t id4_ideogram4_lora_bake_plan_working_set_high_water_mark(
 iree_device_size_t id4_ideogram4_lora_bake_plan_adapter_byte_length(
     const id4_ideogram4_lora_bake_plan_t* plan);
 
-// Returns the number of planned compact weight targets.
+// Returns the number of planned resident weight targets.
 iree_host_size_t id4_ideogram4_lora_bake_plan_target_count(
     const id4_ideogram4_lora_bake_plan_t* plan);
 

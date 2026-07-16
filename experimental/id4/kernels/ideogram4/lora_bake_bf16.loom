@@ -123,6 +123,50 @@ kernel.def export("id4_ideogram4_lora_bake_decode_fp8_f32") @id4_ideogram4_lora_
   kernel.return
 }
 
+// Decodes one contiguous output-row window from dense row-major FP8 storage.
+// AdaLN modulation keeps this layout because its one-vector projection does
+// not benefit from the tiled matrix path used by the token projections.
+kernel.def export("id4_ideogram4_lora_bake_decode_dense_fp8_f32") @id4_ideogram4_lora_bake_decode_dense_fp8_f32() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_row_count, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%weight: buffer, %scale: buffer, %effective_weight: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %weight_noalias, %scale_noalias, %effective_weight_noalias = buffer.assume.noalias %weight, %scale, %effective_weight : buffer, buffer, buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %dense = encoding.layout.dense : encoding<layout>
+  %fp8_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_schema : encoding<schema>} : encoding<storage>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf8E4M3, %fp8_storage>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %weight_fp8 = vector.load %weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xf8E4M3, %fp8_storage> -> vector<16xf8E4M3>
+  %weight_f32 = vector.extf %weight_fp8 : vector<16xf8E4M3> to vector<16xf32>
+  %scale_f32 = view.load %scale_view[%output_row] : view<[%output_row_count]xf32, #dense> -> f32
+  %scale_vector = vector.splat %scale_f32 : vector<16xf32>
+  %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_vector : vector<16xf32>
+  vector.store %scaled, %effective_weight_view[%output_row, %input] : vector<16xf32>, view<[%output_row_count]x[%input_size]xf32, #dense>
+  kernel.return
+}
+
 // Applies one BF16 LoRA segment to an F32 effective-weight window. The Down
 // matrix remains resident across windows; binding offsets select this segment's
 // Down, current Up window, and one issue-time strength. Ordered adapters
@@ -309,5 +353,228 @@ kernel.def export("id4_ideogram4_lora_bake_scale_f32_fp8") @id4_ideogram4_lora_b
   scf.if %is_lane0 {
     view.store %row_scale, %scale_view[%output_row] : f32, view<[%output_row_count]xf32, #dense>
   }
+  kernel.return
+}
+
+// Requantizes one effective-weight window into dense row-major E4M3 bytes.
+// The integer conversion implements round-to-nearest-even for finite E4M3FN,
+// including the mathematical subnormal midpoint that hardware FP8 decoders do
+// not provide in the reverse direction on gfx1100.
+kernel.def export("id4_ideogram4_lora_bake_encode_f32_dense_fp8") @id4_ideogram4_lora_bake_encode_f32_dense_fp8() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_row_count, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%effective_weight: buffer, %scale: buffer, %weight: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %effective_weight_noalias, %scale_noalias, %weight_noalias = buffer.assume.noalias %effective_weight, %scale, %weight : buffer, buffer, buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xi8, #dense>
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %values = vector.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xf32, #dense> -> vector<16xf32>
+  %scale_f32 = view.load %scale_view[%output_row] : view<[%output_row_count]xf32, #dense> -> f32
+  %scale_vector = vector.splat %scale_f32 : vector<16xf32>
+  %normalized = vector.divf %values, %scale_vector : vector<16xf32>
+  %bits = vector.bitcast %normalized : vector<16xf32> to vector<16xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c7 = scalar.constant 7 : i32
+  %c14 = scalar.constant 14 : i32
+  %c20 = scalar.constant 20 : i32
+  %c23 = scalar.constant 23 : i32
+  %c24 = scalar.constant 24 : i32
+  %c126 = scalar.constant 126 : i32
+  %c127 = scalar.constant 127 : i32
+  %c128 = scalar.constant 128 : i32
+  %c255 = scalar.constant 255 : i32
+  %c524287 = scalar.constant 524287 : i32
+  %c8388607 = scalar.constant 8388607 : i32
+  %c8388608 = scalar.constant 8388608 : i32
+  %cn6 = scalar.constant -6 : i32
+  %cn10 = scalar.constant -10 : i32
+  %v0 = vector.splat %c0 : vector<16xi32>
+  %v1 = vector.splat %c1 : vector<16xi32>
+  %v3 = vector.splat %c3 : vector<16xi32>
+  %v7 = vector.splat %c7 : vector<16xi32>
+  %v14 = vector.splat %c14 : vector<16xi32>
+  %v20 = vector.splat %c20 : vector<16xi32>
+  %v23 = vector.splat %c23 : vector<16xi32>
+  %v24 = vector.splat %c24 : vector<16xi32>
+  %v126 = vector.splat %c126 : vector<16xi32>
+  %v127 = vector.splat %c127 : vector<16xi32>
+  %v128 = vector.splat %c128 : vector<16xi32>
+  %v255 = vector.splat %c255 : vector<16xi32>
+  %v524287 = vector.splat %c524287 : vector<16xi32>
+  %v8388607 = vector.splat %c8388607 : vector<16xi32>
+  %v8388608 = vector.splat %c8388608 : vector<16xi32>
+  %vn6 = vector.splat %cn6 : vector<16xi32>
+  %vn10 = vector.splat %cn10 : vector<16xi32>
+  %sign_shifted = vector.shrui %bits, %v24 : vector<16xi32>
+  %sign = vector.andi %sign_shifted, %v128 : vector<16xi32>
+  %exponent_shifted = vector.shrui %bits, %v23 : vector<16xi32>
+  %source_exponent = vector.andi %exponent_shifted, %v255 : vector<16xi32>
+  %arithmetic_exponent = vector.subi %source_exponent, %v127 : vector<16xi32>
+  %mantissa = vector.andi %bits, %v8388607 : vector<16xi32>
+  %normal_retained_shifted = vector.shrui %mantissa, %v20 : vector<16xi32>
+  %normal_retained = vector.andi %normal_retained_shifted, %v1 : vector<16xi32>
+  %normal_bias = vector.addi %v524287, %normal_retained : vector<16xi32>
+  %normal_rounded_mantissa = vector.addi %mantissa, %normal_bias : vector<16xi32>
+  %normal_quantized_mantissa = vector.shrui %normal_rounded_mantissa, %v20 : vector<16xi32>
+  %normal_biased_exponent = vector.addi %arithmetic_exponent, %v7 : vector<16xi32>
+  %normal_encoded_exponent = vector.shli %normal_biased_exponent, %v3 : vector<16xi32>
+  %normal_code = vector.addi %normal_encoded_exponent, %normal_quantized_mantissa : vector<16xi32>
+  %subnormal_valid = vector.cmpi sge, %arithmetic_exponent, %vn10 : vector<16xi32> -> vector<16xi1>
+  %subnormal_shift = vector.subi %v14, %arithmetic_exponent : vector<16xi32>
+  %safe_subnormal_shift = vector.select %subnormal_valid, %subnormal_shift, %v0 : vector<16xi32>
+  %subnormal_even_bit = vector.shli %v1, %safe_subnormal_shift : vector<16xi32>
+  %subnormal_odd_bit = vector.shrui %subnormal_even_bit, %v1 : vector<16xi32>
+  %subnormal_lower_bias = vector.subi %subnormal_odd_bit, %v1 : vector<16xi32>
+  %effective_mantissa = vector.ori %mantissa, %v8388608 : vector<16xi32>
+  %subnormal_retained_bits = vector.andi %effective_mantissa, %subnormal_even_bit : vector<16xi32>
+  %subnormal_retained = vector.cmpi ne, %subnormal_retained_bits, %v0 : vector<16xi32> -> vector<16xi1>
+  %subnormal_bias = vector.select %subnormal_retained, %subnormal_odd_bit, %subnormal_lower_bias : vector<16xi32>
+  %subnormal_rounded_mantissa = vector.addi %effective_mantissa, %subnormal_bias : vector<16xi32>
+  %subnormal_candidate = vector.shrui %subnormal_rounded_mantissa, %safe_subnormal_shift : vector<16xi32>
+  %subnormal_code = vector.select %subnormal_valid, %subnormal_candidate, %v0 : vector<16xi32>
+  %is_normal = vector.cmpi sge, %arithmetic_exponent, %vn6 : vector<16xi32> -> vector<16xi1>
+  %magnitude_candidate = vector.select %is_normal, %normal_code, %subnormal_code : vector<16xi32>
+  %magnitude_overflow = vector.cmpi ugt, %magnitude_candidate, %v126 : vector<16xi32> -> vector<16xi1>
+  %magnitude = vector.select %magnitude_overflow, %v126, %magnitude_candidate : vector<16xi32>
+  %encoded_i32 = vector.ori %sign, %magnitude : vector<16xi32>
+  %encoded_i8 = vector.trunci %encoded_i32 : vector<16xi32> to vector<16xi8>
+  vector.store %encoded_i8, %weight_view[%output_row, %input] : vector<16xi8>, view<[%output_row_count]x[%input_size]xi8, #dense>
+  kernel.return
+}
+
+// Requantizes one effective-weight window directly into compact 16x16 RHS
+// tiles. This is the resident layout consumed by the matrix projections.
+kernel.def export("id4_ideogram4_lora_bake_encode_f32_fp8") @id4_ideogram4_lora_bake_encode_f32_fp8() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_row_count, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%effective_weight: buffer, %scale: buffer, %weight: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_row_count = config.get @id4.ideogram4.lora_bake.output_row_count : index
+  %input_size = config.get @id4.ideogram4.lora_bake.input_size : index
+  %element_count = index.mul %output_row_count, %input_size : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %effective_weight_noalias, %scale_noalias, %weight_noalias = buffer.assume.noalias %effective_weight, %scale, %weight : buffer, buffer, buffer
+  %effective_weight_global = buffer.assume.memory_space<global> %effective_weight_noalias : buffer
+  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %effective_weight_aligned = buffer.assume.alignment %effective_weight_global {minimum_alignment = 16} : buffer
+  %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %effective_weight_view = buffer.view %effective_weight_aligned[%base] : buffer -> view<[%output_row_count]x[%input_size]xf32, #dense>
+  %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_row_count]xf32, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%element_count]xi8, #dense>
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_offset = index.mul %tile, %two_fifty_six : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %weight_index = index.add %tile_offset, %lane_offset : index
+  %values = vector.load %effective_weight_view[%output_row, %input] : view<[%output_row_count]x[%input_size]xf32, #dense> -> vector<16xf32>
+  %scale_f32 = view.load %scale_view[%output_row] : view<[%output_row_count]xf32, #dense> -> f32
+  %scale_vector = vector.splat %scale_f32 : vector<16xf32>
+  %normalized = vector.divf %values, %scale_vector : vector<16xf32>
+  %bits = vector.bitcast %normalized : vector<16xf32> to vector<16xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c7 = scalar.constant 7 : i32
+  %c14 = scalar.constant 14 : i32
+  %c20 = scalar.constant 20 : i32
+  %c23 = scalar.constant 23 : i32
+  %c24 = scalar.constant 24 : i32
+  %c126 = scalar.constant 126 : i32
+  %c127 = scalar.constant 127 : i32
+  %c128 = scalar.constant 128 : i32
+  %c255 = scalar.constant 255 : i32
+  %c524287 = scalar.constant 524287 : i32
+  %c8388607 = scalar.constant 8388607 : i32
+  %c8388608 = scalar.constant 8388608 : i32
+  %cn6 = scalar.constant -6 : i32
+  %cn10 = scalar.constant -10 : i32
+  %v0 = vector.splat %c0 : vector<16xi32>
+  %v1 = vector.splat %c1 : vector<16xi32>
+  %v3 = vector.splat %c3 : vector<16xi32>
+  %v7 = vector.splat %c7 : vector<16xi32>
+  %v14 = vector.splat %c14 : vector<16xi32>
+  %v20 = vector.splat %c20 : vector<16xi32>
+  %v23 = vector.splat %c23 : vector<16xi32>
+  %v24 = vector.splat %c24 : vector<16xi32>
+  %v126 = vector.splat %c126 : vector<16xi32>
+  %v127 = vector.splat %c127 : vector<16xi32>
+  %v128 = vector.splat %c128 : vector<16xi32>
+  %v255 = vector.splat %c255 : vector<16xi32>
+  %v524287 = vector.splat %c524287 : vector<16xi32>
+  %v8388607 = vector.splat %c8388607 : vector<16xi32>
+  %v8388608 = vector.splat %c8388608 : vector<16xi32>
+  %vn6 = vector.splat %cn6 : vector<16xi32>
+  %vn10 = vector.splat %cn10 : vector<16xi32>
+  %sign_shifted = vector.shrui %bits, %v24 : vector<16xi32>
+  %sign = vector.andi %sign_shifted, %v128 : vector<16xi32>
+  %exponent_shifted = vector.shrui %bits, %v23 : vector<16xi32>
+  %source_exponent = vector.andi %exponent_shifted, %v255 : vector<16xi32>
+  %arithmetic_exponent = vector.subi %source_exponent, %v127 : vector<16xi32>
+  %mantissa = vector.andi %bits, %v8388607 : vector<16xi32>
+  %normal_retained_shifted = vector.shrui %mantissa, %v20 : vector<16xi32>
+  %normal_retained = vector.andi %normal_retained_shifted, %v1 : vector<16xi32>
+  %normal_bias = vector.addi %v524287, %normal_retained : vector<16xi32>
+  %normal_rounded_mantissa = vector.addi %mantissa, %normal_bias : vector<16xi32>
+  %normal_quantized_mantissa = vector.shrui %normal_rounded_mantissa, %v20 : vector<16xi32>
+  %normal_biased_exponent = vector.addi %arithmetic_exponent, %v7 : vector<16xi32>
+  %normal_encoded_exponent = vector.shli %normal_biased_exponent, %v3 : vector<16xi32>
+  %normal_code = vector.addi %normal_encoded_exponent, %normal_quantized_mantissa : vector<16xi32>
+  %subnormal_valid = vector.cmpi sge, %arithmetic_exponent, %vn10 : vector<16xi32> -> vector<16xi1>
+  %subnormal_shift = vector.subi %v14, %arithmetic_exponent : vector<16xi32>
+  %safe_subnormal_shift = vector.select %subnormal_valid, %subnormal_shift, %v0 : vector<16xi32>
+  %subnormal_even_bit = vector.shli %v1, %safe_subnormal_shift : vector<16xi32>
+  %subnormal_odd_bit = vector.shrui %subnormal_even_bit, %v1 : vector<16xi32>
+  %subnormal_lower_bias = vector.subi %subnormal_odd_bit, %v1 : vector<16xi32>
+  %effective_mantissa = vector.ori %mantissa, %v8388608 : vector<16xi32>
+  %subnormal_retained_bits = vector.andi %effective_mantissa, %subnormal_even_bit : vector<16xi32>
+  %subnormal_retained = vector.cmpi ne, %subnormal_retained_bits, %v0 : vector<16xi32> -> vector<16xi1>
+  %subnormal_bias = vector.select %subnormal_retained, %subnormal_odd_bit, %subnormal_lower_bias : vector<16xi32>
+  %subnormal_rounded_mantissa = vector.addi %effective_mantissa, %subnormal_bias : vector<16xi32>
+  %subnormal_candidate = vector.shrui %subnormal_rounded_mantissa, %safe_subnormal_shift : vector<16xi32>
+  %subnormal_code = vector.select %subnormal_valid, %subnormal_candidate, %v0 : vector<16xi32>
+  %is_normal = vector.cmpi sge, %arithmetic_exponent, %vn6 : vector<16xi32> -> vector<16xi1>
+  %magnitude_candidate = vector.select %is_normal, %normal_code, %subnormal_code : vector<16xi32>
+  %magnitude_overflow = vector.cmpi ugt, %magnitude_candidate, %v126 : vector<16xi32> -> vector<16xi1>
+  %magnitude = vector.select %magnitude_overflow, %v126, %magnitude_candidate : vector<16xi32>
+  %encoded_i32 = vector.ori %sign, %magnitude : vector<16xi32>
+  %encoded_i8 = vector.trunci %encoded_i32 : vector<16xi32> to vector<16xi8>
+  vector.store %encoded_i8, %weight_view[%weight_index] : vector<16xi8>, view<[%element_count]xi8, #dense>
   kernel.return
 }
