@@ -646,8 +646,8 @@ TEST_F(HostQueueCommandBufferTest,
     uint32_t* output;
   };
   const nested_pointer_args_t pointers = {
-      .input = (uint32_t*)device_pointer(input_buffer),
-      .output = (uint32_t*)device_pointer(output_buffer),
+      /*.input=*/static_cast<uint32_t*>(device_pointer(input_buffer)),
+      /*.output=*/static_cast<uint32_t*>(device_pointer(output_buffer)),
   };
   ASSERT_NE(nullptr, pointers.input);
   ASSERT_NE(nullptr, pointers.output);
