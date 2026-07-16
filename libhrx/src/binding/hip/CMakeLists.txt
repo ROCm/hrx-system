@@ -12,8 +12,6 @@ iree_add_all_subdirs()
 iree_cc_library(
   NAME
     launch_params
-  COPTS
-    "-Wno-attributes"
   HDRS
     "api.h"
     "launch_params.h"
@@ -40,7 +38,6 @@ iree_cc_library(
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
-    "-Wno-attributes"
     "-Wno-unused-variable"
   HDRS
     "api.h"
@@ -104,8 +101,6 @@ iree_cc_test(
     hip_launch_validation_api_test
   SRCS
     "hip_launch_validation_api_test.cc"
-  COPTS
-    "-Wno-attributes"
   DATA
     ::amdhip64
   DEPS
@@ -128,8 +123,6 @@ iree_cc_test(
     launch_params_test
   SRCS
     "launch_params_test.cc"
-  COPTS
-    "-Wno-attributes"
   DEPS
     ::launch_params
     iree::testing::gtest
