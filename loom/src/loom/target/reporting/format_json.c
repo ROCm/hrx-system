@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-#include "loom/target/reporting/format_json_lowering.h"
-#include "loom/target/reporting/format_json_planning.h"
 #include "loom/target/reporting/format_planning.h"
 #include "loom/target/reporting/schema.h"
 

@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/reporting/format_json_lowering.h"
-
 #include <stdint.h>
 
 #include "loom/target/math_policy.h"

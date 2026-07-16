@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared line-oriented compile report field formatting.
+// Compile report text formatting shared across package implementation files.
 
 #ifndef LOOM_TARGET_REPORTING_FORMAT_TEXT_H_
 #define LOOM_TARGET_REPORTING_FORMAT_TEXT_H_
@@ -23,6 +23,20 @@ iree_string_view_t loom_target_compile_report_text_non_empty(
 iree_status_t loom_target_compile_report_text_append_string_field(
     iree_string_builder_t* builder, iree_string_view_t name,
     iree_string_view_t value);
+
+// Appends one source-low memory summary using its known workload scale.
+iree_status_t loom_target_compile_report_format_text_source_low_memory_summary(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload,
+    iree_string_builder_t* builder);
+
+// Appends detailed source-low, math, and target legalization evidence.
+iree_status_t loom_target_compile_report_format_text_lowering_details(
+    const loom_target_compile_report_t* report, iree_string_builder_t* builder);
+
+// Appends detailed configuration, scheduling, and allocation evidence.
+iree_status_t loom_target_compile_report_format_text_planning_details(
+    const loom_target_compile_report_t* report, iree_string_builder_t* builder);
 
 #ifdef __cplusplus
 }  // extern "C"
