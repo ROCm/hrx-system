@@ -2025,7 +2025,6 @@ loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
         .lane_bit_count = 16,
         .element_type = LOOM_SCALAR_TYPE_F16,
         .value_kind = LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_DEFAULT,
-        .fma_mix = {0},
         .is_dynamic = false,
     };
     IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_insert_fma_mix_half_result(
@@ -2124,7 +2123,6 @@ static iree_status_t loom_amdgpu_select_vector_insert_plan(
       .lane_bit_count = storage.element_bit_count,
       .element_type = element_type,
       .value_kind = LOOM_AMDGPU_VECTOR_INSERT_VALUE_KIND_DEFAULT,
-      .fma_mix = {0},
       .is_dynamic = is_dynamic,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_insert_fma_mix_half_result(

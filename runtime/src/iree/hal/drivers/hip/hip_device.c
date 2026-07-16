@@ -330,7 +330,6 @@ static void iree_hal_hip_copy_fixed_cstring(const char* source,
 static iree_hal_hip_device_facts_t iree_hal_hip_device_spec_from_properties(
     const hipDeviceProp_tR0000* properties) {
   iree_hal_hip_device_facts_t spec = {
-      .architecture = {0},
       .launch =
           {
               .maximum_workgroup_invocations =
