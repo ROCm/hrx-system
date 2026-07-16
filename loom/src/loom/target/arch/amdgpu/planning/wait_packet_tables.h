@@ -84,22 +84,15 @@ const loom_low_descriptor_t* loom_amdgpu_wait_packet_resolve_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor);
 
-// Finds the generated wait-packet descriptor template for |descriptor|.
-iree_status_t loom_amdgpu_wait_packet_find_descriptor_template(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    const loom_amdgpu_wait_packet_target_t* target,
-    const loom_amdgpu_wait_packet_descriptor_template_t**
-        out_packet_descriptor);
-
 // Returns the logical counters actually drained by an explicit wait packet
 // already present in scheduled low IR. Descriptor effects describe the counters
 // the packet can encode; this helper interprets the packet's concrete
 // immediate attributes and omits counters left at their no-wait value.
-iree_status_t loom_amdgpu_wait_packet_explicit_counter_mask(
+uint32_t loom_amdgpu_wait_packet_explicit_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, const loom_module_t* module,
-    const loom_op_t* op, uint32_t* out_counter_mask);
+    const loom_low_descriptor_t* descriptor,
+    const loom_amdgpu_wait_packet_target_t* target, const loom_module_t* module,
+    const loom_op_t* op);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -50,6 +50,11 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    StorageLease,
+    StorageLeaseAttachment,
+    StorageLeaseFlag,
+    StorageLeaseKind,
+    StorageLeaseReleaseScope,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -347,6 +352,41 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
             )
             == descriptor.encoding_field_values
         )
+
+
+def test_compiler_rejects_contradictory_storage_lease_boundary_flags() -> None:
+    lease = StorageLease(
+        kind=StorageLeaseKind.RESULT_WRITE,
+        attachment=StorageLeaseAttachment.RESULT,
+        attachment_index=0,
+        unit_offset=0,
+        unit_count=1,
+        release_scope=StorageLeaseReleaseScope.PROGRESS_CLASS,
+        release_class_id=1,
+        release_class_name="test.progress",
+        release_action_id=1,
+        release_action_name="test.release",
+        release_reason_id=1,
+        release_reason_name="test.result_reuse",
+        flags=(
+            StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+            StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
+        ),
+    )
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        storage_leases=(lease,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' storage lease 0 cannot both release before and carry across a boundary"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 def test_compiler_rejects_sparse_register_alias_set_ids() -> None:

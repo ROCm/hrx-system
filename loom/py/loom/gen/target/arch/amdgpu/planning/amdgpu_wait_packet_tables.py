@@ -49,6 +49,9 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
 from loom.target.arch.amdgpu.names import amdgpu_c_identifier_fragment  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AMDGPU_PROCESSOR_INFOS,
+    AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR,
+    AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
@@ -56,15 +59,27 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
 from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
+    EffectFlag,
     EffectKind,
+    HazardKind,
     Immediate,
     ImmediateKind,
+    MemorySpace,
     target_relative_name,
 )
 
 _UINT16_MAX = 0xFFFF
 _WAIT_PACKET_IMMEDIATE_CAPACITY = 4
 _WAIT_COUNTER_MASK_COUNT = 1 << _COUNTER_ALU
+_WAIT_COUNTER_ALU_SCHEDULING_BITS = AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR | AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR
+_DEPENDENCY_MEMORY_SPACES = frozenset(
+    (
+        MemorySpace.GENERIC,
+        MemorySpace.GLOBAL,
+        MemorySpace.STACK,
+        MemorySpace.WORKGROUP,
+    )
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +162,10 @@ def _counter_mask(counter_id: int) -> int:
     if counter_id < _COUNTER_VMEM_LOAD or counter_id > _COUNTER_ALU:
         raise ValueError(f"unknown AMDGPU wait counter id {counter_id}")
     return 1 << (counter_id - 1)
+
+
+_WAIT_COUNTER_READ_MASK = _counter_mask(_COUNTER_VMEM_LOAD) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM)
+_WAIT_COUNTER_WRITE_MASK = _counter_mask(_COUNTER_VMEM_STORE) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM)
 
 
 _IMMEDIATE_COUNTER_MASKS = {
@@ -373,6 +392,80 @@ def _descriptor_set_wait_packet_selection_rows(
     return tuple(selection_rows)
 
 
+def _descriptor_set_processor_scheduling_bits(descriptor_set_key: str) -> int:
+    scheduling_bits = 0
+    for processor_info in AMDGPU_PROCESSOR_INFOS:
+        if processor_info.descriptor_set.key == descriptor_set_key:
+            scheduling_bits |= processor_info.features.scheduling
+    return scheduling_bits
+
+
+def _descriptor_set_required_counter_mask(
+    descriptor_set: DescriptorSet,
+    processor_scheduling_bits: int,
+) -> int:
+    schedule_classes = {schedule_class.name: schedule_class for schedule_class in descriptor_set.schedule_classes}
+    required_counter_mask = 0
+    for descriptor in descriptor_set.descriptors:
+        try:
+            schedule_class = schedule_classes[descriptor.schedule_class]
+        except KeyError as exc:
+            raise ValueError(f"AMDGPU descriptor '{descriptor.key}' references missing schedule class '{descriptor.schedule_class}'") from exc
+        hazard_counter_mask = 0
+        for hazard in schedule_class.hazards:
+            if hazard.kind is not HazardKind.WAIT_COUNTER:
+                continue
+            if hazard.counter_id is None:
+                raise ValueError(f"AMDGPU descriptor '{descriptor.key}' schedule class '{schedule_class.name}' has a wait-counter hazard without a counter id")
+            hazard_counter_mask |= _counter_mask(hazard.counter_id)
+        for effect in descriptor.effects:
+            if EffectFlag.DEPENDENCY not in effect.flags or effect.memory_space not in _DEPENDENCY_MEMORY_SPACES or effect.kind not in (EffectKind.READ, EffectKind.WRITE):
+                continue
+            if effect.counter_id != 0:
+                effect_counter_mask = _counter_mask(effect.counter_id)
+                if effect_counter_mask & ~hazard_counter_mask:
+                    raise ValueError(f"AMDGPU descriptor '{descriptor.key}' dependency effect counter {effect.counter_id} is not present in schedule class '{schedule_class.name}' hazards")
+            else:
+                effect_counter_mask = hazard_counter_mask & (_WAIT_COUNTER_READ_MASK if effect.kind is EffectKind.READ else _WAIT_COUNTER_WRITE_MASK)
+                if effect_counter_mask == 0:
+                    effect_kind_name = "read" if effect.kind is EffectKind.READ else "write"
+                    raise ValueError(f"AMDGPU descriptor '{descriptor.key}' dependency {effect_kind_name} effect has no counter in schedule class '{schedule_class.name}' hazards")
+            required_counter_mask |= effect_counter_mask
+    if processor_scheduling_bits & _WAIT_COUNTER_ALU_SCHEDULING_BITS:
+        required_counter_mask |= _counter_mask(_COUNTER_ALU)
+    return required_counter_mask
+
+
+def _validate_descriptor_set_wait_packet_coverage(
+    descriptor_set: DescriptorSet,
+    descriptor_rows: Sequence[_WaitPacketDescriptorRow],
+    selection_rows: Sequence[_WaitPacketSelectionRow],
+    *,
+    processor_scheduling_bits: int | None = None,
+) -> None:
+    if processor_scheduling_bits is None:
+        processor_scheduling_bits = _descriptor_set_processor_scheduling_bits(descriptor_set.key)
+    required_counter_mask = _descriptor_set_required_counter_mask(descriptor_set, processor_scheduling_bits)
+    available_counter_mask = 0
+    for descriptor_row in descriptor_rows:
+        available_counter_mask |= descriptor_row.counter_mask
+    missing_counter_mask = required_counter_mask & ~available_counter_mask
+    if missing_counter_mask != 0:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' requires wait counter mask 0x{required_counter_mask:x} but packet descriptors only cover 0x{available_counter_mask:x}")
+
+    if len(selection_rows) != _WAIT_COUNTER_MASK_COUNT:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' has {len(selection_rows)} wait selections, expected {_WAIT_COUNTER_MASK_COUNT}")
+    for requested_counter_mask in range(_WAIT_COUNTER_MASK_COUNT):
+        if requested_counter_mask & ~required_counter_mask:
+            continue
+        remaining_counter_mask = requested_counter_mask
+        while remaining_counter_mask != 0:
+            selection = selection_rows[remaining_counter_mask]
+            if selection.covered_counter_mask == 0:
+                raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' cannot materialize wait counter mask 0x{requested_counter_mask:x}")
+            remaining_counter_mask &= ~selection.covered_counter_mask
+
+
 def _validate_wait_packet_tables(tables: _WaitPacketTables) -> None:
     descriptor_count = len(tables.descriptor_rows)
     immediate_count = len(tables.immediate_rows)
@@ -466,13 +559,13 @@ def _materialize_wait_packet_tables(
             )
         )
         descriptor_lookup_rows.extend(set_descriptor_lookup_rows)
-        selection_rows.extend(
-            _descriptor_set_wait_packet_selection_rows(
-                descriptor_set.key,
-                descriptor_set_ordinal,
-                set_descriptor_rows,
-            )
+        set_selection_rows = _descriptor_set_wait_packet_selection_rows(
+            descriptor_set.key,
+            descriptor_set_ordinal,
+            set_descriptor_rows,
         )
+        _validate_descriptor_set_wait_packet_coverage(descriptor_set, set_descriptor_rows, set_selection_rows)
+        selection_rows.extend(set_selection_rows)
     tables = _WaitPacketTables(
         descriptor_rows=tuple(descriptor_rows),
         immediate_rows=tuple(immediate_rows),

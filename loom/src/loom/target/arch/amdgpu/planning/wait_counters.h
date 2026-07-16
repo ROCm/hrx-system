@@ -44,8 +44,9 @@ enum loom_amdgpu_wait_counter_e {
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_READ   \
   (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
    LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE | LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE   \
+  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE | \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP \
   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY \
@@ -64,6 +65,11 @@ static inline uint32_t loom_amdgpu_wait_counter_slot_from_id(
     uint16_t counter_id) {
   IREE_ASSERT(loom_amdgpu_wait_counter_id_is_valid(counter_id));
   return (uint32_t)(counter_id - 1);
+}
+
+// Converts a concrete one-based counter id into its logical counter mask.
+static inline uint32_t loom_amdgpu_wait_counter_mask(uint16_t counter_id) {
+  return (uint32_t)1u << loom_amdgpu_wait_counter_slot_from_id(counter_id);
 }
 
 // Converts a dense zero-based counter slot into its concrete one-based id.
