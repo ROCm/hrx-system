@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/artifact_manifest_collect.h"
+#include "loom/target/reporting/artifact_manifest_collect.h"
 
 #include <string>
 
@@ -19,8 +19,8 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
-#include "loom/target/artifact_manifest.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/reporting/artifact_manifest.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/util/stream.h"
 

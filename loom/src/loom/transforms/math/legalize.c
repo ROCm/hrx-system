@@ -21,8 +21,8 @@
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/rewrite/greedy.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/reporting/compile_report.h"
 #include "loom/target/selection.h"
 #include "loom/transforms/math/patterns.h"
 

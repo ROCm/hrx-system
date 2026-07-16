@@ -117,76 +117,6 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    artifact_manifest
-  HDRS
-    "artifact_manifest.h"
-  SRCS
-    "artifact_manifest.c"
-  DEPS
-    ::types
-    iree::base
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    artifact_manifest_collect
-  HDRS
-    "artifact_manifest_collect.h"
-  SRCS
-    "artifact_manifest_collect.c"
-  DEPS
-    ::artifact_manifest
-    ::entry_selection
-    ::types
-    iree::base
-    iree::base::internal::arena
-    loom::analysis::symbol_dependencies
-    loom::ir
-    loom::ops::low
-    loom::ops::op_defs
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    artifact_manifest_test
-  SRCS
-    "artifact_manifest_test.cc"
-  DEPS
-    ::artifact_manifest
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_test(
-  NAME
-    artifact_manifest_collect_test
-  SRCS
-    "artifact_manifest_collect_test.cc"
-  DEPS
-    ::artifact_manifest
-    ::artifact_manifest_collect
-    ::entry_selection
-    iree::base
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::analysis::symbol_dependencies
-    loom::format::text::parser
-    loom::ir
-    loom::ops::func
-    loom::ops::global
-    loom::ops::low
-    loom::ops::target
-    loom::testing::module_ptr
-    loom::util::stream
-)
-
-loom_cc_library(
-  NAME
     function_contract
   HDRS
     "function_contract.h"
@@ -202,77 +132,6 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::target
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    compile_report
-  HDRS
-    "compile_report.h"
-  SRCS
-    "compile_report.c"
-  DEPS
-    ::types
-    iree::base
-    loom::codegen::low::planning_statistics
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    compile_report_format
-  HDRS
-    "compile_report_format.h"
-  SRCS
-    "compile_report_format.c"
-  DEPS
-    ::compile_report
-    ::compile_report_planning_format
-    ::math_policy
-    iree::base
-    loom::ir
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    compile_report_planning_format
-  HDRS
-    "compile_report_planning_format.h"
-  SRCS
-    "compile_report_planning_format.c"
-  DEPS
-    iree::base
-    loom::codegen::low::planning_statistics
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    compile_report_low
-  HDRS
-    "compile_report_low.h"
-  SRCS
-    "compile_report_low.c"
-  DEPS
-    ::compile_report
-    ::registers
-    iree::base
-    loom::codegen::low::descriptors
-    loom::codegen::low::diagnostics
-    loom::codegen::low::frame
-    loom::codegen::low::function
-    loom::codegen::low::lower
-    loom::codegen::low::packet
-    loom::ir
-    loom::ops::low
-    loom::util::cfg_graph
-    loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -428,8 +287,6 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
-    ::artifact_manifest
-    ::compile_report
     ::legalization
     ::low_asm_diagnostics
     ::low_descriptor_registry
@@ -444,6 +301,8 @@ loom_cc_library(
     loom::ops::op_defs
     loom::pass::environment
     loom::pass::registry
+    loom::target::reporting::artifact_manifest
+    loom::target::reporting::compile_report
   PUBLIC
 )
 
@@ -620,33 +479,6 @@ loom_cc_test(
     loom::ops::test
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
-)
-
-loom_cc_test(
-  NAME
-    compile_report_low_test
-  SRCS
-    "compile_report_low_test.cc"
-  DEPS
-    ::compile_report_low
-    ::registers
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ir
-)
-
-loom_cc_test(
-  NAME
-    compile_report_format_test
-  SRCS
-    "compile_report_format_test.cc"
-  DEPS
-    ::compile_report_format
-    ::math_policy
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ir
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

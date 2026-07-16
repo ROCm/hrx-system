@@ -60,9 +60,9 @@ loom_cc_binary(
     loom::ops::kernel
     loom::ops::op_defs
     loom::sanitizer::options
-    loom::target::artifact_manifest
     loom::target::entry_selection
     loom::target::low_descriptor_registry
+    loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
     loom::tooling::config

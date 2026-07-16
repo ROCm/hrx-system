@@ -15,8 +15,8 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_dependencies.h"
 #include "loom/ir/ir.h"
-#include "loom/target/artifact_manifest.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus

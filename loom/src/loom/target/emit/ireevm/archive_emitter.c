@@ -16,12 +16,12 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/ireevm/descriptors/descriptors.h"
 #include "loom/target/arch/ireevm/provider.h"
-#include "loom/target/compile_report_low.h"
 #include "loom/target/emit/ireevm/function_bytecode.h"
 #include "loom/target/emit/ireevm/module_plan.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/provider.h"
 #include "loom/target/registers.h"
+#include "loom/target/reporting/compile_report_low.h"
 
 enum {
   LOOM_IREEVM_ARCHIVE_EMIT_DEFAULT_MAX_ERRORS = 20,

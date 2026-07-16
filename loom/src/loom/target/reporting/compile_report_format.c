@@ -4,15 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/compile_report_format.h"
+#include "loom/target/reporting/compile_report_format.h"
 
 #include <inttypes.h>
 #include <stdint.h>
 
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
-#include "loom/target/compile_report_planning_format.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/reporting/compile_report_planning_format.h"
 #include "loom/util/json.h"
 
 void loom_target_compile_report_format_options_initialize(

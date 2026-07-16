@@ -99,11 +99,11 @@ loom_cc_library(
     loom::ops::target
     loom::target::arch::ireevm::descriptors
     loom::target::arch::ireevm::provider
-    loom::target::compile_report
-    loom::target::compile_report_low
     loom::target::entry_selection
     loom::target::provider
     loom::target::registers
+    loom::target::reporting::compile_report
+    loom::target::reporting::compile_report_low
     loom::verify
   PUBLIC
 )

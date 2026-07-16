@@ -31,9 +31,9 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::diagnostic
-    loom::target::artifact_manifest
-    loom::target::compile_report
     loom::target::pipeline_options
+    loom::target::reporting::artifact_manifest
+    loom::target::reporting::compile_report
     loom::verify
   PUBLIC
 )
@@ -52,8 +52,8 @@ loom_cc_library(
     loom::error::json_sink
     loom::error::renderer
     loom::ops::config
-    loom::target::compile_report
-    loom::target::compile_report_format
+    loom::target::reporting::compile_report
+    loom::target::reporting::compile_report_format
     loom::tooling::config
   PUBLIC
 )

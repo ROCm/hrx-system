@@ -12,7 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/renderer.h"
-#include "loom/target/compile_report_format.h"
+#include "loom/target/reporting/compile_report_format.h"
 #include "loom/tooling/execution/compile_options.h"
 
 #ifdef __cplusplus

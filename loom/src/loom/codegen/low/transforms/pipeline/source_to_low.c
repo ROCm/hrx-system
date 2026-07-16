@@ -14,8 +14,8 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
 #include "loom/sanitizer/options.h"
-#include "loom/target/compile_report_low.h"
 #include "loom/target/low_legality.h"
+#include "loom/target/reporting/compile_report_low.h"
 
 typedef struct loom_low_source_to_low_pass_state_t {
   // Control-flow shape expected by source-to-low.

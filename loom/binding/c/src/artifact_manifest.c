@@ -6,7 +6,7 @@
 
 #include "loomc/artifact_manifest.h"
 
-#include "loom/target/artifact_manifest.h"
+#include "loom/target/reporting/artifact_manifest.h"
 #include "loomc/iree.h"
 
 static loomc_artifact_manifest_mode_t loomc_artifact_manifest_mode_from_iree(

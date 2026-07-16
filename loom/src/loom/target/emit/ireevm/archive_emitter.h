@@ -16,8 +16,8 @@
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/emit/ireevm/module_archive.h"
+#include "loom/target/reporting/compile_report.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus

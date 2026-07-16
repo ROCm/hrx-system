@@ -27,9 +27,9 @@ loom_cc_library(
     loom::target::arch::amdgpu::runtime_requirements
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
-    loom::target::compile_report
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::emit::native::amdgpu::runtime_globals
+    loom::target::reporting::compile_report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::tooling::execution::hal::artifact
@@ -77,8 +77,8 @@ loom_cc_test(
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
-    loom::target::compile_report
     loom::target::emit::native::amdgpu::runtime_globals
+    loom::target::reporting::compile_report
     loom::testing::module_ptr
     loom::tooling::execution::hal::runtime
   LABELS

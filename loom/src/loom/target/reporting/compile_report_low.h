@@ -11,7 +11,7 @@
 
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/target/compile_report.h"
+#include "loom/target/reporting/compile_report.h"
 
 #ifdef __cplusplus
 extern "C" {

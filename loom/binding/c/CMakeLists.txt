@@ -110,12 +110,12 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::sanitizer::options
-    loom::target::artifact_manifest
-    loom::target::compile_report
-    loom::target::compile_report_format
     loom::target::pipeline
     loom::target::predicate
     loom::target::provider
+    loom::target::reporting::artifact_manifest
+    loom::target::reporting::compile_report
+    loom::target::reporting::compile_report_format
     loom::target::types
     loom::tooling::config
     loom::util::json

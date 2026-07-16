@@ -28,8 +28,8 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::sanitizer::options
-    loom::target::compile_report_low
     loom::target::low_legality
+    loom::target::reporting::compile_report_low
   PUBLIC
 )
 
@@ -58,10 +58,10 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::greedy
-    loom::target::compile_report
     loom::target::legalization
     loom::target::low_descriptor_registry
     loom::target::low_legality
+    loom::target::reporting::compile_report
     loom::transforms::scalar::target_legalization
     loom::transforms::vector::target_legalization
     loom::util::walk

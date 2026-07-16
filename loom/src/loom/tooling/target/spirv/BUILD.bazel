@@ -28,8 +28,6 @@ loom_cc_library(
     target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
         ":vulkan_profile",
-        "//loom/src/loom/target:artifact_manifest_collect",
-        "//loom/src/loom/target:compile_report",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
@@ -37,6 +35,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/emit/spirv:module_builder",
         "//loom/src/loom/target/emit/spirv:module_emitter",
+        "//loom/src/loom/target/reporting:artifact_manifest_collect",
+        "//loom/src/loom/target/reporting:compile_report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",

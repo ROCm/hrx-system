@@ -12,7 +12,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/ir/module.h"
-#include "loom/target/artifact_manifest.h"
+#include "loom/target/reporting/artifact_manifest.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/execution/compile_options.h"
 #include "loom/tooling/execution/compile_report_capture.h"

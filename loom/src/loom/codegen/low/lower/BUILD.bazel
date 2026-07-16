@@ -20,6 +20,7 @@ _LOWER_VISIBILITY = [
     "//loom/src/loom/target/arch:__subpackages__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/target/emit:__subpackages__",
+    "//loom/src/loom/target/reporting:__pkg__",
     "//loom/src/loom/target/test:__subpackages__",
     "//loom/src/loom/tools/loom-check:__pkg__",
     "//loom/src/loom/tools/loom-check:__pkg__",

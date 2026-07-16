@@ -10,9 +10,9 @@
 #define LOOM_TOOLING_EXECUTION_COMPILE_OPTIONS_H_
 
 #include "iree/base/api.h"
-#include "loom/target/artifact_manifest.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/pipeline_options.h"
+#include "loom/target/reporting/artifact_manifest.h"
+#include "loom/target/reporting/compile_report.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus

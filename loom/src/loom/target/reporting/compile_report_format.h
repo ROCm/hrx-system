@@ -10,7 +10,7 @@
 #define LOOM_TARGET_COMPILE_REPORT_FORMAT_H_
 
 #include "iree/base/api.h"
-#include "loom/target/compile_report.h"
+#include "loom/target/reporting/compile_report.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus

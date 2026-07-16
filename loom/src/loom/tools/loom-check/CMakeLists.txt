@@ -100,7 +100,6 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::sanitizer::options
-    loom::target::compile_report_format
     loom::target::entry_selection
     loom::target::legalization
     loom::target::low_asm_diagnostics
@@ -110,6 +109,7 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::pipeline
     loom::target::predicate
+    loom::target::reporting::compile_report_format
     loom::target::types
     loom::tooling::compile::pipeline
     loom::tools::loom-format::convert

@@ -84,7 +84,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::special_values
     loom::sanitizer::options
-    loom::target::artifact_manifest
+    loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
     loom::tooling::config

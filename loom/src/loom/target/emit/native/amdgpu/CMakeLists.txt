@@ -502,12 +502,12 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::target_info
-    loom::target::artifact_manifest_collect
-    loom::target::compile_report
-    loom::target::compile_report_low
     loom::target::entry_selection
     loom::target::function_contract
     loom::target::provider
+    loom::target::reporting::artifact_manifest_collect
+    loom::target::reporting::compile_report
+    loom::target::reporting::compile_report_low
     loom::target::types
     loom::verify
   PUBLIC
