@@ -921,10 +921,8 @@ iree_status_t iree_benchmark_loom_write_benchmark_failure_json(
       benchmark_result->diagnostic_remark_count));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("diagnostics")));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write(stream, benchmark_result->diagnostic_json));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+  IREE_RETURN_IF_ERROR(loom_json_write_value_list_array(
+      benchmark_result->diagnostic_json, stream));
   return loom_json_object_end(&object);
 }
 

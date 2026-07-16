@@ -293,6 +293,48 @@ iree_status_t loom_json_array_write_null_element(
   return loom_output_stream_write_cstring(writer->stream, "null");
 }
 
+void loom_json_value_list_initialize(iree_allocator_t allocator,
+                                     loom_json_value_list_t* out_list) {
+  *out_list = (loom_json_value_list_t){0};
+  iree_string_builder_initialize(allocator, &out_list->body);
+}
+
+void loom_json_value_list_deinitialize(loom_json_value_list_t* list) {
+  iree_string_builder_deinitialize(&list->body);
+  list->count = 0;
+}
+
+iree_status_t loom_json_value_list_begin_value(
+    loom_json_value_list_t* list, loom_output_stream_t* out_stream) {
+  loom_output_stream_for_builder(&list->body, out_stream);
+  loom_json_array_writer_t writer = {
+      .stream = out_stream,
+      .element_count = list->count,
+  };
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&writer));
+  ++list->count;
+  return iree_ok_status();
+}
+
+iree_string_view_t loom_json_value_list_body(
+    const loom_json_value_list_t* list) {
+  return iree_string_builder_view(&list->body);
+}
+
+iree_status_t loom_json_write_value_list_array(iree_string_view_t body,
+                                               loom_output_stream_t* stream) {
+  loom_json_array_writer_t writer;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &writer));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, body));
+  return loom_json_array_end(&writer);
+}
+
+iree_status_t loom_json_value_list_write_array(
+    const loom_json_value_list_t* list, loom_output_stream_t* stream) {
+  return loom_json_write_value_list_array(loom_json_value_list_body(list),
+                                          stream);
+}
+
 iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,
                                             iree_status_code_t code,
                                             iree_string_view_t message) {

@@ -152,6 +152,40 @@ iree_status_t loom_json_array_write_host_size_element(
 iree_status_t loom_json_array_write_null_element(
     loom_json_array_writer_t* writer);
 
+// Deferred comma-separated JSON values serialized while their source data is
+// live. The list owns the serialized array body but excludes the surrounding
+// brackets so callers can embed it in a larger document later.
+typedef struct loom_json_value_list_t {
+  // Serialized values separated by the shared array writer.
+  iree_string_builder_t body;
+  // Number of complete serialized values in |body|.
+  iree_host_size_t count;
+} loom_json_value_list_t;
+
+// Initializes an empty deferred value list using |allocator| for storage.
+void loom_json_value_list_initialize(iree_allocator_t allocator,
+                                     loom_json_value_list_t* out_list);
+
+// Releases storage owned by |list|.
+void loom_json_value_list_deinitialize(loom_json_value_list_t* list);
+
+// Begins the next value and returns a stream receiving its serialized form.
+// The caller must write exactly one complete JSON value to |out_stream|.
+iree_status_t loom_json_value_list_begin_value(
+    loom_json_value_list_t* list, loom_output_stream_t* out_stream);
+
+// Returns the comma-separated serialized values without array brackets.
+iree_string_view_t loom_json_value_list_body(
+    const loom_json_value_list_t* list);
+
+// Writes |list| as a complete JSON array.
+iree_status_t loom_json_value_list_write_array(
+    const loom_json_value_list_t* list, loom_output_stream_t* stream);
+
+// Writes a borrowed comma-separated value list as a complete JSON array.
+iree_status_t loom_json_write_value_list_array(iree_string_view_t body,
+                                               loom_output_stream_t* stream);
+
 // Writes an IREE status value as {"code":N,"name":"...","message":"..."}.
 // The message field is omitted when |message| is empty.
 iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,

@@ -52,6 +52,7 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/config",
+        "//loom/src/loom/util:json",
         "//runtime/src/iree/base",
     ],
 )

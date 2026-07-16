@@ -493,10 +493,10 @@ static iree_status_t loom_target_compile_report_format_summary(
         report->spill_rows.count));
   }
 
-  if (options->diagnostic_count != 0) {
+  if (options->diagnostics.count != 0) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "COMPILE-REPORT: diagnostics count=%" PRIhsz "\n",
-        options->diagnostic_count));
+        options->diagnostics.count));
   }
 
   if (iree_any_bit_set(

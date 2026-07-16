@@ -80,8 +80,8 @@ iree_status_t loom_run_compile_report_capture_initialize(
       .host_allocator = host_allocator,
   };
   loom_target_compile_report_initialize(&out_capture->report, host_allocator);
-  iree_string_builder_initialize(host_allocator,
-                                 &out_capture->diagnostic_json_objects);
+  loom_json_value_list_initialize(host_allocator,
+                                  &out_capture->diagnostics.json_values);
   switch (options->detail_mode) {
     case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY:
       out_capture->report.requested_detail_flags =
@@ -184,10 +184,8 @@ iree_status_t loom_run_compile_report_capture_record_diagnostic(
       capture->options.detail_mode ==
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
     loom_output_stream_t stream;
-    loom_output_stream_for_builder(&capture->diagnostic_json_objects, &stream);
-    if (capture->diagnostic_count > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\n"));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_value_list_begin_value(
+        &capture->diagnostics.json_values, &stream));
     const loom_type_formatter_t formatter =
         type_formatter.fn
             ? type_formatter
@@ -195,7 +193,7 @@ iree_status_t loom_run_compile_report_capture_record_diagnostic(
     IREE_RETURN_IF_ERROR(
         loom_diagnostic_json_write_object(&stream, diagnostic, formatter));
   }
-  ++capture->diagnostic_count;
+  ++capture->diagnostics.count;
   return iree_ok_status();
 }
 
@@ -222,9 +220,12 @@ iree_status_t loom_run_compile_report_capture_append_text(
       loom_run_compile_report_capture_append_separator(builder));
   const loom_target_compile_report_format_options_t format_options = {
       .mode = capture->options.detail_mode,
-      .diagnostic_json_objects =
-          iree_string_builder_view(&capture->diagnostic_json_objects),
-      .diagnostic_count = capture->diagnostic_count,
+      .diagnostics =
+          {
+              .json_objects =
+                  loom_json_value_list_body(&capture->diagnostics.json_values),
+              .count = capture->diagnostics.count,
+          },
   };
   return loom_target_compile_report_format_text(&capture->report,
                                                 &format_options, builder);
@@ -238,9 +239,12 @@ iree_status_t loom_run_compile_report_capture_append_json(
   }
   const loom_target_compile_report_format_options_t format_options = {
       .mode = capture->options.detail_mode,
-      .diagnostic_json_objects =
-          iree_string_builder_view(&capture->diagnostic_json_objects),
-      .diagnostic_count = capture->diagnostic_count,
+      .diagnostics =
+          {
+              .json_objects =
+                  loom_json_value_list_body(&capture->diagnostics.json_values),
+              .count = capture->diagnostics.count,
+          },
   };
   return loom_target_compile_report_format_json(&capture->report,
                                                 &format_options, stream);
@@ -305,7 +309,7 @@ void loom_run_compile_report_capture_deinitialize(
   if (capture == NULL) {
     return;
   }
-  iree_string_builder_deinitialize(&capture->diagnostic_json_objects);
+  loom_json_value_list_deinitialize(&capture->diagnostics.json_values);
   loom_target_compile_report_deinitialize(&capture->report);
   *capture = (loom_run_compile_report_capture_t){0};
 }

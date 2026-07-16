@@ -1188,10 +1188,8 @@ static iree_status_t loom_target_compile_report_format_entries_json(
 static iree_status_t loom_target_compile_report_format_diagnostics_json(
     const loom_target_compile_report_format_options_t* options,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write(stream, options->diagnostic_json_objects));
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_write_value_list_array(options->diagnostics.json_objects,
+                                          stream);
 }
 
 static iree_status_t loom_target_compile_report_format_config_binding_row_json(
@@ -1419,9 +1417,9 @@ iree_status_t loom_target_compile_report_format_json(
   }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_json_planning_details(
       report, options->mode, &object, stream));
-  if (options->diagnostic_count != 0) {
+  if (options->diagnostics.count != 0) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-        &object, IREE_SV("diagnostic_count"), options->diagnostic_count));
+        &object, IREE_SV("diagnostic_count"), options->diagnostics.count));
     if (options->mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
       IREE_RETURN_IF_ERROR(
           loom_json_object_begin_field(&object, IREE_SV("diagnostics")));

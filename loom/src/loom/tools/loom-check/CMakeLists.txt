@@ -178,6 +178,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
@@ -400,6 +401,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream

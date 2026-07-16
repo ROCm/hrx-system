@@ -331,6 +331,37 @@ TEST(JsonWriter, WritesEmptyContainers) {
   iree_string_builder_deinitialize(&builder);
 }
 
+TEST(JsonWriter, DefersValueListsForArrayEmbedding) {
+  loom_json_value_list_t values;
+  loom_json_value_list_initialize(iree_allocator_system(), &values);
+
+  loom_output_stream_t value_stream;
+  IREE_ASSERT_OK(loom_json_value_list_begin_value(&values, &value_stream));
+  loom_json_object_writer_t first;
+  IREE_ASSERT_OK(loom_json_object_begin(&value_stream, &first));
+  IREE_ASSERT_OK(
+      loom_json_object_write_uint32_field(&first, IREE_SV("index"), 1));
+  IREE_ASSERT_OK(loom_json_object_end(&first));
+  IREE_ASSERT_OK(loom_json_value_list_begin_value(&values, &value_stream));
+  loom_json_object_writer_t second;
+  IREE_ASSERT_OK(loom_json_object_begin(&value_stream, &second));
+  IREE_ASSERT_OK(
+      loom_json_object_write_uint32_field(&second, IREE_SV("index"), 2));
+  IREE_ASSERT_OK(loom_json_object_end(&second));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(loom_json_value_list_write_array(&values, &stream));
+  EXPECT_EQ(std::string(iree_string_builder_buffer(&builder),
+                        iree_string_builder_size(&builder)),
+            "[{\"index\":1},{\"index\":2}]");
+
+  iree_string_builder_deinitialize(&builder);
+  loom_json_value_list_deinitialize(&values);
+}
+
 //===----------------------------------------------------------------------===//
 // IREE status objects
 //===----------------------------------------------------------------------===//

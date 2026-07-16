@@ -230,7 +230,7 @@ void iree_benchmark_loom_benchmark_result_set_compile_rejection(
   out_result->diagnostic_warning_count = provider->diagnostics.warning_count;
   out_result->diagnostic_remark_count = provider->diagnostics.remark_count;
   out_result->diagnostic_json =
-      iree_string_builder_view(&provider->diagnostics.output);
+      iree_benchmark_loom_diagnostic_capture_json(&provider->diagnostics);
   out_result->sample_compilation = provider->sample_compilation;
   if (provider->execution.has_sample_constant_ordinal) {
     out_result->has_sample_ordinal = true;

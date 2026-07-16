@@ -29,10 +29,13 @@ typedef enum loom_target_compile_report_format_mode_e {
 typedef struct loom_target_compile_report_format_options_t {
   // Selected report detail mode.
   loom_target_compile_report_format_mode_t mode;
-  // Canonical diagnostic JSON objects separated by ",\n".
-  iree_string_view_t diagnostic_json_objects;
-  // Number of canonical diagnostic JSON objects in |diagnostic_json_objects|.
-  iree_host_size_t diagnostic_count;
+  // Diagnostic detail available to report formatters.
+  struct {
+    // Canonical diagnostic JSON object bodies retained for detail reports.
+    iree_string_view_t json_objects;
+    // Total diagnostics observed, including those without retained JSON.
+    iree_host_size_t count;
+  } diagnostics;
 } loom_target_compile_report_format_options_t;
 
 // Initializes text formatting options with report output disabled.

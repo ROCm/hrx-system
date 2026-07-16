@@ -17,6 +17,7 @@
 #include "loom/tooling/testbench/executor.h"
 #include "loom/tools/iree-benchmark-loom/configuration.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
+#include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
@@ -51,14 +52,10 @@ typedef struct iree_benchmark_loom_benchmark_policy_t {
 } iree_benchmark_loom_benchmark_policy_t;
 
 typedef struct iree_benchmark_loom_diagnostic_capture_t {
-  // JSON array entries for diagnostics emitted by this candidate compile.
-  iree_string_builder_t output;
-  // Output stream backed by |output|.
-  loom_output_stream_t stream;
-  // True after |output| has been initialized.
+  // Canonical diagnostic objects emitted by this candidate compile.
+  loom_json_value_list_t json_values;
+  // True after |json_values| has been initialized.
   bool initialized;
-  // True until the first diagnostic has been written.
-  bool first_diagnostic;
   // Number of error diagnostics captured.
   iree_host_size_t error_count;
   // Number of warning diagnostics captured.

@@ -14,6 +14,7 @@
 #include "loom/error/renderer.h"
 #include "loom/target/reporting/format.h"
 #include "loom/tooling/execution/compile_options.h"
+#include "loom/util/json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,10 +46,13 @@ typedef struct loom_run_compile_report_capture_t {
   iree_allocator_t host_allocator;
   // Compile report populated by candidate compilation.
   loom_target_compile_report_t report;
-  // Canonical diagnostic JSON objects for structured JSON detail reports.
-  iree_string_builder_t diagnostic_json_objects;
-  // Number of compiler diagnostics captured for report output.
-  iree_host_size_t diagnostic_count;
+  // Compiler diagnostics captured for report output.
+  struct {
+    // Canonical diagnostic objects for structured JSON detail reports.
+    loom_json_value_list_t json_values;
+    // Total number of diagnostics, including summary-only captures.
+    iree_host_size_t count;
+  } diagnostics;
 } loom_run_compile_report_capture_t;
 
 // Initializes capture options with report output disabled.

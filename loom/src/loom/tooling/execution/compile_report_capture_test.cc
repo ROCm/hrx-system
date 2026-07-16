@@ -213,8 +213,9 @@ TEST(CompileReportCaptureTest, TextReportsDoNotSerializeDiagnosticJson) {
       &capture, &diagnostic,
       (loom_type_formatter_t){loom_type_format_minimal, nullptr}));
 
-  EXPECT_EQ(capture.diagnostic_count, 1u);
-  EXPECT_EQ(iree_string_builder_size(&capture.diagnostic_json_objects), 0u);
+  EXPECT_EQ(capture.diagnostics.count, 1u);
+  EXPECT_TRUE(iree_string_view_is_empty(
+      loom_json_value_list_body(&capture.diagnostics.json_values)));
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }
