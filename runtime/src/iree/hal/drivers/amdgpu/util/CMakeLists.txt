@@ -172,12 +172,10 @@ iree_cc_library(
   SRCS
     "global_table.c"
   DEPS
-    ::libhsa
     iree::base
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::drivers::amdgpu::buffer
     iree::hal::drivers::amdgpu::queue_affinity
   PUBLIC
 )
@@ -193,8 +191,6 @@ iree_cc_test(
     ::global_table
     iree::base
     iree::hal
-    iree::hal::drivers::amdgpu
-    iree::hal::drivers::amdgpu::queue_affinity
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -216,8 +212,6 @@ iree_cc_binary_benchmark(
     ::global_table
     iree::base
     iree::hal
-    iree::hal::drivers::amdgpu
-    iree::hal::drivers::amdgpu::queue_affinity
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark

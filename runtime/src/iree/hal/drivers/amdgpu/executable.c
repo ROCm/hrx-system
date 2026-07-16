@@ -9,6 +9,7 @@
 #include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/amdgpu/asan_state.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/executable_global_resolver.h"
 #include "iree/hal/drivers/amdgpu/executable_metadata_hsaco.h"
 #include "iree/hal/drivers/amdgpu/feedback_state.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
@@ -904,6 +905,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
 typedef struct iree_hal_amdgpu_executable_load_variant_t {
   // Loaded HSA executable handle for this variant.
   hsa_executable_t handle;
+
+  // HSA-backed resolver state borrowed by |global_table|.
+  iree_hal_amdgpu_executable_global_resolver_t global_resolver;
 
   // Executable global lookup and per-device buffer alias cache for |handle|.
   iree_hal_amdgpu_global_table_t global_table;
@@ -1846,18 +1850,20 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_variant_global_table(
     iree_hal_amdgpu_executable_t* executable,
     iree_hal_amdgpu_executable_load_variant_t* load_variant,
     iree_allocator_t host_allocator) {
-  const iree_hal_amdgpu_global_table_hsa_params_t global_table_params = {
-      .host_allocator = host_allocator,
-      .queue_affinity_domain = executable->queue_affinity_domain,
-      .loaded_physical_device_mask = executable->loaded_physical_device_mask,
-      .libhsa = executable->libhsa,
-      .device = executable->device,
-      .executable = load_variant->handle,
-      .device_agent_count = executable->device_count,
-      .device_agents = executable->device_agents,
-  };
-  return iree_hal_amdgpu_global_table_initialize_hsa(
-      &global_table_params, &load_variant->global_table);
+  load_variant->global_resolver =
+      (iree_hal_amdgpu_executable_global_resolver_t){
+          .host_allocator = host_allocator,
+          .queue_affinity_domain = executable->queue_affinity_domain,
+          .loaded_physical_device_mask =
+              executable->loaded_physical_device_mask,
+          .libhsa = executable->libhsa,
+          .device = executable->device,
+          .executable = load_variant->handle,
+          .device_agent_count = executable->device_count,
+          .device_agents = executable->device_agents,
+      };
+  return iree_hal_amdgpu_executable_global_resolver_initialize_table(
+      &load_variant->global_resolver, &load_variant->global_table);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_load_variant(

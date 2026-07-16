@@ -65,6 +65,25 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    executable_global_resolver
+  HDRS
+    "executable_global_resolver.h"
+  SRCS
+    "executable_global_resolver.c"
+  DEPS
+    ::buffer
+    ::queue_affinity
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu::util::global_table
+    iree::hal::drivers::amdgpu::util::libhsa
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     access_policy
   HDRS
     "access_policy.h"
@@ -271,6 +290,7 @@ iree_cc_library(
     ::access_policy
     ::buffer
     ::device_spec_builder
+    ::executable_global_resolver
     ::executable_metadata
     ::executable_metadata_hsaco
     ::kernarg_layout

@@ -60,6 +60,20 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "executable_global_resolver",
+    srcs = ["executable_global_resolver.c"],
+    hdrs = ["executable_global_resolver.h"],
+    deps = [
+        ":buffer",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:global_table",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "access_policy",
     srcs = ["access_policy.c"],
     hdrs = ["access_policy.h"],
@@ -238,6 +252,7 @@ iree_runtime_cc_library(
         ":access_policy",
         ":buffer",
         ":device_spec_builder",
+        ":executable_global_resolver",
         ":executable_metadata",
         ":executable_metadata_hsaco",
         ":kernarg_layout",
