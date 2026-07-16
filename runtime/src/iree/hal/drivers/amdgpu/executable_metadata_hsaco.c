@@ -26,9 +26,11 @@ typedef struct iree_hal_amdgpu_hsaco_kernel_load_plan_t {
   iree_host_size_t constant_byte_length;
   // Total native kernarg byte length reserved for dispatch.
   iree_host_size_t kernarg_byte_length;
-  // Native byte offset of the implicit-argument suffix, or
+  // Native byte offset where the implicit-argument region begins, or
   // IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE.
   iree_host_size_t implicit_args_byte_offset;
+  // Per-field native offsets of the synthesized implicit arguments.
+  iree_hal_amdgpu_kernarg_implicit_args_t implicit_args;
   // Byte length required for the immutable native kernarg layout record.
   iree_host_size_t layout_byte_length;
 } iree_hal_amdgpu_hsaco_kernel_load_plan_t;
@@ -112,6 +114,65 @@ static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(
          kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE;
 }
 
+// Records the native offset of a synthesized implicit ("hidden") argument by
+// matching its metadata `.value_kind`. Only the fields the runtime writes at
+// dispatch time are recorded; every other hidden argument (global offset,
+// printf/hostcall buffers, remainder, hidden_none padding) is left zero.
+// Returns an error if a recognized field declares an unexpected byte size.
+static iree_status_t iree_hal_amdgpu_hsaco_record_implicit_field(
+    iree_string_view_t symbol_name,
+    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg,
+    iree_hal_amdgpu_kernarg_implicit_args_t* out_implicit_args) {
+  uint16_t* target_offset = NULL;
+  uint32_t expected_size = 0;
+  if (iree_string_view_equal(arg->value_kind,
+                             IREE_SV("hidden_block_count_x"))) {
+    target_offset = &out_implicit_args->block_count_offset[0];
+    expected_size = sizeof(uint32_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_block_count_y"))) {
+    target_offset = &out_implicit_args->block_count_offset[1];
+    expected_size = sizeof(uint32_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_block_count_z"))) {
+    target_offset = &out_implicit_args->block_count_offset[2];
+    expected_size = sizeof(uint32_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_group_size_x"))) {
+    target_offset = &out_implicit_args->group_size_offset[0];
+    expected_size = sizeof(uint16_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_group_size_y"))) {
+    target_offset = &out_implicit_args->group_size_offset[1];
+    expected_size = sizeof(uint16_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_group_size_z"))) {
+    target_offset = &out_implicit_args->group_size_offset[2];
+    expected_size = sizeof(uint16_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_grid_dims"))) {
+    target_offset = &out_implicit_args->grid_dims_offset;
+    expected_size = sizeof(uint16_t);
+  } else if (iree_string_view_equal(arg->value_kind,
+                                    IREE_SV("hidden_dynamic_lds_size"))) {
+    target_offset = &out_implicit_args->dynamic_lds_size_offset;
+    expected_size = sizeof(uint32_t);
+  } else {
+    // Hidden argument the runtime does not synthesize; leave it zero.
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(arg->size != expected_size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel `%.*s` implicit argument `%.*s` has unexpected size %u "
+        "(expected %u)",
+        (int)symbol_name.size, symbol_name.data, (int)arg->value_kind.size,
+        arg->value_kind.data, arg->size, expected_size);
+  }
+  *target_offset = (uint16_t)arg->offset;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_hsaco_load_plan_check_u16(
     iree_string_view_t symbol_name, iree_string_view_t field_name,
     iree_host_size_t value) {
@@ -132,6 +193,16 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
   IREE_ASSERT_ARGUMENT(out_load_plan);
   memset(out_load_plan, 0, sizeof(*out_load_plan));
   out_load_plan->implicit_args_byte_offset =
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    out_load_plan->implicit_args.block_count_offset[i] =
+        IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
+    out_load_plan->implicit_args.group_size_offset[i] =
+        IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
+  }
+  out_load_plan->implicit_args.grid_dims_offset =
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
+  out_load_plan->implicit_args.dynamic_lds_size_offset =
       IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_load_plan_check_u16(
@@ -165,6 +236,8 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
       hidden_args_offset =
           iree_min(hidden_args_offset, (iree_host_size_t)arg->offset);
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_record_implicit_field(
+          kernel->symbol_name, arg, &out_load_plan->implicit_args));
       continue;
     }
 
@@ -243,6 +316,10 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
       kernel->symbol_name, IREE_SV("constant span count"),
       out_load_plan->constant_span_count));
 
+  // The native kernarg length is exactly the code object's kernarg segment
+  // size. Implicit arguments are written in place at their own metadata offsets
+  // (validated per-argument above to fall within the segment) rather than as a
+  // fixed-size suffix reserved past the segment.
   out_load_plan->kernarg_byte_length = kernel->kernarg_segment_size;
   if (hidden_args_offset != IREE_HOST_SIZE_MAX) {
     if (IREE_UNLIKELY(explicit_kernarg_end > hidden_args_offset)) {
@@ -252,22 +329,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
           "implicit kernargs",
           (int)kernel->symbol_name.size, kernel->symbol_name.data);
     }
-    iree_host_size_t implicit_args_end = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_add(
-            hidden_args_offset,
-            (iree_host_size_t)IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-            &implicit_args_end))) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU kernel `%.*s` implicit kernarg suffix overflows",
-          (int)kernel->symbol_name.size, kernel->symbol_name.data);
-    }
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_load_plan_check_u16(
-        kernel->symbol_name, IREE_SV("implicit kernarg suffix end"),
-        implicit_args_end));
     out_load_plan->implicit_args_byte_offset = hidden_args_offset;
-    out_load_plan->kernarg_byte_length =
-        iree_max(out_load_plan->kernarg_byte_length, implicit_args_end);
   }
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_storage_size(
@@ -382,6 +444,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_layout_tables(
       .kernarg_alignment = kernel->kernarg_segment_alignment,
       .constant_byte_length = load_plan->constant_byte_length,
       .implicit_args_byte_offset = load_plan->implicit_args_byte_offset,
+      .implicit_args = load_plan->implicit_args,
       .binding_count = load_plan->binding_count,
       .binding_slots = binding_slots,
       .constant_span_count = load_plan->constant_span_count,

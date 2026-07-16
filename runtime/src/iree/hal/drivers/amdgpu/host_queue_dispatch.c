@@ -497,37 +497,31 @@ static void iree_hal_amdgpu_host_queue_initialize_dispatch_event(
   event->workgroup_size[2] = plan->kernel_args->workgroup_size[2];
 }
 
+// Returns a pointer positioned so the device indirect-parameter patch's
+// contiguous block_count[3] store lands on the kernel's declared
+// hidden_block_count_x/y/z fields, or NULL when there is no block_count to
+// patch (no implicit args, an ELF-only custom-direct export with no native
+// layout, or a kernel that does not declare block_count). |layout| is the
+// native metadata layout shared by native and custom-direct dispatches and is
+// the same source the host emplace uses to write block_count, so the patch
+// overwrites exactly those bytes. Layout construction validates block_count as
+// a contiguous uint32[3], so anchoring the fixed-struct store at the x-field
+// offset covers all three fields in-bounds.
 static iree_amdgpu_kernel_implicit_args_t*
-iree_hal_amdgpu_host_queue_native_implicit_args(
+iree_hal_amdgpu_host_queue_indirect_block_count_args(
     const iree_hal_amdgpu_kernarg_layout_t* layout, void* kernarg_data) {
-  if (!iree_any_bit_set(layout->flags,
+  if (!layout ||
+      !iree_any_bit_set(layout->flags,
                         IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS)) {
     return NULL;
   }
-  return (
-      iree_amdgpu_kernel_implicit_args_t*)((uint8_t*)kernarg_data +
-                                           layout->implicit_args_byte_offset);
-}
-
-static void iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
-    const iree_hal_amdgpu_kernarg_layout_t* layout, void* kernarg_data) {
-  iree_amdgpu_kernel_implicit_args_t* implicit_args =
-      iree_hal_amdgpu_host_queue_native_implicit_args(layout, kernarg_data);
-  if (!implicit_args) return;
-
-  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
-  implicit_args->block_count[0] = workgroup_count[0];
-  implicit_args->block_count[1] = workgroup_count[1];
-  implicit_args->block_count[2] = workgroup_count[2];
-  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-  implicit_args->grid_dims = 3;
-  implicit_args->printf_buffer = NULL;
-  implicit_args->hostcall_buffer = NULL;
-  implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
+  const uint16_t block_count_offset =
+      layout->implicit_args.block_count_offset[0];
+  if (block_count_offset == IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+    return NULL;
+  }
+  return (iree_amdgpu_kernel_implicit_args_t*)((uint8_t*)kernarg_data +
+                                               block_count_offset);
 }
 
 static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
@@ -539,17 +533,22 @@ static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         plan->custom_layout, constants.data, constants.data_length,
         kernarg_data);
-    iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
-        plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-        plan->custom_layout, kernarg_data);
+    // Custom-direct dispatches still synthesize the HIP/OpenCL implicit args.
+    // The native metadata layout carries the per-field implicit offsets; it is
+    // present for reflected kernels and NULL for ELF-only custom-direct exports
+    // (which declare no implicit args, so this is a no-op for them).
+    iree_hal_amdgpu_kernarg_layout_emplace_implicit_args(
+        plan->descriptor->kernarg_layout, workgroup_count,
+        plan->kernel_args->workgroup_size, dynamic_workgroup_local_memory,
+        kernarg_data);
     return;
   }
 
   iree_hal_amdgpu_kernarg_layout_emplace_explicit_args(
       plan->kernarg_layout, binding_ptrs, constants, kernarg_data);
-  iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
-      plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-      plan->kernarg_layout, kernarg_data);
+  iree_hal_amdgpu_kernarg_layout_emplace_implicit_args(
+      plan->kernarg_layout, workgroup_count, plan->kernel_args->workgroup_size,
+      dynamic_workgroup_local_memory, kernarg_data);
 }
 
 static bool iree_hal_amdgpu_host_queue_should_profile_dispatch(
@@ -777,15 +776,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
         iree_hal_amdgpu_host_queue_profiling_completion_signal(
             queue, profile_events.first_event_position);
   }
+  // Both native and custom-direct dispatches synthesize implicit args from the
+  // native metadata layout, so the indirect block_count patch is anchored there
+  // regardless of the argument path. This overwrites the same block_count bytes
+  // the host emplace populated with the placeholder workgroup count.
   iree_amdgpu_kernel_implicit_args_t* implicit_args =
-      uses_custom_direct_arguments
-          ? (plan->custom_layout->has_implicit_args
-                 ? (iree_amdgpu_kernel_implicit_args_t*)(dispatch_kernarg_data +
-                                                         plan->custom_layout
-                                                             ->implicit_args_offset)
-                 : NULL)
-          : iree_hal_amdgpu_host_queue_native_implicit_args(
-                plan->kernarg_layout, dispatch_kernarg_data);
+      iree_hal_amdgpu_host_queue_indirect_block_count_args(
+          plan->descriptor->kernarg_layout, dispatch_kernarg_data);
   const iree_hsa_fence_scope_t dispatch_acquire_scope =
       iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
           IREE_HSA_FENCE_SCOPE_AGENT);

@@ -42,31 +42,6 @@ void iree_hal_amdgpu_device_dispatch_emplace_packet(
 // Dispatch kernarg emission
 //===----------------------------------------------------------------------===//
 
-void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
-        kernel_args,
-    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
-    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
-        layout,
-    void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  if (!layout->has_implicit_args) return;
-
-  iree_amdgpu_kernel_implicit_args_t* IREE_AMDGPU_RESTRICT implicit_args =
-      (iree_amdgpu_kernel_implicit_args_t*)((uint8_t*)kernarg_ptr +
-                                            layout->implicit_args_offset);
-  iree_amdgpu_memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
-  implicit_args->block_count[0] = workgroup_count[0];
-  implicit_args->block_count[1] = workgroup_count[1];
-  implicit_args->block_count[2] = workgroup_count[2];
-  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-  implicit_args->grid_dims = 3;
-  implicit_args->printf_buffer = NULL;
-  implicit_args->hostcall_buffer = NULL;
-  implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
-}
-
 void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,

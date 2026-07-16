@@ -115,25 +115,6 @@ void iree_hal_amdgpu_device_dispatch_emplace_packet(
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
-// Populates the HIP/OpenCL implicit args suffix in already-reserved storage.
-//
-// This must be called after explicit HAL/custom kernargs have been populated
-// whenever |layout->has_implicit_args| is true.
-//
-// Preconditions:
-//   - |kernel_args|, |workgroup_count|, |layout|, and |kernarg_ptr| are
-//     non-NULL.
-//   - |layout| describes a reservation with an implicit suffix.
-//   - |kernarg_ptr| points to at least |layout->total_kernarg_size| bytes of
-//     writable storage.
-void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
-        kernel_args,
-    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
-    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
-        layout,
-    void* IREE_AMDGPU_RESTRICT kernarg_ptr);
-
 // Populates custom direct explicit kernargs in already-reserved storage.
 //
 // |custom_kernarg_ptr| provides caller-supplied bytes in the final kernel ABI

@@ -176,6 +176,95 @@ static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_no_source_overlap(
   return iree_ok_status();
 }
 
+// Validates that a synthesized implicit-argument field lies within the kernarg
+// segment. A NONE offset means the kernel did not declare the field.
+static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_implicit_field(
+    iree_host_size_t kernarg_byte_length, uint16_t field_offset,
+    iree_host_size_t field_size) {
+  if (field_offset == IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+    return iree_ok_status();
+  }
+  iree_host_size_t field_end = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_add(field_offset, field_size, &field_end)) ||
+      IREE_UNLIKELY(field_end > kernarg_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "implicit argument field at offset %u size %" PRIhsz
+                            " exceeds kernarg byte length %" PRIhsz,
+                            field_offset, field_size, kernarg_byte_length);
+  }
+  return iree_ok_status();
+}
+
+// Validates every synthesized implicit-argument field against the kernarg
+// segment bounds and enforces that hidden_block_count_x/y/z are declared as a
+// contiguous uint32[3] block (or omitted), which the device indirect-parameter
+// patch relies on.
+static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_implicit_args(
+    iree_host_size_t kernarg_byte_length,
+    const iree_hal_amdgpu_kernarg_implicit_args_t* implicit_args) {
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_implicit_field(
+        kernarg_byte_length, implicit_args->block_count_offset[i],
+        sizeof(uint32_t)));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_implicit_field(
+        kernarg_byte_length, implicit_args->group_size_offset[i],
+        sizeof(uint16_t)));
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_implicit_field(
+      kernarg_byte_length, implicit_args->grid_dims_offset, sizeof(uint16_t)));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_implicit_field(
+      kernarg_byte_length, implicit_args->dynamic_lds_size_offset,
+      sizeof(uint32_t)));
+
+  // The device indirect-parameter patch rewrites hidden_block_count_x/y/z as a
+  // contiguous uint32[3] (three uint32 dword stores) anchored at the x field,
+  // matching the AMD code object ABI, which packs block_count as one uint32[3]
+  // object. Require the three fields to be either all omitted or all declared
+  // contiguously so those stores land exactly on the declared fields and stay
+  // within the per-field bounds validated above. Real code objects always
+  // satisfy this; rejecting anything else keeps the device writes in-bounds.
+  const uint16_t block_count_x = implicit_args->block_count_offset[0];
+  const uint16_t block_count_y = implicit_args->block_count_offset[1];
+  const uint16_t block_count_z = implicit_args->block_count_offset[2];
+  const bool block_count_absent =
+      block_count_x == IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE &&
+      block_count_y == IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE &&
+      block_count_z == IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE;
+  const bool block_count_contiguous =
+      block_count_x != IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE &&
+      block_count_y != IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE &&
+      block_count_z != IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE &&
+      (iree_host_size_t)block_count_y ==
+          (iree_host_size_t)block_count_x + sizeof(uint32_t) &&
+      (iree_host_size_t)block_count_z ==
+          (iree_host_size_t)block_count_x + 2 * sizeof(uint32_t);
+  if (IREE_UNLIKELY(!block_count_absent && !block_count_contiguous)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "hidden block_count fields must be declared as a contiguous uint32[3] "
+        "block or omitted entirely (got offsets %u, %u, %u)",
+        block_count_x, block_count_y, block_count_z);
+  }
+
+  // The device patch stores block_count as uint32 dwords, so the anchor field
+  // block_count_x (and thus the contiguous y/z that follow it) must be 4-byte
+  // aligned. This replaces the removed 8-byte base-alignment reject: alignment
+  // is now required only where the device performs aligned dword stores, not on
+  // the region base, which may be unaligned for a partial hidden block. When
+  // block_count is absent there is nothing to align.
+  if (IREE_UNLIKELY(
+          !block_count_absent &&
+          !iree_host_size_has_alignment(block_count_x, sizeof(uint32_t)))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "hidden block_count_x offset %u must be 4-byte aligned for the device "
+        "uint32 dword store",
+        block_count_x);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_params(
     const iree_hal_amdgpu_kernarg_layout_params_t* params) {
   if (IREE_UNLIKELY(params->kernarg_byte_length >
@@ -225,13 +314,14 @@ static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_params(
                               params->implicit_args_byte_offset,
                               params->kernarg_byte_length);
     }
-    if (IREE_UNLIKELY(!iree_host_size_has_alignment(
-            params->implicit_args_byte_offset, sizeof(uint64_t)))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "implicit args offset %" PRIhsz
-                              " must be 8-byte aligned",
-                              params->implicit_args_byte_offset);
-    }
+    // The AMD ABI does not require the implicit-argument region to begin at an
+    // 8-byte-aligned offset: hand-written assembly kernels (e.g. MIOpen
+    // Winograd) begin the region with sub-8-byte hidden_none padding so the
+    // lowest hidden offset can be unaligned. Each synthesized field is written
+    // at its own metadata offset instead, so validate every declared field
+    // lies within the kernarg segment rather than constraining the base.
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_implicit_args(
+        params->kernarg_byte_length, &params->implicit_args));
   }
   for (iree_host_size_t i = 0; i < params->binding_count; ++i) {
     const iree_hal_amdgpu_kernarg_byte_range_t range =
@@ -364,6 +454,7 @@ iree_status_t iree_hal_amdgpu_kernarg_layout_initialize(
   out_layout->implicit_args_byte_offset =
       (uint16_t)params->implicit_args_byte_offset;
   out_layout->flags = flags;
+  out_layout->implicit_args = params->implicit_args;
 
   if (params->binding_count > 0) {
     memmove(out_layout->binding_slots, params->binding_slots,
@@ -409,5 +500,61 @@ void iree_hal_amdgpu_kernarg_layout_emplace_explicit_args(
     const iree_hal_amdgpu_kernarg_constant_span_t span = constant_spans[i];
     memcpy(target + span.target_byte_offset,
            constants.data + span.source_byte_offset, span.byte_length);
+  }
+}
+
+void iree_hal_amdgpu_kernarg_layout_emplace_implicit_args(
+    const iree_hal_amdgpu_kernarg_layout_t* layout,
+    const uint32_t workgroup_count[3], const uint16_t workgroup_size[3],
+    uint32_t dynamic_workgroup_local_memory, void* kernarg_ptr) {
+  if (!layout ||
+      !iree_any_bit_set(layout->flags,
+                        IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS)) {
+    return;
+  }
+  uint8_t* target = (uint8_t*)kernarg_ptr;
+
+  // Zero the implicit region so undeclared fields (global offset, printf and
+  // hostcall buffers, remainder, and hidden_none padding) are zero/NULL, which
+  // matches the HIP defaults. The runtime owns the whole implicit region
+  // [implicit_args_byte_offset, kernarg_byte_length). On the native path the
+  // code object metadata analysis rejects kernels whose explicit kernargs reach
+  // into this region, so explicit args sit strictly below the region start and
+  // this zero never touches them. On the custom-direct path the caller supplies
+  // only the pre-packed explicit prefix; the runtime synthesizes the implicit
+  // args and zero-fills this region regardless, so it does not depend on (and
+  // deliberately overwrites) any caller bytes inside it. The zero is
+  // unconditional because kernarg storage is pooled and may hold stale bytes
+  // from a prior dispatch that must not leak into this one.
+  const uint16_t region_begin = layout->implicit_args_byte_offset;
+  memset(target + region_begin, 0, layout->kernarg_byte_length - region_begin);
+
+  // Write only the fields the code object metadata declared, each at its own
+  // native offset (ROCr walks and writes hidden args individually rather than
+  // splatting a fixed struct at one base offset).
+  const iree_hal_amdgpu_kernarg_implicit_args_t* implicit_args =
+      &layout->implicit_args;
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    if (implicit_args->block_count_offset[i] !=
+        IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+      memcpy(target + implicit_args->block_count_offset[i], &workgroup_count[i],
+             sizeof(uint32_t));
+    }
+    if (implicit_args->group_size_offset[i] !=
+        IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+      memcpy(target + implicit_args->group_size_offset[i], &workgroup_size[i],
+             sizeof(uint16_t));
+    }
+  }
+  if (implicit_args->grid_dims_offset !=
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+    const uint16_t grid_dims = 3;
+    memcpy(target + implicit_args->grid_dims_offset, &grid_dims,
+           sizeof(uint16_t));
+  }
+  if (implicit_args->dynamic_lds_size_offset !=
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
+    memcpy(target + implicit_args->dynamic_lds_size_offset,
+           &dynamic_workgroup_local_memory, sizeof(uint32_t));
   }
 }
