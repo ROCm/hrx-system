@@ -9,7 +9,6 @@
 
 iree_add_all_subdirs()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     launch_params
@@ -35,6 +34,7 @@ iree_cc_library(
   PUBLIC
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     amdhip64
@@ -70,7 +70,6 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   OUTPUT_NAME amdhip64
   VERSION 7.9999.0
@@ -78,6 +77,8 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     hip_get_proc_address_test
@@ -93,6 +94,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
 )
+endif()
 
 iree_cc_test(
   NAME
@@ -130,7 +132,6 @@ iree_cc_test(
     iree::testing::gtest_main
     libhrx_defs
 )
-endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
