@@ -135,17 +135,170 @@ iree_status_t loom_json_write_escaped_string(loom_output_stream_t* stream,
   return iree_ok_status();
 }
 
+//===----------------------------------------------------------------------===//
+// Streaming JSON containers
+//===----------------------------------------------------------------------===//
+
+static iree_status_t loom_json_write_separator(loom_output_stream_t* stream,
+                                               iree_host_size_t value_count) {
+  return value_count == 0 ? iree_ok_status()
+                          : loom_output_stream_write_char(stream, ',');
+}
+
+iree_status_t loom_json_object_begin(loom_output_stream_t* stream,
+                                     loom_json_object_writer_t* out_writer) {
+  out_writer->stream = stream;
+  out_writer->field_count = 0;
+  return loom_output_stream_write_char(stream, '{');
+}
+
+iree_status_t loom_json_object_end(loom_json_object_writer_t* writer) {
+  return loom_output_stream_write_char(writer->stream, '}');
+}
+
+iree_status_t loom_json_object_begin_field(loom_json_object_writer_t* writer,
+                                           iree_string_view_t name) {
+  IREE_RETURN_IF_ERROR(
+      loom_json_write_separator(writer->stream, writer->field_count));
+  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(writer->stream, name));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(writer->stream, ':'));
+  ++writer->field_count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_json_object_write_string_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_json_write_escaped_string(writer->stream, value);
+}
+
+iree_status_t loom_json_object_write_uint32_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    uint32_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_format(writer->stream, "%" PRIu32, value);
+}
+
+iree_status_t loom_json_object_write_uint64_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    uint64_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_format(writer->stream, "%" PRIu64, value);
+}
+
+iree_status_t loom_json_object_write_int32_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, int32_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_format(writer->stream, "%" PRId32, value);
+}
+
+iree_status_t loom_json_object_write_int64_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, int64_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_format(writer->stream, "%" PRId64, value);
+}
+
+iree_status_t loom_json_object_write_bool_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, bool value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_cstring(writer->stream,
+                                          value ? "true" : "false");
+}
+
+iree_status_t loom_json_object_write_host_size_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    iree_host_size_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_format(writer->stream, "%" PRIhsz, value);
+}
+
+iree_status_t loom_json_object_write_null_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(writer, name));
+  return loom_output_stream_write_cstring(writer->stream, "null");
+}
+
+iree_status_t loom_json_array_begin(loom_output_stream_t* stream,
+                                    loom_json_array_writer_t* out_writer) {
+  out_writer->stream = stream;
+  out_writer->element_count = 0;
+  return loom_output_stream_write_char(stream, '[');
+}
+
+iree_status_t loom_json_array_end(loom_json_array_writer_t* writer) {
+  return loom_output_stream_write_char(writer->stream, ']');
+}
+
+iree_status_t loom_json_array_begin_element(loom_json_array_writer_t* writer) {
+  IREE_RETURN_IF_ERROR(
+      loom_json_write_separator(writer->stream, writer->element_count));
+  ++writer->element_count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_json_array_write_string_element(
+    loom_json_array_writer_t* writer, iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_json_write_escaped_string(writer->stream, value);
+}
+
+iree_status_t loom_json_array_write_uint32_element(
+    loom_json_array_writer_t* writer, uint32_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_format(writer->stream, "%" PRIu32, value);
+}
+
+iree_status_t loom_json_array_write_uint64_element(
+    loom_json_array_writer_t* writer, uint64_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_format(writer->stream, "%" PRIu64, value);
+}
+
+iree_status_t loom_json_array_write_int32_element(
+    loom_json_array_writer_t* writer, int32_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_format(writer->stream, "%" PRId32, value);
+}
+
+iree_status_t loom_json_array_write_int64_element(
+    loom_json_array_writer_t* writer, int64_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_format(writer->stream, "%" PRId64, value);
+}
+
+iree_status_t loom_json_array_write_bool_element(
+    loom_json_array_writer_t* writer, bool value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_cstring(writer->stream,
+                                          value ? "true" : "false");
+}
+
+iree_status_t loom_json_array_write_host_size_element(
+    loom_json_array_writer_t* writer, iree_host_size_t value) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_format(writer->stream, "%" PRIhsz, value);
+}
+
+iree_status_t loom_json_array_write_null_element(
+    loom_json_array_writer_t* writer) {
+  IREE_RETURN_IF_ERROR(loom_json_array_begin_element(writer));
+  return loom_output_stream_write_cstring(writer->stream, "null");
+}
+
 iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,
                                             iree_status_code_t code,
                                             iree_string_view_t message) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "{\"code\":%" PRIu32 ",\"name\":", (uint32_t)code));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_cstring(stream, iree_status_code_string(code)));
+  loom_json_object_writer_t writer;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &writer));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &writer, IREE_SV("code"), (uint32_t)code));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &writer, IREE_SV("name"),
+      iree_make_cstring_view(iree_status_code_string(code))));
   if (!iree_string_view_is_empty(message)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"message\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, message));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &writer, IREE_SV("message"), message));
   }
-  return loom_output_stream_write_char(stream, '}');
+  return loom_json_object_end(&writer);
 }

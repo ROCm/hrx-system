@@ -96,6 +96,7 @@ loom_cc_test(
   DEPS
     ::json
     ::stream
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
 )

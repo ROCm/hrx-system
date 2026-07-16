@@ -65,6 +65,89 @@ void loom_json_escape_stream_init(loom_output_stream_t* inner,
 iree_status_t loom_json_write_escaped_string(loom_output_stream_t* stream,
                                              iree_string_view_t value);
 
+// Streaming state for a JSON object. The writer emits directly to the output
+// stream and owns field separator placement.
+typedef struct loom_json_object_writer_t {
+  // Output stream receiving the serialized object.
+  loom_output_stream_t* stream;
+  // Number of fields written to the object.
+  iree_host_size_t field_count;
+} loom_json_object_writer_t;
+
+// Begins a JSON object and initializes |out_writer| to append fields to it.
+iree_status_t loom_json_object_begin(loom_output_stream_t* stream,
+                                     loom_json_object_writer_t* out_writer);
+
+// Ends a JSON object previously begun with loom_json_object_begin.
+iree_status_t loom_json_object_end(loom_json_object_writer_t* writer);
+
+// Begins a named field in |writer|. The caller must write exactly one JSON
+// value to writer->stream before beginning the next field or ending the object.
+iree_status_t loom_json_object_begin_field(loom_json_object_writer_t* writer,
+                                           iree_string_view_t name);
+
+// Writes required object fields of the indicated type.
+iree_status_t loom_json_object_write_string_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    iree_string_view_t value);
+iree_status_t loom_json_object_write_uint32_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, uint32_t value);
+iree_status_t loom_json_object_write_uint64_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, uint64_t value);
+iree_status_t loom_json_object_write_int32_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, int32_t value);
+iree_status_t loom_json_object_write_int64_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, int64_t value);
+iree_status_t loom_json_object_write_bool_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name, bool value);
+iree_status_t loom_json_object_write_host_size_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name,
+    iree_host_size_t value);
+
+// Writes a named field with an explicit JSON null value.
+iree_status_t loom_json_object_write_null_field(
+    loom_json_object_writer_t* writer, iree_string_view_t name);
+
+// Streaming state for a JSON array. The writer emits directly to the output
+// stream and owns element separator placement.
+typedef struct loom_json_array_writer_t {
+  // Output stream receiving the serialized array.
+  loom_output_stream_t* stream;
+  // Number of elements written to the array.
+  iree_host_size_t element_count;
+} loom_json_array_writer_t;
+
+// Begins a JSON array and initializes |out_writer| to append elements to it.
+iree_status_t loom_json_array_begin(loom_output_stream_t* stream,
+                                    loom_json_array_writer_t* out_writer);
+
+// Ends a JSON array previously begun with loom_json_array_begin.
+iree_status_t loom_json_array_end(loom_json_array_writer_t* writer);
+
+// Begins an element in |writer|. The caller must write exactly one JSON value
+// to writer->stream before beginning the next element or ending the array.
+iree_status_t loom_json_array_begin_element(loom_json_array_writer_t* writer);
+
+// Writes array elements of the indicated type.
+iree_status_t loom_json_array_write_string_element(
+    loom_json_array_writer_t* writer, iree_string_view_t value);
+iree_status_t loom_json_array_write_uint32_element(
+    loom_json_array_writer_t* writer, uint32_t value);
+iree_status_t loom_json_array_write_uint64_element(
+    loom_json_array_writer_t* writer, uint64_t value);
+iree_status_t loom_json_array_write_int32_element(
+    loom_json_array_writer_t* writer, int32_t value);
+iree_status_t loom_json_array_write_int64_element(
+    loom_json_array_writer_t* writer, int64_t value);
+iree_status_t loom_json_array_write_bool_element(
+    loom_json_array_writer_t* writer, bool value);
+iree_status_t loom_json_array_write_host_size_element(
+    loom_json_array_writer_t* writer, iree_host_size_t value);
+
+// Writes an explicit JSON null array element.
+iree_status_t loom_json_array_write_null_element(
+    loom_json_array_writer_t* writer);
+
 // Writes an IREE status value as {"code":N,"name":"...","message":"..."}.
 // The message field is omitted when |message| is empty.
 iree_status_t loom_json_write_status_object(loom_output_stream_t* stream,
