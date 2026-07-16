@@ -739,6 +739,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunRecordFinalize(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
@@ -765,6 +766,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunRecordOnly(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
@@ -779,17 +781,14 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
         break;
       }
       state.PauseTiming();
-      const bool finalize_ok =
-          HandleStatus(state, iree_hal_command_buffer_end(command_buffer),
-                       "failed to finalize ABABA command buffer");
-      if (finalize_ok) {
-        iree_hal_command_buffer_release(last_command_buffer);
-        last_command_buffer = command_buffer;
-      } else {
+      if (!HandleStatus(state, iree_hal_command_buffer_end(command_buffer),
+                        "failed to finalize ABABA command buffer")) {
         iree_hal_command_buffer_release(command_buffer);
+        break;
       }
+      iree_hal_command_buffer_release(last_command_buffer);
+      last_command_buffer = command_buffer;
       state.ResumeTiming();
-      if (!finalize_ok) break;
     }
     if (last_command_buffer) {
       SetCounters(state, path, spec, last_command_buffer);
@@ -799,6 +798,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunFinalizeOnly(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
@@ -808,24 +808,22 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     for (auto _ : state) {
       iree_hal_command_buffer_t* command_buffer = nullptr;
       state.PauseTiming();
-      const bool record_ok = HandleStatus(
-          state, BeginAbabaCommandBuffer(path, spec, &command_buffer),
-          "failed to record ABABA command buffer");
-      state.ResumeTiming();
-      if (!record_ok) break;
-
-      const bool finalize_ok =
-          HandleStatus(state, iree_hal_command_buffer_end(command_buffer),
-                       "failed to finalize ABABA command buffer");
-      state.PauseTiming();
-      if (finalize_ok) {
-        iree_hal_command_buffer_release(last_command_buffer);
-        last_command_buffer = command_buffer;
-      } else {
-        iree_hal_command_buffer_release(command_buffer);
+      if (!HandleStatus(state,
+                        BeginAbabaCommandBuffer(path, spec, &command_buffer),
+                        "failed to record ABABA command buffer")) {
+        break;
       }
       state.ResumeTiming();
-      if (!finalize_ok) break;
+
+      if (!HandleStatus(state, iree_hal_command_buffer_end(command_buffer),
+                        "failed to finalize ABABA command buffer")) {
+        iree_hal_command_buffer_release(command_buffer);
+        break;
+      }
+      state.PauseTiming();
+      iree_hal_command_buffer_release(last_command_buffer);
+      last_command_buffer = command_buffer;
+      state.ResumeTiming();
     }
     if (last_command_buffer) {
       SetCounters(state, path, spec, last_command_buffer);
@@ -835,6 +833,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunSubmitOnly(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
@@ -855,10 +854,11 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
         break;
       }
       state.PauseTiming();
-      const bool wait_ok = HandleStatus(state, Wait(completion),
-                                        "ABABA command-buffer wait failed");
+      if (!HandleStatus(state, Wait(completion),
+                        "ABABA command-buffer wait failed")) {
+        break;
+      }
       state.ResumeTiming();
-      if (!wait_ok) break;
     }
     SetCounters(state, path, spec, command_buffer);
     state.SetItemsProcessed(state.iterations() * spec.operation_count);
@@ -866,6 +866,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunSubmitWait(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
@@ -896,6 +897,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   void RunEndToEnd(benchmark::State& state, CommandBufferPath path) {
+    if (state.skipped()) return;
     BenchmarkSpec spec = {
         /*operation_count=*/state.range(0),
         /*binding_table_count=*/state.range(1),
