@@ -27,10 +27,40 @@ CMAKE_SANITIZER_OPTIONS = {
     "tsan": ("-DIREE_ENABLE_TSAN=ON",),
     "ubsan": ("-DIREE_ENABLE_UBSAN=ON",),
 }
-CI_HAL_DRIVER_DEFINES = (
+BAZEL_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
+    ("hip", "IREE_HAL_DRIVER_HIP"),
+    ("local-sync", "IREE_HAL_DRIVER_LOCAL_SYNC"),
+    ("local-task", "IREE_HAL_DRIVER_LOCAL_TASK"),
+    ("null", "IREE_HAL_DRIVER_NULL"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
+    ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
 )
+CMAKE_HAL_DRIVER_DEFINES = (
+    ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
+    ("hip", "IREE_HAL_DRIVER_HIP"),
+    ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
+    ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
+)
+CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
+REPOSITORY_BUILD_HAL_DRIVERS = (
+    "amdgpu",
+    "hip",
+    "local-sync",
+    "local-task",
+    "null",
+    "vulkan",
+    "webgpu",
+)
+REPOSITORY_BUILD_LOOM_TARGETS = (
+    "amdgpu",
+    "iree_vm",
+    "llvmir",
+    "spirv",
+    "wasm",
+    "x86",
+)
+REPOSITORY_BUILD_LOOM_IMPORTERS = ("mlir", "tilelang")
 ROCM_PINNED_DEPENDENCY_MODE_OPTION = "-DIREE_ROCM_DEPENDENCY_MODE=pinned"
 AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
@@ -38,6 +68,7 @@ AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS = (
 )
 BAZEL_COMMANDS = {
     "iree-bazel-cpu": ("cpu", None),
+    "iree-bazel-repository-build": ("repository-build", None),
     "iree-bazel-cpu-asan": ("cpu", "asan"),
     "iree-bazel-cpu-msan": ("cpu", "msan"),
     "iree-bazel-cpu-tsan": ("cpu", "tsan"),
@@ -169,9 +200,8 @@ def cmake_dev_command(command_name: str, *args: str) -> tuple[str, ...]:
 
 
 def validate_enabled_drivers(enabled_drivers: tuple[str, ...]) -> frozenset[str]:
-    supported_drivers = frozenset(driver for driver, _ in CI_HAL_DRIVER_DEFINES)
     enabled_driver_set = frozenset(enabled_drivers)
-    unsupported_drivers = enabled_driver_set.difference(supported_drivers)
+    unsupported_drivers = enabled_driver_set.difference(CI_SUPPORTED_HAL_DRIVERS)
     if unsupported_drivers:
         raise ValueError(
             "unsupported CI HAL driver(s): " + ", ".join(sorted(unsupported_drivers))
@@ -186,17 +216,30 @@ def amdgpu_bazel_options(target_selector: str) -> tuple[str, ...]:
     )
 
 
-def bazel_configure_step(enabled_drivers: tuple[str, ...] = ()) -> CiStep:
+def bazel_configure_step(
+    enabled_drivers: tuple[str, ...] = (),
+    *,
+    enabled_loom_targets: tuple[str, ...] | None = None,
+    enabled_loom_importers: tuple[str, ...] | None = None,
+) -> CiStep:
     enabled_driver_set = validate_enabled_drivers(enabled_drivers)
     command = ["bazel", "configure"]
-    for driver, define in CI_HAL_DRIVER_DEFINES:
+    for driver, define in BAZEL_HAL_DRIVER_DEFINES:
         if driver in enabled_driver_set:
             command.append(f"-D{define}=ON")
-    if "amdgpu" in enabled_driver_set:
+    if enabled_driver_set.intersection(("amdgpu", "hip")):
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
         rocm_root = os.environ.get("HRX_ROCM_ROOT")
         if rocm_root:
             command.append(f"-DIREE_ROCM_PATH={rocm_root}")
+    if enabled_loom_targets is not None:
+        command.append(
+            "--//loom/config/target:enable=" + ",".join(enabled_loom_targets)
+        )
+    if enabled_loom_importers is not None:
+        command.append(
+            "--//loom/config/import:enable=" + ",".join(enabled_loom_importers)
+        )
     return CiStep("Configure Bazel", dev_command(*command))
 
 
@@ -261,7 +304,7 @@ def cmake_configure_step(
         "-DIREE_ENABLE_LIBBACKTRACE=OFF",
         "-DLIBHRX_BUILD=OFF",
     ]
-    for driver, define in CI_HAL_DRIVER_DEFINES:
+    for driver, define in CMAKE_HAL_DRIVER_DEFINES:
         command.append(f"-D{define}={'ON' if driver in enabled_driver_set else 'OFF'}")
     if "amdgpu" in enabled_driver_set:
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
@@ -333,6 +376,17 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
             scoped_targets + ci_config.CPU_XFAIL_TARGETS,
             test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
         ),
+    ]
+
+
+def repository_build_steps() -> list[CiStep]:
+    return [
+        bazel_configure_step(
+            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+            enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
+        ),
+        bazel_build_step("Build repository", ("//...",)),
     ]
 
 
@@ -944,6 +998,12 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         if sanitizer is not None:
             raise ValueError("Loom AMDGPU Bazel CI does not support sanitizers")
         return loom_amdgpu_bazel_steps()
+    if bazel_target == "repository-build":
+        if args.target:
+            raise ValueError(
+                "--target is not supported by the repository-wide build command"
+            )
+        return repository_build_steps()
     targets = command_targets(args.target)
     if bazel_target == "cpu":
         if sanitizer == "all":

@@ -61,22 +61,63 @@ jobs:
     runs-on: aws-linux-scale-rocm-prod
     timeout-minutes: 45
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      image: ${{ matrix.container_image }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux / CPU
             command: iree-bazel-cpu
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: false
+            setup_python: true
           - name: Linux / CPU / ASAN
             command: iree-bazel-cpu-asan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / MSAN
             command: iree-bazel-cpu-msan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / TSAN
             command: iree-bazel-cpu-tsan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / UBSAN
             command: iree-bazel-cpu-ubsan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
+          - name: Linux / Repository / GCC Build
+            command: iree-bazel-repository-build
+            container_image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+            install_compiler_rt: false
+            setup_python: false
     env:
+      AR: ${{ matrix.host_ar }}
+      CC: ${{ matrix.host_cc }}
+      CXX: ${{ matrix.host_cxx }}
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel
@@ -90,6 +131,18 @@ jobs:
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        if: matrix.setup_python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
 
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
@@ -125,6 +178,9 @@ jobs:
           - name: Linux / Vulkan / Sanitizers
             command: iree-bazel-vulkan-sanitizers
     env:
+      AR: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan

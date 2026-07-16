@@ -94,6 +94,8 @@ py_test(
         "//:.github/workflows/ci_importers.yml",
         "//:.github/workflows/ci_iree_bazel.yml",
         "//:.github/workflows/ci_iree_cmake.yml",
+        "//:.github/workflows/ci_libhrx_bazel.yml",
+        "//:.github/workflows/presubmit.yml",
         "//:.github/workflows/test_core_linux_gpu.yml",
     ],
     main = "ci_test.py",

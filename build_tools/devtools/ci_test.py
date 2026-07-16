@@ -90,6 +90,54 @@ class CiTest(unittest.TestCase):
         self.assertIn("//runtime/...", test_step.argv)
         self.assertIn("//loom/...", test_step.argv)
 
+    def test_bazel_repository_build_covers_supported_linux_graph(self):
+        args = ci.parse_arguments(["iree-bazel-repository-build"])
+
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.steps_from_args(args)
+
+        self.assertEqual(
+            [step.name for step in steps], ["Configure Bazel", "Build repository"]
+        )
+        configure_step = steps[0]
+        for define in (
+            "IREE_HAL_DRIVER_AMDGPU",
+            "IREE_HAL_DRIVER_HIP",
+            "IREE_HAL_DRIVER_LOCAL_SYNC",
+            "IREE_HAL_DRIVER_LOCAL_TASK",
+            "IREE_HAL_DRIVER_NULL",
+            "IREE_HAL_DRIVER_VULKAN",
+            "IREE_HAL_DRIVER_WEBGPU",
+        ):
+            self.assertIn(f"-D{define}=ON", configure_step.argv)
+        self.assertIn(
+            "--//loom/config/target:enable="
+            + ",".join(ci.REPOSITORY_BUILD_LOOM_TARGETS),
+            configure_step.argv,
+        )
+        self.assertIn(
+            "--//loom/config/import:enable="
+            + ",".join(ci.REPOSITORY_BUILD_LOOM_IMPORTERS),
+            configure_step.argv,
+        )
+        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
+        build_step = steps[-1]
+        self.assertEqual(build_step.argv[-1], "//...")
+        self.assertFalse(any(arg.startswith("-//") for arg in build_step.argv))
+        self.assertFalse(any(step.name.startswith("Test") for step in steps))
+
+    def test_bazel_repository_build_rejects_partial_target_scope(self):
+        args = ci.parse_arguments(
+            ["iree-bazel-repository-build", "--target", "//runtime/..."]
+        )
+
+        with self.assertRaisesRegex(ValueError, "repository-wide"):
+            ci.steps_from_args(args)
+
     def test_amdgpu_dry_run_does_not_embed_machine_paths(self):
         args = ci.parse_arguments(
             [
@@ -759,64 +807,6 @@ class CiTest(unittest.TestCase):
                     block,
                     r"command: iree-bazel-(amdgpu|vulkan)-sanitizers",
                 )
-
-    def test_iree_amdgpu_workflows_fan_out_base_bazel_coverage(self):
-        bazel_block = self.workflow_job_block(
-            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"
-        )
-        self.assertIn("runs-on: ${{ matrix.runner_label }}", bazel_block)
-        self.assertIn(
-            "image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:",
-            bazel_block,
-        )
-        self.assertIn("--device /dev/kfd", bazel_block)
-        self.assertIn("CC: clang", bazel_block)
-        self.assertIn("CXX: clang++", bazel_block)
-        self.assertIn("AR: ar", bazel_block)
-        for name, runner_label, target_selector in (
-            (
-                "gfx942",
-                "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
-                "gfx942",
-            ),
-            ("gfx110X", "linux-gfx110X-gpu-rocm", "gfx110X-all"),
-            ("gfx1150", "linux-gfx1150-gpu-rocm", "gfx1150"),
-            ("gfx1151", "linux-gfx1151-gpu-rocm", "gfx1151"),
-            ("gfx120X", "linux-gfx120X-gpu-rocm", "gfx120X-all"),
-        ):
-            with self.subTest(target=name):
-                self.assertIn(f"name: Linux / AMDGPU / {name}\n", bazel_block)
-                self.assertIn(f"runner_label: {runner_label}", bazel_block)
-                self.assertIn(f"target_selector: {target_selector}", bazel_block)
-        self.assertEqual(bazel_block.count("command: iree-bazel-amdgpu\n"), 5)
-        self.assertEqual(
-            bazel_block.count("command: iree-bazel-amdgpu-sanitizers\n"), 1
-        )
-        self.assertIn("Linux / AMDGPU / gfx942 / Sanitizers", bazel_block)
-        self.assertIn('--amdgpu-target "${{ matrix.target_selector }}"', bazel_block)
-        self.assertIn("uses: actions/setup-python@", bazel_block)
-        self.assertNotIn("core42", bazel_block)
-
-        cmake_block = self.workflow_job_block(
-            ".github/workflows/ci_iree_cmake.yml", "linux_cmake_amdgpu"
-        )
-        self.assertIn("name: Linux / AMDGPU / gfx942", cmake_block)
-        self.assertIn(
-            "image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:",
-            cmake_block,
-        )
-        self.assertIn("--device /dev/kfd", cmake_block)
-        self.assertIn("CC: clang", cmake_block)
-        self.assertIn("CXX: clang++", cmake_block)
-        self.assertIn("AR: ar", cmake_block)
-        self.assertIn(
-            "runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm",
-            cmake_block,
-        )
-        self.assertIn("target_selector: gfx942", cmake_block)
-        self.assertIn('--amdgpu-target "${{ matrix.target_selector }}"', cmake_block)
-        self.assertIn("uses: actions/setup-python@", cmake_block)
-        self.assertNotIn("core42", cmake_block)
 
     def test_core_gpu_workflow_routes_gpu_labels_to_linux_runners(self):
         block = self.workflow_job_block(

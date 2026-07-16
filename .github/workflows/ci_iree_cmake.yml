@@ -55,16 +55,21 @@ jobs:
     runs-on: aws-linux-scale-rocm-prod
     timeout-minutes: 45
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux / CPU
             command: iree-cmake-cpu
+            install_compiler_rt: false
           - name: Linux / CPU / Sanitizer Smoke
             command: iree-cmake-sanitizer-smoke
+            install_compiler_rt: true
     env:
+      AR: ar
+      CC: clang
+      CXX: clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake
@@ -78,6 +83,17 @@ jobs:
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
 
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
@@ -113,6 +129,9 @@ jobs:
           - name: Linux / Vulkan
             command: iree-cmake-vulkan
     env:
+      AR: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan

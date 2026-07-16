@@ -35,9 +35,9 @@ export_env() {
   fi
 }
 
-# Keep the ROCm LLVM directory off PATH. Project sources must use the host
-# compiler; AMDGPU device compilation receives this root through explicit build
-# configuration instead.
+# Keep the ROCm LLVM directory off PATH. Workflows select their host compiler
+# explicitly; AMDGPU device compilation receives this root through explicit
+# build configuration instead of ambient PATH order.
 append_path "${HRX_ROCM_ROOT}/bin"
 export_env "CMAKE_PREFIX_PATH" \
   "${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
