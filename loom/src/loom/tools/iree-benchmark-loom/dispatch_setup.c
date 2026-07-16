@@ -56,7 +56,6 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
         .config_set = options->hal_context->config_set,
         .test_module = options->module_plan->module,
         .case_plan = case_plan,
-        .sample_constant_case_plan = case_plan,
         .sample_constant_ordinal = compile_item->case_sample_ordinal,
         .has_sample_constant_ordinal = compile_item->has_case_sample_ordinal,
     };
