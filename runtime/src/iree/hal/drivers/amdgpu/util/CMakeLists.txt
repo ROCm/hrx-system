@@ -1024,6 +1024,7 @@ iree_amdgpu_binary_variants_embed_data(
   SRCS
     "pm4_dispatch_test_kernels.c"
   TESTONLY
+  FLATTEN
   PUBLIC
 )
 endif()
@@ -1256,6 +1257,7 @@ iree_amdgpu_binary_variants_embed_data(
   SRCS
     "feedback_channel_test_kernels.c"
   TESTONLY
+  FLATTEN
   PUBLIC
 )
 endif()

@@ -5,7 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_library")
+load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
+load(
+    "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
+    "hrx_cc_test",
+)
 load("//libhrx/build_tools/bazel:cts.bzl", "hrx_cts_test")
 
 package(
@@ -15,6 +20,8 @@ package(
 )
 
 AMD_GPU_CTS_TAGS = ["runtime-resource=amd-gpu"]
+
+_LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 
 iree_amdgpu_binary_variants_embed_data(
     name = "amdgpu_executable_test_kernels",
@@ -109,11 +116,38 @@ hrx_cts_test(
 
 hrx_cts_test(
     name = "executable",
-    srcs = ["tests/executable/executable_test.cpp"],
+    srcs = [
+        "core/amdgpu_executable_test_data.hpp",
+        "tests/executable/executable_test.cpp",
+    ],
     tags = AMD_GPU_CTS_TAGS,
     deps = [
         ":amdgpu_executable_test_kernels",
         "//build_tools/amdgpu:target_map_h",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_module_execution_test",
+    srcs = [
+        "core/amdgpu_executable_test_data.hpp",
+        "tests/hip/module_execution_test.cpp",
+    ],
+    copts = ["-Wno-attributes"],
+    data = ["//libhrx/src/binding/hip:amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location //libhrx/src/binding/hip:amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":amdgpu_executable_test_kernels",
+        "//build_tools:dl",
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -2201,7 +2201,7 @@ class BuildFileFunctions(object):
         c_file_output=None,
         h_file_output=None,
         identifier=None,
-        flatten=None,
+        flatten=True,
         internal_hdrs=None,
         copts=None,
         linkopts=None,
