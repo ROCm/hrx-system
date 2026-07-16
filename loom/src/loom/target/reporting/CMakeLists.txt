@@ -66,6 +66,11 @@ loom_cc_library(
   SRCS
     "compile_report_format.c"
     "compile_report_format_json.c"
+    "compile_report_format_json.h"
+    "compile_report_format_json_lowering.c"
+    "compile_report_format_json_lowering.h"
+    "compile_report_format_json_planning.c"
+    "compile_report_format_json_planning.h"
     "compile_report_format_text.c"
     "compile_report_format_text.h"
     "compile_report_format_text_lowering.c"
