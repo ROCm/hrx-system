@@ -92,6 +92,7 @@ iree_cc_test(
     libhrx_defs
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     kpack_test
@@ -104,6 +105,7 @@ iree_cc_test(
     iree::testing::gtest_main
     libhrx_defs
 )
+endif()
 
 iree_cc_binary_benchmark(
   NAME
@@ -166,7 +168,10 @@ if(HRX_ENABLE_ZSTD)
         HRX_ENABLE_ZSTD=1
       )
       target_include_directories(libhrx_src_binding_common_kpack_test PRIVATE
-        ${ZSTD_INCLUDE_DIRS}
+        ${HRX_ZSTD_INCLUDE_DIRS}
+      )
+      target_compile_options(libhrx_src_binding_common_kpack_test PRIVATE
+        ${HRX_ZSTD_CFLAGS_OTHER}
       )
     endif()
     message(STATUS

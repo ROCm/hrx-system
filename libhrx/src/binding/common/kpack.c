@@ -9,25 +9,32 @@
 #include <string.h>
 
 #include "iree/base/api.h"
-#include "iree/io/file_contents.h"
+#include "iree/io/file_handle.h"
 
 #if defined(HRX_ENABLE_ZSTD)
 #include <zstd.h>
 #endif
 
 // Fixed bounds. These are generous relative to real kpack metadata (a kernel
-// name plus a handful of search paths) and real archive TOCs; exceeding them is
-// treated as malformed input rather than silently truncated.
+// name plus a handful of search paths) and real archive TOCs. Exceeding the
+// depth, path, or lookup-key bound is rejected rather than silently truncated;
+// exceeding the feature or arch-candidate bound instead drops the excess and
+// continues with what fit.
 enum {
   KPACK_MP_MAX_DEPTH = 32,  // msgpack nesting guard
   // ISA features subset into a target ID (today sramecc, xnack), with headroom.
-  // One target expands to at most 2^KPACK_MAX_FEATURES candidates, kept well
-  // within KPACK_MAX_ARCH_CANDIDATES.
+  // Features past this many are dropped from a target before it is expanded.
   KPACK_MAX_FEATURES = 4,
-  KPACK_PATH_MAX = 4096,           // filesystem path buffer
-  KPACK_MAX_LOOKUP_KEY = 1024,     // "<kernel_name>#<co_index>"
-  KPACK_MAX_ARCH_CANDIDATES = 64,  // distinct compatible arch strings
-  KPACK_MAX_OPEN_ARCHIVES = 64,    // archives opened per resolve
+  KPACK_PATH_MAX = 4096,        // filesystem path buffer
+  KPACK_MAX_LOOKUP_KEY = 1024,  // "<kernel_name>#<co_index>"
+  // Distinct compatible arch strings ranked in one resolve. Every requested
+  // target expands into this one list, each contributing up to
+  // 2^KPACK_MAX_FEATURES candidates, so the ceiling scales with how many
+  // targets the caller asks for rather than with any single one. Candidates
+  // past the cap are dropped, costing the lowest-ranked fallbacks; the binding
+  // asks for a device's exact target plus a generic fallback, leaving two
+  // expansions to share this list.
+  KPACK_MAX_ARCH_CANDIDATES = 64,
 };
 
 // Upper bound on a single resolved code object. Real AMDGPU code objects are
@@ -528,21 +535,26 @@ iree_status_t iree_hal_streaming_kpack_archive_open(
                             "kpack TOC is not a msgpack map");
   }
 
-  // Compression scheme (default "none").
+  // Compression scheme. An absent field means "none"; a present one decides, so
+  // a value that is not a scheme name is malformed structure rather than a
+  // reason to apply the default and decode the archive under a scheme it never
+  // declared.
   out_archive->compression = IREE_HAL_STREAMING_KPACK_COMPRESSION_NONE;
   iree_const_byte_span_t value;
   if (kpack_mp_map_find(out_archive->toc_map, IREE_SV("compression_scheme"),
                         &value)) {
     iree_string_view_t scheme;
-    if (kpack_mp_as_str(value, &scheme)) {
-      if (iree_string_view_equal(scheme, IREE_SV("zstd-per-kernel"))) {
-        out_archive->compression =
-            IREE_HAL_STREAMING_KPACK_COMPRESSION_ZSTD_PER_KERNEL;
-      } else if (!iree_string_view_equal(scheme, IREE_SV("none"))) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unsupported kpack compression scheme '%.*s'",
-                                (int)scheme.size, scheme.data);
-      }
+    if (!kpack_mp_as_str(value, &scheme)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kpack TOC 'compression_scheme' is not a string");
+    }
+    if (iree_string_view_equal(scheme, IREE_SV("zstd-per-kernel"))) {
+      out_archive->compression =
+          IREE_HAL_STREAMING_KPACK_COMPRESSION_ZSTD_PER_KERNEL;
+    } else if (!iree_string_view_equal(scheme, IREE_SV("none"))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported kpack compression scheme '%.*s'",
+                              (int)scheme.size, scheme.data);
     }
   }
 
@@ -775,7 +787,7 @@ iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
 }
 
 //===----------------------------------------------------------------------===//
-// Path resolution and discovery
+// Path resolution and mapping queries
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_kpack_expand_gfxarch(
@@ -927,95 +939,134 @@ iree_status_t iree_hal_streaming_kpack_resolve_relative_path(
                               out_capacity);
 }
 
-iree_status_t iree_hal_streaming_kpack_discover_binary_path(
-    const void* address_in_binary, char* out, iree_host_size_t out_capacity,
-    iree_host_size_t* out_offset) {
-  if (!address_in_binary || !out || out_capacity == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kpack_discover_binary_path: null argument");
-  }
 #if defined(__linux__)
-  // Resolve the file backing the mapping that contains |address_in_binary| by
-  // scanning /proc/self/maps. dladdr() cannot reliably resolve data segments,
-  // and the HIPK wrapper points into a data section.
+
+// Fills |out_mapping| from the tail of a /proc/self/maps line describing the
+// mapping that contains |address| and ends at |high|. |fields| points just past
+// the address range, at the whitespace before the permission bits, and is
+// modified in place while trimming the trailing newline.
+//
+// |out_mapping| and |path_buffer| are initialized by the caller and written
+// only once the entry has been parsed in full, so a failure leaves them as the
+// caller initialized them rather than half-filled.
+static iree_status_t kpack_parse_maps_entry(
+    char* fields, const void* address, uintptr_t high, char* path_buffer,
+    iree_host_size_t path_capacity,
+    iree_hal_streaming_kpack_mapping_t* out_mapping) {
+  // Remaining fields: "<perms> <offset> <dev> <inode> <path>".
+  char* cursor = fields;
+  while (*cursor == ' ') ++cursor;
+  const char* permissions = cursor;
+  while (*cursor && *cursor != ' ') ++cursor;
+  const iree_host_size_t permissions_length =
+      (iree_host_size_t)(cursor - permissions);
+  // A mapping carries the read bit only when its pages can actually be
+  // dereferenced. The ELF loader reserves a library's whole span and protects
+  // the segments individually, leaving PROT_NONE alignment gaps that are
+  // file-backed and named exactly like the segments around them, so the path is
+  // no evidence that the bytes are readable.
+  if (permissions_length == 0 || permissions[0] != 'r') {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "kpack_query_mapping: address %p is in a mapping that cannot be read "
+        "(permissions '%.*s')",
+        address, (int)permissions_length, permissions);
+  }
+
+  while (*cursor == ' ') ++cursor;
+  while (*cursor && *cursor != ' ') ++cursor;  // skip offset
+  while (*cursor == ' ') ++cursor;
+  while (*cursor && *cursor != ' ') ++cursor;  // skip dev
+  while (*cursor == ' ') ++cursor;
+  while (*cursor && *cursor != ' ') ++cursor;  // skip inode
+  while (*cursor == ' ') ++cursor;             // cursor -> path (or EOL)
+
+  // Terminate the path at the line's newline.
+  char* newline = cursor;
+  while (*newline && *newline != '\n') ++newline;
+  *newline = '\0';
+
+  const iree_host_size_t readable_bytes =
+      (iree_host_size_t)(high - (uintptr_t)address);
+
+  // Three kinds of mapping have a valid extent but no file to resolve paths
+  // against: an anonymous one, a special region ([heap], [stack], ...), and one
+  // whose backing file has been unlinked. The kernel renders the last as
+  // "<path> (deleted)", which names no file that can be opened; reporting it as
+  // a path would silently resolve relative search paths against a directory
+  // that no longer holds what the path claims.
+  const iree_string_view_t path = iree_make_cstring_view(cursor);
+  if (path.size == 0 || cursor[0] == '[' ||
+      iree_string_view_ends_with(path, IREE_SV(" (deleted)"))) {
+    out_mapping->readable_bytes = readable_bytes;
+    return iree_ok_status();
+  }
+  if (path.size + 1 > path_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "kpack_query_mapping: mapping path too long for "
+                            "buffer (%" PRIhsz " bytes)",
+                            path.size);
+  }
+  memcpy(path_buffer, path.data, path.size + 1);
+  out_mapping->readable_bytes = readable_bytes;
+  out_mapping->path = iree_make_string_view(path_buffer, path.size);
+  return iree_ok_status();
+}
+
+#endif  // __linux__
+
+iree_status_t iree_hal_streaming_kpack_query_mapping(
+    const void* address, char* path_buffer, iree_host_size_t path_capacity,
+    iree_hal_streaming_kpack_mapping_t* out_mapping) {
+  if (!address || !path_buffer || path_capacity == 0 || !out_mapping) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack_query_mapping: null argument");
+  }
+  // Sole owner of the outputs' initial state: the scan below may find no entry
+  // to describe, and kpack_parse_maps_entry writes only what it fully parses.
+  memset(out_mapping, 0, sizeof(*out_mapping));
+  path_buffer[0] = '\0';
+#if defined(__linux__)
   FILE* maps = fopen("/proc/self/maps", "r");
   if (!maps) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "kpack_discover_binary_path: cannot open "
-                            "/proc/self/maps");
+                            "kpack_query_mapping: cannot open /proc/self/maps");
   }
-  uintptr_t target = (uintptr_t)address_in_binary;
+  const uintptr_t target = (uintptr_t)address;
   char line[KPACK_PATH_MAX + 256];
-  // Defer building the not-found status until the scan finds no containing
-  // mapping. It carries a formatted (heap-allocated) message and the branches
-  // below overwrite |status|, so allocating it eagerly here would leak it
-  // whenever a mapping is found. Track whether any file mapping matched
-  // instead.
-  bool matched = false;
+  // The scan stops at the one mapping containing |target|, whether or not that
+  // mapping can be described. Build the not-found status after the scan: it
+  // carries a formatted (heap-allocated) message that would leak on every
+  // successful query if it were built eagerly.
+  bool found = false;
   iree_status_t status = iree_ok_status();
   while (fgets(line, sizeof(line), maps)) {
     // Format: "<low>-<high> <perms> <offset> <dev> <inode> <path>".
     char* dash = strchr(line, '-');
     if (!dash) continue;
-    char* endp = NULL;
-    uintptr_t low = (uintptr_t)strtoull(line, &endp, 16);
-    if (endp != dash) continue;
-    uintptr_t high = (uintptr_t)strtoull(dash + 1, &endp, 16);
+    char* end_pointer = NULL;
+    const uintptr_t low = (uintptr_t)strtoull(line, &end_pointer, 16);
+    if (end_pointer != dash) continue;
+    const uintptr_t high = (uintptr_t)strtoull(dash + 1, &end_pointer, 16);
     if (target < low || target >= high) continue;
-    matched = true;
-
-    // endp points just past the high address, at the space before perms.
-    char* cursor = endp;
-    while (*cursor == ' ') ++cursor;
-    while (*cursor && *cursor != ' ') ++cursor;  // skip perms
-    while (*cursor == ' ') ++cursor;
-    uintptr_t file_offset = (uintptr_t)strtoull(cursor, &endp, 16);
-    cursor = endp;
-    while (*cursor == ' ') ++cursor;
-    while (*cursor && *cursor != ' ') ++cursor;  // skip dev
-    while (*cursor == ' ') ++cursor;
-    while (*cursor && *cursor != ' ') ++cursor;  // skip inode
-    while (*cursor == ' ') ++cursor;             // cursor -> path (or EOL)
-
-    // Trim trailing newline/whitespace.
-    char* nl = cursor;
-    while (*nl && *nl != '\n') ++nl;
-    *nl = '\0';
-    if (cursor[0] == '\0' || cursor[0] == '[') {
-      // Anonymous mapping or special region ([heap], [stack], ...).
-      status = iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "kpack_discover_binary_path: address %p is in an anonymous mapping",
-          address_in_binary);
-      break;
-    }
-    iree_host_size_t path_len = strlen(cursor);
-    if (path_len + 1 > out_capacity) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "kpack_discover_binary_path: path too long for "
-                                "buffer (%" PRIhsz " bytes)",
-                                path_len);
-      break;
-    }
-    memcpy(out, cursor, path_len + 1);
-    if (out_offset)
-      *out_offset = (iree_host_size_t)(file_offset + (target - low));
-    status = iree_ok_status();
+    found = true;
+    // end_pointer points just past the high address, at the space before perms.
+    status = kpack_parse_maps_entry(end_pointer, address, high, path_buffer,
+                                    path_capacity, out_mapping);
     break;
   }
   fclose(maps);
-  if (!matched) {
-    status = iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "kpack_discover_binary_path: address %p not in any file mapping",
-        address_in_binary);
+  if (iree_status_is_ok(status) && !found) {
+    status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "kpack_query_mapping: address %p is not in any "
+                              "mapping",
+                              address);
   }
   return status;
 #else
-  (void)out_offset;
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
-      "kpack_discover_binary_path is not implemented on this platform");
+      "kpack_query_mapping is not implemented on this platform");
 #endif  // __linux__
 }
 
@@ -1023,37 +1074,95 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 // Top-level resolution
 //===----------------------------------------------------------------------===//
 
-// Memory-maps the archive at |path|; the mapping owns the bytes and the spans
-// parsed from it stay valid until it is freed. The file must not change size
-// while mapped. Fails if |path| cannot be mapped (caller skips the path).
-static iree_status_t kpack_map_file(const char* path,
-                                    iree_allocator_t host_allocator,
-                                    iree_io_file_contents_t** out_mapping) {
-  *out_mapping = NULL;
-  return iree_io_file_contents_map(iree_make_cstring_view(path),
-                                   IREE_IO_FILE_ACCESS_READ, host_allocator,
-                                   out_mapping);
+// Opens the file at |path| for reading, reporting whether anything is there.
+// The open is kept separate from the mapping below because the two answer
+// different questions: whether |path| names a member of the search space at
+// all, and whether what it names is usable as an archive. A combined
+// open-and-map cannot answer the first, since mapping a directory reports
+// ENODEV, which maps to IREE_STATUS_NOT_FOUND exactly like the ENOENT of a path
+// naming nothing.
+static iree_status_t kpack_open_file(const char* path,
+                                     iree_allocator_t host_allocator,
+                                     iree_io_file_handle_t** out_handle) {
+  *out_handle = NULL;
+  return iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_SHARE_READ,
+      iree_make_cstring_view(path), host_allocator, out_handle);
 }
 
-// An opened archive plus its canonical path (for dedup). |archive|'s spans
-// point into |mapping| and are valid until it is freed.
+// Memory-maps the whole of an opened file; the mapping owns the bytes and the
+// spans parsed from it stay valid until it is released. The mapping retains
+// |handle|, so the caller may release its own reference once this returns. The
+// file must not change size while mapped.
+static iree_status_t kpack_map_file(iree_io_file_handle_t* handle,
+                                    iree_allocator_t host_allocator,
+                                    iree_io_file_mapping_t** out_mapping) {
+  *out_mapping = NULL;
+  return iree_io_file_map_view(handle, IREE_IO_FILE_ACCESS_READ, /*offset=*/0,
+                               IREE_HOST_SIZE_MAX,
+                               IREE_IO_FILE_MAPPING_FLAG_PRIVATE |
+                                   IREE_IO_FILE_MAPPING_FLAG_EXCLUDE_FROM_DUMPS,
+                               host_allocator, out_mapping);
+}
+
+// An opened archive plus the search path spelling it was reached by.
 typedef struct {
-  char canonical[KPACK_PATH_MAX];
-  iree_io_file_contents_t* mapping;
+  // Search path the archive was opened from, exactly as spelled by whoever
+  // named it; the dedup key.
+  char path[KPACK_PATH_MAX];
+  // Mapping owning the archive bytes; |archive|'s spans point into it and are
+  // valid until it is released.
+  iree_io_file_mapping_t* mapping;
+  // Archive parsed over |mapping|'s bytes.
   iree_hal_streaming_kpack_archive_t archive;
 } kpack_open_archive_t;
 
 // Mutable state threaded through resolution.
 typedef struct {
+  // Allocator for archive mappings and the resolved code object.
   iree_allocator_t host_allocator;
   // Ranked, de-duplicated compatible architecture candidates.
   char arch[KPACK_MAX_ARCH_CANDIDATES]
            [IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY];
+  // Number of populated entries in |arch|.
   iree_host_size_t arch_count;
-  // Opened archives.
+  // Archives opened so far, owned; capacity is MAX_OPEN_ARCHIVES entries.
   kpack_open_archive_t* open;
+  // Number of populated entries in |open|.
   iree_host_size_t open_count;
+  // First problem that kept a candidate out of the search: an archive that is
+  // present but unusable, or a search path that cannot be formed. Owned, and
+  // reported only if the search matches nothing; a search that finds a code
+  // object discards it.
+  iree_status_t deferred_error;
 } kpack_resolve_state_t;
+
+// Records a problem that kept a candidate archive out of the search. The first
+// one recorded wins: it is the most likely root cause, and it is stable with
+// respect to whichever unrelated files happen to sit later on the search path.
+// Every one is logged, since only one can be returned and a user who fixes that
+// one and re-runs would otherwise meet the next only after the round trip.
+static void kpack_note_search_error(kpack_resolve_state_t* state,
+                                    iree_status_t status) {
+  if (kpack_debug_enabled()) {
+    // Rendering allocates, so it is gated rather than left to KPACK_DBG.
+    char* message = NULL;
+    iree_host_size_t message_length = 0;
+    if (iree_status_to_string(status, &state->host_allocator, &message,
+                              &message_length)) {
+      KPACK_DBG("candidate rejected: %.*s", (int)message_length, message);
+      iree_allocator_free(state->host_allocator, message);
+    } else {
+      KPACK_DBG("candidate rejected: %s",
+                iree_status_code_string(iree_status_code(status)));
+    }
+  }
+  if (iree_status_is_ok(state->deferred_error)) {
+    state->deferred_error = status;
+  } else {
+    iree_status_ignore(status);
+  }
+}
 
 // Appends |target| to the ranked arch candidate list if not already present.
 static bool kpack_arch_collect_cb(iree_string_view_t target, void* user_data) {
@@ -1076,68 +1185,130 @@ static bool kpack_arch_collect_cb(iree_string_view_t target, void* user_data) {
   return false;  // continue collecting
 }
 
-// Maps and parses the archive at |path| into the resolve's open list
-// (deduplicated by canonical path). Missing or unparseable archives are skipped
-// (logged), not fatal.
-static void kpack_try_open_archive(kpack_resolve_state_t* state,
-                                   const char* path) {
-  // realpath() requires a buffer of at least PATH_MAX bytes; KPACK_PATH_MAX is
-  // sized to match (== PATH_MAX on Linux, the only platform that reaches here).
-  // realpath() also doubles as the existence check: it returns NULL if |path|
-  // cannot be resolved, and yields the canonical path used to dedup archives.
-  char canonical[KPACK_PATH_MAX];
-  if (!realpath(path, canonical)) {
-    KPACK_DBG("archive not found: %s", path);
-    return;
-  }
+// Maps and parses the archive at |path| into the resolve's open list,
+// deduplicated by path spelling. |path| is NUL-terminated and shorter than
+// KPACK_PATH_MAX; every caller forms it in a buffer of that size.
+//
+// A path the open reports as naming nothing is not a member of the search
+// space: the embedded search paths are speculative, so a miss is the normal
+// case and skipping it still evaluates the space completely. Once the open
+// succeeds the path names something, and every way that something can fail to
+// be a usable archive — it cannot be mapped, it is not an archive, it is a
+// directory — is a fact about the user's system that they cannot otherwise
+// discover, so it is skipped only after being recorded on |state|.
+//
+// Returns non-OK only when the search itself cannot continue, which is the one
+// case a deferred diagnostic cannot express: more archives than
+// MAX_OPEN_ARCHIVES means the ranked search space cannot be evaluated, so "no
+// code object found" would not be an honest answer.
+static iree_status_t kpack_try_open_archive(kpack_resolve_state_t* state,
+                                            const char* path) {
+  // The key is the spelling as written, compared verbatim, because no lexical
+  // rewrite is an identity function for paths: collapsing ".." does not commute
+  // with symlink resolution in either direction, so spellings that collapse
+  // alike can name different files and one file can be named by spellings that
+  // do not. Keying on a rewrite would therefore drop a distinct archive from
+  // the search. Dedup exists only to avoid mapping one archive twice, so it
+  // claims no more than it can prove: identical spellings name one file and are
+  // opened once, while an alias it cannot see (a "." segment, a symlink, a
+  // hardlink, a bind mount) costs one redundant mapping rather than a lost
+  // archive.
   for (iree_host_size_t i = 0; i < state->open_count; ++i) {
-    if (strcmp(state->open[i].canonical, canonical) == 0) return;  // dedup
-  }
-  if (state->open_count >= KPACK_MAX_OPEN_ARCHIVES) {
-    KPACK_DBG("too many archives; ignoring %s", canonical);
-    return;
+    if (strcmp(state->open[i].path, path) == 0) {
+      return iree_ok_status();  // dedup
+    }
   }
 
-  iree_io_file_contents_t* mapping = NULL;
-  iree_status_t status =
-      kpack_map_file(canonical, state->host_allocator, &mapping);
+  iree_io_file_handle_t* handle = NULL;
+  iree_status_t status = kpack_open_file(path, state->host_allocator, &handle);
   if (!iree_status_is_ok(status)) {
-    KPACK_DBG("failed to map %s", canonical);
-    iree_status_ignore(status);
-    return;
+    if (iree_status_is_not_found(status)) {
+      KPACK_DBG("no archive at %s", path);
+      iree_status_ignore(status);
+    } else {
+      kpack_note_search_error(state, status);
+    }
+    return iree_ok_status();
+  }
+
+  // Past the open, |path| names something. It is no longer a candidate that
+  // happens to be absent, so nothing below is skipped silently.
+  iree_io_file_mapping_t* mapping = NULL;
+  status = kpack_map_file(handle, state->host_allocator, &mapping);
+  iree_io_file_handle_release(handle);  // retained by |mapping| on success
+  if (!iree_status_is_ok(status)) {
+    kpack_note_search_error(
+        state, iree_status_annotate_f(
+                   status,
+                   "kpack search path '%s' names something that cannot be "
+                   "mapped as an archive file",
+                   path));
+    return iree_ok_status();
+  }
+  iree_hal_streaming_kpack_archive_t archive;
+  status = iree_hal_streaming_kpack_archive_open(
+      iree_io_file_mapping_contents_ro(mapping), &archive);
+  if (!iree_status_is_ok(status)) {
+    // The parse sees only bytes, so the path it rejected is named here or
+    // nowhere: without it a caller learns some archive is malformed but not
+    // which, which is the fact they cannot otherwise discover.
+    kpack_note_search_error(
+        state,
+        iree_status_annotate_f(
+            status, "kpack search path '%s' is not a usable archive", path));
+    iree_io_file_mapping_release(mapping);
+    return iree_ok_status();
+  }
+
+  // The cap is tested here, against a real archive: a path that holds nothing
+  // or holds an unparseable file never consumed a slot, so it must not be the
+  // candidate that reports the set as overfull.
+  if (state->open_count >= IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES) {
+    iree_io_file_mapping_release(mapping);
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "kpack search matched more than %d archives, so the ranked search "
+        "cannot be completed and a truncated one would silently select a "
+        "lower-ranked target; set ROCM_KPACK_PATH to the specific archive(s) "
+        "needed (%s)",
+        IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES, path);
   }
   kpack_open_archive_t* slot = &state->open[state->open_count];
-  status = iree_hal_streaming_kpack_archive_open(mapping->const_buffer,
-                                                 &slot->archive);
-  if (!iree_status_is_ok(status)) {
-    KPACK_DBG("failed to parse %s", canonical);
-    iree_status_ignore(status);
-    iree_io_file_contents_free(mapping);
-    return;
-  }
+  slot->archive = archive;
   slot->mapping = mapping;
-  iree_host_size_t clen = strlen(canonical);
-  memcpy(slot->canonical, canonical, clen + 1);
+  memcpy(slot->path, path, strlen(path) + 1);
   ++state->open_count;
-  KPACK_DBG("opened archive %s", canonical);
+  KPACK_DBG("opened archive %s", path);
+  return iree_ok_status();
 }
 
 // Opens every archive in a ':'-separated path list (ROCM_KPACK_PATH / _PREFIX).
-static void kpack_open_path_list(kpack_resolve_state_t* state,
-                                 const char* list_str) {
-  iree_string_view_t list = iree_make_cstring_view(list_str);
-  while (list.size > 0) {
+// Returns non-OK only when the search cannot continue (see
+// kpack_try_open_archive).
+static iree_status_t kpack_open_path_list(kpack_resolve_state_t* state,
+                                          const char* list_string) {
+  iree_string_view_t list = iree_make_cstring_view(list_string);
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && list.size > 0) {
     iree_string_view_t entry;
     iree_string_view_t rest;
     iree_string_view_split(list, ':', &entry, &rest);
     list = rest;  // empty when no separator remains, terminating the loop
     if (entry.size == 0) continue;
     char path[KPACK_PATH_MAX];
-    if (entry.size + 1 > sizeof(path)) continue;
+    if (entry.size + 1 > sizeof(path)) {
+      kpack_note_search_error(
+          state, iree_make_status(
+                     IREE_STATUS_OUT_OF_RANGE,
+                     "kpack search path entry is too long (%" PRIhsz " bytes)",
+                     entry.size));
+      continue;
+    }
     memcpy(path, entry.data, entry.size);
     path[entry.size] = '\0';
-    kpack_try_open_archive(state, path);
+    status = kpack_try_open_archive(state, path);
   }
+  return status;
 }
 
 iree_status_t iree_hal_streaming_kpack_resolve_code_object(
@@ -1158,14 +1329,32 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
                             "kpack disabled via ROCM_KPACK_DISABLE");
   }
 
-  // 1. Parse the HIPK metadata blob (self-bounding within the cap).
+  // 1. Query the mapping holding the metadata. This bounds the parse below and
+  // names the owning binary in one scan, so the extent and the path are
+  // guaranteed to describe the same mapping.
+  char binary_path[KPACK_PATH_MAX];
+  iree_hal_streaming_kpack_mapping_t mapping;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_kpack_query_mapping(hipk_metadata, binary_path,
+                                             sizeof(binary_path), &mapping),
+      "bounding HIPK metadata at %p", hipk_metadata);
+  if (mapping.path.size > 0) {
+    KPACK_DBG("owning binary: %.*s", (int)mapping.path.size, mapping.path.data);
+  }
+
+  // 2. Parse the HIPK metadata blob. The blob carries no length, so the reader
+  // is bounded by what is readable at the pointer; the cap then rejects a blob
+  // no real metadata approaches.
   iree_hal_streaming_kpack_metadata_t metadata;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_kpack_parse_metadata(
-      iree_make_const_byte_span(hipk_metadata,
-                                IREE_HAL_STREAMING_KPACK_MAX_METADATA_SIZE),
+      iree_make_const_byte_span(
+          hipk_metadata,
+          iree_min(
+              mapping.readable_bytes,
+              (iree_host_size_t)IREE_HAL_STREAMING_KPACK_MAX_METADATA_SIZE)),
       &metadata));
 
-  // 2. Lookup key is "<kernel_name>#<co_index>".
+  // 3. Lookup key is "<kernel_name>#<co_index>".
   char lookup_key[KPACK_MAX_LOOKUP_KEY];
   int klen = snprintf(lookup_key, sizeof(lookup_key), "%.*s#%u",
                       (int)metadata.kernel_name.size, metadata.kernel_name.data,
@@ -1177,22 +1366,6 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
   iree_string_view_t lookup_key_view = iree_make_string_view(lookup_key, klen);
   KPACK_DBG("resolving lookup_key='%s', %d search paths, %" PRIhsz " targets",
             lookup_key, (int)metadata.search_path_count, target_arch_count);
-
-  // 3. Discover the owning binary so relative search paths resolve. Best
-  // effort: absolute paths and ROCM_KPACK_PATH overrides work without it.
-  char binary_path[KPACK_PATH_MAX];
-  bool have_binary_path = false;
-  iree_status_t disc = iree_hal_streaming_kpack_discover_binary_path(
-      hipk_metadata, binary_path, sizeof(binary_path), NULL);
-  if (iree_status_is_ok(disc)) {
-    have_binary_path = true;
-    KPACK_DBG("owning binary: %s", binary_path);
-  } else {
-    iree_status_ignore(disc);
-  }
-  iree_string_view_t binary_path_view =
-      have_binary_path ? iree_make_string_view(binary_path, strlen(binary_path))
-                       : iree_string_view_empty();
 
   // 4. Build the ranked, de-duplicated architecture candidate list across all
   // requested targets (priority order, then feature-subset specificity).
@@ -1210,7 +1383,8 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
 
   state.open = NULL;
   iree_status_t status = iree_allocator_malloc(
-      host_allocator, KPACK_MAX_OPEN_ARCHIVES * sizeof(kpack_open_archive_t),
+      host_allocator,
+      IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES * sizeof(kpack_open_archive_t),
       (void**)&state.open);
   if (!iree_status_is_ok(status)) return status;
 
@@ -1222,24 +1396,33 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
   const char* env_prefix = getenv("ROCM_KPACK_PATH_PREFIX");
 
   if (env_override && env_override[0]) {
-    kpack_open_path_list(&state, env_override);
+    status = kpack_open_path_list(&state, env_override);
   } else {
     if (env_prefix && env_prefix[0]) {
-      kpack_open_path_list(&state, env_prefix);
+      status = kpack_open_path_list(&state, env_prefix);
     }
-    for (iree_host_size_t i = 0; i < metadata.search_path_count; ++i) {
+    for (iree_host_size_t i = 0;
+         iree_status_is_ok(status) && i < metadata.search_path_count; ++i) {
       iree_string_view_t rel = metadata.search_paths[i];
       bool is_absolute = rel.size > 0 && rel.data[0] == '/';
-      if (!is_absolute && !have_binary_path) {
-        KPACK_DBG("skipping relative search path with unknown binary: %.*s",
-                  (int)rel.size, rel.data);
+      if (!is_absolute && mapping.path.size == 0) {
+        // The search path cannot be formed at all: it is relative to the binary
+        // owning the metadata, and that mapping has no file to resolve against.
+        kpack_note_search_error(
+            &state,
+            iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "kpack search path '%.*s' is relative to the binary owning the "
+                "metadata, which is a mapping with no backing file to resolve "
+                "it against",
+                (int)rel.size, rel.data));
         continue;
       }
       char resolved[KPACK_PATH_MAX];
       iree_status_t rs = iree_hal_streaming_kpack_resolve_relative_path(
-          binary_path_view, rel, resolved, sizeof(resolved));
+          mapping.path, rel, resolved, sizeof(resolved));
       if (!iree_status_is_ok(rs)) {
-        iree_status_ignore(rs);
+        kpack_note_search_error(&state, rs);
         continue;
       }
       iree_string_view_t resolved_view =
@@ -1248,30 +1431,30 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
           iree_string_view_find_char(resolved_view, '@', 0) !=
           IREE_STRING_VIEW_NPOS;
       if (!has_placeholder) {
-        kpack_try_open_archive(&state, resolved);
+        status = kpack_try_open_archive(&state, resolved);
         continue;
       }
       // Expand "@GFXARCH@" for each candidate architecture.
-      for (iree_host_size_t a = 0; a < state.arch_count; ++a) {
+      for (iree_host_size_t a = 0;
+           iree_status_is_ok(status) && a < state.arch_count; ++a) {
         char expanded[KPACK_PATH_MAX];
-        bool had = false;
         iree_status_t es = iree_hal_streaming_kpack_expand_gfxarch(
             resolved_view, iree_make_cstring_view(state.arch[a]), expanded,
-            sizeof(expanded), &had);
+            sizeof(expanded), /*out_had_placeholder=*/NULL);
         if (!iree_status_is_ok(es)) {
-          iree_status_ignore(es);
+          kpack_note_search_error(&state, es);
           continue;
         }
-        kpack_try_open_archive(&state, expanded);
+        status = kpack_try_open_archive(&state, expanded);
       }
     }
   }
 
   // 6. Arch-first search: for each architecture candidate in priority order,
   // probe every opened archive; the first hit wins.
-  iree_status_t last_error = iree_ok_status();
   bool found = false;
-  for (iree_host_size_t a = 0; a < state.arch_count && !found; ++a) {
+  for (iree_host_size_t a = 0;
+       iree_status_is_ok(status) && a < state.arch_count && !found; ++a) {
     iree_string_view_t arch =
         iree_make_string_view(state.arch[a], strlen(state.arch[a]));
     for (iree_host_size_t o = 0; o < state.open_count; ++o) {
@@ -1285,44 +1468,57 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
         *out_code_object_size = kernel_size;
         found = true;
         KPACK_DBG("matched arch '%s' in %s (%" PRIhsz " bytes)", state.arch[a],
-                  state.open[o].canonical, kernel_size);
+                  state.open[o].path, kernel_size);
         break;
       }
-      if (iree_status_code(ks) == IREE_STATUS_NOT_FOUND) {
+      if (iree_status_is_not_found(ks)) {
         iree_status_ignore(ks);  // not in this archive — keep looking
       } else {
         // Corrupt/unsupported archive: remember but keep searching others.
-        iree_status_ignore(last_error);
-        last_error = ks;
+        kpack_note_search_error(&state, ks);
       }
     }
   }
 
-  if (!found) {
-    if (iree_status_is_ok(last_error)) {
-      if (state.open_count == 0) {
-        last_error = iree_make_status(
+  if (iree_status_is_ok(status) && !found) {
+    if (state.open_count == 0) {
+      // No archive was opened, so the search space was empty. A candidate that
+      // was rejected is then the only explanation there is, and it answers as
+      // itself: its code carries the diagnosis (a permissions problem, a
+      // malformed file) that a generic "not found" would erase.
+      if (!iree_status_is_ok(state.deferred_error)) {
+        status = state.deferred_error;
+        state.deferred_error = iree_ok_status();
+      } else {
+        status = iree_make_status(
             IREE_STATUS_NOT_FOUND,
             "no kpack archive found for '%s' (%" PRIhsz
             " search paths; set ROCM_KPACK_DEBUG=1 for details)",
             lookup_key, metadata.search_path_count);
-      } else {
-        last_error = iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "no kpack code object for '%s' matches target '%.*s' in %" PRIhsz
-            " archive(s)",
-            lookup_key, (int)target_archs[0].size, target_archs[0].data,
-            state.open_count);
       }
+    } else {
+      // Archives were opened and searched exhaustively, so the miss is a target
+      // mismatch and that is the explanation the caller needs. A rejected
+      // candidate is attached to it rather than replacing it: it may still be
+      // the root cause, but it cannot outrank a search that actually ran.
+      status = iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "no kpack code object for '%s' matches target '%.*s' in %" PRIhsz
+          " archive(s)",
+          lookup_key, (int)target_archs[0].size, target_archs[0].data,
+          state.open_count);
+      status = iree_status_join(status, state.deferred_error);
+      state.deferred_error = iree_ok_status();  // consumed by the join
     }
-    status = last_error;
-  } else {
-    iree_status_ignore(last_error);
   }
+  // Discarded unless it was transferred to |status| above: the search either
+  // succeeded, making the diagnostic moot, or failed terminally, which outranks
+  // it.
+  iree_status_ignore(state.deferred_error);
 
   // Unmap the archives; the returned code object is an independent copy.
   for (iree_host_size_t o = 0; o < state.open_count; ++o) {
-    iree_io_file_contents_free(state.open[o].mapping);
+    iree_io_file_mapping_release(state.open[o].mapping);
   }
   iree_allocator_free(host_allocator, state.open);
   return status;

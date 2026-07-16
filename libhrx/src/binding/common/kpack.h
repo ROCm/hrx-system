@@ -39,9 +39,21 @@ enum {
   // Maximum kpack search paths parsed out of a single HIPK metadata blob.
   IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS = 32,
   // Upper bound on metadata blob size walked by the msgpack reader. The HIP ABI
-  // carries no length for the wrapper's binary pointer, so the reader is capped
-  // here to avoid running off the end of the owning ELF section.
+  // carries no length for the wrapper's binary pointer, so what makes the walk
+  // memory-safe is the extent of the mapping holding the blob (see
+  // iree_hal_streaming_kpack_query_mapping); this is a plausibility cap on top
+  // of that extent, clamping the span handed to the reader so that a blob in a
+  // large mapping is still walked no further than real metadata ever reaches.
+  // It bounds what the reader can see rather than validating a size: a value
+  // the parse needs that lies past the clamp is invisible and fails as a
+  // missing or truncated field, while bytes the parse never reaches are never
+  // examined.
   IREE_HAL_STREAMING_KPACK_MAX_METADATA_SIZE = 64 * 1024,
+  // Maximum archives opened while resolving one code object. The search ranks
+  // targets across every opened archive, so truncating the archive set could
+  // silently select a compatible but lower-ranked code object; exceeding this
+  // is reported as IREE_STATUS_RESOURCE_EXHAUSTED instead.
+  IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES = 64,
 };
 
 // Archive-wide kernel storage scheme (from the TOC "compression_scheme" field).
@@ -103,11 +115,18 @@ typedef struct iree_hal_streaming_kpack_metadata_t {
 } iree_hal_streaming_kpack_metadata_t;
 
 // Parses HIPK msgpack metadata ({"kernel_name": str, "kpack_search_paths":
-// [str, ...]}). The reader self-bounds within |data|; pass a generous upper
-// bound when the true length is unknown (see MAX_METADATA_SIZE). Fails with
+// [str, ...]}). The reader self-bounds within |data|, which must therefore be a
+// span the caller has established is readable: the blob carries no length of
+// its own, and every bound the reader enforces is measured against |data|'s
+// end (see iree_hal_streaming_kpack_query_mapping). Fails with
 // IREE_STATUS_INVALID_ARGUMENT if the blob is not the expected shape or carries
 // no search paths, and IREE_STATUS_OUT_OF_RANGE if it lists more than
 // IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS paths.
+//
+// A search-path entry that is not a string is skipped rather than rejected: it
+// names no path, so it drops out of a list that is only a set of candidates to
+// try. The list itself must still be an array, and one that yields no usable
+// entry fails as though it were empty.
 iree_status_t iree_hal_streaming_kpack_parse_metadata(
     iree_const_byte_span_t data,
     iree_hal_streaming_kpack_metadata_t* out_metadata);
@@ -134,8 +153,9 @@ typedef struct iree_hal_streaming_kpack_archive_t {
 // Validates the 16-byte fixed header ("KPAK", version, TOC offset) of an
 // in-memory archive and parses the top-level msgpack TOC, recording the
 // compression scheme and blob locations. Fails with
-// IREE_STATUS_INVALID_ARGUMENT on bad magic/structure and
-// IREE_STATUS_INCOMPATIBLE on unsupported versions.
+// IREE_STATUS_INVALID_ARGUMENT on bad magic/structure, including a
+// "compression_scheme" field that is not a string or does not name a supported
+// scheme, and IREE_STATUS_INCOMPATIBLE on unsupported versions.
 iree_status_t iree_hal_streaming_kpack_archive_open(
     iree_const_byte_span_t archive_bytes,
     iree_hal_streaming_kpack_archive_t* out_archive);
@@ -158,13 +178,20 @@ iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
     iree_host_size_t* out_kernel_size);
 
 //===----------------------------------------------------------------------===//
-// Path resolution and discovery
+// Path resolution and mapping queries
 //===----------------------------------------------------------------------===//
 
 // Resolves |relative| against the directory containing |base_path| with lexical
 // "." / ".." normalization (no symlink resolution / filesystem access). An
 // absolute |relative| is normalized and returned as-is. Writes a NUL-terminated
 // path into |out|.
+//
+// Fails with IREE_STATUS_OUT_OF_RANGE when a path does not fit the buffer
+// holding it: the normalized result and its NUL terminator against
+// |out_capacity|, or |base_path|'s directory joined with |relative| against the
+// buffer that join is staged in. Also IREE_STATUS_OUT_OF_RANGE when the
+// normalized path retains more components than the normalizer tracks, since
+// each is a ".." target and dropping one would resolve the wrong path.
 iree_status_t iree_hal_streaming_kpack_resolve_relative_path(
     iree_string_view_t base_path, iree_string_view_t relative, char* out,
     iree_host_size_t out_capacity);
@@ -173,22 +200,42 @@ iree_status_t iree_hal_streaming_kpack_resolve_relative_path(
 // a NUL-terminated result into |out|. If no placeholder is present |pattern| is
 // copied unchanged. |out_had_placeholder| (optional) reports whether a
 // placeholder was found.
+//
+// Fails with IREE_STATUS_OUT_OF_RANGE if the result and its NUL terminator do
+// not fit |out_capacity|, including a zero-capacity |out|.
 iree_status_t iree_hal_streaming_kpack_expand_gfxarch(
     iree_string_view_t pattern, iree_string_view_t arch, char* out,
     iree_host_size_t out_capacity, bool* out_had_placeholder);
 
-// Discovers the filesystem path of the loaded binary containing
-// |address_in_binary| (e.g. the HIPK wrapper's binary pointer), used to resolve
-// archive paths relative to the owning library. On Linux this scans
-// /proc/self/maps. |out_offset| (optional) receives the address's offset within
-// the file. Fails with IREE_STATUS_INVALID_ARGUMENT on a null address/buffer or
-// zero |out_capacity|, IREE_STATUS_NOT_FOUND if the address maps to no file
-// (including when /proc/self/maps cannot be read), IREE_STATUS_OUT_OF_RANGE if
-// the resolved path does not fit in |out_capacity|, and
-// IREE_STATUS_UNIMPLEMENTED on unsupported platforms.
-iree_status_t iree_hal_streaming_kpack_discover_binary_path(
-    const void* address_in_binary, char* out, iree_host_size_t out_capacity,
-    iree_host_size_t* out_offset);
+// Describes the virtual memory mapping containing a queried address.
+typedef struct iree_hal_streaming_kpack_mapping_t {
+  // Bytes readable at the queried address before the end of its containing
+  // mapping. Always nonzero on success. Bounds reads of data that carries no
+  // length of its own.
+  iree_host_size_t readable_bytes;
+  // Filesystem path of the file backing the mapping, NUL-terminated in the
+  // caller-provided buffer. Empty when the mapping has a valid extent but no
+  // file that can be opened: an anonymous mapping, a special region ([heap],
+  // [stack], ...), or one whose backing file has been unlinked.
+  iree_string_view_t path;
+} iree_hal_streaming_kpack_mapping_t;
+
+// Queries the mapping containing |address| (e.g. the HIPK wrapper's binary
+// pointer), reporting both how far it is safe to read from |address| and which
+// file backs it, so archive paths can be resolved relative to the owning
+// library. On Linux this scans /proc/self/maps; dladdr() cannot reliably
+// resolve data segments, and the HIPK wrapper points into a data section.
+// |path_buffer| receives the backing path and |out_mapping|->path borrows it.
+//
+// Fails with IREE_STATUS_INVALID_ARGUMENT on a null address/buffer/output or
+// zero |path_capacity|, IREE_STATUS_NOT_FOUND if |address| lies in no mapping
+// or in one that cannot be read (a PROT_NONE guard region), including when
+// /proc/self/maps cannot be read, IREE_STATUS_OUT_OF_RANGE if the backing path
+// does not fit in |path_capacity|, and IREE_STATUS_UNIMPLEMENTED on unsupported
+// platforms.
+iree_status_t iree_hal_streaming_kpack_query_mapping(
+    const void* address, char* path_buffer, iree_host_size_t path_capacity,
+    iree_hal_streaming_kpack_mapping_t* out_mapping);
 
 //===----------------------------------------------------------------------===//
 // Top-level resolution
@@ -204,11 +251,58 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
 // through its compatible ISA feature subsets, and "@GFXARCH@" placeholders in
 // search paths are expanded per candidate architecture.
 //
+// A search path whose open reports it absent (IREE_STATUS_NOT_FOUND) is not
+// part of the search space and is skipped: the embedded paths are speculative,
+// so a miss is the normal case. Every other open failure, and every failure to
+// map or parse what the path names, is a fact about the caller's system that
+// the caller cannot otherwise discover, so the candidate is skipped but its
+// cause is retained. A path that is malformed rather than absent is therefore
+// reported, not skipped: one leading through a component that names a file
+// rather than a directory fails the open with
+// IREE_STATUS_FAILED_PRECONDITION and is retained. A retained cause is reported
+// if the search matches nothing, making such a path diagnosable rather than
+// indistinguishable from an absent one, and it surfaces one of two ways:
+//
+//   If no archive was opened, the search space was empty and a retained cause
+//   is the only explanation for the miss, so it is returned as-is and its code
+//   is the diagnosis. It may be any code the underlying open, mapping, or
+//   archive parse produces (see iree_hal_streaming_kpack_archive_open), or one
+//   the resolver produces for a search path it cannot form.
+//
+//   If archives were opened, the search ran to completion and the miss is a
+//   target mismatch, which is reported as IREE_STATUS_NOT_FOUND with any
+//   retained cause attached to it as diagnostic context.
+//
+// Fails with:
+//   IREE_STATUS_INVALID_ARGUMENT on a null argument, metadata that is not the
+//     expected shape, or no usable |target_archs|.
+//   IREE_STATUS_OUT_OF_RANGE when a value does not fit the buffer holding it: a
+//     lookup key formed from an over-long kernel name, metadata listing more
+//     than IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS paths, a backing path
+//     longer than the resolver's path buffer, or a search path that overruns
+//     that buffer or its component limit once formed and expanded.
+//   IREE_STATUS_UNAVAILABLE when ROCM_KPACK_DISABLE is set.
+//   IREE_STATUS_NOT_FOUND when |hipk_metadata| lies in no readable mapping, or
+//     when no reachable archive holds a code object matching |target_archs|.
+//   IREE_STATUS_FAILED_PRECONDITION when a search path cannot be formed or
+//     followed: one relative to a binary that no file backs, so there is
+//     nothing to resolve it against, or one leading through a component that
+//     names a file rather than a directory.
+//   IREE_STATUS_RESOURCE_EXHAUSTED when more than
+//     IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES archives match, as the ranked
+//     search cannot be completed and truncating it could silently select a
+//     lower-ranked code object.
+//   IREE_STATUS_UNIMPLEMENTED on platforms without a mapping query, since the
+//     blob cannot be bounded and so cannot be parsed safely (see
+//     iree_hal_streaming_kpack_query_mapping).
+//   the retained cause of an unusable candidate, as described above.
+//
 // On success |out_code_object| is a freshly-allocated buffer owned by the
 // caller (free with iree_allocator_free) and |out_code_object_size| is nonzero;
 // it holds a raw AMDGPU code object (ELF, a concatenation of ELFs, or a Clang
 // offload bundle) ready to feed back through the normal fat-binary extraction
-// path. On failure both outputs are left untouched.
+// path. Both outputs are cleared once the arguments are accepted, so on any
+// failure past that point they are NULL and zero.
 iree_status_t iree_hal_streaming_kpack_resolve_code_object(
     const void* hipk_metadata, uint32_t co_index,
     iree_host_size_t target_arch_count, const iree_string_view_t* target_archs,

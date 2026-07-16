@@ -3,7 +3,13 @@
 
 #include "common/kpack.h"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -120,6 +126,15 @@ class KpackBuilder {
     return *this;
   }
 
+  // Omits the optional "compression_scheme" TOC field so the archive exercises
+  // the runtime's absent-means-none default. Only meaningful for a NoOp
+  // archive: a zstd archive whose scheme goes undeclared opens as NONE and
+  // cannot decode.
+  KpackBuilder& OmitCompressionScheme() {
+    omit_compression_scheme_ = true;
+    return *this;
+  }
+
   std::vector<uint8_t> Build() const {
     std::vector<uint8_t> blob;
     std::vector<std::pair<uint64_t, uint64_t>> blob_info;  // {abs offset, size}
@@ -146,7 +161,9 @@ class KpackBuilder {
     }
 
     Mp toc;
-    toc.Map(zstd_ ? 8 : 7);
+    uint32_t toc_entry_count = zstd_ ? 8 : 7;
+    if (omit_compression_scheme_) --toc_entry_count;
+    toc.Map(toc_entry_count);
     toc.Str("format_version");
     toc.UInt(1);
     toc.Str("group_name");
@@ -156,8 +173,10 @@ class KpackBuilder {
     toc.Str("gfx_arches");
     toc.Array(static_cast<uint32_t>(arches.size()));
     for (const auto& a : arches) toc.Str(a);
-    toc.Str("compression_scheme");
-    toc.Str(zstd_ ? "zstd-per-kernel" : "none");
+    if (!omit_compression_scheme_) {
+      toc.Str("compression_scheme");
+      toc.Str(zstd_ ? "zstd-per-kernel" : "none");
+    }
     toc.Str("toc");
     toc.Map(static_cast<uint32_t>(by_binary.size()));
     for (const auto& [binary, archmap] : by_binary) {
@@ -224,6 +243,9 @@ class KpackBuilder {
 #endif
 
   bool zstd_;
+  // When true, Build() leaves the optional "compression_scheme" field out of
+  // the TOC entirely (as opposed to writing "none").
+  bool omit_compression_scheme_ = false;
   std::vector<Kernel> kernels_;
 };
 
@@ -272,16 +294,38 @@ std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041) {
   return elf;
 }
 
+void WriteFile(const std::string& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(file.is_open()) << "cannot open " << path << " for writing";
+  file.write(reinterpret_cast<const char*>(bytes.data()),
+             static_cast<std::streamsize>(bytes.size()));
+  file.close();  // sets failbit if the flush does not land
+  ASSERT_TRUE(file.good()) << "cannot write " << bytes.size() << " bytes to "
+                           << path;
+}
+
 std::string WriteTempFile(const std::string& name,
                           const std::vector<uint8_t>& bytes) {
   static int counter = 0;
   std::string path = std::string(::testing::TempDir()) + "/kpack_test_" +
                      std::to_string(counter++) + "_" + name;
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  f.write(reinterpret_cast<const char*>(bytes.data()),
-          static_cast<std::streamsize>(bytes.size()));
-  f.close();
+  WriteFile(path, bytes);
   return path;
+}
+
+// Creates a directory, accepting one that an earlier run of the binary left
+// behind in a TempDir() that is not per-run.
+bool EnsureDirectory(const std::string& path) {
+  return mkdir(path.c_str(), 0700) == 0 || errno == EEXIST;
+}
+
+std::string JoinPathList(const std::vector<std::string>& paths) {
+  std::string joined;
+  for (const auto& path : paths) {
+    if (!joined.empty()) joined += ':';
+    joined += path;
+  }
+  return joined;
 }
 
 std::vector<std::string> ExpandTargets(const char* isa) {
@@ -306,6 +350,69 @@ std::string StripPrefix(const char* isa) {
 void FreeBuffer(void* p) { iree_allocator_free(iree_allocator_system(), p); }
 
 using Vec = std::vector<std::string>;
+
+// A mapping of |readable_pages| readable pages followed by one PROT_NONE page,
+// giving the readable region a hard end: dereferencing guard() faults. Models
+// an address at the end of a loaded segment, where the bytes beyond it belong
+// to no readable mapping.
+//
+// The pages are anonymous unless |backing_path| is given, in which case they
+// come from a file created there and the guard page is file-backed. That is the
+// shape the ELF loader produces between a library's segments: /proc/self/maps
+// names the file on the guard entry exactly as on the segments around it, so
+// the path is no evidence that the bytes can be read.
+class GuardedMapping {
+ public:
+  explicit GuardedMapping(size_t readable_pages,
+                          const std::string& backing_path = "")
+      : backing_path_(backing_path) {
+    page_size_ = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    total_size_ = (readable_pages + 1) * page_size_;
+    int fd = -1;
+    if (!backing_path_.empty()) {
+      fd = open(backing_path_.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+      if (fd < 0) return;
+      if (ftruncate(fd, static_cast<off_t>(total_size_)) != 0) {
+        close(fd);
+        return;
+      }
+    }
+    void* base =
+        mmap(nullptr, total_size_, PROT_READ | PROT_WRITE,
+             fd < 0 ? (MAP_PRIVATE | MAP_ANONYMOUS) : MAP_PRIVATE, fd, 0);
+    if (fd >= 0) close(fd);  // the mapping keeps the file alive
+    if (base == MAP_FAILED) return;
+    // Splits the region into a readable mapping and an unreadable one, so the
+    // readable extent is exactly |readable_pages| pages.
+    uint8_t* guard = static_cast<uint8_t*>(base) + readable_pages * page_size_;
+    if (mprotect(guard, page_size_, PROT_NONE) != 0) {
+      munmap(base, total_size_);
+      return;
+    }
+    base_ = static_cast<uint8_t*>(base);
+    guard_ = guard;
+  }
+  ~GuardedMapping() {
+    if (base_) munmap(base_, total_size_);
+    // Only once unmapped: unlinking a mapped file would leave the kernel
+    // rendering its entries as "(deleted)", a different case entirely.
+    if (!backing_path_.empty()) unlink(backing_path_.c_str());
+  }
+  GuardedMapping(const GuardedMapping&) = delete;
+  GuardedMapping& operator=(const GuardedMapping&) = delete;
+
+  bool ok() const { return base_ != nullptr; }
+  // First byte that cannot be read; the end of the readable mapping.
+  uint8_t* guard() const { return guard_; }
+
+ private:
+  uint8_t* base_ = nullptr;
+  uint8_t* guard_ = nullptr;
+  size_t total_size_ = 0;
+  size_t page_size_ = 0;
+  // Path of the file backing the pages; empty when they are anonymous.
+  std::string backing_path_;
+};
 
 // Returns the offset of the sole occurrence of |needle| within |hay|, requiring
 // exactly one match so the byte-patch tests below target an unambiguous field.
@@ -688,66 +795,127 @@ TEST(KpackPath, ResolveAbsoluteWithDotDot) {
 }
 
 //===----------------------------------------------------------------------===//
-// discover_binary_path
+// query_mapping
 //===----------------------------------------------------------------------===//
 
 // A symbol in the test binary's mapped image (not heap), so /proc/self/maps
 // resolves it to a real file.
 static const int kProbeSymbol = 0x5a5a;
 
-TEST(KpackDiscover, ResolvesOwnBinary) {
+TEST(KpackQueryMapping, ResolvesOwnBinary) {
   char path[1024];
-  iree_host_size_t offset = 0;
-  iree_status_t status = iree_hal_streaming_kpack_discover_binary_path(
-      &kProbeSymbol, path, sizeof(path), &offset);
-  // On Linux this should resolve to the running test executable/library.
-  IREE_ASSERT_OK(status);
-  EXPECT_GT(strlen(path), 0u);
-  // The reported offset should land inside the backing file: a mapped data
-  // symbol sits past the ELF header (nonzero) and within the file's size.
-  std::ifstream f(path, std::ios::binary | std::ios::ate);
-  ASSERT_TRUE(f.good());
-  auto file_size = static_cast<iree_host_size_t>(f.tellg());
-  EXPECT_GT(offset, 0u);
-  EXPECT_LT(offset, file_size);
+  iree_hal_streaming_kpack_mapping_t mapping;
+  // On Linux this resolves to the running test executable/library.
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_query_mapping(
+      &kProbeSymbol, path, sizeof(path), &mapping));
+  ASSERT_GT(mapping.path.size, 0u);
+  EXPECT_EQ(mapping.path.data, static_cast<const char*>(path));
+  EXPECT_GT(mapping.readable_bytes, 0u);
 }
 
-TEST(KpackDiscover, HeapPointerNotFound) {
-  // A heap allocation is backed by an anonymous / [heap] mapping, not a file,
-  // so discovery must report NOT_FOUND rather than a bogus path.
-  void* heap = malloc(1 << 20);
+TEST(KpackQueryMapping, HeapPointerHasExtentButNoPath) {
+  // A heap allocation is backed by an anonymous / [heap] mapping: a real extent
+  // with no file behind it. Every test below hands resolution a heap pointer to
+  // its metadata, so the query must report an extent for a mapping it cannot
+  // name.
+  const size_t kAllocationSize = 1 << 20;
+  void* heap = malloc(kAllocationSize);
   ASSERT_NE(heap, nullptr);
   char path[1024];
-  iree_status_t status = iree_hal_streaming_kpack_discover_binary_path(
-      heap, path, sizeof(path), nullptr);
+  iree_hal_streaming_kpack_mapping_t mapping;
+  iree_status_t status = iree_hal_streaming_kpack_query_mapping(
+      heap, path, sizeof(path), &mapping);
+  IREE_EXPECT_OK(status);
+  EXPECT_EQ(mapping.path.size, 0u);
+  // The whole allocation is readable from |heap|, so the extent covers it.
+  EXPECT_GE(mapping.readable_bytes, kAllocationSize);
   free(heap);
-  EXPECT_THAT(iree::Status(std::move(status)),
-              StatusIs(iree::StatusCode::kNotFound));
 }
 
-TEST(KpackDiscover, UnmappedAddressNotFound) {
+TEST(KpackQueryMapping, DeletedBackingFileHasExtentButNoPath) {
+  // An unlinked backing file is rendered as "<path> (deleted)", a spelling that
+  // names no file that can be opened. The mapping is still readable, so it has
+  // an extent; reporting the spelling as a path would resolve search paths
+  // against a directory that no longer holds the file.
+  const size_t kMappingSize = 4096;
+  std::string path =
+      WriteTempFile("deleted.kpack", std::vector<uint8_t>(kMappingSize, 0));
+  int fd = open(path.c_str(), O_RDONLY);
+  ASSERT_GE(fd, 0);
+  void* region = mmap(nullptr, kMappingSize, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  ASSERT_NE(region, MAP_FAILED);
+  ASSERT_EQ(unlink(path.c_str()), 0);
+
+  char buffer[1024];
+  iree_hal_streaming_kpack_mapping_t mapping;
+  IREE_EXPECT_OK(iree_hal_streaming_kpack_query_mapping(
+      region, buffer, sizeof(buffer), &mapping));
+  EXPECT_EQ(mapping.path.size, 0u);
+  EXPECT_EQ(mapping.readable_bytes, kMappingSize);
+  munmap(region, kMappingSize);
+}
+
+TEST(KpackQueryMapping, UnmappedAddressNotFound) {
   char path[1024];
-  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_discover_binary_path(
-                  reinterpret_cast<void*>(0x1), path, sizeof(path), nullptr)),
+  iree_hal_streaming_kpack_mapping_t mapping;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_query_mapping(
+                  reinterpret_cast<void*>(0x1), path, sizeof(path), &mapping)),
               StatusIs(iree::StatusCode::kNotFound));
 }
 
-TEST(KpackDiscover, NullAddress) {
+TEST(KpackQueryMapping, ProtNoneMappingNotFound) {
+  // A mapped but unreadable page faults on access exactly like an unmapped one,
+  // so it must not be reported as an extent of readable bytes. The ELF loader
+  // leaves such pages between a library's segments, where they are file-backed
+  // and named after that library just as the segments around them are: reading
+  // the permission bits is the only thing that separates them. Reporting this
+  // page would hand back both an extent of bytes that fault and a path the
+  // mapping cannot be read from.
+  const std::string backing =
+      std::string(::testing::TempDir()) + "/kpack_prot_none_backing.bin";
+  GuardedMapping region(/*readable_pages=*/1, backing);
+  ASSERT_TRUE(region.ok());
+  char path[1024];
+  iree_hal_streaming_kpack_mapping_t mapping;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_query_mapping(
+                  region.guard(), path, sizeof(path), &mapping)),
+              StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(KpackQueryMapping, ExtentStopsAtMappingEnd) {
+  // The extent ends at the mapping boundary rather than spilling into whatever
+  // follows it.
+  GuardedMapping region(/*readable_pages=*/2);
+  ASSERT_TRUE(region.ok());
+  const iree_host_size_t kTailBytes = 100;
+  char path[1024];
+  iree_hal_streaming_kpack_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_query_mapping(
+      region.guard() - kTailBytes, path, sizeof(path), &mapping));
+  EXPECT_EQ(mapping.readable_bytes, kTailBytes);
+  EXPECT_EQ(mapping.path.size, 0u);
+}
+
+TEST(KpackQueryMapping, NullAddress) {
   char path[64];
-  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_discover_binary_path(
-                  nullptr, path, sizeof(path), nullptr)),
+  iree_hal_streaming_kpack_mapping_t mapping;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_query_mapping(
+                  nullptr, path, sizeof(path), &mapping)),
               StatusIs(iree::StatusCode::kInvalidArgument));
 }
-TEST(KpackDiscover, ZeroCapacity) {
+TEST(KpackQueryMapping, ZeroCapacity) {
   char path[64];
-  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_discover_binary_path(
-                  &kProbeSymbol, path, 0, nullptr)),
+  iree_hal_streaming_kpack_mapping_t mapping;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_query_mapping(
+                  &kProbeSymbol, path, 0, &mapping)),
               StatusIs(iree::StatusCode::kInvalidArgument));
 }
-TEST(KpackDiscover, BufferTooSmall) {
+TEST(KpackQueryMapping, BufferTooSmall) {
   char path[1];
-  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_discover_binary_path(
-                  &kProbeSymbol, path, sizeof(path), nullptr)),
+  iree_hal_streaming_kpack_mapping_t mapping;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_query_mapping(
+                  &kProbeSymbol, path, sizeof(path), &mapping)),
               StatusIs(iree::StatusCode::kOutOfRange));
 }
 
@@ -870,6 +1038,50 @@ TEST(KpackArchive, UnknownCompressionSchemeRejected) {
       iree::Status(iree_hal_streaming_kpack_archive_open(
           iree_make_const_byte_span(bytes.data(), bytes.size()), &archive)),
       StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+TEST(KpackArchive, NonStringCompressionSchemeRejected) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {1, 2, 3}).Build();
+  // Overwrite the compression_scheme value (fixstr "none") with an equal-length
+  // msgpack uint32, leaving the rest of the TOC layout intact. A scheme that is
+  // present but not a string names no scheme at all, so it must fail closed
+  // rather than apply the "none" default and decode the archive under a scheme
+  // it never declared.
+  size_t at = FindOnce(bytes, {0xa4, 'n', 'o', 'n', 'e'});
+  const uint8_t kUInt32One[] = {0xce, 0x00, 0x00, 0x00, 0x01};
+  memcpy(bytes.data() + at, kUInt32One, sizeof(kUInt32One));
+  iree_hal_streaming_kpack_archive_t archive;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_archive_open(
+          iree_make_const_byte_span(bytes.data(), bytes.size()), &archive)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+// The "compression_scheme" TOC field is optional: an archive that omits it
+// opens as the uncompressed NONE scheme. A present-but-invalid scheme fails
+// closed; the absent case is the documented default, so a NoOp archive built
+// without the field must still open and decode its blobs.
+TEST(KpackArchive, AbsentCompressionSchemeDefaultsToNone) {
+  std::vector<uint8_t> k = {'A', 'B', 'C', 'D'};
+  auto bytes = KpackBuilder(/*zstd=*/false)
+                   .OmitCompressionScheme()
+                   .Add("lib/x.so#0", "gfx900", k)
+                   .Build();
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  EXPECT_EQ(archive.compression, IREE_HAL_STREAMING_KPACK_COMPRESSION_NONE);
+
+  // The default is fully wired, not just the enum value: the blobs array is
+  // consulted and the uncompressed bytes come back.
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_get_kernel(
+      &archive, IREE_SV("lib/x.so#0"), IREE_SV("gfx900"),
+      iree_allocator_system(), &out, &out_size));
+  ASSERT_EQ(out_size, k.size());
+  EXPECT_EQ(0, memcmp(out, k.data(), k.size()));
+  FreeBuffer(out);
 }
 
 TEST(KpackArchive, ExactArchMatchDoesNotFuzzMatch) {
@@ -1154,6 +1366,51 @@ iree_status_t Resolve(const std::vector<uint8_t>& metadata, uint32_t co_index,
       out, out_size);
 }
 
+TEST(KpackResolve, MetadataAtMappingEndIsBounded) {
+  // The HIPK metadata pointer carries no length, so the only thing that makes
+  // the msgpack walk memory-safe is the extent of the mapping holding it. This
+  // blob sits flush against the end of the readable mapping and declares a
+  // string whose payload therefore begins on the guard page: a reader bounded
+  // by anything other than that extent accepts the declared length, skips the
+  // payload, and reads the next key from unreadable memory.
+  GuardedMapping region(/*readable_pages=*/1);
+  ASSERT_TRUE(region.ok());
+
+  // The first key is not the one the parser looks for, so it moves on to a
+  // second pair rather than stopping at the first. The declared length is kept
+  // well inside the guard page so the fault is that page rather than whatever
+  // happens to lie beyond the region.
+  const std::vector<uint8_t> blob = {
+      0x82,                  // map, 2 pairs
+      0xa3, 'z',  'z', 'z',  // key: "zzz"
+      0xd9, 0x64,            // value: str8 declaring 100 bytes
+  };
+  uint8_t* metadata = region.guard() - blob.size();
+  memcpy(metadata, blob.data(), blob.size());
+
+  const iree_string_view_t target = IREE_SV("gfx900");
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_resolve_code_object(
+          metadata, 0, 1, &target, iree_allocator_system(), &out, &out_size)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
+  EXPECT_EQ(out, nullptr);
+}
+
+// A metadata pointer that lies in no mapping at all has no readable bytes to
+// bound the parse, so resolution reports it rather than dereferencing it.
+TEST(KpackResolve, UnmappedMetadataRejected) {
+  const iree_string_view_t target = IREE_SV("gfx900");
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_resolve_code_object(
+                  reinterpret_cast<void*>(0x1), 0, 1, &target,
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kNotFound));
+  EXPECT_EQ(out, nullptr);
+}
+
 TEST(KpackResolve, AbsoluteSearchPath) {
   auto elf = MakeMinimalAmdgpuElf();
   auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
@@ -1187,10 +1444,10 @@ TEST(KpackResolve, SearchesMultipleArchives) {
   FreeBuffer(out);
 }
 
-// A file that maps but is not a valid archive is skipped, not fatal: a valid
-// archive later on the search path still resolves, and with no valid archive
-// the result is NOT_FOUND.
-TEST(KpackResolve, SkipsUnparseableArchive) {
+// A file that maps but is not a valid archive does not stop the search: a valid
+// archive later on the search path still resolves, and the diagnostic about the
+// bad one is discarded because the search succeeded.
+TEST(KpackResolve, UnparseableArchiveDoesNotBlockLaterArchive) {
   std::vector<uint8_t> garbage(32, 0xAB);  // maps, but not a "KPAK" archive
   std::string p_bad = WriteTempFile("multi_bad.kpack", garbage);
   auto elf = MakeMinimalAmdgpuElf();
@@ -1203,12 +1460,203 @@ TEST(KpackResolve, SkipsUnparseableArchive) {
   IREE_ASSERT_OK(Resolve(with_good, 0, {"gfx900"}, &out, &out_size));
   ASSERT_EQ(out_size, elf.size());
   FreeBuffer(out);
+}
 
-  out = nullptr;
-  out_size = 0;
+// When the only candidate is a file that is present but not an archive, the
+// caller learns the file is malformed rather than that nothing was found: the
+// file being there is a fact they cannot otherwise discover.
+TEST(KpackResolve, UnparseableArchiveReportedWhenNothingMatches) {
+  std::vector<uint8_t> garbage(32, 0xAB);
+  std::string p_bad = WriteTempFile("only_bad.kpack", garbage);
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
   auto only_bad = MakeMetadata("lib/x.so", {p_bad});
   EXPECT_THAT(iree::Status(Resolve(only_bad, 0, {"gfx900"}, &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+// An archive reachable only through a spelling whose ".." follows a symlink
+// must resolve. Collapsing ".." lexically does not commute with symlink
+// resolution, so the normalized spelling of such a path names a different file
+// than the caller did, or none at all.
+TEST(KpackResolve, SymlinkedParentSpellingResolves) {
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  const std::string base = std::string(::testing::TempDir()) + "/kpack_symlink";
+  const std::string real = base + "/real";
+  const std::string sub = base + "/sub";
+  ASSERT_TRUE(EnsureDirectory(base));
+  ASSERT_TRUE(EnsureDirectory(real));
+  ASSERT_TRUE(EnsureDirectory(sub));
+  WriteFile(real + "/a.kpack", archive);
+  const std::string link = sub + "/link";
+  unlink(link.c_str());  // may survive an earlier run
+  ASSERT_EQ(symlink(real.c_str(), link.c_str()), 0);
+
+  // "sub/link/.." is |base|, so this names the archive; collapsing it lexically
+  // yields "sub/real/a.kpack", where nothing exists.
+  const std::string spelling = link + "/../real/a.kpack";
+  ASSERT_EQ(access(spelling.c_str(), R_OK), 0);
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  setenv("ROCM_KPACK_PATH", spelling.c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// A directory on the search path names something, so it is reported rather than
+// skipped. Mapping a directory fails with the same NOT_FOUND that a path naming
+// nothing produces, so the code alone cannot carry the diagnosis and the
+// message has to name the offending path.
+TEST(KpackResolve, DirectoryOnSearchPathIsReported) {
+  const std::string directory =
+      std::string(::testing::TempDir()) + "/kpack_directory_entry";
+  ASSERT_TRUE(EnsureDirectory(directory));
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  setenv("ROCM_KPACK_PATH", directory.c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, {"gfx900"}, &out, &out_size));
+  unsetenv("ROCM_KPACK_PATH");
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr(directory));
+}
+
+// A relative search path is formed against the binary owning the metadata, so a
+// mapping with no backing file leaves it unformable. Dropping it silently would
+// leave a caller whose search matched nothing with no way to learn why.
+TEST(KpackResolve, RelativeSearchPathWithoutOwningBinaryIsReported) {
+  // The metadata here lives in a heap allocation, whose mapping is anonymous.
+  auto metadata = MakeMetadata("lib/x.so", {"sibling.kpack"});
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, {"gfx900"}, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr("sibling.kpack"));
+}
+
+// Once archives are opened the search runs to completion, so a miss is a target
+// mismatch and that is the answer. A candidate rejected along the way is
+// attached as context rather than displacing it: reporting the junk file alone
+// would describe a file that has nothing to do with the miss.
+TEST(KpackResolve, TargetMismatchOutranksRejectedCandidate) {
+  std::vector<uint8_t> garbage(32, 0xAB);  // maps, but not a "KPAK" archive
+  std::string p_bad = WriteTempFile("mismatch_bad.kpack", garbage);
+  auto elf = MakeMinimalAmdgpuElf();
+  auto good = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string p_good = WriteTempFile("mismatch_good.kpack", good);
+  auto metadata = MakeMetadata("lib/x.so", {p_bad, p_good});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, {"gfx1100"}, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kNotFound);
+  // The explanation the completed search established comes first...
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("matches target 'gfx1100'"));
+  // ...and the rejected candidate survives alongside it.
+  EXPECT_THAT(status.ToString(), ::testing::HasSubstr("bad magic"));
+}
+
+// Only one cause can be returned, so every other one reaches the user on the
+// debug channel or not at all. A user who fixes the reported archive and
+// re-runs would otherwise meet the next one only after the round trip, one run
+// per bad archive. Each line names its own path: "malformed" without a path is
+// not something the user can act on.
+TEST(KpackResolve, EveryRejectedCandidateIsLogged) {
+  std::string first =
+      WriteTempFile("logged_first.kpack", std::vector<uint8_t>(32, 0xAB));
+  std::string second =
+      WriteTempFile("logged_second.kpack", std::vector<uint8_t>(32, 0xCD));
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  setenv("ROCM_KPACK_DEBUG", "1", 1);
+  setenv("ROCM_KPACK_PATH", JoinPathList({first, second}).c_str(), 1);
+  ::testing::internal::CaptureStderr();
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  const std::string log = ::testing::internal::GetCapturedStderr();
+  unsetenv("ROCM_KPACK_PATH");
+  unsetenv("ROCM_KPACK_DEBUG");
+
+  // The first cause is the one returned; the second exists only in the log.
+  EXPECT_THAT(iree::Status(std::move(status)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+  EXPECT_THAT(log, ::testing::HasSubstr(first));
+  EXPECT_THAT(log, ::testing::HasSubstr(second));
+}
+
+// A path that simply holds no file is not a member of the search space, so it
+// stays a plain NOT_FOUND rather than being reported as a problem.
+TEST(KpackResolve, MissingArchiveStaysNotFound) {
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  EXPECT_THAT(iree::Status(Resolve(metadata, 0, {"gfx900"}, &out, &out_size)),
               StatusIs(iree::StatusCode::kNotFound));
+}
+
+// A zero-length file is present but cannot be an archive, so it is reported
+// rather than skipped as an absent one. Mapping it fails with INVALID_ARGUMENT
+// because a zero-length mapping is required to fail (EINVAL); what the rule
+// depends on is only that it is not NOT_FOUND.
+TEST(KpackResolve, EmptyArchiveReportedWhenNothingMatches) {
+  std::string path = WriteTempFile("empty.kpack", {});
+  auto metadata = MakeMetadata("lib/x.so", {path});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(Resolve(metadata, 0, {"gfx900"}, &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
+// An archive the process cannot read is reported as such. Without this the user
+// has no way to tell a permissions problem from a missing archive.
+TEST(KpackResolve, UnreadableArchiveReportsPermissionDenied) {
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "root bypasses the mode bits this test relies on";
+  }
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string path = WriteTempFile("noperm.kpack", archive);
+  ASSERT_EQ(chmod(path.c_str(), 0), 0);
+  auto metadata = MakeMetadata("lib/x.so", {path});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  chmod(path.c_str(), 0600);
+  EXPECT_THAT(iree::Status(std::move(status)),
+              StatusIs(iree::StatusCode::kPermissionDenied));
+}
+
+// An unreadable archive is a diagnostic, not a hard stop: one stale file on a
+// speculative search path must not break an application that resolves from a
+// later path.
+TEST(KpackResolve, UnreadableArchiveDoesNotBlockLaterArchive) {
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "root bypasses the mode bits this test relies on";
+  }
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string p_bad = WriteTempFile("noperm_first.kpack", archive);
+  ASSERT_EQ(chmod(p_bad.c_str(), 0), 0);
+  std::string p_good = WriteTempFile("perm_second.kpack", archive);
+  auto metadata = MakeMetadata("lib/x.so", {p_bad, p_good});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  chmod(p_bad.c_str(), 0600);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
 }
 
 TEST(KpackResolve, GfxArchPlaceholderExpansion) {
@@ -1342,6 +1790,178 @@ TEST(KpackResolve, EnvPathPrefix) {
   out_size = 0;
   status = Resolve(metadata2, 0, {"gfx900"}, &out, &out_size);
   unsetenv("ROCM_KPACK_PATH_PREFIX");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// Writes |count| valid archives to distinct paths. The one at |match_index|
+// holds "lib/x.so#0"; the rest hold an unrelated key, so every archive parses
+// and occupies a slot but only one can satisfy the search.
+std::vector<std::string> WriteArchiveSet(const std::string& name_prefix,
+                                         size_t count, size_t match_index,
+                                         const std::vector<uint8_t>& elf) {
+  std::vector<std::string> paths;
+  paths.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    const std::string key = i == match_index ? "lib/x.so#0" : "lib/other.so#0";
+    auto archive = KpackBuilder(false).Add(key, "gfx900", elf).Build();
+    paths.push_back(
+        WriteTempFile(name_prefix + std::to_string(i) + ".kpack", archive));
+  }
+  return paths;
+}
+
+// The cap counts archives that fit, so exactly that many resolve. The match
+// sits in the last one, pinning that every slot is searched.
+TEST(KpackResolve, ExactlyMaxArchivesSucceeds) {
+  auto elf = MakeMinimalAmdgpuElf();
+  const size_t count = IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES;
+  auto paths =
+      WriteArchiveSet("cap_exact_", count, /*match_index=*/count - 1, elf);
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  setenv("ROCM_KPACK_PATH", JoinPathList(paths).c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// One archive past the cap. The match is in the first archive, so a truncated
+// search would find it and succeed by luck; because the ranked space cannot be
+// evaluated, a match that happens to be reachable is not an honest answer.
+TEST(KpackResolve, TooManyArchivesFailsLoudly) {
+  auto elf = MakeMinimalAmdgpuElf();
+  const size_t count = IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES + 1;
+  auto paths = WriteArchiveSet("cap_over_", count, /*match_index=*/0, elf);
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  setenv("ROCM_KPACK_PATH", JoinPathList(paths).c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  EXPECT_THAT(iree::Status(std::move(status)),
+              StatusIs(iree::StatusCode::kResourceExhausted));
+  EXPECT_EQ(out, nullptr);
+}
+
+// The cap counts archives, not candidate paths. With the archive set already
+// exactly full, a further path that holds nothing (or holds a file that is not
+// an archive) is still not a member of the search space, so it neither occupies
+// a slot nor reports the set as overfull.
+TEST(KpackResolve, NonArchivePathsDoNotConsumeArchiveSlots) {
+  auto elf = MakeMinimalAmdgpuElf();
+  const size_t count = IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES;
+  auto entries = WriteArchiveSet("slots_", count, /*match_index=*/0, elf);
+  entries.push_back("/nonexistent/none.kpack");
+  entries.push_back(
+      WriteTempFile("slots_garbage.kpack", std::vector<uint8_t>(32, 0xAB)));
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  setenv("ROCM_KPACK_PATH", JoinPathList(entries).c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// One spelling repeated names one archive, and dedup is observable through the
+// archive cap: more repetitions than the cap allows still resolve, because they
+// occupy one slot between them. Opening each repetition would yield a slot each
+// and exceed the cap.
+TEST(KpackResolve, RepeatedSearchPathOpensArchiveOnce) {
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string path = WriteTempFile("dedup.kpack", archive);
+  std::vector<std::string> entries(
+      IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES + 1, path);
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  setenv("ROCM_KPACK_PATH", JoinPathList(entries).c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// Two spellings that collapse to one string lexically can still name different
+// files, so both must be searched. Collapsing ".." does not commute with
+// symlinks: "B/link/.." is not "B" when "link" points elsewhere. Treating the
+// collapsed spelling as an identity would drop the second archive as a
+// duplicate of the first and lose the code object it holds.
+TEST(KpackResolve, LexicallyCollidingSpellingsOfDifferentFilesAreBothSearched) {
+  auto elf = MakeMinimalAmdgpuElf();
+  // Only the archive under "A" answers the search; the one under "B" parses and
+  // occupies a slot, so a dropped "A" surfaces as a miss rather than an error.
+  auto match = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  auto other = KpackBuilder(false).Add("lib/other.so#0", "gfx900", elf).Build();
+
+  // TempDir() may already end in '/'; a doubled separator would leave the
+  // spellings differing from their normalized form for a reason unrelated to
+  // the collision, masking it.
+  std::string base = std::string(::testing::TempDir());
+  while (!base.empty() && base.back() == '/') base.pop_back();
+  base += "/kpack_collision";
+  const std::string directory_a = base + "/A";
+  const std::string directory_b = base + "/B";
+  ASSERT_TRUE(EnsureDirectory(base));
+  ASSERT_TRUE(EnsureDirectory(directory_a));
+  ASSERT_TRUE(EnsureDirectory(directory_a + "/sub"));
+  ASSERT_TRUE(EnsureDirectory(directory_b));
+  WriteFile(directory_a + "/x.kpack", match);
+  WriteFile(directory_b + "/x.kpack", other);
+  const std::string link = directory_b + "/link";
+  unlink(link.c_str());  // may survive an earlier run
+  ASSERT_EQ(symlink((directory_a + "/sub").c_str(), link.c_str()), 0);
+
+  // "B/link/.." is "A", so this second spelling names "A/x.kpack" while
+  // collapsing to "B/x.kpack" — the first spelling exactly.
+  const std::string spelling_b = directory_b + "/x.kpack";
+  const std::string spelling_a = link + "/../x.kpack";
+  ASSERT_EQ(ResolveRel("/ignored", spelling_a.c_str()), spelling_b);
+
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  setenv("ROCM_KPACK_PATH", JoinPathList({spelling_b, spelling_a}).c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// A relative search path stays relative; the open resolves it against the
+// process working directory.
+TEST(KpackResolve, RelativeEnvPathResolves) {
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  std::string path = WriteTempFile("relative.kpack", archive);
+  size_t slash = path.rfind('/');
+  std::string directory = path.substr(0, slash);
+  std::string basename = path.substr(slash + 1);
+
+  char previous_cwd[4096];
+  ASSERT_NE(getcwd(previous_cwd, sizeof(previous_cwd)), nullptr);
+  ASSERT_EQ(chdir(directory.c_str()), 0);
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  setenv("ROCM_KPACK_PATH", basename.c_str(), 1);
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
+  unsetenv("ROCM_KPACK_PATH");
+  ASSERT_EQ(chdir(previous_cwd), 0);
   IREE_ASSERT_OK(status);
   EXPECT_EQ(out_size, elf.size());
   FreeBuffer(out);

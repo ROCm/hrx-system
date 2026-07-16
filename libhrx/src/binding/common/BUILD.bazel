@@ -103,6 +103,11 @@ hrx_cc_test(
 hrx_cc_test(
     name = "kpack_test",
     srcs = ["kpack_test.cc"],
+    # The test builds its fixtures from POSIX facilities (mmap/mprotect guard
+    # pages, /proc/self/maps, mode-bit permissions, symlinks) and exercises the
+    # Linux-only resolution path; the resolver itself reports UNIMPLEMENTED off
+    # Linux, so there is nothing for this suite to assert on other platforms.
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":common",
         "//runtime/src/iree/base",
