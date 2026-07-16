@@ -10,32 +10,13 @@
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_VALUES_H_
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Selects an AMDGPU constant materialization plan for index.constant.
-iree_status_t loom_amdgpu_select_index_constant_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
-
-// Selects an AMDGPU constant materialization plan for scalar.constant.
-iree_status_t loom_amdgpu_select_scalar_constant_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
-
-// Selects an AMDGPU constant materialization plan for vector.constant.
-iree_status_t loom_amdgpu_select_vector_constant_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
-
-// Lowers an AMDGPU constant materialization plan.
-iree_status_t loom_amdgpu_lower_constant_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_constant_plan_t* plan);
 
 // Selects an AMDGPU index.cast plan.
 iree_status_t loom_amdgpu_select_index_cast_plan(
