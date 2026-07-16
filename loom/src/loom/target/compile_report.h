@@ -1028,8 +1028,6 @@ typedef struct loom_target_compile_report_source_low_row_t {
   uint64_t plan_id;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
-  // First stable low descriptor id emitted by this source op, if any.
-  uint64_t descriptor_id;
   // First low descriptor key emitted by this source op, if any.
   iree_string_view_t descriptor_key;
   // First low descriptor semantic tag emitted by this source op, if any.
@@ -1522,8 +1520,6 @@ typedef struct loom_target_compile_report_legalization_row_t {
   uint16_t rule_index;
   // Diagnostic row ordinal retained by the rejected rule, or UINT16_MAX.
   uint16_t diagnostic_index;
-  // Low descriptor stable id selected by the accepted rule, or UINT64_MAX.
-  uint64_t descriptor_id;
   // Low descriptor key selected by the accepted rule, or empty.
   iree_string_view_t descriptor_key;
   // Compact target-independent rejection flags.
