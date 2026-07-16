@@ -285,6 +285,12 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
+    for (uint16_t j = 0; j < symbol_op_counts[i].resolve_count; ++j) {
+      // This sentinel is replaced when its dense HAL binding ordinal is
+      // reflected below. It detects duplicate metadata before the operation
+      // table becomes visible to dispatch.
+      resolve_ops_start[j].resolve.destination_ordinal = UINT16_MAX;
+    }
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
     for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count;
@@ -316,13 +322,42 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                   "field width");
         break;
       }
+      if (!is_binding_parameter) {
+        iree_host_size_t constant_destination_extent = 0;
+        if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                              (iree_host_size_t)parameter->offset,
+                              parameter->size, &constant_destination_extent) ||
+                          constant_destination_extent >
+                              export_infos[i].constant_byte_length)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel constant parameter exceeds the reflected constants "
+              "range");
+          break;
+        }
+      }
       const uint16_t next_source_offset = (uint16_t)source_extent;
       if (is_binding_parameter) {
+        if (IREE_UNLIKELY(parameter->offset >=
+                          symbol_op_counts[i].resolve_count)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel binding parameter ordinal %u exceeds binding count %u",
+              parameter->offset, symbol_op_counts[i].resolve_count);
+          break;
+        }
         iree_hal_streaming_parameter_resolve_op_t* op =
-            &resolve_ops_start[resolve_count].resolve;
+            &resolve_ops_start[parameter->offset].resolve;
+        if (IREE_UNLIKELY(op->destination_ordinal != UINT16_MAX)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel metadata assigns binding ordinal %u more than once",
+              parameter->offset);
+          break;
+        }
         op->reserved = 0;
         op->source_offset = source_offset;
-        op->destination_ordinal = resolve_count;
+        op->destination_ordinal = parameter->offset;
         op->source_ordinal = j;
         // Native launches place raw device pointers at target ABI offsets.
         op->native_abi_destination_offset =

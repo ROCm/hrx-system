@@ -19131,14 +19131,6 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
 
   result = hipGraphKernelNodeSetParams(node, pNodeParams);
   if (result != hipSuccess) {
-    stream_node->attrs.kernel = old_attrs;
-    if (old_constants) {
-      memcpy((void*)old_attrs.constants.data, old_constants,
-             old_attrs.constants_capacity);
-    }
-    if (old_bindings) {
-      memcpy((void*)old_attrs.bindings.values, old_bindings, old_bindings_size);
-    }
     iree_allocator_free(host_allocator, old_bindings);
     iree_allocator_free(host_allocator, old_constants);
     iree_hal_streaming_graph_exec_release(exec);

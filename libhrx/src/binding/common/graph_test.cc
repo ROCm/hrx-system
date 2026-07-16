@@ -159,4 +159,71 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   EXPECT_EQ(binding_storage.data(), node.attrs.kernel.bindings.values);
 }
 
+TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
+  iree_hal_streaming_graph_t graph = {};
+  graph.host_allocator = iree_allocator_system();
+
+  std::array<uint8_t, 24> constants = {};
+  constants.fill(0xA5);
+  iree_hal_streaming_graph_node_t node = {};
+  node.graph = &graph;
+  node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
+  node.attrs.kernel.constants =
+      iree_make_const_byte_span(constants.data(), constants.size());
+  node.attrs.kernel.constants_capacity = constants.size();
+
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  symbol.parameters.constant_bytes = 16;
+  symbol.parameters.direct_arg_bytes = 16;
+
+  std::array<uint8_t, 16> exact_arguments = {};
+  for (uint8_t i = 0; i < exact_arguments.size(); ++i) {
+    exact_arguments[i] = i;
+  }
+  const iree_hal_streaming_dispatch_params_t exact_params = {
+      .buffer = exact_arguments.data(),
+      .buffer_size = exact_arguments.size(),
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+  };
+  IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
+      &node, &symbol, &exact_params));
+  EXPECT_EQ(exact_arguments.size(), node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(0, memcmp(exact_arguments.data(), constants.data(),
+                      exact_arguments.size()));
+  for (size_t i = exact_arguments.size(); i < constants.size(); ++i) {
+    EXPECT_EQ(0u, constants[i]);
+  }
+  exact_arguments.fill(0xFF);
+  EXPECT_NE(0, memcmp(exact_arguments.data(), constants.data(),
+                      exact_arguments.size()));
+
+  std::array<uint8_t, 24> padded_arguments = {};
+  for (uint8_t i = 0; i < padded_arguments.size(); ++i) {
+    padded_arguments[i] = static_cast<uint8_t>(0x80u + i);
+  }
+  const iree_hal_streaming_dispatch_params_t padded_params = {
+      .buffer = padded_arguments.data(),
+      .buffer_size = padded_arguments.size(),
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+  };
+  IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
+      &node, &symbol, &padded_params));
+  EXPECT_EQ(padded_arguments.size(), node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(0, memcmp(padded_arguments.data(), constants.data(),
+                      padded_arguments.size()));
+  padded_arguments.fill(0xFF);
+  EXPECT_NE(0, memcmp(padded_arguments.data(), constants.data(),
+                      padded_arguments.size()));
+
+  iree_hal_streaming_symbol_t empty_symbol = {};
+  empty_symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  const iree_hal_streaming_dispatch_params_t empty_params = {
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+  };
+  IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
+      &node, &empty_symbol, &empty_params));
+  EXPECT_EQ(0u, node.attrs.kernel.constants.data_length);
+}
+
 }  // namespace

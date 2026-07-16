@@ -222,7 +222,7 @@ TEST_F(HipLaunchValidationApiTest,
 }
 
 TEST_F(HipLaunchValidationApiTest,
-       ImmediateLaunchesRejectSharedMemoryOutsideTheDispatchAbi) {
+       LaunchEntryPointsRejectOutOfRangeSharedMemory) {
   if (sizeof(size_t) <= sizeof(uint32_t)) {
     GTEST_SKIP() << "size_t cannot represent a value above uint32_t";
   }
@@ -231,8 +231,18 @@ TEST_F(HipLaunchValidationApiTest,
   symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
   const void* function = iree_hal_streaming_symbol_tag(&symbol);
   const dim3 valid_dimension = {1, 1, 1};
+  const size_t largest_dispatch_shared_memory = UINT32_MAX;
   const size_t oversized_shared_memory = (size_t)UINT32_MAX + 1;
 
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            api_.launch_kernel(function, valid_dimension, valid_dimension,
+                               /*arguments=*/nullptr,
+                               largest_dispatch_shared_memory, stream_));
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
+                                   /*arguments=*/nullptr,
+                                   largest_dispatch_shared_memory, stream_,
+                                   nullptr, nullptr, /*flags=*/0));
   EXPECT_EQ(hipErrorInvalidConfiguration,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr, oversized_shared_memory,
@@ -242,6 +252,46 @@ TEST_F(HipLaunchValidationApiTest,
       api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                              /*arguments=*/nullptr, oversized_shared_memory,
                              stream_, nullptr, nullptr, /*flags=*/0));
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            api_.module_launch_kernel(
+                (hipFunction_t)function, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, UINT32_MAX, stream_, /*arguments=*/nullptr,
+                /*extra=*/nullptr));
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+  hipKernelNodeParams valid_params = {
+      .blockDim = valid_dimension,
+      .extra = nullptr,
+      .func = const_cast<void*>(function),
+      .gridDim = valid_dimension,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
+  };
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.graph_add_kernel_node(&node, graph, /*dependencies=*/nullptr,
+                                       /*dependency_count=*/0, &valid_params));
+
+  hipKernelNodeParams rejected_params = valid_params;
+  rejected_params.sharedMemBytes = largest_dispatch_shared_memory;
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            api_.graph_kernel_node_set_params(node, &rejected_params));
+  hipKernelNodeParams retained_params = {};
+  ASSERT_EQ(hipSuccess,
+            api_.graph_kernel_node_get_params(node, &retained_params));
+  EXPECT_EQ(0u, retained_params.sharedMemBytes);
+
+  hipGraphNode_t rejected_node = reinterpret_cast<hipGraphNode_t>(uintptr_t{1});
+  EXPECT_EQ(
+      hipErrorInvalidConfiguration,
+      api_.graph_add_kernel_node(&rejected_node, graph,
+                                 /*dependencies=*/nullptr,
+                                 /*dependency_count=*/0, &rejected_params));
+  EXPECT_EQ(reinterpret_cast<hipGraphNode_t>(uintptr_t{1}), rejected_node);
+
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
 TEST_F(HipLaunchValidationApiTest,

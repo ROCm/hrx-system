@@ -15,6 +15,7 @@
 #include "iree/hal/cts/util/registry.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
+#include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_packet.h"
@@ -515,6 +516,243 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
   IREE_ASSERT_OK(iree_hal_buffer_map_read(
       output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
+
+  iree_hal_executable_release(executable);
+  iree_hal_executable_cache_release(executable_cache);
+}
+
+TEST_F(HostQueueCommandBufferTest,
+       DirectDispatchPreservesNestedPointersInNativeKernargs) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_executable_cache_t* executable_cache = NULL;
+  iree_hal_executable_t* executable = NULL;
+  IREE_ASSERT_OK(LoadCtsExecutable(
+      test_device.base_device(),
+      iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
+                             "bin"),
+      &executable_cache, &executable));
+
+  const iree_hal_executable_function_t normal_function =
+      iree_hal_executable_function_from_index(0);
+  iree_hal_executable_function_info_t normal_function_info = {};
+  IREE_ASSERT_OK(iree_hal_executable_function_info(executable, normal_function,
+                                                   &normal_function_info));
+  ASSERT_EQ(4u, normal_function_info.parameter_count);
+  std::vector<iree_hal_executable_function_parameter_t> normal_parameters(
+      normal_function_info.parameter_count);
+  IREE_ASSERT_OK(iree_hal_executable_function_parameters(
+      executable, normal_function, normal_parameters.size(),
+      normal_parameters.data()));
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING,
+            normal_parameters[0].type);
+  ASSERT_EQ(0u, normal_parameters[0].offset);
+  ASSERT_TRUE(iree_all_bits_set(
+      normal_parameters[0].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
+  EXPECT_EQ(0u, normal_parameters[0].native_abi_offset);
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING,
+            normal_parameters[1].type);
+  ASSERT_EQ(1u, normal_parameters[1].offset);
+  ASSERT_TRUE(iree_all_bits_set(
+      normal_parameters[1].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
+  EXPECT_EQ(sizeof(void*), normal_parameters[1].native_abi_offset);
+
+  iree_hal_executable_function_t function =
+      iree_hal_executable_function_invalid();
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("command_buffer_dispatch_nested_pointers_test"),
+      &function));
+  iree_hal_executable_function_info_t function_info = {};
+  IREE_ASSERT_OK(
+      iree_hal_executable_function_info(executable, function, &function_info));
+  ASSERT_EQ(3u, function_info.parameter_count);
+  std::vector<iree_hal_executable_function_parameter_t> parameters(
+      function_info.parameter_count);
+  IREE_ASSERT_OK(iree_hal_executable_function_parameters(
+      executable, function, parameters.size(), parameters.data()));
+
+  // The compiler leaves by-value parameter names empty. Their source ABI has
+  // one pointer-pair record followed by two uint32_t values, so classify the
+  // reflected records from that shape and their native layout instead.
+  const iree_hal_executable_function_parameter_t* pointers_parameter = nullptr;
+  std::vector<const iree_hal_executable_function_parameter_t*>
+      scalar_parameters;
+  for (const iree_hal_executable_function_parameter_t& parameter : parameters) {
+    ASSERT_EQ(IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+              parameter.type);
+    ASSERT_TRUE(iree_all_bits_set(
+        parameter.flags,
+        IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
+    if (parameter.size == 2 * sizeof(void*)) {
+      ASSERT_EQ(nullptr, pointers_parameter);
+      pointers_parameter = &parameter;
+    } else if (parameter.size == sizeof(uint32_t)) {
+      scalar_parameters.push_back(&parameter);
+    } else {
+      ADD_FAILURE() << "unexpected native parameter size: " << parameter.size;
+    }
+  }
+  ASSERT_EQ(2u, scalar_parameters.size());
+  std::sort(scalar_parameters.begin(), scalar_parameters.end(),
+            [](const iree_hal_executable_function_parameter_t* lhs,
+               const iree_hal_executable_function_parameter_t* rhs) {
+              return lhs->native_abi_offset < rhs->native_abi_offset;
+            });
+  const iree_hal_executable_function_parameter_t* scale_parameter =
+      scalar_parameters[0];
+  const iree_hal_executable_function_parameter_t* offset_parameter =
+      scalar_parameters[1];
+  ASSERT_NE(nullptr, pointers_parameter);
+  ASSERT_EQ(2 * sizeof(void*), pointers_parameter->size);
+  ASSERT_EQ(sizeof(uint32_t), scale_parameter->size);
+  ASSERT_EQ(sizeof(uint32_t), offset_parameter->size);
+
+  Ref<iree_hal_buffer_t> input_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), /*buffer_size=*/4 * sizeof(uint32_t),
+      input_buffer.out()));
+  const uint32_t input_values[4] = {1, 2, 3, 4};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(input_buffer, /*target_offset=*/0,
+                                           input_values, sizeof(input_values)));
+
+  Ref<iree_hal_buffer_t> output_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), /*buffer_size=*/4 * sizeof(uint32_t),
+      output_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_buffer_map_zero(output_buffer, /*offset=*/0,
+                                          IREE_HAL_WHOLE_BUFFER));
+
+  const auto device_pointer = [](iree_hal_buffer_t* buffer) -> void* {
+    iree_hal_buffer_t* allocated_buffer =
+        iree_hal_buffer_allocated_buffer(buffer);
+    void* base_pointer =
+        iree_hal_amdgpu_buffer_device_pointer(allocated_buffer);
+    if (!base_pointer) return nullptr;
+    return (void*)((uintptr_t)base_pointer +
+                   iree_hal_buffer_byte_offset(buffer));
+  };
+  struct nested_pointer_args_t {
+    // Input data read by the kernel.
+    uint32_t* input;
+    // Output data written by the kernel.
+    uint32_t* output;
+  };
+  const nested_pointer_args_t pointers = {
+      .input = (uint32_t*)device_pointer(input_buffer),
+      .output = (uint32_t*)device_pointer(output_buffer),
+  };
+  ASSERT_NE(nullptr, pointers.input);
+  ASSERT_NE(nullptr, pointers.output);
+
+  const size_t explicit_argument_size = std::max(
+      (size_t)pointers_parameter->native_abi_offset + sizeof(pointers),
+      std::max((size_t)scale_parameter->native_abi_offset + sizeof(uint32_t),
+               (size_t)offset_parameter->native_abi_offset + sizeof(uint32_t)));
+  ASSERT_GT(explicit_argument_size, 0u);
+
+  Ref<iree_hal_semaphore_t> dispatch_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dispatch_signal.out()));
+  iree_hal_semaphore_t* dispatch_signal_ptr = dispatch_signal.get();
+
+  // Normal HAL dispatch consumes the same executable through ordinary binding
+  // ordinals and dense constants. Native ABI offsets remain metadata only.
+  iree_hal_buffer_ref_t normal_binding_refs[2] = {
+      iree_hal_make_buffer_ref(input_buffer, /*offset=*/0,
+                               iree_hal_buffer_byte_length(input_buffer)),
+      iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,
+                               iree_hal_buffer_byte_length(output_buffer)),
+  };
+  const iree_hal_buffer_ref_list_t normal_bindings = {
+      /*.count=*/IREE_ARRAYSIZE(normal_binding_refs),
+      /*.values=*/normal_binding_refs,
+  };
+  const uint32_t normal_constants[2] = {3, 10};
+  uint64_t normal_signal_value = 1;
+  const iree_hal_semaphore_list_t normal_signal_semaphores = {
+      /*.count=*/1,
+      /*.semaphores=*/&dispatch_signal_ptr,
+      /*.payload_values=*/&normal_signal_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), normal_signal_semaphores, executable,
+      normal_function, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_make_const_byte_span(normal_constants, sizeof(normal_constants)),
+      normal_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dispatch_signal, normal_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  uint32_t output_values[4] = {0, 0, 0, 0};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
+  const uint32_t normal_expected_values[4] = {13, 16, 19, 22};
+  EXPECT_EQ(0, memcmp(output_values, normal_expected_values,
+                      sizeof(normal_expected_values)));
+  IREE_ASSERT_OK(iree_hal_buffer_map_zero(output_buffer, /*offset=*/0,
+                                          IREE_HAL_WHOLE_BUFFER));
+
+  const auto dispatch_with_temporary_arguments =
+      [&](uint32_t scale, uint32_t offset, size_t padding,
+          uint64_t signal_value) -> iree_status_t {
+    std::vector<uint8_t> native_arguments(explicit_argument_size + padding,
+                                          0xCD);
+    memcpy(native_arguments.data() + pointers_parameter->native_abi_offset,
+           &pointers, sizeof(pointers));
+    memcpy(native_arguments.data() + scale_parameter->native_abi_offset, &scale,
+           sizeof(scale));
+    memcpy(native_arguments.data() + offset_parameter->native_abi_offset,
+           &offset, sizeof(offset));
+    const iree_hal_semaphore_list_t signal_semaphores = {
+        /*.count=*/1,
+        /*.semaphores=*/&dispatch_signal_ptr,
+        /*.payload_values=*/&signal_value,
+    };
+    return iree_hal_device_queue_dispatch(
+        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal_semaphores, executable,
+        function, iree_hal_make_static_dispatch_config(1, 1, 1),
+        iree_make_const_byte_span(native_arguments.data(),
+                                  native_arguments.size()),
+        iree_hal_buffer_ref_list_empty(),
+        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+  };
+
+  // The queue must retain a private copy before this temporary byte image is
+  // destroyed. The padded tail is deliberately ignored by the native layout.
+  IREE_ASSERT_OK(dispatch_with_temporary_arguments(/*scale=*/3, /*offset=*/10,
+                                                   /*padding=*/0,
+                                                   /*signal_value=*/2));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dispatch_signal, /*value=*/2,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
+  const uint32_t first_expected_values[4] = {13, 16, 19, 22};
+  EXPECT_EQ(0, memcmp(output_values, first_expected_values,
+                      sizeof(first_expected_values)));
+
+  IREE_ASSERT_OK(iree_hal_buffer_map_zero(output_buffer, /*offset=*/0,
+                                          IREE_HAL_WHOLE_BUFFER));
+  IREE_ASSERT_OK(dispatch_with_temporary_arguments(/*scale=*/4, /*offset=*/1,
+                                                   /*padding=*/16,
+                                                   /*signal_value=*/3));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dispatch_signal, /*value=*/3,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
+  const uint32_t second_expected_values[4] = {5, 9, 13, 17};
+  EXPECT_EQ(0, memcmp(output_values, second_expected_values,
+                      sizeof(second_expected_values)));
 
   iree_hal_executable_release(executable);
   iree_hal_executable_cache_release(executable_cache);

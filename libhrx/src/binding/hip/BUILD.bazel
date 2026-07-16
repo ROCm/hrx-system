@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/sanitizer:suppressions.bzl", "rocm_suppressions")
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -127,6 +128,7 @@ hrx_cc_test(
     env = {
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
+    sanitizer_suppressions = rocm_suppressions,
     deps = [
         ":launch_params",
         "//build_tools:dl",

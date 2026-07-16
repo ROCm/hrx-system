@@ -112,6 +112,9 @@ iree_cc_test(
     libhrx_defs
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
 )
 
 iree_cc_test(
