@@ -120,5 +120,20 @@ target.generic<reference> @gpu {
   EXPECT_EQ(facts->storage.snapshot.max_flat_grid_size, 8589934592ull);
 }
 
+TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @gpu
+)");
+  const loom_symbol_id_t symbol_id = FindSymbol(module.get(), IREE_SV("gpu"));
+  loom_op_t* target_op = module->symbols.entries[symbol_id].defining_op;
+  loom_op_attrs(target_op)[loom_target_generic_kind_ATTR_INDEX] =
+      loom_attr_enum(UINT8_MAX);
+
+  const loom_symbol_facts_base_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(&fact_table_, module.get(),
+                                               symbol_id, &facts));
+  EXPECT_EQ(facts, nullptr);
+}
+
 }  // namespace
 }  // namespace loom

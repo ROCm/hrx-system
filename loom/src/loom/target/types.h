@@ -329,6 +329,13 @@ typedef struct loom_target_bundle_table_t {
   uint8_t count;
 } loom_target_bundle_table_t;
 
+// Resolves |selector| to a populated bundle row, or returns NULL when the
+// selector is outside the table or names an unavailable row.
+static inline const loom_target_bundle_t* loom_target_bundle_table_lookup(
+    const loom_target_bundle_table_t* table, uint32_t selector) {
+  return selector < table->count ? table->values[selector] : NULL;
+}
+
 enum loom_target_projection_value_bits_e {
   // Enum attr projected into a uint8_t target enum field.
   LOOM_TARGET_PROJECTION_VALUE_ENUM_U8 = 1,
