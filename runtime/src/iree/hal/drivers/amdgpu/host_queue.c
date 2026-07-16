@@ -63,7 +63,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_tsan_state_initialize(
     iree_hal_amdgpu_device_tsan_emplace_queue_initialize(
         &queue->transfer_context->kernels
              ->iree_hal_amdgpu_device_tsan_initialize_queue_state,
-        initialize_args, &packet->dispatch, submission.kernargs.blocks->data);
+        initialize_args, queue->transfer_context->max_workgroup_count,
+        &packet->dispatch, submission.kernargs.blocks->data);
     packet->dispatch.completion_signal =
         iree_hal_amdgpu_notification_ring_epoch_signal(
             &queue->notification_ring);
