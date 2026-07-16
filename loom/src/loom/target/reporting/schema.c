@@ -10,6 +10,7 @@
 
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
+#include "loom/util/math.h"
 
 iree_string_view_t loom_target_compile_report_artifact_kind_name(
     loom_target_compile_artifact_kind_t kind) {
@@ -40,28 +41,6 @@ iree_string_view_t loom_target_compile_report_source_low_selection_name(
     default:
       return IREE_SV("none");
   }
-}
-
-bool loom_target_compile_report_checked_add_u64(uint64_t lhs, uint64_t rhs,
-                                                uint64_t* out_result) {
-#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
-  return !__builtin_add_overflow(lhs, rhs, out_result);
-#else
-  if (UINT64_MAX - lhs < rhs) return false;
-  *out_result = lhs + rhs;
-  return true;
-#endif  // IREE_HAVE_BUILTIN(__builtin_add_overflow)
-}
-
-bool loom_target_compile_report_checked_mul_u64(uint64_t lhs, uint64_t rhs,
-                                                uint64_t* out_result) {
-#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
-  return !__builtin_mul_overflow(lhs, rhs, out_result);
-#else
-  if (lhs != 0 && rhs > UINT64_MAX / lhs) return false;
-  *out_result = lhs * rhs;
-  return true;
-#endif  // IREE_HAVE_BUILTIN(__builtin_mul_overflow)
 }
 
 static iree_host_size_t
@@ -225,15 +204,13 @@ bool loom_target_compile_report_dispatch_memory_bytes(
     uint64_t dispatch_workitem_count,
     loom_target_compile_report_dispatch_memory_bytes_t* out_bytes) {
   *out_bytes = (loom_target_compile_report_dispatch_memory_bytes_t){0};
-  return loom_target_compile_report_checked_mul_u64(
-             read_byte_count, dispatch_workitem_count,
-             &out_bytes->read_byte_count) &&
-         loom_target_compile_report_checked_mul_u64(
-             write_byte_count, dispatch_workitem_count,
-             &out_bytes->write_byte_count) &&
-         loom_target_compile_report_checked_add_u64(
-             out_bytes->read_byte_count, out_bytes->write_byte_count,
-             &out_bytes->total_byte_count);
+  return loom_checked_mul_u64(read_byte_count, dispatch_workitem_count,
+                              &out_bytes->read_byte_count) &&
+         loom_checked_mul_u64(write_byte_count, dispatch_workitem_count,
+                              &out_bytes->write_byte_count) &&
+         loom_checked_add_u64(out_bytes->read_byte_count,
+                              out_bytes->write_byte_count,
+                              &out_bytes->total_byte_count);
 }
 
 bool loom_target_compile_report_source_low_memory_dispatch_source_bytes(

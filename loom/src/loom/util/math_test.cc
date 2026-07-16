@@ -15,6 +15,32 @@ namespace loom {
 namespace {
 
 //===----------------------------------------------------------------------===//
+// loom_checked_add_u64
+//===----------------------------------------------------------------------===//
+
+TEST(MathTest, CheckedAddU64) {
+  uint64_t out = 0;
+  EXPECT_TRUE(loom_checked_add_u64(0, 0, &out));
+  EXPECT_EQ(out, 0u);
+  EXPECT_TRUE(loom_checked_add_u64(UINT64_MAX - 1, 1, &out));
+  EXPECT_EQ(out, UINT64_MAX);
+  EXPECT_FALSE(loom_checked_add_u64(UINT64_MAX, 1, &out));
+}
+
+//===----------------------------------------------------------------------===//
+// loom_checked_mul_u64
+//===----------------------------------------------------------------------===//
+
+TEST(MathTest, CheckedMulU64) {
+  uint64_t out = 0;
+  EXPECT_TRUE(loom_checked_mul_u64(0, UINT64_MAX, &out));
+  EXPECT_EQ(out, 0u);
+  EXPECT_TRUE(loom_checked_mul_u64(UINT64_MAX, 1, &out));
+  EXPECT_EQ(out, UINT64_MAX);
+  EXPECT_FALSE(loom_checked_mul_u64(UINT64_MAX, 2, &out));
+}
+
+//===----------------------------------------------------------------------===//
 // loom_checked_add_i64
 //===----------------------------------------------------------------------===//
 

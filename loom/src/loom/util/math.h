@@ -42,8 +42,30 @@ extern "C" {
 // Checked arithmetic
 //===----------------------------------------------------------------------===//
 //
-// Signed int64 arithmetic with overflow detection. Returns true on
-// success (no overflow), false on overflow (*out is undefined).
+// Integer arithmetic with overflow detection. Returns true on success (no
+// overflow), false on overflow (*out is undefined).
+
+// Checked unsigned addition.
+static inline bool loom_checked_add_u64(uint64_t a, uint64_t b, uint64_t* out) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out);
+#else
+  if (UINT64_MAX - a < b) return false;
+  *out = a + b;
+  return true;
+#endif
+}
+
+// Checked unsigned multiplication.
+static inline bool loom_checked_mul_u64(uint64_t a, uint64_t b, uint64_t* out) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out);
+#else
+  if (a != 0 && b > UINT64_MAX / a) return false;
+  *out = a * b;
+  return true;
+#endif
+}
 
 // Checked signed addition.
 static inline bool loom_checked_add_i64(int64_t a, int64_t b, int64_t* out) {

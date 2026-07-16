@@ -56,11 +56,6 @@ iree_string_view_t loom_target_compile_report_artifact_kind_name(
 iree_string_view_t loom_target_compile_report_source_low_selection_name(
     loom_target_compile_report_source_low_selection_kind_t kind);
 
-bool loom_target_compile_report_checked_add_u64(uint64_t lhs, uint64_t rhs,
-                                                uint64_t* out_result);
-bool loom_target_compile_report_checked_mul_u64(uint64_t lhs, uint64_t rhs,
-                                                uint64_t* out_result);
-
 iree_host_size_t loom_target_compile_report_source_low_memory_storage_fields(
     const loom_target_compile_report_source_low_memory_row_t* row,
     loom_target_compile_report_string_field_t* fields);

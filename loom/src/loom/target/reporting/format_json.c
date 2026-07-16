@@ -10,6 +10,7 @@
 
 #include "loom/target/reporting/format_planning.h"
 #include "loom/target/reporting/schema.h"
+#include "loom/util/math.h"
 
 iree_status_t loom_target_compile_report_json_write_optional_string_field(
     loom_json_object_writer_t* object, iree_string_view_t name,
@@ -777,8 +778,7 @@ loom_target_compile_report_json_write_scaled_nonzero_u64_field(
     loom_json_object_writer_t* object, iree_string_view_t key, uint64_t value,
     uint64_t scale) {
   uint64_t scaled_value = 0;
-  if (!loom_target_compile_report_checked_mul_u64(value, scale,
-                                                  &scaled_value)) {
+  if (!loom_checked_mul_u64(value, scale, &scaled_value)) {
     return iree_ok_status();
   }
   return loom_target_compile_report_json_write_nonzero_u64_field(object, key,
@@ -791,14 +791,14 @@ iree_status_t loom_target_compile_report_format_memory_economics_json(
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   uint64_t read_byte_count = 0;
-  const bool has_read_byte_count = loom_target_compile_report_checked_mul_u64(
+  const bool has_read_byte_count = loom_checked_mul_u64(
       mix->memory_read_byte_count, scale, &read_byte_count);
   if (has_read_byte_count) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
         &object, IREE_SV("read_bytes"), read_byte_count));
   }
   uint64_t write_byte_count = 0;
-  const bool has_write_byte_count = loom_target_compile_report_checked_mul_u64(
+  const bool has_write_byte_count = loom_checked_mul_u64(
       mix->memory_write_byte_count, scale, &write_byte_count);
   if (has_write_byte_count) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
@@ -806,8 +806,8 @@ iree_status_t loom_target_compile_report_format_memory_economics_json(
   }
   uint64_t total_byte_count = 0;
   if (has_read_byte_count && has_write_byte_count &&
-      loom_target_compile_report_checked_add_u64(
-          read_byte_count, write_byte_count, &total_byte_count)) {
+      loom_checked_add_u64(read_byte_count, write_byte_count,
+                           &total_byte_count)) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
         &object, IREE_SV("total_bytes"), total_byte_count));
   }
@@ -849,8 +849,7 @@ iree_status_t loom_target_compile_report_format_memory_economics_json(
   uint64_t byte_count = 0;
 #define LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_FIELD(field) \
   do {                                                                 \
-    if (loom_target_compile_report_checked_mul_u64(mix->field, scale,  \
-                                                   &byte_count)) {     \
+    if (loom_checked_mul_u64(mix->field, scale, &byte_count)) {        \
       IREE_RETURN_IF_ERROR(                                            \
           loom_target_compile_report_json_write_nonzero_u64_field(     \
               &object, IREE_SV(#field), byte_count));                  \

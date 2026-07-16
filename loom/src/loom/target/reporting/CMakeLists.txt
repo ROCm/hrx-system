@@ -50,11 +50,16 @@ loom_cc_library(
   HDRS
     "report.h"
   SRCS
+    "memory_summary.c"
+    "memory_summary.h"
     "report.c"
+    "row_list.c"
+    "row_list.h"
   DEPS
     iree::base
     loom::codegen::low::planning_statistics
     loom::target::types
+    loom::util::math
   PUBLIC
 )
 
@@ -82,6 +87,7 @@ loom_cc_library(
     loom::ir
     loom::target::math_policy
     loom::util::json
+    loom::util::math
     loom::util::stream
   PUBLIC
 )
@@ -107,9 +113,16 @@ loom_cc_library(
     "low.h"
   SRCS
     "low.c"
+    "low_allocation.c"
+    "low_allocation.h"
+    "low_mix.c"
+    "low_mix.h"
+    "low_names.c"
+    "low_names.h"
   DEPS
     ::report
     iree::base
+    loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
@@ -178,9 +191,14 @@ loom_cc_test(
   NAME
     format_test
   SRCS
+    "format_json_test.cc"
+    "format_lowering_test.cc"
+    "format_planning_test.cc"
     "format_test.cc"
+    "memory_summary_test.cc"
   DEPS
     ::format
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
