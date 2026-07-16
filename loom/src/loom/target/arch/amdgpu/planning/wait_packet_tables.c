@@ -170,35 +170,21 @@ const loom_low_descriptor_t* loom_amdgpu_wait_packet_resolve_descriptor(
   return descriptor;
 }
 
-iree_status_t loom_amdgpu_wait_packet_find_descriptor_template(
+static const loom_amdgpu_wait_packet_descriptor_template_t*
+loom_amdgpu_wait_packet_find_descriptor_template(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
-    const loom_amdgpu_wait_packet_target_t* target,
-    const loom_amdgpu_wait_packet_descriptor_template_t**
-        out_packet_descriptor) {
-  *out_packet_descriptor = NULL;
+    const loom_amdgpu_wait_packet_target_t* target) {
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set, descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU explicit wait packet uses a descriptor outside the target "
-        "descriptor set");
-  }
-  if (descriptor_ordinal < target->descriptor_lookup_count) {
-    const uint16_t descriptor_index_plus_one =
-        target->descriptor_lookup[descriptor_ordinal];
-    if (descriptor_index_plus_one != 0) {
-      const uint16_t descriptor_index = descriptor_index_plus_one - 1;
-      IREE_ASSERT_LT(descriptor_index, target->descriptor_count);
-      *out_packet_descriptor = &target->descriptors[descriptor_index];
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "AMDGPU explicit wait packet descriptor has no generated wait-packet "
-      "template");
+  IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
+  IREE_ASSERT_LT(descriptor_ordinal, target->descriptor_lookup_count);
+  const uint16_t descriptor_index_plus_one =
+      target->descriptor_lookup[descriptor_ordinal];
+  IREE_ASSERT_NE(descriptor_index_plus_one, 0u);
+  const uint16_t descriptor_index = descriptor_index_plus_one - 1;
+  IREE_ASSERT_LT(descriptor_index, target->descriptor_count);
+  return &target->descriptors[descriptor_index];
 }
 
 static const loom_named_attr_t* loom_amdgpu_wait_packet_find_attr(
@@ -216,48 +202,37 @@ static const loom_named_attr_t* loom_amdgpu_wait_packet_find_attr(
   return NULL;
 }
 
-static iree_status_t loom_amdgpu_wait_packet_immediate_value(
+static uint16_t loom_amdgpu_wait_packet_immediate_value(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_amdgpu_wait_packet_descriptor_immediate_template_t* immediate,
-    uint16_t* out_value) {
-  *out_value = immediate->no_wait_value;
+    const loom_amdgpu_wait_packet_descriptor_immediate_template_t* immediate) {
   const loom_named_attr_t* attr = loom_amdgpu_wait_packet_find_attr(
       module, loom_low_op_attrs(op), immediate->name);
   if (attr == NULL) {
-    return iree_ok_status();
+    return immediate->no_wait_value;
   }
-  if (attr->value.kind != LOOM_ATTR_I64 || attr->value.i64 < 0 ||
-      attr->value.i64 > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU verified explicit wait packet immediate '%.*s' is malformed",
-        (int)immediate->name.size, immediate->name.data);
-  }
-  *out_value = (uint16_t)attr->value.i64;
-  return iree_ok_status();
+  IREE_ASSERT_EQ(attr->value.kind, LOOM_ATTR_I64);
+  IREE_ASSERT_GE(attr->value.i64, 0);
+  IREE_ASSERT_LE((uint64_t)attr->value.i64, UINT16_MAX);
+  return (uint16_t)attr->value.i64;
 }
 
-iree_status_t loom_amdgpu_wait_packet_explicit_counter_mask(
+uint32_t loom_amdgpu_wait_packet_explicit_counter_mask(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, const loom_module_t* module,
-    const loom_op_t* op, uint32_t* out_counter_mask) {
-  *out_counter_mask = 0;
-
-  loom_amdgpu_wait_packet_target_t target = {0};
-  loom_amdgpu_wait_packet_analyze_target(descriptor_set, &target);
-
-  const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_find_descriptor_template(
-      descriptor_set, descriptor, &target, &packet_descriptor));
+    const loom_low_descriptor_t* descriptor,
+    const loom_amdgpu_wait_packet_target_t* target, const loom_module_t* module,
+    const loom_op_t* op) {
+  const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor =
+      loom_amdgpu_wait_packet_find_descriptor_template(descriptor_set,
+                                                       descriptor, target);
+  uint32_t counter_mask = 0;
   for (uint16_t i = 0; i < packet_descriptor->immediate_count; ++i) {
     const loom_amdgpu_wait_packet_descriptor_immediate_template_t* immediate =
         loom_amdgpu_wait_packet_descriptor_immediate(packet_descriptor, i);
-    uint16_t value = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_wait_packet_immediate_value(module, op, immediate, &value));
+    const uint16_t value =
+        loom_amdgpu_wait_packet_immediate_value(module, op, immediate);
     if (value < immediate->no_wait_value) {
-      *out_counter_mask |= immediate->counter_mask;
+      counter_mask |= immediate->counter_mask;
     }
   }
-  return iree_ok_status();
+  return counter_mask;
 }

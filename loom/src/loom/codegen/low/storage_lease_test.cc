@@ -304,55 +304,5 @@ TEST_F(LowStorageLeaseTest, BuildsEmptyLeaseTable) {
   EXPECT_EQ(table.records, nullptr);
 }
 
-iree_status_t InvalidAttachmentLeaseQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_node_t* node, loom_low_storage_lease_emit_fn_t emit,
-    void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)node;
-  return EmitEvent(emit, emit_user_data, LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
-                   LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND, 2, 0, 1,
-                   kSyntheticReleaseStore, IREE_SV("synthetic.store"),
-                   LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE);
-}
-
-TEST_F(LowStorageLeaseTest, RejectsInvalidAttachmentIndex) {
-  const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidAttachmentLeaseQuery,
-  };
-  loom_low_storage_lease_table_t table = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_storage_lease_build(
-                            &state_.schedule, &provider, &arena_, &table));
-}
-
-iree_status_t InvalidFlagsLeaseQuery(void* user_data,
-                                     const loom_low_schedule_table_t* schedule,
-                                     const loom_low_schedule_node_t* node,
-                                     loom_low_storage_lease_emit_fn_t emit,
-                                     void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)node;
-  return EmitEvent(emit, emit_user_data, LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
-                   LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND, 0, 0, 1,
-                   kSyntheticReleaseStore, IREE_SV("synthetic.store"),
-                   LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY |
-                       LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY);
-}
-
-TEST_F(LowStorageLeaseTest, RejectsContradictoryBoundaryFlags) {
-  const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidFlagsLeaseQuery,
-  };
-  loom_low_storage_lease_table_t table = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_storage_lease_build(
-                            &state_.schedule, &provider, &arena_, &table));
-}
-
 }  // namespace
 }  // namespace loom

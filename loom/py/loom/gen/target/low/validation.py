@@ -31,6 +31,7 @@ from loom.target.low_descriptors import (
     RegClassFlag,
     RegisterPart,
     StorageLeaseAttachment,
+    StorageLeaseFlag,
 )
 
 
@@ -499,6 +500,8 @@ def validate_descriptor_storage_leases(
             raise ValueError(f"{description} has zero release action id")
         if lease.release_reason_id == LOW_DESCRIPTOR_ENCODING_ID_NONE:
             raise ValueError(f"{description} has no release reason id")
+        if StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY in lease.flags and StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY in lease.flags:
+            raise ValueError(f"{description} cannot both release before and carry across a boundary")
         unit_count = attachment_unit_counts.get((lease.attachment, lease.attachment_index))
         if unit_count is None:
             raise ValueError(f"{description} references {lease.attachment.name.lower()} {lease.attachment_index}, which is not attached to the packet")

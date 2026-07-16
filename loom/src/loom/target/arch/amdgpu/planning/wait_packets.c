@@ -95,11 +95,9 @@ static iree_status_t loom_amdgpu_wait_packet_allocate(
       builder->target.max_descriptor_immediate_count == 0
           ? 1
           : builder->target.max_descriptor_immediate_count;
-  if (!iree_host_size_checked_mul(planned_action_count, max_immediate_count,
-                                  &builder->immediate_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU wait packet immediate capacity overflows");
-  }
+  IREE_ASSERT_LE(planned_action_count,
+                 IREE_HOST_SIZE_MAX / max_immediate_count);
+  builder->immediate_capacity = planned_action_count * max_immediate_count;
   if (builder->immediate_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         builder->arena, builder->immediate_capacity,
@@ -232,7 +230,7 @@ bool loom_amdgpu_wait_packet_try_select_counter_mask(
   return true;
 }
 
-static iree_status_t loom_amdgpu_wait_packet_materialize_group(
+static void loom_amdgpu_wait_packet_materialize_group(
     loom_amdgpu_wait_packet_builder_t* builder,
     const loom_amdgpu_wait_packet_group_t* group) {
   IREE_ASSERT_EQ(group->counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL, 0u);
@@ -242,17 +240,12 @@ static iree_status_t loom_amdgpu_wait_packet_materialize_group(
     const loom_amdgpu_wait_packet_descriptor_template_t* descriptor =
         loom_amdgpu_wait_packet_select_descriptor(
             builder, remaining_counter_mask, &covered_counter_mask);
-    if (descriptor == NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target cannot materialize wait packet for counter mask 0x%x",
-          remaining_counter_mask);
-    }
+    IREE_ASSERT_NE(descriptor, NULL);
+    IREE_ASSERT_NE(covered_counter_mask, 0u);
     loom_amdgpu_wait_packet_append_packet(builder, group, descriptor,
                                           covered_counter_mask);
     remaining_counter_mask &= ~covered_counter_mask;
   }
-  return iree_ok_status();
 }
 
 static bool loom_amdgpu_wait_packet_same_insertion_point(
@@ -279,12 +272,11 @@ static void loom_amdgpu_wait_packet_group_initialize(
   }
 }
 
-static iree_status_t loom_amdgpu_wait_packet_group_accumulate(
+static void loom_amdgpu_wait_packet_group_accumulate(
     loom_amdgpu_wait_packet_group_t* group,
     const loom_amdgpu_wait_plan_action_t* action) {
-  uint32_t counter_mask = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_counter_mask(action->counter_id, &counter_mask));
+  const uint32_t counter_mask =
+      loom_amdgpu_wait_counter_mask(action->counter_id);
   const uint32_t slot =
       loom_amdgpu_wait_counter_slot_from_id(action->counter_id);
   IREE_ASSERT_LT(slot, IREE_ARRAYSIZE(group->target_counts));
@@ -293,10 +285,9 @@ static iree_status_t loom_amdgpu_wait_packet_group_accumulate(
     group->target_counts[slot] = action->target_count;
   }
   ++group->source_action_count;
-  return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_packet_build_packets(
+static void loom_amdgpu_wait_packet_build_packets(
     loom_amdgpu_wait_packet_builder_t* builder) {
   const loom_amdgpu_wait_plan_t* wait_plan = builder->wait_plan;
   for (iree_host_size_t i = 0; i < wait_plan->action_count;) {
@@ -314,28 +305,23 @@ static iree_status_t loom_amdgpu_wait_packet_build_packets(
       const loom_amdgpu_wait_plan_action_t* group_action =
           &wait_plan->actions[next_action_index];
       if (group_action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED) {
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_wait_packet_group_accumulate(&group, group_action));
+        loom_amdgpu_wait_packet_group_accumulate(&group, group_action);
       }
       ++next_action_index;
     }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_wait_packet_materialize_group(builder, &group));
+    loom_amdgpu_wait_packet_materialize_group(builder, &group);
     i = next_action_index;
   }
-  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_wait_packet_plan_build(
     const loom_amdgpu_wait_plan_t* wait_plan, iree_arena_allocator_t* arena,
     loom_amdgpu_wait_packet_plan_t* out_plan) {
+  IREE_ASSERT_ARGUMENT(wait_plan);
+  IREE_ASSERT_ARGUMENT(wait_plan->schedule);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_plan);
   *out_plan = (loom_amdgpu_wait_packet_plan_t){0};
-  if (wait_plan == NULL || wait_plan->schedule == NULL || arena == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "wait plan, schedule, and arena are required for AMDGPU wait packet "
-        "materialization");
-  }
   loom_amdgpu_wait_packet_builder_t builder = {
       .wait_plan = wait_plan,
       .descriptor_set = wait_plan->schedule->target.descriptor_set,
@@ -344,7 +330,7 @@ iree_status_t loom_amdgpu_wait_packet_plan_build(
   loom_amdgpu_wait_packet_analyze_target(builder.descriptor_set,
                                          &builder.target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_allocate(&builder));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_build_packets(&builder));
+  loom_amdgpu_wait_packet_build_packets(&builder);
   *out_plan = (loom_amdgpu_wait_packet_plan_t){
       .wait_plan = wait_plan,
       .packets = builder.packets,

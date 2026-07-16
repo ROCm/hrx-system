@@ -127,10 +127,6 @@ iree_string_view_t loom_amdgpu_wait_counter_name(uint16_t counter_id);
 iree_string_view_t loom_amdgpu_wait_counter_progress_class_name(
     uint16_t counter_id);
 
-// Returns the bit mask for one AMDGPU wait counter id.
-iree_status_t loom_amdgpu_wait_counter_mask(uint16_t counter_id,
-                                            uint32_t* out_mask);
-
 // Returns the stable diagnostic spelling for an AMDGPU wait-plan reason.
 iree_string_view_t loom_amdgpu_wait_plan_reason_name(
     loom_amdgpu_wait_plan_reason_t reason);

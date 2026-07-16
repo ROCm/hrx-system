@@ -172,6 +172,33 @@ low.func.def target(@gfx1250_target) @gfx1250_scalar_domain_fma_forms(%acc32: re
 
 // ====
 
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @rdna3_wait_counter_out_of_range() asm<amdgpu.rdna3.core> {
+  // ERROR@+1: STRUCTURE/014 {attr_name="vmcnt", actual_value="64", expected_constraint="0..63"}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 64}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target(@gfx942_target) @cdna3_wait_counter_out_of_range() asm<amdgpu.cdna3.core> {
+  // ERROR@+1: STRUCTURE/014 {attr_name="vmcnt", actual_value="64", expected_constraint="0..63"}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 64}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @gfx1200_target
+low.func.def target(@gfx1200_target) @rdna4_wait_counter_out_of_range() asm<amdgpu.rdna4.core> {
+  // ERROR@+1: STRUCTURE/014 {attr_name="dscnt", actual_value="64", expected_constraint="0..63"}
+  s_wait_dscnt {dscnt = 64}
+  return
+}
+
+// ====
+
 amdgpu.target<gfx942> @gfx942_target
 low.func.def target(@gfx942_target) @cdna_scalar_f16_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
   %mad = v_mad_f16 %a, %b, %c
