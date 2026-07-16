@@ -188,12 +188,12 @@ TEST_F(HipLaunchValidationApiTest,
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
   hipKernelNodeParams valid_params = {
-      .blockDim = valid_dimension,
-      .extra = nullptr,
-      .func = const_cast<void*>(function),
-      .gridDim = valid_dimension,
-      .kernelParams = nullptr,
-      .sharedMemBytes = 0,
+      /*.blockDim=*/valid_dimension,
+      /*.extra=*/nullptr,
+      /*.func=*/const_cast<void*>(function),
+      /*.gridDim=*/valid_dimension,
+      /*.kernelParams=*/nullptr,
+      /*.sharedMemBytes=*/0,
   };
   hipGraphNode_t node = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -262,12 +262,12 @@ TEST_F(HipLaunchValidationApiTest,
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
   hipKernelNodeParams valid_params = {
-      .blockDim = valid_dimension,
-      .extra = nullptr,
-      .func = const_cast<void*>(function),
-      .gridDim = valid_dimension,
-      .kernelParams = nullptr,
-      .sharedMemBytes = 0,
+      /*.blockDim=*/valid_dimension,
+      /*.extra=*/nullptr,
+      /*.func=*/const_cast<void*>(function),
+      /*.gridDim=*/valid_dimension,
+      /*.kernelParams=*/nullptr,
+      /*.sharedMemBytes=*/0,
   };
   hipGraphNode_t node = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -317,20 +317,20 @@ TEST_F(HipLaunchValidationApiTest,
       HIP_LAUNCH_PARAM_END,
   };
   hipKernelNodeParams empty_params = {
-      .blockDim = valid_dimension,
-      .extra = nullptr,
-      .func = const_cast<void*>(empty_function),
-      .gridDim = valid_dimension,
-      .kernelParams = nullptr,
-      .sharedMemBytes = 0,
+      /*.blockDim=*/valid_dimension,
+      /*.extra=*/nullptr,
+      /*.func=*/const_cast<void*>(empty_function),
+      /*.gridDim=*/valid_dimension,
+      /*.kernelParams=*/nullptr,
+      /*.sharedMemBytes=*/0,
   };
   hipKernelNodeParams short_prepacked_params = {
-      .blockDim = valid_dimension,
-      .extra = extra,
-      .func = const_cast<void*>(prepacked_function),
-      .gridDim = valid_dimension,
-      .kernelParams = nullptr,
-      .sharedMemBytes = 0,
+      /*.blockDim=*/valid_dimension,
+      /*.extra=*/extra,
+      /*.func=*/const_cast<void*>(prepacked_function),
+      /*.gridDim=*/valid_dimension,
+      /*.kernelParams=*/nullptr,
+      /*.sharedMemBytes=*/0,
   };
 
   EXPECT_EQ(

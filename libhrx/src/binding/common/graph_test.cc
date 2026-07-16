@@ -24,13 +24,13 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   std::array<iree_hal_streaming_parameter_op_t, kArgumentCount> operations = {};
   for (uint16_t i = 0; i < kArgumentCount; ++i) {
     operations[i].copy = {
-        .size = sizeof(uint32_t),
-        .native_abi_destination_offset =
-            static_cast<uint16_t>(i * sizeof(uint32_t)),
-        .source_offset = static_cast<uint16_t>(i * sizeof(uint32_t)),
-        .source_ordinal = static_cast<uint16_t>(i),
-        .constant_destination_offset =
-            static_cast<uint16_t>(i * sizeof(uint32_t)),
+        /*.size=*/sizeof(uint32_t),
+        /*.native_abi_destination_offset=*/
+        static_cast<uint16_t>(i * sizeof(uint32_t)),
+        /*.source_offset=*/static_cast<uint16_t>(i * sizeof(uint32_t)),
+        /*.source_ordinal=*/static_cast<uint16_t>(i),
+        /*.constant_destination_offset=*/
+        static_cast<uint16_t>(i * sizeof(uint32_t)),
     };
   }
 
@@ -71,8 +71,8 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
                                           /*length=*/31),
     };
     node.attrs.kernel.bindings = {
-        .count = binding_storage.size(),
-        .values = binding_storage.data(),
+        /*.count=*/binding_storage.size(),
+        /*.values=*/binding_storage.data(),
     };
     node.attrs.kernel.binding_capacity = binding_storage.size();
 
@@ -84,11 +84,12 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
     };
     arguments[missing_ordinal] = nullptr;
     const iree_hal_streaming_dispatch_params_t params = {
-        .grid_dim = {23, 29, 31},
-        .block_dim = {37, 41, 43},
-        .shared_memory_bytes = 47,
-        .buffer = arguments.data(),
-        .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+        /*.grid_dim=*/{23, 29, 31},
+        /*.block_dim=*/{37, 41, 43},
+        /*.shared_memory_bytes=*/47,
+        /*.buffer=*/arguments.data(),
+        /*.buffer_size=*/0,
+        /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
     };
 
     EXPECT_THAT(Status(iree_hal_streaming_graph_set_kernel_node_params(
@@ -132,8 +133,8 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   node.attrs.kernel.constants_capacity = constants.size();
   std::array<iree_hal_buffer_ref_t, 1> binding_storage = {};
   node.attrs.kernel.bindings = {
-      .count = binding_storage.size(),
-      .values = binding_storage.data(),
+      /*.count=*/binding_storage.size(),
+      /*.values=*/binding_storage.data(),
   };
   node.attrs.kernel.binding_capacity = binding_storage.size();
 
@@ -143,8 +144,12 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   symbol.parameters.direct_arg_bytes = constants.size();
 
   const iree_hal_streaming_dispatch_params_t params = {
-      .buffer = reinterpret_cast<void*>(uintptr_t{1}),
-      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      /*.grid_dim=*/{},
+      /*.block_dim=*/{},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/reinterpret_cast<void*>(uintptr_t{1}),
+      /*.buffer_size=*/0,
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -182,9 +187,12 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
     exact_arguments[i] = i;
   }
   const iree_hal_streaming_dispatch_params_t exact_params = {
-      .buffer = exact_arguments.data(),
-      .buffer_size = exact_arguments.size(),
-      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      /*.grid_dim=*/{},
+      /*.block_dim=*/{},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/exact_arguments.data(),
+      /*.buffer_size=*/exact_arguments.size(),
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &exact_params));
@@ -203,9 +211,12 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
     padded_arguments[i] = static_cast<uint8_t>(0x80u + i);
   }
   const iree_hal_streaming_dispatch_params_t padded_params = {
-      .buffer = padded_arguments.data(),
-      .buffer_size = padded_arguments.size(),
-      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      /*.grid_dim=*/{},
+      /*.block_dim=*/{},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/padded_arguments.data(),
+      /*.buffer_size=*/padded_arguments.size(),
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &padded_params));
@@ -219,7 +230,12 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   iree_hal_streaming_symbol_t empty_symbol = {};
   empty_symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
   const iree_hal_streaming_dispatch_params_t empty_params = {
-      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      /*.grid_dim=*/{},
+      /*.block_dim=*/{},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/nullptr,
+      /*.buffer_size=*/0,
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &empty_symbol, &empty_params));

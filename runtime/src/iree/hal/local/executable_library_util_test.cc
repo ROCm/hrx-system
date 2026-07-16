@@ -16,25 +16,35 @@ namespace {
 
 TEST(ExecutableLibraryUtilTest, InitializesUnspecifiedParameterFields) {
   const iree_hal_executable_dispatch_parameter_v0_t parameter = {
-      .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
-      .size = sizeof(void*),
-      .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-      .name = UINT16_MAX,
-      .offset = 0,
+      /*.type=*/IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
+      /*.size=*/sizeof(void*),
+      /*.flags=*/IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
+      /*.name=*/UINT16_MAX,
+      /*.offset=*/0,
   };
   const iree_hal_executable_dispatch_parameter_v0_t* parameters[] = {
       &parameter,
   };
   const iree_hal_executable_dispatch_attrs_v0_t attributes = {
-      .parameter_count = 1,
+      /*.flags=*/{},
+      /*.local_memory_pages=*/{},
+      /*.binding_count=*/{},
+      /*.reserved_0=*/{},
+      /*.workgroup_size_x=*/{},
+      /*.workgroup_size_y=*/{},
+      /*.workgroup_size_z=*/{},
+      /*.parameter_count=*/1,
   };
   const iree_hal_executable_library_v0_t library = {
-      .exports =
-          {
-              .count = 1,
-              .attrs = &attributes,
-              .params = parameters,
-          },
+      /*.header=*/{},
+      /*.imports=*/{},
+      /*.exports=*/
+      {
+          /*.count=*/1,
+          /*.ptrs=*/{},
+          /*.attrs=*/&attributes,
+          /*.params=*/parameters,
+      },
   };
 
   iree_hal_executable_function_parameter_t output;
