@@ -11,6 +11,24 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    control_uniformity
+  HDRS
+    "control_uniformity.h"
+  SRCS
+    "control_uniformity.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ir::facts
+    loom::ops::op_defs
+    loom::util::cfg_graph
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     availability
   HDRS
     "availability.h"

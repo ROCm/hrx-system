@@ -78,6 +78,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::analysis::control_uniformity
     loom::codegen::low::pipeline::pass_environment
     loom::ir
     loom::ops::buffer

@@ -1,6 +1,12 @@
 // RUN: pass stage-loop-carried-fragments,dce
 
-func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_dense_accumulator_fragments() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -17,11 +23,18 @@ func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_v
     %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  test.use %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  kernel.return
 }
 
 // ----
-func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_dense_accumulator_fragments() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -31,45 +44,52 @@ func.def @stage_dense_accumulator_fragments(%lhs_values: vector<16xbf16>, %rhs_v
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
-  %29 = index.constant 4096 : offset
-  %30 = index.constant 0 : offset
-  %31 = index.constant 0 : index
-  %32 = encoding.layout.dense : encoding<layout>
-  %33 = buffer.alloca %29 {base_alignment = 16, memory_space = workgroup} : buffer
-  %34 = buffer.view %33[%30] : buffer -> view<16x64xf32, %32>
-  %35 = index.constant 0 : index
-  vector.fragment.store<result> %init, %34[%31, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-  %36 = index.constant 16 : index
-  vector.fragment.store<result> %init, %34[%31, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-  %37 = index.constant 32 : index
-  vector.fragment.store<result> %init, %34[%31, %37] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-  %38 = index.constant 48 : index
-  vector.fragment.store<result> %init, %34[%31, %38] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
+  %27 = index.constant 4096 : offset
+  %28 = index.constant 0 : offset
+  %29 = index.constant 0 : index
+  %30 = encoding.layout.dense : encoding<layout>
+  %31 = buffer.alloca %27 {base_alignment = 16, memory_space = workgroup} : buffer
+  %32 = buffer.view %31[%28] : buffer -> view<16x64xf32, %30>
+  %33 = index.constant 0 : index
+  vector.fragment.store<result> %init, %32[%29, %33] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+  %34 = index.constant 16 : index
+  vector.fragment.store<result> %init, %32[%29, %34] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+  %35 = index.constant 32 : index
+  vector.fragment.store<result> %init, %32[%29, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+  %36 = index.constant 48 : index
+  vector.fragment.store<result> %init, %32[%29, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  scf.for %39 = [%zero to %four step %one] {
-    %40 = vector.fragment.load<init> %34[%31, %35] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-    %41 = vector.fragment.load<init> %34[%31, %36] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-    %42 = vector.fragment.load<init> %34[%31, %37] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-    %43 = vector.fragment.load<init> %34[%31, %38] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-    %next0 = vector.mma %lhs, %rhs, %40 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next1 = vector.mma %lhs, %rhs, %41 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next2 = vector.mma %lhs, %rhs, %42 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next3 = vector.mma %lhs, %rhs, %43 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    vector.fragment.store<result> %next0, %34[%31, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-    vector.fragment.store<result> %next1, %34[%31, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-    vector.fragment.store<result> %next2, %34[%31, %37] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
-    vector.fragment.store<result> %next3, %34[%31, %38] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %32>
+  scf.for %37 = [%zero to %four step %one] {
+    %38 = vector.fragment.load<init> %32[%29, %33] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+    %39 = vector.fragment.load<init> %32[%29, %34] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+    %40 = vector.fragment.load<init> %32[%29, %35] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+    %41 = vector.fragment.load<init> %32[%29, %36] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+    %next0 = vector.mma %lhs, %rhs, %38 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %39 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %40 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %41 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    vector.fragment.store<result> %next0, %32[%29, %33] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+    vector.fragment.store<result> %next1, %32[%29, %34] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+    vector.fragment.store<result> %next2, %32[%29, %35] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
+    vector.fragment.store<result> %next3, %32[%29, %36] shape [%m, %n] : vector<8xf32>, view<16x64xf32, %30>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
-  %result3 = vector.fragment.load<init> %34[%31, %38] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-  %result2 = vector.fragment.load<init> %34[%31, %37] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-  %result1 = vector.fragment.load<init> %34[%31, %36] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-  %result0 = vector.fragment.load<init> %34[%31, %35] shape [%m, %n] : view<16x64xf32, %32> -> vector<8xf32>
-  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  %result3 = vector.fragment.load<init> %32[%29, %36] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+  %result2 = vector.fragment.load<init> %32[%29, %35] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+  %result1 = vector.fragment.load<init> %32[%29, %34] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+  %result0 = vector.fragment.load<init> %32[%29, %33] shape [%m, %n] : view<16x64xf32, %30> -> vector<8xf32>
+  test.use %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  kernel.return
 }
 
 // ====
-func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_blocked_accumulator_fragment() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -84,11 +104,18 @@ func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_va
     %next = vector.mma %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<16xf32>
     scf.yield %next : vector<16xf32>
   }
-  func.return %result : vector<16xf32>
+  test.use %result : vector<16xf32>
+  kernel.return
 }
 
 // ----
-func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_blocked_accumulator_fragment() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -99,29 +126,36 @@ func.def @stage_blocked_accumulator_fragment(%lhs_values: vector<4xf16>, %rhs_va
   %lhs = vector.fragment<lhs> %lhs_values shape [blocks(%blocks), %m, %k] : vector<4xf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [blocks(%blocks), %k, %n] : vector<4xf16>
   %init = vector.fragment<init> %accumulator shape [blocks(%blocks), %m, %n] : vector<16xf32>
-  %18 = index.constant 4096 : offset
-  %19 = index.constant 0 : offset
-  %20 = index.constant 0 : index
-  %21 = encoding.layout.dense : encoding<layout>
-  %22 = buffer.alloca %18 {base_alignment = 16, memory_space = workgroup} : buffer
-  %23 = buffer.view %22[%19] : buffer -> view<4x16x16xf32, %21>
-  %24 = index.constant 0 : index
-  vector.fragment.store<result> %init, %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %21>
+  %19 = index.constant 4096 : offset
+  %20 = index.constant 0 : offset
+  %21 = index.constant 0 : index
+  %22 = encoding.layout.dense : encoding<layout>
+  %23 = buffer.alloca %19 {base_alignment = 16, memory_space = workgroup} : buffer
+  %24 = buffer.view %23[%20] : buffer -> view<4x16x16xf32, %22>
+  %25 = index.constant 0 : index
+  vector.fragment.store<result> %init, %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %22>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  scf.for %25 = [%zero to %four step %one] {
-    %26 = vector.fragment.load<init> %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %21> -> vector<16xf32>
-    %next = vector.mma %lhs, %rhs, %26 : vector<4xf16>, vector<4xf16>, vector<16xf32>
-    vector.fragment.store<result> %next, %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %21>
+  scf.for %26 = [%zero to %four step %one] {
+    %27 = vector.fragment.load<init> %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %22> -> vector<16xf32>
+    %next = vector.mma %lhs, %rhs, %27 : vector<4xf16>, vector<4xf16>, vector<16xf32>
+    vector.fragment.store<result> %next, %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<4x16x16xf32, %22>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
-  %result = vector.fragment.load<init> %23[%20, %20, %24] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %21> -> vector<16xf32>
-  func.return %result : vector<16xf32>
+  %result = vector.fragment.load<init> %24[%21, %21, %25] shape [blocks(%blocks), %m, %n] : view<4x16x16xf32, %22> -> vector<16xf32>
+  test.use %result : vector<16xf32>
+  kernel.return
 }
 
 // ====
 // RUN: pass-report stage-loop-carried-fragments,dce
 
-func.def @report_blocked_accumulator_fragment_staging(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) -> (vector<16xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @report_blocked_accumulator_fragment_staging() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<4xf16>, %rhs_values: vector<4xf16>, %accumulator: vector<16xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -136,10 +170,15 @@ func.def @report_blocked_accumulator_fragment_staging(%lhs_values: vector<4xf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<16xf32>
     scf.yield %next : vector<16xf32>
   }
-  func.return %result : vector<16xf32>
+  test.use %result : vector<16xf32>
+  kernel.return
 }
 
-func.def @explicitly_stage_one_accumulator_fragment(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+kernel.def target(@target) @explicitly_stage_one_accumulator_fragment() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -153,10 +192,15 @@ func.def @explicitly_stage_one_accumulator_fragment(%lhs_values: vector<16xbf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
-  func.return %result : vector<8xf32>
+  test.use %result : vector<8xf32>
+  kernel.return
 }
 
-func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+kernel.def target(@target) @report_dense_accumulator_fragment_staging() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -173,7 +217,8 @@ func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>
     %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  test.use %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  kernel.return
 }
 
 // ----
@@ -187,7 +232,13 @@ COMPILE-REPORT: source_low_transform[2] function=report_dense_accumulator_fragme
 // ====
 // RUN: pass-report sink-single-use-reads,stage-loop-carried-fragments,dce
 
-func.def @stage_after_sinking_single_use_fragment_read(%rhs_buffer: buffer, %base: offset, %lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @stage_after_sinking_single_use_fragment_read() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%rhs_buffer: buffer, %base: offset, %lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -209,7 +260,8 @@ func.def @stage_after_sinking_single_use_fragment_read(%rhs_buffer: buffer, %bas
     test.use %noise : vector<8xf32>
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  test.use %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  kernel.return
 }
 
 // ----
@@ -220,7 +272,7 @@ COMPILE-REPORT: source_low_transform[0] function=stage_after_sinking_single_use_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %one = index.constant 1 : index
@@ -253,7 +305,7 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
 }
 
 // ----
-amdgpu.target<gfx1100> @target
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 
 kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %one = index.constant 1 : index
@@ -272,44 +324,200 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %input = vector.fragment<init> %payload shape [%m, %n] : vector<8xf32>
   %lhs = vector.fragment<lhs> %payload shape [%m, %k] : vector<8xf32>
   %rhs = vector.fragment<rhs> %payload shape [%k, %n] : vector<8xf32>
-  %30 = index.constant 16384 : offset
+  %30 = index.constant 8192 : offset
   %31 = index.constant 0 : offset
   %32 = index.constant 0 : index
   %33 = encoding.layout.dense : encoding<layout>
   %34 = buffer.alloca %30 {base_alignment = 16, memory_space = workgroup} : buffer
-  %35 = buffer.view %34[%31] : buffer -> view<16x256xf32, %33>
+  %35 = buffer.view %34[%31] : buffer -> view<16x128xf32, %33>
   %36 = kernel.subgroup.id : index
   %37 = index.constant 64 : index
   %38 = index.mul %36, %37 : index
-  vector.fragment.store<result> %input, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  vector.fragment.store<result> %input, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
   %39 = index.constant 16 : index
   %40 = index.add %38, %39 : index
-  vector.fragment.store<result> %input, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  vector.fragment.store<result> %input, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
   %41 = index.constant 32 : index
   %42 = index.add %38, %41 : index
-  vector.fragment.store<result> %input, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  vector.fragment.store<result> %input, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
   %43 = index.constant 48 : index
   %44 = index.add %38, %43 : index
-  vector.fragment.store<result> %input, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+  vector.fragment.store<result> %input, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   scf.for %45 = [%zero to %four step %one] {
-    %46 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
-    %47 = vector.fragment.load<init> %35[%32, %40] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
-    %48 = vector.fragment.load<init> %35[%32, %42] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
-    %49 = vector.fragment.load<init> %35[%32, %44] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+    %46 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
+    %47 = vector.fragment.load<init> %35[%32, %40] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
+    %48 = vector.fragment.load<init> %35[%32, %42] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
+    %49 = vector.fragment.load<init> %35[%32, %44] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
     %next0 = vector.mma %lhs, %rhs, %46 : vector<8xf32>, vector<8xf32>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %47 : vector<8xf32>, vector<8xf32>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %48 : vector<8xf32>, vector<8xf32>, vector<8xf32>
     %next3 = vector.mma %lhs, %rhs, %49 : vector<8xf32>, vector<8xf32>, vector<8xf32>
-    vector.fragment.store<result> %next0, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
-    vector.fragment.store<result> %next1, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
-    vector.fragment.store<result> %next2, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
-    vector.fragment.store<result> %next3, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x256xf32, %33>
+    vector.fragment.store<result> %next0, %35[%32, %38] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
+    vector.fragment.store<result> %next1, %35[%32, %40] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
+    vector.fragment.store<result> %next2, %35[%32, %42] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
+    vector.fragment.store<result> %next3, %35[%32, %44] shape [%m, %n] : vector<8xf32>, view<16x128xf32, %33>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
-  %result0 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x256xf32, %33> -> vector<8xf32>
+  %result0 = vector.fragment.load<init> %35[%32, %38] shape [%m, %n] : view<16x128xf32, %33> -> vector<8xf32>
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%zero_offset] : buffer -> view<16x64xf32, #dense>
   vector.fragment.store<result> %result0, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x64xf32, #dense>
   kernel.return
 }
+
+// ====
+
+func.def @does_not_stage_ordinary_function(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  func.return %result : vector<8xf32>
+}
+
+// ----
+func.def @does_not_stage_ordinary_function(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  func.return %result : vector<8xf32>
+}
+
+// ====
+// RUN: pass-report stage-loop-carried-fragments,dce
+
+test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @decline_subgroup_dependent_loop_bound() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %subgroup = kernel.subgroup.id : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result = scf.for %tile = [%zero to %subgroup step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  test.use %result : vector<8xf32>
+  kernel.return
+}
+
+kernel.def target(@target) @decline_subgroup_dependent_branch() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %subgroup = kernel.subgroup.id : index
+  %is_first_subgroup = index.cmp eq, %subgroup, %zero : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  scf.if %is_first_subgroup {
+    %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+      %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    test.use %result : vector<8xf32>
+    scf.yield
+  }
+  kernel.return
+}
+
+kernel.def target(@target) @decline_lane_dependent_cfg_arm() {
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %four : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  cfg.cond_br %active, ^active_arm, ^join
+^active_arm:
+  %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  test.use %result : vector<8xf32>
+  cfg.br ^join
+^join:
+  kernel.return
+}
+
+kernel.def target(@target) @stage_exact_single_subgroup_control() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %subgroup = kernel.subgroup.id : index
+  %is_first_subgroup = index.cmp eq, %subgroup, %zero : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  scf.if %is_first_subgroup {
+    %result = scf.for %tile = [%zero to %four step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+      %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    test.use %result : vector<8xf32>
+    scf.yield
+  }
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
+COMPILE-REPORT: source_low_transforms rows=4
+COMPILE-REPORT: source_low_transform[0] function=decline_subgroup_dependent_loop_bound source_op=scf.for transform=stage-loop-carried-fragments outcome=declined reason=control_not_workgroup_uniform candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[1] function=decline_subgroup_dependent_branch source_op=scf.for transform=stage-loop-carried-fragments outcome=declined reason=control_not_workgroup_uniform candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[2] function=decline_lane_dependent_cfg_arm source_op=scf.for transform=stage-loop-carried-fragments outcome=declined reason=control_not_workgroup_uniform candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 inserted_loads=2 inserted_stores=2 barriers=2
+COMPILE-REPORT: source_low_transform[3] function=stage_exact_single_subgroup_control source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2

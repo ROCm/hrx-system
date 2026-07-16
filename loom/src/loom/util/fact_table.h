@@ -51,6 +51,9 @@ typedef struct loom_value_fact_table_t loom_value_fact_table_t;
 typedef struct loom_value_fact_extension_entry_t
     loom_value_fact_extension_entry_t;
 typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
+typedef struct loom_value_fact_cfg_graph_entry_t
+    loom_value_fact_cfg_graph_entry_t;
+typedef struct loom_cfg_graph_t loom_cfg_graph_t;
 typedef struct loom_target_bundle_t loom_target_bundle_t;
 
 typedef const loom_value_fact_domain_t* (
@@ -640,6 +643,20 @@ struct loom_value_fact_table_t {
   // Context object passed to op-specific fact inference callbacks.
   loom_fact_context_t context;
 
+  // CFG graphs built while solving block argument facts. Entries and buckets
+  // have transient scope lifetime and let downstream analyses reuse the graph
+  // extraction already paid for by value-fact computation.
+  struct {
+    // Hash buckets containing collision chains keyed by region address.
+    loom_value_fact_cfg_graph_entry_t** buckets;
+    // Power-of-two hash bucket count.
+    iree_host_size_t bucket_count;
+    // Number of cached CFG region graphs.
+    iree_host_size_t count;
+    // Intrusive list of all entries for bucket-table rehashing.
+    loom_value_fact_cfg_graph_entry_t* entries;
+  } cfg_graphs;
+
   // Interned fact extension payloads. Extension IDs stored in
   // loom_value_facts_t are one-based indexes into entries and are only valid
   // for this table/context.
@@ -760,6 +777,12 @@ static inline loom_value_facts_t loom_value_fact_table_lookup(
   }
   return table->entries[value_id];
 }
+
+// Returns the CFG graph built while computing facts for |region|, or NULL when
+// the region was not part of the populated fact scope. The returned graph is
+// borrowed from |table| and remains valid until the table scope is cleared.
+const loom_cfg_graph_t* loom_value_fact_table_lookup_cfg_graph(
+    const loom_value_fact_table_t* table, const loom_region_t* region);
 
 // Defines (or updates) facts for a value, growing the table if needed.
 iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,

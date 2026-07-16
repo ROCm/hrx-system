@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_library(
+    name = "control_uniformity",
+    srcs = ["control_uniformity.c"],
+    hdrs = ["control_uniformity.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "availability",
     srcs = ["availability.c"],
     hdrs = ["availability.h"],

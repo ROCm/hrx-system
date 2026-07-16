@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/control_uniformity.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -141,6 +142,9 @@ typedef struct loom_stage_loop_carried_fragments_context_t {
 
   // Rewriter owning IR mutations.
   loom_rewriter_t* rewriter;
+
+  // Execution-uniformity analysis sharing the rewriter's value facts.
+  loom_control_uniformity_info_t* control_uniformity;
 } loom_stage_loop_carried_fragments_context_t;
 
 static iree_status_t loom_stage_loop_carried_fragments_fact_scope(
@@ -365,9 +369,9 @@ static bool loom_stage_loop_carried_fragments_same_candidate_contract(
 static bool loom_stage_loop_carried_fragments_exact_subgroup_count(
     const loom_stage_loop_carried_fragments_context_t* context,
     uint32_t* out_count) {
-  *out_count = 1;
+  *out_count = 0;
   if (!loom_kernel_def_isa(context->function.op)) {
-    return true;
+    return false;
   }
 
   const loom_value_fact_table_t* fact_table = context->rewriter->fact_table;
@@ -904,6 +908,20 @@ static iree_status_t loom_stage_loop_carried_fragments_try_rewrite(
     return iree_ok_status();
   }
 
+  loom_control_uniformity_failure_t control_failure = {0};
+  bool control_proven = false;
+  IREE_RETURN_IF_ERROR(loom_control_uniformity_prove_execution(
+      context->control_uniformity, yield,
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP, &control_failure,
+      &control_proven));
+  if (!control_proven) {
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_report(
+        context, loom_op_name(context->module, op), op->kind, &staged_fragments,
+        IREE_SV("declined"), IREE_SV("control_not_workgroup_uniform"),
+        /*workgroup_memory_byte_count=*/0));
+    return iree_ok_status();
+  }
+
   uint32_t subgroup_count = 1;
   if (!loom_stage_loop_carried_fragments_exact_subgroup_count(
           context, &subgroup_count)) {
@@ -960,7 +978,9 @@ static iree_status_t loom_stage_loop_carried_fragments_has_structural_candidate(
 iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
                                                     loom_module_t* module,
                                                     loom_func_like_t function) {
-  if (!loom_func_like_body(function)) return iree_ok_status();
+  if (!loom_kernel_def_isa(function.op) || !loom_func_like_body(function)) {
+    return iree_ok_status();
+  }
 
   loom_stage_loop_carried_fragments_statistics_t* statistics =
       loom_stage_loop_carried_fragments_statistics(pass);
@@ -997,6 +1017,10 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
         loom_rewriter_enable_analysis(&rewriter, function, facts));
     IREE_RETURN_IF_ERROR(loom_rewriter_seed_function(&rewriter, function));
 
+    loom_control_uniformity_info_t control_uniformity;
+    loom_control_uniformity_info_initialize(module, facts, pass->arena,
+                                            &control_uniformity);
+
     loom_stage_loop_carried_fragments_context_t context = {
         .pass = pass,
         .statistics = statistics,
@@ -1004,6 +1028,7 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
         .function = function,
         .report = compile_report,
         .rewriter = &rewriter,
+        .control_uniformity = &control_uniformity,
     };
     iree_status_t status = iree_ok_status();
     loom_op_t* op = NULL;

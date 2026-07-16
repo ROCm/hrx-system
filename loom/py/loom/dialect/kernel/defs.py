@@ -306,6 +306,7 @@ kernel_def = Op(
             doc="Kernel body.",
             terminator="kernel.return",
             buffer_arg_memory_space="global",
+            arg_uniform_scope="workgroup",
         ),
     ],
     interfaces=[
@@ -763,6 +764,7 @@ kernel_subgroup_broadcast = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_broadcast_verify",
+    facts="loom_kernel_subgroup_broadcast_facts",
     format=[
         Ref("value"),
         kw("from"),
@@ -786,6 +788,7 @@ kernel_subgroup_broadcast_first = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_value_result_verify",
+    facts="loom_kernel_subgroup_broadcast_first_facts",
     format=[Ref("value"), COLON, TypeOf("value")],
     examples=["%r = kernel.subgroup.broadcast.first %v : f32"],
 )
@@ -815,6 +818,7 @@ kernel_subgroup_reduce = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_reduce_verify",
+    facts="loom_kernel_subgroup_reduce_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -841,6 +845,7 @@ kernel_subgroup_scan = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_scan_verify",
+    facts="loom_kernel_scan_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -964,6 +969,7 @@ kernel_workgroup_reduce = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_reduce_verify",
+    facts="loom_kernel_workgroup_reduce_facts",
     format=[TemplateParam("kind"), Ref("value"), COLON, TypeOf("value")],
     examples=["%sum = kernel.workgroup.reduce<addf> %v : f32"],
 )
@@ -984,6 +990,7 @@ kernel_workgroup_scan = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_scan_verify",
+    facts="loom_kernel_scan_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -1003,6 +1010,7 @@ kernel_workgroup_vote_any = Op(
     operands=[Operand("predicate", I1, doc="Per-invocation predicate.")],
     results=[Result("result", I1, doc="Workgroup-uniform vote result.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate")],
     examples=["%any = kernel.workgroup.vote.any %p : i1"],
 )
@@ -1016,6 +1024,7 @@ kernel_workgroup_vote_all = Op(
     operands=[Operand("predicate", I1, doc="Per-invocation predicate.")],
     results=[Result("result", I1, doc="Workgroup-uniform vote result.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate")],
     examples=["%all = kernel.workgroup.vote.all %p : i1"],
 )
@@ -1030,6 +1039,7 @@ kernel_workgroup_vote_count = Op(
     results=[Result("result", INTEGER, doc="Integer true-predicate count.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_vote_count_verify",
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate"), ARROW, ResultType("result")],
     examples=["%count = kernel.workgroup.vote.count %p : i1 -> i32"],
 )

@@ -625,25 +625,29 @@ ERR_STRUCTURE_037 = ErrorDef(
     ),
 )
 
-# ERR_STRUCTURE_038: Workgroup barrier is under divergent control.
+# ERR_STRUCTURE_038: Barrier control is not uniform at its execution scope.
 ERR_STRUCTURE_038 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=38,
     severity=Severity.ERROR,
-    summary="Workgroup barrier is under divergent control.",
+    summary="Barrier control is not uniform at its execution scope.",
     message=(
-        "'{op_name}' with workgroup scope is control-dependent on "
-        "lane-varying {control_kind} '{control_value}' from '{control_op_name}'"
+        "'{op_name}' requires {required_uniform_scope}-uniform "
+        "{control_kind} '{control_value}' "
+        "from '{control_op_name}', but its control distribution is "
+        "{control_distribution}"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("required_uniform_scope", ParamKind.STRING),
         ErrorParam("control_kind", ParamKind.STRING),
         ErrorParam("control_value", ParamKind.STRING),
         ErrorParam("control_op_name", ParamKind.STRING),
+        ErrorParam("control_distribution", ParamKind.STRING),
     ),
     fix_hint=(
-        "Move the workgroup barrier outside lane-varying control and guard "
-        "only the memory access or final store"
+        "Move the barrier outside insufficiently uniform control or make every "
+        "invocation in the barrier scope take the same control path"
     ),
 )
 
