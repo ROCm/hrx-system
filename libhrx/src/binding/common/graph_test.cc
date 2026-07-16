@@ -19,6 +19,28 @@ using ::iree::Status;
 using ::iree::StatusCode;
 using ::iree::testing::status::StatusIs;
 
+// Owns a dependency-free graph node using the same variable-sized allocation
+// shape as production graph construction.
+class GraphNodeStorage {
+ public:
+  GraphNodeStorage() {
+    IREE_CHECK_OK(iree_allocator_malloc(iree_allocator_system(), sizeof(*node_),
+                                        (void**)&node_));
+    memset(node_, 0, sizeof(*node_));
+  }
+
+  ~GraphNodeStorage() { iree_allocator_free(iree_allocator_system(), node_); }
+
+  GraphNodeStorage(const GraphNodeStorage&) = delete;
+  GraphNodeStorage& operator=(const GraphNodeStorage&) = delete;
+
+  iree_hal_streaming_graph_node_t* get() const { return node_; }
+
+ private:
+  // Allocated graph node header with no trailing dependency pointers.
+  iree_hal_streaming_graph_node_t* node_ = nullptr;
+};
+
 TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   constexpr size_t kArgumentCount = 3;
   std::array<iree_hal_streaming_parameter_op_t, kArgumentCount> operations = {};
@@ -52,7 +74,8 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
     const std::array<uint8_t, kArgumentCount * sizeof(uint32_t)>
         original_constants = constants;
     iree_hal_streaming_symbol_t previous_symbol = {};
-    iree_hal_streaming_graph_node_t node = {};
+    GraphNodeStorage node_storage;
+    iree_hal_streaming_graph_node_t& node = *node_storage.get();
     node.graph = &graph;
     node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
     node.attrs.kernel.symbol = &previous_symbol;
@@ -120,7 +143,8 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   std::array<uint8_t, 16> constants = {};
   constants.fill(0x5A);
   const std::array<uint8_t, 16> original_constants = constants;
-  iree_hal_streaming_graph_node_t node = {};
+  GraphNodeStorage node_storage;
+  iree_hal_streaming_graph_node_t& node = *node_storage.get();
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
   iree_hal_streaming_symbol_t previous_symbol = {};
@@ -170,7 +194,8 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
 
   std::array<uint8_t, 24> constants = {};
   constants.fill(0xA5);
-  iree_hal_streaming_graph_node_t node = {};
+  GraphNodeStorage node_storage;
+  iree_hal_streaming_graph_node_t& node = *node_storage.get();
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
   node.attrs.kernel.constants =

@@ -13,17 +13,15 @@
 
 namespace {
 
-iree_hal_streaming_device_t MakeLaunchDevice() {
-  iree_hal_streaming_device_t device = {};
-  device.max_grid_dim[0] = 1024;
-  device.max_grid_dim[1] = 1024;
-  device.max_grid_dim[2] = 1024;
-  device.max_block_dim[0] = 1024;
-  device.max_block_dim[1] = 1024;
-  device.max_block_dim[2] = 64;
-  device.max_threads_per_block = 1024;
-  device.max_shared_memory_per_block = 64 * 1024;
-  return device;
+void InitializeLaunchDevice(iree_hal_streaming_device_t* device) {
+  device->max_grid_dim[0] = 1024;
+  device->max_grid_dim[1] = 1024;
+  device->max_grid_dim[2] = 1024;
+  device->max_block_dim[0] = 1024;
+  device->max_block_dim[1] = 1024;
+  device->max_block_dim[2] = 64;
+  device->max_threads_per_block = 1024;
+  device->max_shared_memory_per_block = 64 * 1024;
 }
 
 TEST(LaunchParamsTest, ParseLaunchExtraAcceptsBufferAndSize) {
@@ -114,7 +112,8 @@ TEST(LaunchParamsTest, ParseLaunchExtraRejectsMarkerValues) {
 }
 
 TEST(LaunchParamsTest, ValidateLaunchConfigurationAcceptsDeviceLimits) {
-  iree_hal_streaming_device_t device = MakeLaunchDevice();
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
   iree_hal_streaming_symbol_t symbol = {};
   symbol.max_threads_per_block = 512;
   symbol.max_dynamic_shared_size_bytes = 32 * 1024;
@@ -127,7 +126,8 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationAcceptsDeviceLimits) {
 }
 
 TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsInvalidDimensions) {
-  iree_hal_streaming_device_t device = MakeLaunchDevice();
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
 
   EXPECT_EQ(hipErrorInvalidConfiguration,
             iree_hip_validate_launch_configuration(
@@ -142,7 +142,8 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsInvalidDimensions) {
 }
 
 TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsResourceExcess) {
-  iree_hal_streaming_device_t device = MakeLaunchDevice();
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
   iree_hal_streaming_symbol_t symbol = {};
   symbol.max_threads_per_block = 256;
   symbol.max_dynamic_shared_size_bytes = 4096;
@@ -161,7 +162,8 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsResourceExcess) {
 
 TEST(LaunchParamsTest,
      ValidateLaunchConfigurationRejectsUnrepresentableSharedMemory) {
-  iree_hal_streaming_device_t device = MakeLaunchDevice();
+  iree_hal_streaming_device_t device = {};
+  InitializeLaunchDevice(&device);
   device.max_shared_memory_per_block = UINT32_MAX;
 
   EXPECT_EQ(hipSuccess,

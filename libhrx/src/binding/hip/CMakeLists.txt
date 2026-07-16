@@ -70,6 +70,7 @@ iree_cc_library(
 )
 endif()
 
+if(TARGET libhrx_src_binding_hip_amdhip64)
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   OUTPUT_NAME amdhip64
   VERSION 7.9999.0
@@ -77,6 +78,7 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
 )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
@@ -96,6 +98,7 @@ iree_cc_test(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     hip_launch_validation_api_test
@@ -118,6 +121,7 @@ iree_cc_test(
     lsan
     rocm
 )
+endif()
 
 iree_cc_test(
   NAME
