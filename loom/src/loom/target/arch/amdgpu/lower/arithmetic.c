@@ -24,6 +24,17 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
 
+iree_status_t loom_amdgpu_select_arithmetic_contract(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    bool* out_selected) {
+  *out_selected = false;
+  loom_low_lower_rule_selection_t selection = {0};
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_select_contract(
+      context, &loom_amdgpu_arithmetic_lower_rule_set, source_op, &selection));
+  *out_selected = selection.rule != NULL;
+  return iree_ok_status();
+}
+
 static bool loom_amdgpu_type_is_f16(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F16;

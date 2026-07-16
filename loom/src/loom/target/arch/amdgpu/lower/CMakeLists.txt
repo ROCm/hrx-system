@@ -231,6 +231,7 @@ loom_cc_library(
     "types.h"
     "value/integer64.h"
     "value/scalar_conversion.h"
+    "value/vector_conversion.h"
     "values.h"
     "workgroup.h"
   TEXTUAL_HDRS
@@ -313,6 +314,7 @@ loom_cc_library(
     "types.c"
     "value/integer64.c"
     "value/scalar_conversion.c"
+    "value/vector_conversion.c"
     "values.c"
   DEPS
     ::kinds
