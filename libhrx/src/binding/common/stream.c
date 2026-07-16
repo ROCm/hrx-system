@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "common/kernel_arguments.h"
 
 // Env-gated timing for launch-path investigation. This intentionally uses plain
 // counters because the current perf probes run single-threaded and we want the
@@ -1190,12 +1191,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // contain device pointers either as formal pointer arguments or inside
     // opaque data, so preserve the bytes exactly and rely on HIP lifetime
     // ordering instead of trying to translate visible pointer slots.
-    if (params->buffer_size != 0 && !params->buffer) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "pre-packed kernel arguments require storage "
-                              "when length is non-zero");
-    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_validate_prepacked_kernel_arguments(symbol, params));
     constants = params->buffer;
     constants_size = params->buffer_size;
     binding_list.count = 0;  // No IREE bindings, using raw pointers.

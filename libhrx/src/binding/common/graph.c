@@ -7,6 +7,7 @@
 #include "common/graph.h"
 
 #include "common/internal.h"
+#include "common/kernel_arguments.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_t (template)
@@ -1154,6 +1155,11 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
         IREE_STATUS_UNIMPLEMENTED,
         "non-empty args-array graph kernel launch requires parameter metadata");
   }
+  if (is_pre_packed) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_validate_prepacked_kernel_arguments(symbol, params));
+  }
 
   iree_host_size_t constants_capacity = symbol->parameters.constant_bytes;
   if (params->buffer_size > constants_capacity) {
@@ -1311,6 +1317,10 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "non-empty args-array graph kernel launch requires parameter metadata");
+  }
+  if (is_pre_packed) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_validate_prepacked_kernel_arguments(symbol, params));
   }
 
   iree_host_size_t constants_capacity = symbol->parameters.constant_bytes;

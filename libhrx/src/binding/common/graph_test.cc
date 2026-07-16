@@ -112,14 +112,21 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   }
 }
 
-TEST(GraphTest, KernelParameterUpdatePreservesEmptyPrepackedSpan) {
+TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   iree_hal_streaming_graph_t graph = {};
   graph.host_allocator = iree_allocator_system();
 
   std::array<uint8_t, 16> constants = {};
+  constants.fill(0x5A);
+  const std::array<uint8_t, 16> original_constants = constants;
   iree_hal_streaming_graph_node_t node = {};
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
+  iree_hal_streaming_symbol_t previous_symbol = {};
+  node.attrs.kernel.symbol = &previous_symbol;
+  node.attrs.kernel.grid_dim[0] = 7;
+  node.attrs.kernel.block_dim[0] = 11;
+  node.attrs.kernel.shared_memory_bytes = 19;
   node.attrs.kernel.constants =
       iree_make_const_byte_span(constants.data(), constants.size());
   node.attrs.kernel.constants_capacity = constants.size();
@@ -139,10 +146,16 @@ TEST(GraphTest, KernelParameterUpdatePreservesEmptyPrepackedSpan) {
       .buffer = reinterpret_cast<void*>(uintptr_t{1}),
       .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
-  IREE_EXPECT_OK(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_streaming_graph_set_kernel_node_params(&node, &symbol, &params));
-  EXPECT_EQ(0u, node.attrs.kernel.constants.data_length);
-  EXPECT_EQ(0u, node.attrs.kernel.bindings.count);
+  EXPECT_EQ(original_constants, constants);
+  EXPECT_EQ(&previous_symbol, node.attrs.kernel.symbol);
+  EXPECT_EQ(7u, node.attrs.kernel.grid_dim[0]);
+  EXPECT_EQ(11u, node.attrs.kernel.block_dim[0]);
+  EXPECT_EQ(19u, node.attrs.kernel.shared_memory_bytes);
+  EXPECT_EQ(constants.size(), node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(binding_storage.size(), node.attrs.kernel.bindings.count);
   EXPECT_EQ(binding_storage.data(), node.attrs.kernel.bindings.values);
 }
 

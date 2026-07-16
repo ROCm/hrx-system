@@ -116,6 +116,27 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_launch_validation_api_test",
+    srcs = ["hip_launch_validation_api_test.cc"],
+    copts = [
+        "-Wno-attributes",
+    ],
+    # The test loads the built runtime through its public ABI and supplies a
+    # tagged function handle that reaches argument validation before dispatch.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    deps = [
+        ":launch_params",
+        "//build_tools:dl",
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "launch_params_test",
     srcs = ["launch_params_test.cc"],
     copts = [

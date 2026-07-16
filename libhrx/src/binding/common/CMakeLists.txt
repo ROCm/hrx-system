@@ -12,6 +12,7 @@ iree_cc_library(
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
+    "kernel_arguments.h"
     "tls.h"
   SRCS
     "context.c"
@@ -22,6 +23,7 @@ iree_cc_library(
     "graph_analysis.c"
     "graph_exec.c"
     "init.c"
+    "kernel_arguments.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
