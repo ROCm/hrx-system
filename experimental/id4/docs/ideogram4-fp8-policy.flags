@@ -1,0 +1,15 @@
+--amdgpu_command_buffer_mode=aql
+--dit_parameter_format=fp8_e4m3
+--qwen_parameter_format=fp8_e4m3_block_scaled
+--dit_activation_format=bf16_linear_input
+--dit_weight_execution_format=fp8_compact_rhs
+--qwen_weight_execution_strategy=compact_rhs
+--qwen_attention_implementation=auto
+--dit_attention_implementation=online_wmma
+--dit_feed_forward_implementation=pytorch_parity
+--vae_tiling_mode=disabled
+--vae_attention_implementation=materialized
+--generation_residency=all_stage_bundles
+--generation_issue_mode=stage_serial
+--parameter_load_prefetch_segment_distance=0
+--parameter_window_budget=2147483648

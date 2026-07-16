@@ -112,14 +112,14 @@ IREE_FLAG(string, bake_parameter_layout_directory, "",
 IREE_FLAG(string, bake_parameter_layout_stages, "all",
           "Coarse stages to bake: qwen, dit_conditioned, dit_unconditioned, "
           "decode, or all.");
-IREE_FLAG(string, generation_residency, "issue_phases",
+IREE_FLAG(string, generation_residency, "all_stage_bundles",
           "Generation residency mode: issue_phases, "
           "phase_stage_bundles, selected_stage_bundles, all_stage_bundles, "
           "or memory_budgeted.");
 IREE_FLAG(int64_t, generation_residency_budget, 0,
           "Logical live byte budget for "
           "--generation_residency=memory_budgeted.");
-IREE_FLAG(string, generation_issue_mode, "phases",
+IREE_FLAG(string, generation_issue_mode, "stage_serial",
           "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(int64_t, parameter_load_prefetch_segment_distance, 0,
           "Number of future execution segments whose parameter windows may be "

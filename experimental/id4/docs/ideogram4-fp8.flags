@@ -1,0 +1,7 @@
+--flagfile=experimental/id4/docs/ideogram4-fp8-policy.flags
+--tokenizer=models/qwen3-vl-8b-instruct-fp8/tokenizer.json
+--generation_parameter_source=checkpoint
+--parameters=qwen=models/qwen3-vl-8b-instruct-fp8/model.safetensors.index.json
+--parameters=dit_cond_fp8=models/ideogram-4-fp8/transformer/diffusion_pytorch_model.safetensors
+--parameters=dit_uncond_fp8=models/ideogram-4-fp8/unconditional_transformer/diffusion_pytorch_model.safetensors
+--parameters=vae=models/flux2-dev/ae.safetensors

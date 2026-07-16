@@ -14,8 +14,78 @@ and inspectable.
 
 The measured result and reusable method are documented separately:
 
+- [Build and run quickstart](docs/quickstart.md)
 - [Ideogram 4 FP8 inference case study](docs/case_study.md)
 - [Production-shaped Loom model porting guide](docs/porting_guide.md)
+
+## Quick Start
+
+The current full-model evidence is Linux on a Radeon Pro W7900. The runtime
+discovers the selected AMDGPU target and uses the compatible Loom providers;
+there is no architecture encoded in the model command. The direct-checkpoint
+FP8 base path has a sampled 1024x1024 physical VRAM peak of about 25.8 GiB;
+dynamic LoRAs have also run end to end, with their separate cost recorded in
+the quickstart. Accept the gated
+[Ideogram 4 FP8 license](https://huggingface.co/ideogram-ai/ideogram-4-fp8),
+authenticate with `hf auth login`, and download the exact model artifacts used
+by this prototype:
+
+```bash
+hf download ideogram-ai/ideogram-4-fp8 \
+  transformer/diffusion_pytorch_model.safetensors \
+  unconditional_transformer/diffusion_pytorch_model.safetensors \
+  --revision ee79a7237b519f1402ceacf952f30c8a31ec5073 \
+  --local-dir models/ideogram-4-fp8
+
+hf download Qwen/Qwen3-VL-8B-Instruct-FP8 \
+  tokenizer.json \
+  model.safetensors.index.json \
+  model-00001-of-00002.safetensors \
+  model-00002-of-00002.safetensors \
+  --revision 9cdc6310a8cb770ce18efaf4e9935334512aee45 \
+  --local-dir models/qwen3-vl-8b-instruct-fp8
+
+hf download black-forest-labs/FLUX.2-dev \
+  ae.safetensors \
+  --revision 26afe3a78bb242c0a8bb181dcc8937bb16e5c66c \
+  --local-dir models/flux2-dev
+```
+
+After the one-time AMDGPU setup in the [quickstart](docs/quickstart.md), build
+the CLI:
+
+```bash
+python dev.py bazel build \
+  -c opt \
+  --features=thin_lto \
+  --copt=-O3 \
+  --cxxopt=-O3 \
+  --host_copt=-O3 \
+  --host_cxxopt=-O3 \
+  --copt=-march=native \
+  --cxxopt=-march=native \
+  --host_copt=-march=native \
+  --host_cxxopt=-march=native \
+  //experimental/id4/binding/cli:id4
+```
+
+Generate a 1024x1024 binary PPM from the checked-in structured request:
+
+```bash
+bazel-bin/experimental/id4/binding/cli/id4 \
+  --flagfile=experimental/id4/docs/ideogram4-fp8.flags \
+  --device=amdgpu:// \
+  --prompt_json_file=experimental/id4/docs/requests/long_1024.json \
+  --output=ideogram4.ppm
+```
+
+The checked flagfile maps the downloaded checkpoint with ordinary
+`--parameters=` flags and selects the measured compact-FP8 execution policy.
+No model preparation or second weight copy is required. The CLI also accepts a
+prompt directly with `--prompt`, and repeatable
+`--lora`/`--lora_strength` flags compose one or more Ideogram 4 adapters. The
+[quickstart](docs/quickstart.md) has complete commands and the current hardware,
+output, first-run, and model-layout constraints.
 
 ## Source References
 
@@ -244,17 +314,30 @@ Diagnostics are part of the runtime contract:
 
 ## LoRA Contract
 
-The intended adapter surface supports multiple LoRAs and strengths through two
-explicit paths:
+The current dynamic adapter path accepts an ordered set of LoRA safetensors and
+one issue-time strength per adapter. Each artifact is indexed and validated as
+BF16 down/up projection pairs over any of six supported linear sites across the
+conditioned-DiT blocks. Planning authors the corresponding low-rank math while
+the unconditioned branch and the no-adapter program remain unchanged.
 
-- dynamic adapter math controlled by Loom config so the no-adapter path folds
-  away;
-- a prebake API that applies selected adapters into a derived immutable
-  parameter layout for repeated execution.
+Topology is a plan-time fact because it changes program structure. Strengths
+are issue-time values, so one prepared topology can be reused at different
+strengths by a long-lived session. The one-shot CLI exposes this as repeatable
+`--lora=<path>` and `--lora_strength=<f32>` flags; omitted strengths default to
+1.0. Multiple files preserve command-line order and are fused additively into
+each shared target.
 
-Prebaking is an observable session operation rather than an implicit mutation.
-Read-only base weights remain shareable, and multiple derived selections may
-coexist when the caller's memory policy permits them.
+Checkpoint sources execute that authored adapter math dynamically. When the
+base conditioned DiT already comes from an execution-layout archive, the CLI
+instead materializes the selected strengths into an in-memory resident
+conditioned-DiT variant before preparing the generation. The derived slab is
+immutable for its lifetime, the base archive remains unchanged and shareable,
+and no model-sized LoRA artifact is written to disk.
+
+The resident variant is distinct from the optional disk execution-layout cache
+documented in the quickstart. The direct-checkpoint path remains the ordinary
+user path because it avoids the extra model-sized archive and its measured
+startup benefit is small for a one-shot generation.
 
 ## Build and Repository Shape
 
@@ -286,9 +369,9 @@ normal Bazel presubmit.
 The current `gfx1100` path is measured against the official FP8 implementation
 in the [case study](docs/case_study.md). The next durable extensions are native
 FP8 target providers on `gfx942` and newer architectures, tensor-parallel and
-heterogeneous device placement, LoRA execution and prebaking, and migration of
-the semantic C program into Loom scheduling IR as its host and VM facilities
-come online.
+heterogeneous device placement, persistent resident LoRA variant reuse,
+persistent compiled-executable caching, and migration of the semantic C
+program into Loom scheduling IR as its host and VM facilities come online.
 
 Those extensions keep the existing contracts: dynamic request planning,
 source-native compact parameters, coarse reusable stage command buffers,

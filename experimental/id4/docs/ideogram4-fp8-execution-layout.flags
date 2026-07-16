@@ -1,0 +1,7 @@
+--flagfile=experimental/id4/docs/ideogram4-fp8-policy.flags
+--tokenizer=models/qwen3-vl-8b-instruct-fp8/tokenizer.json
+--generation_parameter_source=execution_layout
+--parameters=qwen=models/ideogram-4-fp8-layouts/qwen.irpa
+--parameters=dit_conditioned=models/ideogram-4-fp8-layouts/dit_conditioned.irpa
+--parameters=dit_unconditioned=models/ideogram-4-fp8-layouts/dit_unconditioned.irpa
+--parameters=vae=models/ideogram-4-fp8-layouts/vae.irpa
