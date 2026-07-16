@@ -33,7 +33,7 @@ loom_cc_library(
     loom::error::diagnostic
     loom::target::pipeline_options
     loom::target::reporting::artifact_manifest
-    loom::target::reporting::compile_report
+    loom::target::reporting::report
     loom::verify
   PUBLIC
 )
@@ -52,8 +52,8 @@ loom_cc_library(
     loom::error::json_sink
     loom::error::renderer
     loom::ops::config
-    loom::target::reporting::compile_report
-    loom::target::reporting::compile_report_format
+    loom::target::reporting::format
+    loom::target::reporting::report
     loom::tooling::config
   PUBLIC
 )

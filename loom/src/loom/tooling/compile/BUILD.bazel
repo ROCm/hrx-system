@@ -35,7 +35,7 @@ loom_cc_library(
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/reporting:compile_report",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

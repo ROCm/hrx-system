@@ -12,7 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/error_defs.h"
 #include "loom/target/provider.h"
-#include "loom/target/reporting/compile_report_format.h"
+#include "loom/target/reporting/format.h"
 #include "loomc/compile_report.h"
 #include "loomc/iree.h"
 #include "module.h"

@@ -6,10 +6,10 @@
 
 // Shared compile report JSON value formatting.
 
-#ifndef LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_H_
-#define LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_H_
+#ifndef LOOM_TARGET_REPORTING_FORMAT_JSON_H_
+#define LOOM_TARGET_REPORTING_FORMAT_JSON_H_
 
-#include "loom/target/reporting/compile_report_format.h"
+#include "loom/target/reporting/format.h"
 #include "loom/util/json.h"
 
 #ifdef __cplusplus
@@ -56,4 +56,4 @@ iree_status_t loom_target_compile_report_format_operation_economics_json(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_H_
+#endif  // LOOM_TARGET_REPORTING_FORMAT_JSON_H_

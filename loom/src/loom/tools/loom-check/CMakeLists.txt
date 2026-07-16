@@ -109,7 +109,7 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::pipeline
     loom::target::predicate
-    loom::target::reporting::compile_report_format
+    loom::target::reporting::format
     loom::target::types
     loom::tooling::compile::pipeline
     loom::tools::loom-format::convert

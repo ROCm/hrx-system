@@ -46,7 +46,7 @@
 #include "loom/target/entry_selection.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/provider.h"
-#include "loom/target/reporting/compile_report_low.h"
+#include "loom/target/reporting/low.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS 20u
 

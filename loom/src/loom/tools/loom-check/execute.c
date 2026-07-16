@@ -19,7 +19,7 @@
 #include "loom/pass/builtin_registry.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/predicate.h"
-#include "loom/target/reporting/compile_report_format.h"
+#include "loom/target/reporting/format.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/requirements.h"
 #include "loom/tools/loom-format/convert.h"

@@ -21,7 +21,7 @@
 #include "loom/target/entry_selection.h"
 #include "loom/target/provider.h"
 #include "loom/target/registers.h"
-#include "loom/target/reporting/compile_report_low.h"
+#include "loom/target/reporting/low.h"
 
 enum {
   LOOM_IREEVM_ARCHIVE_EMIT_DEFAULT_MAX_ERRORS = 20,

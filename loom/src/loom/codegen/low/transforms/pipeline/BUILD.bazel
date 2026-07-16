@@ -33,7 +33,7 @@ loom_cc_library(
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:low_legality",
-        "//loom/src/loom/target/reporting:compile_report_low",
+        "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
     ],
 )
@@ -62,7 +62,7 @@ loom_cc_library(
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:low_legality",
-        "//loom/src/loom/target/reporting:compile_report",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/transforms/scalar:target_legalization",
         "//loom/src/loom/transforms/vector:target_legalization",
         "//loom/src/loom/util:walk",

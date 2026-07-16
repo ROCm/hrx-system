@@ -255,7 +255,7 @@ loom_cc_library(
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/reporting:compile_report_format",
+        "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tools/loom-format:convert",
         "//loom/src/loom/util:diff",

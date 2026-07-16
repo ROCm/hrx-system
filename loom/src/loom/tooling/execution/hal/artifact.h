@@ -22,7 +22,7 @@
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
 #include "loom/target/provider.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
 #include "loom/tooling/execution/compile_options.h"
 #include "loom/verify/verify.h"

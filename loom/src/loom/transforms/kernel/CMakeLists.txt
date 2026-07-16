@@ -94,7 +94,7 @@ loom_cc_library(
     loom::rewrite::remap
     loom::rewrite::rewriter
     loom::target::launch
-    loom::target::reporting::compile_report
+    loom::target::reporting::report
     loom::target::selection
     loom::util::math
     loom::util::walk

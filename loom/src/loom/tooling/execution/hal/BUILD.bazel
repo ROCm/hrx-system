@@ -26,7 +26,7 @@ loom_cc_library(
         "//loom/src/loom/target:pipeline_options",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/reporting:compile_report",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
@@ -56,7 +56,7 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":runtime",
-        "//loom/src/loom/target/reporting:compile_report",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/verify",

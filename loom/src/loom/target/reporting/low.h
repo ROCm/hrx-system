@@ -6,12 +6,12 @@
 
 // Compile-report adapters for target-low emission frames.
 
-#ifndef LOOM_TARGET_COMPILE_REPORT_LOW_H_
-#define LOOM_TARGET_COMPILE_REPORT_LOW_H_
+#ifndef LOOM_TARGET_REPORTING_LOW_H_
+#define LOOM_TARGET_REPORTING_LOW_H_
 
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,4 +50,4 @@ void loom_target_compile_report_record_low_kernel_workload(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_COMPILE_REPORT_LOW_H_
+#endif  // LOOM_TARGET_REPORTING_LOW_H_

@@ -36,7 +36,7 @@ loom_cc_library(
         "//loom/src/loom/target/emit/spirv:module_builder",
         "//loom/src/loom/target/emit/spirv:module_emitter",
         "//loom/src/loom/target/reporting:artifact_manifest_collect",
-        "//loom/src/loom/target/reporting:compile_report",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",

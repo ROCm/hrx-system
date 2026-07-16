@@ -46,9 +46,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile_report",
-    srcs = ["compile_report.c"],
-    hdrs = ["compile_report.h"],
+    name = "report",
+    srcs = ["report.c"],
+    hdrs = ["report.h"],
     deps = [
         "//loom/src/loom/codegen/low:planning_statistics",
         "//loom/src/loom/target:types",
@@ -57,28 +57,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile_report_format",
+    name = "format",
     srcs = [
-        "compile_report_format.c",
-        "compile_report_format_json.c",
-        "compile_report_format_json.h",
-        "compile_report_format_json_lowering.c",
-        "compile_report_format_json_lowering.h",
-        "compile_report_format_json_planning.c",
-        "compile_report_format_json_planning.h",
-        "compile_report_format_text.c",
-        "compile_report_format_text.h",
-        "compile_report_format_text_lowering.c",
-        "compile_report_format_text_lowering.h",
-        "compile_report_format_text_planning.c",
-        "compile_report_format_text_planning.h",
-        "compile_report_schema.c",
-        "compile_report_schema.h",
+        "format.c",
+        "format_json.c",
+        "format_json.h",
+        "format_json_lowering.c",
+        "format_json_lowering.h",
+        "format_json_planning.c",
+        "format_json_planning.h",
+        "format_text.c",
+        "format_text.h",
+        "format_text_lowering.c",
+        "format_text_lowering.h",
+        "format_text_planning.c",
+        "format_text_planning.h",
+        "schema.c",
+        "schema.h",
     ],
-    hdrs = ["compile_report_format.h"],
+    hdrs = ["format.h"],
     deps = [
-        ":compile_report",
-        ":compile_report_planning_format",
+        ":format_planning",
+        ":report",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/util:json",
@@ -88,9 +88,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile_report_planning_format",
-    srcs = ["compile_report_planning_format.c"],
-    hdrs = ["compile_report_planning_format.h"],
+    name = "format_planning",
+    srcs = ["format_planning.c"],
+    hdrs = ["format_planning.h"],
     deps = [
         "//loom/src/loom/codegen/low:planning_statistics",
         "//loom/src/loom/util:stream",
@@ -99,11 +99,11 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile_report_low",
-    srcs = ["compile_report_low.c"],
-    hdrs = ["compile_report_low.h"],
+    name = "low",
+    srcs = ["low.c"],
+    hdrs = ["low.h"],
     deps = [
-        ":compile_report",
+        ":report",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
@@ -154,10 +154,10 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "compile_report_low_test",
-    srcs = ["compile_report_low_test.cc"],
+    name = "low_test",
+    srcs = ["low_test.cc"],
     deps = [
-        ":compile_report_low",
+        ":low",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base/internal:arena",
@@ -167,10 +167,10 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "compile_report_format_test",
-    srcs = ["compile_report_format_test.cc"],
+    name = "format_test",
+    srcs = ["format_test.cc"],
     deps = [
-        ":compile_report_format",
+        ":format",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:math_policy",
         "//runtime/src/iree/testing:gtest",

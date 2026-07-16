@@ -6,10 +6,10 @@
 
 // Line-oriented compile report planning details.
 
-#ifndef LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_TEXT_PLANNING_H_
-#define LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_TEXT_PLANNING_H_
+#ifndef LOOM_TARGET_REPORTING_FORMAT_TEXT_PLANNING_H_
+#define LOOM_TARGET_REPORTING_FORMAT_TEXT_PLANNING_H_
 
-#include "loom/target/reporting/compile_report_format.h"
+#include "loom/target/reporting/format.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,4 +23,4 @@ iree_status_t loom_target_compile_report_format_text_planning_details(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_TEXT_PLANNING_H_
+#endif  // LOOM_TARGET_REPORTING_FORMAT_TEXT_PLANNING_H_

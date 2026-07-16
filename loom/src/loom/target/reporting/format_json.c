@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/reporting/compile_report_format_json.h"
+#include "loom/target/reporting/format_json.h"
 
 #include <stdint.h>
 
-#include "loom/target/reporting/compile_report_format_json_lowering.h"
-#include "loom/target/reporting/compile_report_format_json_planning.h"
-#include "loom/target/reporting/compile_report_planning_format.h"
-#include "loom/target/reporting/compile_report_schema.h"
+#include "loom/target/reporting/format_json_lowering.h"
+#include "loom/target/reporting/format_json_planning.h"
+#include "loom/target/reporting/format_planning.h"
+#include "loom/target/reporting/schema.h"
 
 iree_status_t loom_target_compile_report_json_write_optional_string_field(
     loom_json_object_writer_t* object, iree_string_view_t name,

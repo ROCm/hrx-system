@@ -30,7 +30,7 @@
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
 #include "loom/target/reporting/artifact_manifest.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -33,7 +33,7 @@ loom_cc_library(
     loom::target::pipeline
     loom::target::predicate
     loom::target::provider
-    loom::target::reporting::compile_report
+    loom::target::reporting::report
     loom::target::types
     loom::verify
   PUBLIC

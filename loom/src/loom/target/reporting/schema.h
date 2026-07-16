@@ -6,11 +6,11 @@
 
 // Shared compile-report schema names and derived values.
 
-#ifndef LOOM_TARGET_REPORTING_COMPILE_REPORT_SCHEMA_H_
-#define LOOM_TARGET_REPORTING_COMPILE_REPORT_SCHEMA_H_
+#ifndef LOOM_TARGET_REPORTING_SCHEMA_H_
+#define LOOM_TARGET_REPORTING_SCHEMA_H_
 
 #include "iree/base/api.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -151,4 +151,4 @@ bool loom_target_compile_report_has_economics(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_REPORTING_COMPILE_REPORT_SCHEMA_H_
+#endif  // LOOM_TARGET_REPORTING_SCHEMA_H_

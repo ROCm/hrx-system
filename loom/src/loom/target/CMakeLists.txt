@@ -302,7 +302,7 @@ loom_cc_library(
     loom::pass::environment
     loom::pass::registry
     loom::target::reporting::artifact_manifest
-    loom::target::reporting::compile_report
+    loom::target::reporting::report
   PUBLIC
 )
 

@@ -12,7 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/target/pipeline_options.h"
 #include "loom/target/reporting/artifact_manifest.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus

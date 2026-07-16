@@ -6,8 +6,8 @@
 
 // Structured module compilation reports.
 
-#ifndef LOOM_TARGET_COMPILE_REPORT_H_
-#define LOOM_TARGET_COMPILE_REPORT_H_
+#ifndef LOOM_TARGET_REPORTING_REPORT_H_
+#define LOOM_TARGET_REPORTING_REPORT_H_
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/planning_statistics.h"
@@ -1999,4 +1999,4 @@ iree_status_t loom_target_compile_report_record_legalization_row(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_COMPILE_REPORT_H_
+#endif  // LOOM_TARGET_REPORTING_REPORT_H_

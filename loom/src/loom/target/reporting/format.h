@@ -6,11 +6,11 @@
 
 // Cold compile report formatting adapters.
 
-#ifndef LOOM_TARGET_COMPILE_REPORT_FORMAT_H_
-#define LOOM_TARGET_COMPILE_REPORT_FORMAT_H_
+#ifndef LOOM_TARGET_REPORTING_FORMAT_H_
+#define LOOM_TARGET_REPORTING_FORMAT_H_
 
 #include "iree/base/api.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
@@ -65,4 +65,4 @@ iree_status_t loom_target_compile_report_format_json(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_COMPILE_REPORT_FORMAT_H_
+#endif  // LOOM_TARGET_REPORTING_FORMAT_H_

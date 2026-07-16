@@ -6,10 +6,10 @@
 
 // Compile report lowering and economics JSON fields.
 
-#ifndef LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_LOWERING_H_
-#define LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_LOWERING_H_
+#ifndef LOOM_TARGET_REPORTING_FORMAT_JSON_LOWERING_H_
+#define LOOM_TARGET_REPORTING_FORMAT_JSON_LOWERING_H_
 
-#include "loom/target/reporting/compile_report_format_json.h"
+#include "loom/target/reporting/format_json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,4 +33,4 @@ iree_status_t loom_target_compile_report_format_json_lowering_details(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_REPORTING_COMPILE_REPORT_FORMAT_JSON_LOWERING_H_
+#endif  // LOOM_TARGET_REPORTING_FORMAT_JSON_LOWERING_H_

@@ -506,8 +506,8 @@ loom_cc_library(
     loom::target::function_contract
     loom::target::provider
     loom::target::reporting::artifact_manifest_collect
-    loom::target::reporting::compile_report
-    loom::target::reporting::compile_report_low
+    loom::target::reporting::low
+    loom::target::reporting::report
     loom::target::types
     loom::verify
   PUBLIC

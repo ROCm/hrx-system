@@ -27,7 +27,7 @@ loom_cc_library(
     loom::target::entry_selection
     loom::target::low_descriptor_registry
     loom::target::reporting::artifact_manifest_collect
-    loom::target::reporting::compile_report
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::tooling::execution::hal::artifact

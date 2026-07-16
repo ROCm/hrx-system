@@ -19,7 +19,7 @@
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/artifact_manifest_collect.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 

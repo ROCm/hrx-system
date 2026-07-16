@@ -102,8 +102,8 @@ loom_cc_library(
     loom::target::entry_selection
     loom::target::provider
     loom::target::registers
-    loom::target::reporting::compile_report
-    loom::target::reporting::compile_report_low
+    loom::target::reporting::low
+    loom::target::reporting::report
     loom::verify
   PUBLIC
 )

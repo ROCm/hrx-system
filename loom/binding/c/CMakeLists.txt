@@ -114,8 +114,8 @@ loom_cc_library(
     loom::target::predicate
     loom::target::provider
     loom::target::reporting::artifact_manifest
-    loom::target::reporting::compile_report
-    loom::target::reporting::compile_report_format
+    loom::target::reporting::format
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::config
     loom::util::json

@@ -46,11 +46,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    compile_report
+    report
   HDRS
-    "compile_report.h"
+    "report.h"
   SRCS
-    "compile_report.c"
+    "report.c"
   DEPS
     iree::base
     loom::codegen::low::planning_statistics
@@ -60,28 +60,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    compile_report_format
+    format
   HDRS
-    "compile_report_format.h"
+    "format.h"
   SRCS
-    "compile_report_format.c"
-    "compile_report_format_json.c"
-    "compile_report_format_json.h"
-    "compile_report_format_json_lowering.c"
-    "compile_report_format_json_lowering.h"
-    "compile_report_format_json_planning.c"
-    "compile_report_format_json_planning.h"
-    "compile_report_format_text.c"
-    "compile_report_format_text.h"
-    "compile_report_format_text_lowering.c"
-    "compile_report_format_text_lowering.h"
-    "compile_report_format_text_planning.c"
-    "compile_report_format_text_planning.h"
-    "compile_report_schema.c"
-    "compile_report_schema.h"
+    "format.c"
+    "format_json.c"
+    "format_json.h"
+    "format_json_lowering.c"
+    "format_json_lowering.h"
+    "format_json_planning.c"
+    "format_json_planning.h"
+    "format_text.c"
+    "format_text.h"
+    "format_text_lowering.c"
+    "format_text_lowering.h"
+    "format_text_planning.c"
+    "format_text_planning.h"
+    "schema.c"
+    "schema.h"
   DEPS
-    ::compile_report
-    ::compile_report_planning_format
+    ::format_planning
+    ::report
     iree::base
     loom::ir
     loom::target::math_policy
@@ -92,11 +92,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    compile_report_planning_format
+    format_planning
   HDRS
-    "compile_report_planning_format.h"
+    "format_planning.h"
   SRCS
-    "compile_report_planning_format.c"
+    "format_planning.c"
   DEPS
     iree::base
     loom::codegen::low::planning_statistics
@@ -106,13 +106,13 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    compile_report_low
+    low
   HDRS
-    "compile_report_low.h"
+    "low.h"
   SRCS
-    "compile_report_low.c"
+    "low.c"
   DEPS
-    ::compile_report
+    ::report
     iree::base
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
@@ -166,11 +166,11 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    compile_report_low_test
+    low_test
   SRCS
-    "compile_report_low_test.cc"
+    "low_test.cc"
   DEPS
-    ::compile_report_low
+    ::low
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -180,11 +180,11 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    compile_report_format_test
+    format_test
   SRCS
-    "compile_report_format_test.cc"
+    "format_test.cc"
   DEPS
-    ::compile_report_format
+    ::format
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir

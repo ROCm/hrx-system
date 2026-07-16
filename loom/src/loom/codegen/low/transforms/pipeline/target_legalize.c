@@ -24,7 +24,7 @@
 #include "loom/target/legalization.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
-#include "loom/target/reporting/compile_report.h"
+#include "loom/target/reporting/report.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/util/walk.h"
