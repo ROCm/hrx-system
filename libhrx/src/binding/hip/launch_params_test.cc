@@ -45,6 +45,25 @@ TEST(LaunchParamsTest, ParseLaunchExtraAcceptsBufferAndSize) {
   EXPECT_EQ(buffer.size(), out_buffer_size);
 }
 
+TEST(LaunchParamsTest, ParseLaunchExtraPreservesZeroLengthSpan) {
+  uint8_t buffer = 0;
+  size_t buffer_size = 0;
+  void* extra[] = {
+      HIP_LAUNCH_PARAM_BUFFER_POINTER,
+      &buffer,
+      HIP_LAUNCH_PARAM_BUFFER_SIZE,
+      &buffer_size,
+      HIP_LAUNCH_PARAM_END,
+  };
+
+  void* out_buffer = nullptr;
+  size_t out_buffer_size = 1;
+  EXPECT_EQ(hipSuccess,
+            iree_hip_parse_launch_extra(extra, &out_buffer, &out_buffer_size));
+  EXPECT_EQ(&buffer, out_buffer);
+  EXPECT_EQ(0u, out_buffer_size);
+}
+
 TEST(LaunchParamsTest, ParseLaunchExtraRejectsMissingPair) {
   std::array<uint8_t, 16> buffer = {};
   void* extra[] = {
@@ -138,6 +157,24 @@ TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsResourceExcess) {
                 &device, &symbol, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
                 /*grid_dim_z=*/1, /*block_dim_x=*/128, /*block_dim_y=*/1,
                 /*block_dim_z=*/1, /*shared_memory_bytes=*/8192));
+}
+
+TEST(LaunchParamsTest,
+     ValidateLaunchConfigurationRejectsUnrepresentableSharedMemory) {
+  iree_hal_streaming_device_t device = MakeLaunchDevice();
+  device.max_shared_memory_per_block = UINT32_MAX;
+
+  EXPECT_EQ(hipSuccess,
+            iree_hip_validate_launch_configuration(
+                &device, nullptr, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/UINT32_MAX));
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            iree_hip_validate_launch_configuration(
+                &device, nullptr, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1,
+                /*shared_memory_bytes=*/(size_t)UINT32_MAX + 1));
 }
 
 TEST(LaunchParamsTest, ValidateLaunchConfigurationRejectsMissingDevice) {

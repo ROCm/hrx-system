@@ -715,6 +715,12 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
         const iree_hal_executable_function_parameter_t* parameter =
             &parameters[parameter_index++];
         parameter_metadata->offset = parameter->offset;
+        parameter_metadata->native_abi_offset =
+            iree_any_bit_set(
+                parameter->flags,
+                IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET)
+                ? parameter->native_abi_offset
+                : 0;
         parameter_metadata->flags = parameter->flags;
         parameter_metadata->type = parameter->type;
         parameter_metadata->size = parameter->size;

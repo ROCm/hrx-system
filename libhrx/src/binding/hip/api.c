@@ -11591,10 +11591,19 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }
 
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_obj->context ? stream_obj->context->device_entry : NULL, symbol,
+      numBlocks.x, numBlocks.y, numBlocks.z, dimBlocks.x, dimBlocks.y,
+      dimBlocks.z, sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   const iree_hal_streaming_dispatch_params_t params = {
       .grid_dim = {numBlocks.x, numBlocks.y, numBlocks.z},
       .block_dim = {dimBlocks.x, dimBlocks.y, dimBlocks.z},
-      .shared_memory_bytes = sharedMemBytes,
+      .shared_memory_bytes = (uint32_t)sharedMemBytes,
       .buffer = args,  // args is already the kernelParams array
       .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };

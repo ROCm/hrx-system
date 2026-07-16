@@ -28,16 +28,22 @@ typedef struct iree_hal_mock_executable_function_record_t {
   uint8_t workgroup_size[3];
   // Byte length of the function name in the trailing name storage.
   uint8_t name_length;
-  // Reserved byte; must be zero.
-  uint8_t reserved;
+  // Native ABI byte offset for one optional reflected buffer binding.
+  uint8_t native_abi_offset;
 } iree_hal_mock_executable_function_record_t;
 
 typedef struct iree_hal_mock_executable_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
   iree_host_size_t function_count;
+  // Function metadata records indexed by executable function ordinal.
   iree_hal_executable_function_info_t functions[];
 } iree_hal_mock_executable_t;
+
+static uint8_t* iree_hal_mock_executable_native_abi_offsets(
+    iree_hal_mock_executable_t* executable) {
+  return (uint8_t*)(executable->functions + executable->function_count);
+}
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable;
 
@@ -92,11 +98,6 @@ static iree_status_t iree_hal_mock_executable_create(
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const iree_hal_mock_executable_function_record_t* record =
         &function_records[i];
-    if (IREE_UNLIKELY(record->reserved != 0)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "mock executable function metadata reserved byte "
-                              "must be zero");
-    }
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             expected_name_storage_length, record->name_length,
             &expected_name_storage_length))) {
@@ -110,13 +111,18 @@ static iree_status_t iree_hal_mock_executable_create(
   }
 
   iree_host_size_t function_info_size = 0;
+  iree_host_size_t native_abi_offset_size = 0;
   iree_host_size_t total_size = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(
               function_count, sizeof(iree_hal_executable_function_info_t),
               &function_info_size) ||
+          !iree_host_size_checked_mul(function_count, sizeof(uint8_t),
+                                      &native_abi_offset_size) ||
           !iree_host_size_checked_add(sizeof(iree_hal_mock_executable_t),
                                       function_info_size, &total_size) ||
+          !iree_host_size_checked_add(total_size, native_abi_offset_size,
+                                      &total_size) ||
           !iree_host_size_checked_add(total_size, name_storage.data_length,
                                       &total_size))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -131,8 +137,8 @@ static iree_status_t iree_hal_mock_executable_create(
   executable->host_allocator = host_allocator;
   executable->function_count = function_count;
 
-  char* executable_name_storage =
-      (char*)executable + sizeof(*executable) + function_info_size;
+  char* executable_name_storage = (char*)executable + sizeof(*executable) +
+                                  function_info_size + native_abi_offset_size;
   if (name_storage.data_length != 0) {
     memcpy(executable_name_storage, name_storage.data,
            name_storage.data_length);
@@ -148,10 +154,13 @@ static iree_status_t iree_hal_mock_executable_create(
     executable->functions[i].constant_byte_length =
         record->constant_count * sizeof(uint32_t);
     executable->functions[i].binding_count = record->binding_count;
-    executable->functions[i].parameter_count = 0;
+    executable->functions[i].parameter_count =
+        record->native_abi_offset ? 1 : 0;
     executable->functions[i].workgroup_size[0] = record->workgroup_size[0];
     executable->functions[i].workgroup_size[1] = record->workgroup_size[1];
     executable->functions[i].workgroup_size[2] = record->workgroup_size[2];
+    iree_hal_mock_executable_native_abi_offsets(executable)[i] =
+        record->native_abi_offset;
   }
 
   *out_executable = (iree_hal_executable_t*)executable;
@@ -193,10 +202,29 @@ static iree_status_t iree_hal_mock_executable_function_parameters(
     iree_hal_executable_t* base_executable,
     iree_hal_executable_function_t function, iree_host_size_t capacity,
     iree_hal_executable_function_parameter_t* out_parameters) {
-  (void)base_executable;
-  (void)function;
-  (void)capacity;
-  (void)out_parameters;
+  iree_hal_mock_executable_t* executable =
+      iree_hal_mock_executable_cast(base_executable);
+  if (!iree_hal_executable_function_is_index_in_range(
+          function, executable->function_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
+  }
+  const uint32_t function_ordinal =
+      iree_hal_executable_function_index(function);
+  const uint8_t native_abi_offset =
+      iree_hal_mock_executable_native_abi_offsets(executable)[function_ordinal];
+  if (!native_abi_offset) return iree_ok_status();
+  if (capacity < 1 || !out_parameters) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "mock executable parameter output too small");
+  }
+  out_parameters[0] = (iree_hal_executable_function_parameter_t){
+      .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING,
+      .flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET,
+      .size = sizeof(void*),
+      .offset = 0,
+      .native_abi_offset = native_abi_offset,
+      .name = iree_string_view_empty(),
+  };
   return iree_ok_status();
 }
 

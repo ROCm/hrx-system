@@ -400,6 +400,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
 
   iree_host_size_t parameter_ordinal = 0;
   iree_host_size_t constant_source_offset = 0;
+  uint16_t binding_ordinal = 0;
   for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
     const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
@@ -422,12 +423,12 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
             rebase, "parameter name", arg->name, &parameter->name));
     switch (arg->kind) {
       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        // Preserve native kernarg offsets for HIP-style custom-direct callers.
-        // The internal kernarg layout still records binding slots for normal
-        // HAL dispatch binding lists.
-        parameter->type =
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR;
-        parameter->offset = (uint16_t)arg->offset;
+        // HAL dispatches use a dense binding list while native callers use the
+        // target kernarg byte image. Keep those representations distinct: the
+        // public offset is the HAL binding ordinal and native_abi_offset is the
+        // target-specific placement for custom-direct dispatch.
+        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING;
+        parameter->offset = binding_ordinal++;
         break;
       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
         parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;

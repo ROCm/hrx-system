@@ -1185,24 +1185,19 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
   uint64_t timing_params_start_ns =
       timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  if (is_pre_packed && params->buffer) {
+  if (is_pre_packed) {
     // Pre-packed buffers are already in native kernarg layout. They may
     // contain device pointers either as formal pointer arguments or inside
     // opaque data, so preserve the bytes exactly and rely on HIP lifetime
     // ordering instead of trying to translate visible pointer slots.
-    if (params->buffer_size != 0) {
-      if (params->buffer_size < symbol->parameters.constant_bytes) {
-        constants_size = symbol->parameters.constant_bytes;
-        constants = iree_alloca(constants_size);
-        memset(constants, 0, constants_size);
-        memcpy(constants, params->buffer, params->buffer_size);
-      } else {
-        constants = params->buffer;
-        constants_size = params->buffer_size;
-      }
-    } else {
-      constants = params->buffer;
+    if (params->buffer_size != 0 && !params->buffer) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "pre-packed kernel arguments require storage "
+                              "when length is non-zero");
     }
+    constants = params->buffer;
+    constants_size = params->buffer_size;
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {

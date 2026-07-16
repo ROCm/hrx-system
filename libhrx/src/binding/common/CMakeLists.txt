@@ -79,6 +79,19 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    graph_test
+  SRCS
+    "graph_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
     fat_binary_test
   SRCS
     "fat_binary_test.cc"

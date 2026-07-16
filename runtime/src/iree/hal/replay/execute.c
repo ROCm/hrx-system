@@ -961,20 +961,28 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
       if (captured_parameter->type != loaded_parameter->type ||
           captured_parameter->size != loaded_parameter->size ||
           captured_parameter->flags != loaded_parameter->flags ||
-          captured_parameter->offset != loaded_parameter->offset) {
+          captured_parameter->offset != loaded_parameter->offset ||
+          (iree_any_bit_set(
+               captured_parameter->flags,
+               IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET) &&
+           captured_parameter->native_abi_offset !=
+               loaded_parameter->native_abi_offset)) {
         status = iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
             "replay executable %" PRIu64 " function %" PRIhsz
             " parameter %" PRIhsz
             " ABI mismatch: captured=(type=%u size=%u flags=0x%04x "
-            "offset=%u) loaded=(type=%u size=%u flags=0x%04x offset=%u)",
+            "offset=%u native_offset=%u) loaded=(type=%u size=%u flags=0x%04x "
+            "offset=%u native_offset=%u)",
             executable_id, i, j, (uint32_t)captured_parameter->type,
             (uint32_t)captured_parameter->size,
             (uint32_t)captured_parameter->flags,
             (uint32_t)captured_parameter->offset,
+            (uint32_t)captured_parameter->native_abi_offset,
             (uint32_t)loaded_parameter->type, (uint32_t)loaded_parameter->size,
             (uint32_t)loaded_parameter->flags,
-            (uint32_t)loaded_parameter->offset);
+            (uint32_t)loaded_parameter->offset,
+            (uint32_t)loaded_parameter->native_abi_offset);
       }
     }
     parameter_index += captured->parameter_count;

@@ -21,7 +21,7 @@ hipError_t iree_hip_validate_launch_configuration(
     iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,
     unsigned int block_dim_x, unsigned int block_dim_y,
-    unsigned int block_dim_z, unsigned int shared_memory_bytes);
+    unsigned int block_dim_z, size_t shared_memory_bytes);
 
 #ifdef __cplusplus
 }  // extern "C"

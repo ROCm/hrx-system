@@ -206,11 +206,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
           parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
-      const bool is_buffer_binding_parameter =
-          parameter->type ==
-              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
-          symbol_op_counts[i].resolve_count < export_infos[i].binding_count;
-      if (is_binding_parameter || is_buffer_binding_parameter) {
+      if (is_binding_parameter) {
         ++symbol_op_counts[i].resolve_count;
         ++total_ops;
       } else {
@@ -265,9 +261,9 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           "function constant metadata exceeds supported parameter size");
       continue;
     }
-    // Executable binding_count describes normal HAL dispatch bindings. HRX's
-    // unpacker needs the number of reflected BINDING parameters it will
-    // resolve from the HIP launch ABI.
+    // Executable binding_count describes normal HAL dispatch bindings. Native
+    // HIP packing uses the same reflected BINDING parameters and only consults
+    // their optional target ABI offsets while constructing custom kernargs.
     parameter_info->buffer_size = 0;
     parameter_info->constant_bytes = 0;
     parameter_info->direct_arg_bytes = 0;
@@ -297,16 +293,10 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
           parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
-      const bool is_buffer_binding_parameter =
-          parameter->type ==
-              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
-          resolve_count < export_infos[i].binding_count;
       iree_host_size_t native_abi_destination_offset = direct_arg_offset;
       if (parameter->flags &
           IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET) {
         native_abi_destination_offset = parameter->native_abi_offset;
-      } else if (is_buffer_binding_parameter) {
-        native_abi_destination_offset = parameter->offset;
       }
       iree_host_size_t source_extent = 0;
       iree_host_size_t native_extent = 0;
@@ -327,16 +317,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         break;
       }
       const uint16_t next_source_offset = (uint16_t)source_extent;
-      if (is_binding_parameter || is_buffer_binding_parameter) {
+      if (is_binding_parameter) {
         iree_hal_streaming_parameter_resolve_op_t* op =
             &resolve_ops_start[resolve_count].resolve;
         op->reserved = 0;
         op->source_offset = source_offset;
         op->destination_ordinal = resolve_count;
         op->source_ordinal = j;
-        // Native launches place raw device pointers at ABI offsets. Reflected
-        // native offsets preserve padding in toolchain ABI layouts; older
-        // metadata only provides that byte offset for BUFFER_PTR parameters.
+        // Native launches place raw device pointers at target ABI offsets.
         op->native_abi_destination_offset =
             (uint16_t)native_abi_destination_offset;
         source_offset = next_source_offset;

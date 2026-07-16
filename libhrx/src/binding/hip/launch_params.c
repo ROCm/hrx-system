@@ -52,8 +52,9 @@ hipError_t iree_hip_validate_launch_configuration(
     iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,
     unsigned int block_dim_x, unsigned int block_dim_y,
-    unsigned int block_dim_z, unsigned int shared_memory_bytes) {
+    unsigned int block_dim_z, size_t shared_memory_bytes) {
   if (!device) return hipErrorInvalidDevice;
+  if (shared_memory_bytes > UINT32_MAX) return hipErrorInvalidConfiguration;
 
   const unsigned int grid_dim[3] = {grid_dim_x, grid_dim_y, grid_dim_z};
   const unsigned int block_dim[3] = {block_dim_x, block_dim_y, block_dim_z};

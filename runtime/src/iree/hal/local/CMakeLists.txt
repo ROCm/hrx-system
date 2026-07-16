@@ -146,6 +146,19 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    executable_library_util_test
+  SRCS
+    "executable_library_util_test.cc"
+  DEPS
+    ::executable_library_util
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     executable_plugin
