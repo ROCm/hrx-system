@@ -2849,7 +2849,7 @@ static iree_status_t loom_vector_float_ternary_summary_facts(
     loom_vector_float_ternary_fact_transfer_fn_t transfer_fn,
     const void* user_data) {
   bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_accumulator_fragment_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
       context, operand_facts, 3, result_facts, &fragment_handled));
   if (fragment_handled) return iree_ok_status();
 
