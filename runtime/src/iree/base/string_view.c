@@ -398,7 +398,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_int32_base(iree_string_view_t value,
                                                       int32_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[16] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -424,7 +426,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_uint32_base(iree_string_view_t value,
                                                        uint32_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[16] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -447,7 +451,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_int64_base(iree_string_view_t value,
                                                       int64_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -473,7 +479,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_uint64_base(iree_string_view_t value,
                                                        uint64_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -495,7 +503,9 @@ IREE_API_EXPORT bool iree_string_view_atof(iree_string_view_t value,
                                            float* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -510,7 +520,9 @@ IREE_API_EXPORT bool iree_string_view_atod(iree_string_view_t value,
                                            double* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
