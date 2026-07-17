@@ -273,6 +273,13 @@ inline StatusOr<uint16_t> ParseElementBF16(const std::string& value) {
                                     iree::span<uint16_t>(&result, 1)));
   return result;
 }
+inline StatusOr<uint8_t> ParseElementF8E4M3FN(const std::string& value) {
+  uint8_t result = uint8_t();
+  IREE_RETURN_IF_ERROR(ParseElement(value,
+                                    IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FN,
+                                    iree::span<uint8_t>(&result, 1)));
+  return result;
+}
 
 // Converts a single element of to a string value.
 template <typename T>
@@ -731,6 +738,9 @@ TEST(ElementStringUtilTest, ParseElement) {
   EXPECT_THAT(ParseElement<uint64_t>("18446744073709551615"),
               IsOkAndHolds(Eq(UINT64_MAX)));
   EXPECT_THAT(ParseElementBF16("1.5"), IsOkAndHolds(Eq(0x3FC0u)));
+  EXPECT_THAT(ParseElementF8E4M3FN("449"), IsOkAndHolds(Eq(0x7Eu)));
+  EXPECT_THAT(ParseElementF8E4M3FN("-449"), IsOkAndHolds(Eq(0xFEu)));
+  EXPECT_THAT(ParseElementF8E4M3FN("inf"), IsOkAndHolds(Eq(0x7Eu)));
   EXPECT_THAT(ParseElement<float>("1.5"), IsOkAndHolds(Eq(1.5f)));
   EXPECT_THAT(ParseElement<double>("1.567890123456789"),
               IsOkAndHolds(Eq(1.567890123456789)));

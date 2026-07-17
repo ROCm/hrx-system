@@ -228,6 +228,28 @@ TEST(FloatFacts, FloatToIntegerRejectsNonFiniteValues) {
                                 LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, value);
   }
 }
+TEST(FloatFacts, F8E4M3SaturatesOverflow) {
+  auto expect_saturated = [](double source_value, double expected_value,
+                             uint64_t expected_bits) {
+    loom_value_facts_t value =
+        loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F8E4M3, source_value);
+    EXPECT_DOUBLE_EQ(ExactFloatValue(LOOM_SCALAR_TYPE_F8E4M3, value),
+                     expected_value);
+
+    loom_value_facts_t bits = loom_value_facts_unknown();
+    loom_value_facts_eval_scalar_bitcast(LOOM_SCALAR_TYPE_F8E4M3,
+                                         LOOM_SCALAR_TYPE_I8, &value, &bits);
+    uint64_t actual_bits = 0;
+    EXPECT_TRUE(loom_value_facts_as_exact_raw_bits(bits, 8, &actual_bits));
+    EXPECT_EQ(expected_bits, actual_bits);
+  };
+
+  expect_saturated(449.0, 448.0, UINT64_C(0x7E));
+  expect_saturated(-449.0, -448.0, UINT64_C(0xFE));
+  expect_saturated(INFINITY, 448.0, UINT64_C(0x7E));
+  expect_saturated(-INFINITY, -448.0, UINT64_C(0xFE));
+}
+
 TEST(FloatFacts, DistinguishesFusedAndStagedF32Arithmetic) {
   loom_value_facts_t a =
       loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4097.0);

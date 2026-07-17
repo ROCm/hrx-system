@@ -745,12 +745,6 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FN) {
   // Min normal values.
   EXPECT_EQ(0x08, iree_math_f32_to_f8e4m3fn(kF8E4M3FNMin));
   EXPECT_EQ(0x88, iree_math_f32_to_f8e4m3fn(-kF8E4M3FNMin));
-  // Infinity
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(INFINITY));
-  EXPECT_EQ(0xfF, iree_math_f32_to_f8e4m3fn(-INFINITY));
-  // Overflow
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(FLT_MAX));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-FLT_MAX));
   // Test some round-to-nearest-even behavior.
   EXPECT_EQ(0x70, iree_math_f32_to_f8e4m3fn(136.0f));
   EXPECT_EQ(0x72, iree_math_f32_to_f8e4m3fn(152.0f));
@@ -775,19 +769,44 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FN) {
   EXPECT_EQ(0x82, iree_math_f32_to_f8e4m3fn(-2.5f / 512.f));
   EXPECT_EQ(0x83, iree_math_f32_to_f8e4m3fn(-3.f / 512.f));
   EXPECT_EQ(0x84, iree_math_f32_to_f8e4m3fn(-3.5f / 512.f));
-
-  // Important case to test: overflow due to rounding to nearest-even of 465
-  // to 512, while 464 gets rounded to nearest-even 448, not overflowing.
-  EXPECT_EQ(0x7E, iree_math_f32_to_f8e4m3fn(464.f));
-  EXPECT_EQ(0xFE, iree_math_f32_to_f8e4m3fn(-464.f));
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(465.f));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-465.f));
-  // Largest float value in the same exponent bucket, a tricky case.
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(511.f));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-511.f));
   // Underflow
   EXPECT_EQ(0, iree_math_f32_to_f8e4m3fn(FLT_MIN));
   EXPECT_EQ(0x80, iree_math_f32_to_f8e4m3fn(-FLT_MIN));
+}
+
+TEST(F8E4M3FNConversionTest, SaturatesOverflowAndPreservesNan) {
+  constexpr float kMaxFinite = 448.0f;
+  constexpr float kOverflowMidpoint = 464.0f;
+  const float just_above_max = std::nextafter(kMaxFinite, INFINITY);
+  const float below_midpoint = std::nextafter(kOverflowMidpoint, kMaxFinite);
+  const float above_midpoint = std::nextafter(kOverflowMidpoint, INFINITY);
+  auto expect_saturated = [](float value) {
+    EXPECT_EQ(0x7E, iree_math_f32_to_f8e4m3fn(value));
+    EXPECT_EQ(0xFE, iree_math_f32_to_f8e4m3fn(-value));
+  };
+
+  expect_saturated(just_above_max);
+  expect_saturated(below_midpoint);
+  expect_saturated(kOverflowMidpoint);
+  expect_saturated(above_midpoint);
+  expect_saturated(465.0f);
+  expect_saturated(511.0f);
+  expect_saturated(FLT_MAX);
+  expect_saturated(INFINITY);
+
+  auto f32_from_bits = [](uint32_t bits) {
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+  };
+  EXPECT_EQ(0x7F,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0x7FC00000))));
+  EXPECT_EQ(0x7F,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0x7F800001))));
+  EXPECT_EQ(0xFF,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0xFFC00000))));
+  EXPECT_EQ(0xFF,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0xFF800001))));
 }
 
 TEST(F8E4M3FNConversionTest, Denormals) {
@@ -833,25 +852,21 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FNToF32) {
   EXPECT_EQ(256.f, iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(256.f)));
   EXPECT_EQ(-256.f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-256.f)));
-  // Overflow
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MAX))));
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MAX))));
-  EXPECT_GT(
-      kF8E4M3FNMax + 1.f,
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(kF8E4M3FNMax + 1.f)));
+  // Overflow saturates to signed maximum finite.
+  EXPECT_EQ(kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MAX)));
+  EXPECT_EQ(-kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MAX)));
   // Underflow
   EXPECT_EQ(0.0f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MIN)));
   EXPECT_EQ(0.0f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MIN)));
-  // Inf and Nan
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(INFINITY))));
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-INFINITY))));
-  // Check that the result is a Nan with nan != nan.
+  // Infinities saturate while NaNs remain NaN.
+  EXPECT_EQ(kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(INFINITY)));
+  EXPECT_EQ(-kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-INFINITY)));
   float nan = iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(NAN));
   EXPECT_NE(nan, nan);
 }
