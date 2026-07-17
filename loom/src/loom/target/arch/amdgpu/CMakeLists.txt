@@ -138,10 +138,13 @@ loom_cc_library(
     math_policy
   HDRS
     "math_policy.h"
+  TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
   SRCS
     "math_policy.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::lower::kinds
     loom::target::math_policy
   PUBLIC
 )
@@ -190,6 +193,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::analysis::symbolic_expr
+    loom::codegen::low::descriptors
     loom::ir
     loom::ops::index
     loom::ops::kernel
@@ -200,6 +204,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::lower::kinds
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info_defs
     loom::target::legalization
     loom::transforms::vector::to_scalar
@@ -254,8 +259,10 @@ loom_cc_library(
     ::low_aliases
     iree::base
     loom::codegen::low::diagnostics
+    loom::codegen::low::packet
     loom::codegen::low::verify
     loom::error::error_defs
+    loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::ops
   PUBLIC
 )

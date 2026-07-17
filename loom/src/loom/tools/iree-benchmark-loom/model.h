@@ -17,6 +17,7 @@
 #include "loom/tooling/testbench/executor.h"
 #include "loom/tools/iree-benchmark-loom/configuration.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
+#include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
@@ -51,14 +52,10 @@ typedef struct iree_benchmark_loom_benchmark_policy_t {
 } iree_benchmark_loom_benchmark_policy_t;
 
 typedef struct iree_benchmark_loom_diagnostic_capture_t {
-  // JSON array entries for diagnostics emitted by this candidate compile.
-  iree_string_builder_t output;
-  // Output stream backed by |output|.
-  loom_output_stream_t stream;
-  // True after |output| has been initialized.
+  // Canonical diagnostic objects emitted by this candidate compile.
+  loom_json_value_list_t json_values;
+  // True after |json_values| has been initialized.
   bool initialized;
-  // True until the first diagnostic has been written.
-  bool first_diagnostic;
   // Number of error diagnostics captured.
   iree_host_size_t error_count;
   // Number of warning diagnostics captured.
@@ -109,9 +106,24 @@ typedef struct iree_benchmark_loom_timing_stats_t {
   int64_t p90_ns;
 } iree_benchmark_loom_timing_stats_t;
 
+typedef uint8_t iree_benchmark_loom_buffer_materialization_t;
+enum iree_benchmark_loom_buffer_materialization_e {
+  // The report does not know how this buffer family was materialized.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_UNKNOWN = 0,
+  // Buffers were materialized as host-local device-visible mappings.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE = 1,
+  // Buffers were materialized using the materializer default device-local
+  // placement.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL = 2,
+};
+
 typedef struct iree_benchmark_loom_data_cache_summary_t {
   // True when the dispatch benchmark has populated this summary.
   bool populated;
+  // Placement used for correctness samples before benchmark timing.
+  iree_benchmark_loom_buffer_materialization_t correctness_materialization;
+  // Placement used for measured dispatch-complete binding-ring buffers.
+  iree_benchmark_loom_buffer_materialization_t measurement_materialization;
   // Number of HAL binding references in each dispatch binding set.
   iree_host_size_t binding_count;
   // Number of physical binding sets materialized from check ops.
@@ -201,6 +213,8 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   loom_run_hal_testbench_actual_provider_t execution;
   // Sample compilation label for rows emitted from this provider.
   iree_string_view_t sample_compilation;
+  // Optional suffix appended to debug/full artifact leaves.
+  iree_string_view_t artifact_path_suffix;
   // Structured diagnostics emitted while compiling this candidate.
   iree_benchmark_loom_diagnostic_capture_t diagnostics;
   // Structured compile report populated while emitting this candidate.
@@ -228,6 +242,15 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   // True when |compile_report_capture| owns initialized capture state.
   bool compile_report_capture_initialized;
 } iree_benchmark_loom_hal_actual_provider_t;
+
+typedef struct iree_benchmark_loom_hal_actual_sequence_t {
+  // Host allocator used for sequence-owned provider storage.
+  iree_allocator_t host_allocator;
+  // Sequence-owned providers in check.case source order.
+  iree_benchmark_loom_hal_actual_provider_t* providers;
+  // Number of entries in |providers|.
+  iree_host_size_t provider_count;
+} iree_benchmark_loom_hal_actual_sequence_t;
 
 typedef struct iree_benchmark_loom_dispatch_comparison_candidate_t {
   // Selected benchmark/case/policy identity for this comparison member.

@@ -66,6 +66,7 @@ from loom.dsl import (
     LoopLikeInterface,
     Op,
     Operand,
+    OperandRole,
     OpPhase,
     RegionBranchInterface,
     RegionDef,
@@ -150,7 +151,7 @@ scf_condition = Op(
     group=scf_ops,
     doc=("Terminates the before region of scf.while with a scalar i1 continuation condition and the values forwarded to the after region."),
     operands=[
-        Operand("condition", I1),
+        Operand("condition", I1, role=OperandRole.CONTROL_CONDITION),
         Operand("forwarded", ANY, variadic=True),
     ],
     traits=[TERMINATOR],
@@ -195,9 +196,9 @@ scf_select = Op(
         "masking remains vector.select."
     ),
     operands=[
-        Operand("condition", I1),
-        Operand("true_value", ANY),
-        Operand("false_value", ANY),
+        Operand("condition", I1, role=OperandRole.SELECT_CONDITION),
+        Operand("true_value", ANY, role=OperandRole.SELECT_PAYLOAD),
+        Operand("false_value", ANY, role=OperandRole.SELECT_PAYLOAD),
     ],
     results=[Result("result", ANY)],
     constraints=[SameType("true_value", "false_value", "result")],
@@ -476,7 +477,7 @@ scf_if = Op(
     verify="loom_scf_if_verify",
     canonicalize="loom_scf_if_canonicalize",
     type_transfer="loom_scf_region_branch_type_transfer",
-    operands=[Operand("condition", I1)],
+    operands=[Operand("condition", I1, role=OperandRole.CONTROL_CONDITION)],
     results=[Result("results", ANY, variadic=True)],
     regions=[
         RegionDef(

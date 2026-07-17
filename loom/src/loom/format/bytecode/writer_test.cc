@@ -643,8 +643,8 @@ TEST_F(WriterTest, ModuleWithFunction) {
   loom_string_id_t y_name = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("x"), &x_name));
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("y"), &y_name));
-  module->values.entries[arg_ids[0]].name_id = x_name;
-  module->values.entries[arg_ids[1]].name_id = y_name;
+  loom_module_value(module, arg_ids[0])->name_id = x_name;
+  loom_module_value(module, arg_ids[1])->name_id = y_name;
 
   // Build an addi op in the function body.
   loom_region_t* body = loom_func_like_body(func_like);
@@ -1011,7 +1011,7 @@ TEST_F(WriterTest, ZeroExtentVectorTypeWrites) {
   ASSERT_EQ(arg_count, 1);
   ASSERT_EQ(module->types.count, 2u);
   EXPECT_TRUE(
-      loom_type_equal(vector_type, module->values.entries[arg_ids[0]].type));
+      loom_type_equal(vector_type, loom_module_value_type(module, arg_ids[0])));
 
   auto bytes = WriteModule(module);
   EXPECT_GT(bytes.size(), 0u);

@@ -257,7 +257,7 @@ static iree_status_t loom_print_low_asm_result_types_require_annotation(
         ctx->low_asm_environment.vtable->result_type_annotation_required(
             ctx->low_asm_environment.state, &statement->packet,
             statement->operands, statement->operand_count, i, ctx->module,
-            ctx->module->values.entries[result].type, &annotation_required,
+            loom_module_value_type(ctx->module, result), &annotation_required,
             &diagnostic_detail));
     if (!iree_string_view_is_empty(diagnostic_detail)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -470,7 +470,7 @@ static iree_status_t loom_print_low_asm_result_type_annotation(
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     IREE_RETURN_IF_ERROR(loom_print_type(
-        ctx, ctx->module->values.entries[statement->results[i]].type));
+        ctx, loom_module_value_type(ctx->module, statement->results[i])));
     loom_print_did_write(ctx);
   }
   return iree_ok_status();
@@ -636,6 +636,7 @@ static iree_status_t loom_print_low_asm_structural_copy(
   IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
                                                      statement->operand_count,
                                                      LOOM_PRINT_FIELD_OPERAND));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_structural_attr_dict(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ":", false));
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
   IREE_RETURN_IF_ERROR(loom_print_value_type(ctx, statement->operands[0]));

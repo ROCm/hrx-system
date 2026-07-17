@@ -21,9 +21,9 @@ loom_cc_library(
     iree::hal
     loom::error::diagnostic
     loom::ir
-    loom::target::compile_report
     loom::target::pipeline_options
     loom::target::provider
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::verify
@@ -59,7 +59,7 @@ loom_cc_library(
     ::artifact
     ::runtime
     iree::base
-    loom::target::compile_report
+    loom::target::reporting::report
     loom::tooling::execution::compile_options
     loom::tooling::execution::session
     loom::verify
@@ -111,8 +111,10 @@ loom_cc_library(
     loom::tooling::compile::pipeline
     loom::tooling::config
     loom::tooling::execution::compile_options
+    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::session
     loom::tooling::testbench
+    loom::tooling::testbench::invocation
     loom::tooling::testbench::requirements
     loom::tooling::testbench::value_materializer
     loom::util::fact_table

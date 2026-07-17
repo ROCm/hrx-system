@@ -24,7 +24,6 @@ loom_cc_library(
     ],
     deps = [
         ":ir",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],
@@ -71,6 +70,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/util:bstring",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

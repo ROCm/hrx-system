@@ -6,6 +6,7 @@
 
 #include "loom/transforms/vector/to_scalar_lanes.h"
 
+#include "loom/analysis/contract.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -14,13 +15,13 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/transforms/vector/to_scalar_encoding.h"
 #include "loom/transforms/vector/to_scalar_memory.h"
 #include "loom/transforms/vector/to_scalar_mma.h"
 #include "loom/transforms/vector/to_scalar_quantized.h"
 #include "loom/transforms/vector/to_scalar_structural.h"
 #include "loom/transforms/vector/to_scalar_tables.h"
 #include "loom/transforms/vector/to_scalar_transforms.h"
-#include "loom/util/math.h"
 
 struct loom_vector_to_scalar_lane_cache_entry_t {
   // Vector SSA value whose lane was materialized.
@@ -51,19 +52,6 @@ static loom_attribute_t loom_vector_to_scalar_zero_attr(
   if (scalar_type == LOOM_SCALAR_TYPE_I1) return loom_attr_bool(false);
   if (loom_scalar_type_is_float(scalar_type)) return loom_attr_f64(0.0);
   return loom_attr_i64(0);
-}
-
-uint8_t loom_vector_to_scalar_project_instance_flags(
-    loom_vector_to_scalar_instance_flag_mode_t mode, uint8_t instance_flags) {
-  switch (mode) {
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_DROP:
-      return 0;
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FORWARD:
-      return instance_flags;
-    case LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH:
-      return instance_flags;
-  }
-  return 0;
 }
 
 iree_status_t loom_vector_to_scalar_build_scalar_constant(
@@ -240,8 +228,8 @@ static iree_status_t loom_vector_to_scalar_cast_float_lane(
   const int32_t result_width =
       loom_scalar_type_bitwidth(loom_type_element_type(result_type));
   if (input_width <= 0 || result_width <= 0 || input_width == result_width) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "unsupported vector-to-scalar float lane cast");
+    IREE_ASSERT_UNREACHABLE("unsupported vector-to-scalar float lane cast");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_op_t* cast_op = NULL;
   if (input_width < result_width) {
@@ -296,8 +284,8 @@ iree_status_t loom_vector_to_scalar_cast_numeric_lane(
     *out_result = loom_scalar_sitofp_result(cast_op);
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unsupported vector-to-scalar numeric lane cast");
+  IREE_ASSERT_UNREACHABLE("unsupported vector-to-scalar numeric lane cast");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static bool loom_vector_to_scalar_lookup_cached_static_integer_lane(
@@ -637,20 +625,19 @@ iree_status_t loom_vector_to_scalar_build_poison_lane(
 static iree_status_t loom_vector_to_scalar_build_generic_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
-  const loom_vector_to_scalar_descriptor_t* descriptor = state->descriptor;
   loom_value_id_t lane_operands[4] = {0};
+  const uint16_t operand_count = state->op->operand_count;
+  IREE_ASSERT_LE(operand_count, IREE_ARRAYSIZE(lane_operands));
   const loom_value_id_t* operands = loom_op_const_operands(state->op);
-  for (uint8_t i = 0; i < descriptor->lane_operand_count; ++i) {
+  for (uint16_t i = 0; i < operand_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
         state, operands[i], indices, &lane_operands[i]));
   }
 
-  uint8_t instance_flags = loom_vector_to_scalar_project_instance_flags(
-      descriptor->instance_flag_mode, state->op->instance_flags);
   const loom_attribute_t* attrs = loom_op_attrs(state->op);
   return loom_vector_to_scalar_build_generic_lane_op(
-      state, descriptor->lane_op_kind, instance_flags, lane_operands,
-      descriptor->lane_operand_count, attrs, descriptor->copied_attr_count,
+      state, state->descriptor.lane_op_kind, state->op->instance_flags,
+      lane_operands, operand_count, attrs, state->op->attribute_count,
       state->result_scalar_type, out_lane);
 }
 
@@ -713,6 +700,7 @@ static const loom_vector_to_scalar_lane_lowerer_t
         loom_vector_to_scalar_build_bitunpacks_lane,
         loom_vector_to_scalar_build_table_lookup_lane,
         loom_vector_to_scalar_build_table_quantize_lane,
+        loom_vector_to_scalar_build_decode_lane,
         loom_vector_to_scalar_build_transform_lane,
         loom_vector_to_scalar_build_load_lane,
         loom_vector_to_scalar_build_masked_load_lane,
@@ -728,8 +716,73 @@ iree_status_t loom_vector_to_scalar_build_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
   loom_vector_to_scalar_record_lane_materialized(state);
-  return kVectorToScalarLaneLowerers[state->descriptor->lane_kind](
+  return kVectorToScalarLaneLowerers[state->descriptor.lane_kind](
       state, indices, out_lane);
+}
+
+bool loom_vector_to_scalar_can_materialize_def_lane(
+    const loom_module_t* module, loom_value_id_t value,
+    const loom_matrix_fragment_layout_t* matrix_fragment_layout,
+    loom_vector_to_scalar_index_list_t indices) {
+  for (;;) {
+    if (value == LOOM_VALUE_ID_INVALID) return false;
+    loom_type_t vector_type = loom_module_value_type(module, value);
+    if (!loom_type_is_vector(vector_type)) return true;
+    if (loom_type_rank(vector_type) != indices.rank) return false;
+
+    const loom_value_t* value_record = loom_module_value(module, value);
+    if (value_record == NULL || loom_value_is_block_arg(value_record)) {
+      return false;
+    }
+    const loom_op_t* def_op = loom_value_def_op(value_record);
+    if (def_op == NULL) return false;
+
+    const loom_trait_flags_t traits = loom_op_effective_traits(module, def_op);
+    if (loom_traits_are_value_alias(traits)) {
+      if (def_op->operand_count == 0) return false;
+      value = loom_op_const_operands(def_op)[0];
+      continue;
+    }
+
+    if (loom_vector_from_elements_isa(def_op)) {
+      if (loom_vector_to_scalar_indices_are_dynamic(indices) ||
+          !loom_type_is_all_static(vector_type)) {
+        return false;
+      }
+      const int64_t ordinal = loom_vector_to_scalar_linear_ordinal_static(
+          vector_type, indices.static_indices);
+      if (ordinal < 0) return false;
+      const loom_value_slice_t elements =
+          loom_vector_from_elements_elements(def_op);
+      if (ordinal >= (int64_t)elements.count) return false;
+      return true;
+    }
+
+    if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
+        loom_vector_poison_isa(def_op)) {
+      return true;
+    }
+
+    if (loom_vector_fragment_load_isa(def_op)) {
+      if (loom_vector_fragment_load_role(def_op) == LOOM_VECTOR_ROLE_RESULT &&
+          indices.rank == 1 &&
+          loom_vector_to_scalar_result_fragment_layout_is_supported(
+              matrix_fragment_layout)) {
+        return true;
+      }
+      const uint8_t logical_rank =
+          loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
+      return indices.rank == logical_rank;
+    }
+
+    loom_vector_to_scalar_descriptor_t descriptor = {0};
+    if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor) ||
+        descriptor.lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
+        !iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
+      return false;
+    }
+    return true;
+  }
 }
 
 static bool loom_vector_to_scalar_try_from_elements_lane(
@@ -783,13 +836,16 @@ loom_vector_to_scalar_try_physical_result_fragment_load_lane(
   const loom_vector_to_scalar_index_term_t register_index =
       loom_vector_to_scalar_lane_term(&def_state, indices, 0);
 
-  loom_vector_to_scalar_index_term_t terms[2] = {0};
+  loom_vector_to_scalar_index_term_t terms[3] = {0};
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_build_result_fragment_coordinate_terms(
-          &def_state, lane_id, register_index, &terms[0], &terms[1]));
+          &def_state, lane_id, register_index, &terms[0], &terms[1],
+          &terms[2]));
+  const uint8_t logical_rank =
+      loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
   loom_vector_to_scalar_index_list_t logical_indices = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_terms_to_index_list(
-      &def_state, terms, IREE_ARRAYSIZE(terms), &logical_indices));
+      &def_state, &terms[3 - logical_rank], logical_rank, &logical_indices));
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_load_lane(
       &def_state, logical_indices, out_lane));
   *out_materialized = true;
@@ -866,7 +922,9 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     if (*out_materialized) {
       return iree_ok_status();
     }
-    if (indices.rank != 2) {
+    const uint8_t logical_rank =
+        loom_vector_fragment_load_blocks_is_present(def_op) ? 3 : 2;
+    if (indices.rank != logical_rank) {
       return iree_ok_status();
     }
     loom_vector_to_scalar_state_t def_state = {
@@ -890,9 +948,10 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         state, def_op, indices, out_materialized, out_lane);
   }
 
-  const loom_vector_to_scalar_descriptor_t* descriptor =
-      loom_vector_to_scalar_find_descriptor(def_op->kind);
-  if (!descriptor) return iree_ok_status();
+  loom_vector_to_scalar_descriptor_t descriptor = {0};
+  if (!loom_vector_to_scalar_resolve_descriptor(def_op->kind, &descriptor)) {
+    return iree_ok_status();
+  }
   loom_value_t* value_record =
       loom_module_value(state->rewriter->module, value);
   uint16_t result_ordinal = loom_value_def_index(value_record);
@@ -907,12 +966,15 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .value_checkpoint = state->value_checkpoint,
       .result_ordinal = result_ordinal,
       .vector_type = result_type,
-      .result_scalar_type = descriptor->result_is_i1
-                                ? loom_type_scalar(LOOM_SCALAR_TYPE_I1)
-                                : loom_vector_to_scalar_lane_type(result_type),
+      .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
       .matrix_fragment_layout = state->matrix_fragment_layout,
       .location = def_op->location,
   };
+  if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
+      loom_vector_to_scalar_decode_rejection_bits(&def_state) !=
+          LOOM_CONTRACT_REJECTION_NONE) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_build_lane(&def_state, indices, out_lane));
   *out_materialized = true;

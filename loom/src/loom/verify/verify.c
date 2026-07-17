@@ -24,17 +24,12 @@ static iree_status_t loom_verify_region(loom_verify_state_t* state,
       state->current_consumption_query;
   loom_consumption_region_query_t consumption_query;
   state->current_region = region;
-  iree_status_t status = loom_consumption_region_query_initialize(
-      state->module, region, &state->arena, &consumption_query);
-  if (!iree_status_is_ok(status)) {
-    state->current_region = saved_region;
-    state->current_consumption_query = saved_consumption_query;
-    return status;
-  }
+  loom_consumption_region_query_initialize(state->module, region, &state->arena,
+                                           &consumption_query);
   state->current_consumption_query = &consumption_query;
 
   bool scope_pushed = false;
-  status = loom_verify_push_scope(state);
+  iree_status_t status = loom_verify_push_scope(state);
   if (iree_status_is_ok(status)) {
     scope_pushed = true;
   }

@@ -22,13 +22,19 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/placement.h"
+#include "loom/codegen/low/pressure.h"
+#include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct loom_low_allocation_budget_t loom_low_allocation_budget_t;
 
 // Sentinel for absent schedule node indices.
 #define LOOM_LOW_SCHEDULE_NODE_NONE UINT32_MAX
@@ -46,27 +52,18 @@ enum loom_low_schedule_node_flag_bits_e {
   // Value ordinals are stored in overflow_value_ordinals instead of
   // inline_value_ordinals.
   LOOM_LOW_SCHEDULE_NODE_FLAG_VALUE_ORDINALS_OVERFLOW = 1u << 0,
+  // Node occupies a fixed source-order position between reorderable ranges.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY = 1u << 1,
+  // Structural node can supply dependencies while setting up a target pair.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP = 1u << 2,
+  // Node observes completion of externally visible program-exit memory.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY = 1u << 3,
+  // Descriptor results overwrite storage before untied operands are consumed.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER = 1u << 4,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
 #define LOOM_LOW_SCHEDULE_NODE_INLINE_VALUE_ORDINAL_CAPACITY 4
-
-typedef enum loom_low_schedule_dependency_kind_e {
-  // Unknown or uninitialized dependency kind.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_UNKNOWN = 0,
-  // SSA producer-to-consumer dependency.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_SSA = 1,
-  // Conservative side-effect ordering dependency.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT = 2,
-  // Block-control dependency keeping terminators after block contents.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL = 3,
-  // Structural anchoring dependency keeping fixed-position packets in place.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR = 4,
-  // Target architectural state dependency such as flags or special registers.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_STATE = 5,
-  // Tied-result storage dependency keeping older readers before an overwrite.
-  LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE = 6,
-} loom_low_schedule_dependency_kind_t;
 
 #define LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY 16
 
@@ -137,6 +134,8 @@ typedef uint32_t loom_low_schedule_diagnostic_flags_t;
 enum loom_low_schedule_flag_bits_e {
   // Retains source-order liveness analysis in the returned schedule table.
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS = 1u << 0,
+  // Retains per-node pressure-model steps for detailed schedule inspection.
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS = 1u << 1,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -154,42 +153,6 @@ typedef enum loom_low_schedule_strategy_e {
 #define LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE UINT32_MAX
 #define LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE UINT32_MAX
 
-// One target-provided register-pressure cliff.
-//
-// Cliffs are keyed by descriptor-set-local register-class ID so the scheduler
-// can direct-index them after resolving low register types. The list passed to
-// the scheduler must be sorted by descriptor_reg_class_id and then cliff_units.
-// A candidate that moves projected live units from below |cliff_units| to at or
-// above it receives a penalty based on the resident-wave drop.
-typedef struct loom_low_schedule_pressure_cliff_t {
-  // Descriptor-set-local register class affected by this cliff.
-  uint16_t descriptor_reg_class_id;
-  // Live allocation units at which this cliff is crossed.
-  uint32_t cliff_units;
-  // Occupancy or throughput tier before crossing the cliff.
-  uint32_t tier_before;
-  // Occupancy or throughput tier after crossing the cliff.
-  uint32_t tier_after;
-} loom_low_schedule_pressure_cliff_t;
-
-// List of target-provided register-pressure cliffs.
-typedef struct loom_low_schedule_pressure_cliff_list_t {
-  // Borrowed pressure cliff rows.
-  const loom_low_schedule_pressure_cliff_t* values;
-  // Number of entries in |values|.
-  iree_host_size_t count;
-} loom_low_schedule_pressure_cliff_list_t;
-
-static inline loom_low_schedule_pressure_cliff_list_t
-loom_low_schedule_pressure_cliff_list_empty(void) {
-  return (loom_low_schedule_pressure_cliff_list_t){0};
-}
-
-static inline bool loom_low_schedule_pressure_cliff_list_is_empty(
-    loom_low_schedule_pressure_cliff_list_t list) {
-  return list.count == 0;
-}
-
 // One target-provided pair-affinity row.
 //
 // These rows are optimistic scheduling hints. The generic scheduler can place
@@ -204,6 +167,9 @@ typedef struct loom_low_schedule_pair_affinity_t {
   const loom_low_descriptor_t* second_descriptor;
   // Relative benefit for forming this pair. Zero disables the row.
   uint16_t priority;
+  // Index + 1 into the list placement_recipes table, or
+  // LOOM_LOW_PLACEMENT_PAIR_RECIPE_NONE.
+  uint16_t placement_recipe_index;
 } loom_low_schedule_pair_affinity_t;
 
 // List of target-provided pair-affinity rows.
@@ -212,6 +178,10 @@ typedef struct loom_low_schedule_pair_affinity_list_t {
   const loom_low_schedule_pair_affinity_t* values;
   // Number of entries in |values|.
   iree_host_size_t count;
+  // Borrowed target-provided placement recipes referenced by values.
+  const loom_low_placement_pair_recipe_t* placement_recipes;
+  // Number of entries in placement_recipes.
+  iree_host_size_t placement_recipe_count;
 } loom_low_schedule_pair_affinity_list_t;
 
 static inline loom_low_schedule_pair_affinity_list_t
@@ -256,40 +226,28 @@ typedef struct loom_low_schedule_node_t {
   const loom_op_t* op;
   // Block containing |op|.
   const loom_block_t* block;
+  // Descriptor row for descriptor-backed nodes, or NULL.
+  const loom_low_descriptor_t* descriptor;
+  // Schedule-class row for descriptor-backed nodes, or NULL.
+  const loom_low_schedule_class_t* schedule_class;
   // Region block ordinal containing |op|.
   uint32_t block_index;
   // Source-order ordinal within the whole low function body.
   uint32_t source_ordinal;
   // Scheduled ordinal within |block| after topological scheduling.
   uint32_t scheduled_ordinal;
-  // Kind of schedule node.
-  loom_low_schedule_node_kind_t kind;
-  // Effective traits used for conservative structural ordering.
-  loom_trait_flags_t traits;
-  // Descriptor row for descriptor-backed nodes, or NULL.
-  const loom_low_descriptor_t* descriptor;
   // Source memory-access record attached to this node, or NONE.
   uint32_t memory_access_record_index;
-  // Schedule-class id for descriptor-backed nodes, or NONE.
-  uint16_t schedule_class_id;
-  // Borrowed schedule-class name for descriptor-backed nodes.
-  iree_string_view_t schedule_class_name;
-  // Descriptor schedule latency in cycles.
-  uint16_t latency_cycles;
-  // Descriptor latency interpretation.
-  loom_low_latency_kind_t latency_kind;
-  // Descriptor schedule-model quality.
-  loom_low_model_quality_t model_quality;
-  // Number of issue-resource rows consumed by the schedule class.
-  uint16_t issue_use_count;
-  // Number of hazard rows attached to the schedule class.
-  uint16_t hazard_count;
-  // Number of descriptor effect rows.
-  uint16_t effect_count;
+  // Effective traits used for conservative structural ordering.
+  loom_trait_flags_t traits;
+  // Kind of schedule node.
+  loom_low_schedule_node_kind_t kind;
   // Number of operand value ordinals.
   uint16_t operand_count;
   // Number of result value ordinals.
   uint16_t result_count;
+  // Number of indexed storage relations owned by this node.
+  uint16_t storage_relation_count;
   // Per-node storage flags.
   loom_low_schedule_node_flags_t flags;
   // Operand ordinals followed by result ordinals. Small nodes store ordinals
@@ -346,18 +304,6 @@ loom_low_schedule_node_const_result_ordinals(
          node->operand_count;
 }
 
-// One dependency edge between two schedule nodes.
-typedef struct loom_low_schedule_dependency_t {
-  // Producer node index.
-  uint32_t producer_node;
-  // Consumer node index.
-  uint32_t consumer_node;
-  // Dependency kind.
-  loom_low_schedule_dependency_kind_t kind;
-  // Operand index for SSA dependencies, or UINT32_MAX.
-  uint32_t operand_index;
-} loom_low_schedule_dependency_t;
-
 // Pressure-model step recorded while scheduling one node. This is an aggregate
 // target-independent register-pressure estimate across all register classes,
 // not a replacement for source-order liveness or target occupancy analysis.
@@ -387,8 +333,10 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
-  // Number of dependency-ready candidates scored at this ordinal.
+  // Number of dependency-ready candidates at this ordinal.
   uint32_t ready_candidate_count;
+  // Number of ready candidates selected for exact scoring.
+  uint32_t scored_candidate_count;
   // Chosen schedule node.
   uint32_t chosen_node;
   // Best rejected schedule node, or LOOM_LOW_SCHEDULE_NODE_NONE.
@@ -430,9 +378,8 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t chosen_bottleneck_resource_id;
   // Chosen target pressure-cliff penalty.
   uint32_t chosen_pressure_cliff_penalty;
-  // Chosen register class closest to a pressure cliff, or
-  // LOOM_LOW_REG_CLASS_NONE.
-  uint16_t chosen_pressure_cliff_reg_class_id;
+  // Chosen register class or derived resource closest to a pressure cliff.
+  iree_string_view_t chosen_pressure_cliff_source;
   // Chosen crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t chosen_pressure_cliff_units;
   // Chosen live units remaining before the next pressure cliff, or
@@ -451,9 +398,9 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t rejected_bottleneck_resource_id;
   // Best rejected target pressure-cliff penalty.
   uint32_t rejected_pressure_cliff_penalty;
-  // Best rejected register class closest to a pressure cliff, or
-  // LOOM_LOW_REG_CLASS_NONE.
-  uint16_t rejected_pressure_cliff_reg_class_id;
+  // Best rejected register class or derived resource closest to a pressure
+  // cliff.
+  iree_string_view_t rejected_pressure_cliff_source;
   // Best rejected crossed pressure cliff, or
   // LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t rejected_pressure_cliff_units;
@@ -462,41 +409,9 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t rejected_units_until_pressure_cliff;
 } loom_low_schedule_candidate_decision_t;
 
-// Descriptor resource use recorded in scheduled order. This is an issue-model
-// trace, not a cycle-accurate reservation table; target overlays can refine it
-// into wait insertion, occupancy, or port-pressure diagnostics.
-typedef struct loom_low_schedule_resource_use_t {
-  // Scheduled node using the resource.
-  uint32_t node_index;
-  // Region block containing |node_index|.
-  uint32_t block_index;
-  // Scheduled ordinal within |block_index|.
-  uint32_t scheduled_ordinal;
-  // Issue-use row ordinal within the node's schedule class.
-  uint16_t issue_use_ordinal;
-  // Target resource table identifier consumed by this issue use.
-  uint16_t resource_id;
-  // Borrowed stable resource name.
-  iree_string_view_t resource_name;
-  // Abstract resource kind used by generic diagnostics.
-  loom_low_resource_kind_t resource_kind;
-  // Generic resource flags from the descriptor table.
-  loom_low_resource_flags_t resource_flags;
-  // Resource units available per cycle in the descriptor model.
-  uint16_t capacity_per_cycle;
-  // Contention group identifier shared by related resources.
-  uint16_t contention_group_id;
-  // Pipeline stage associated with this use.
-  uint16_t stage;
-  // Number of cycles the resource is occupied.
-  uint16_t cycles;
-  // Number of resource units consumed per cycle.
-  uint16_t units;
-} loom_low_schedule_resource_use_t;
-
 // Descriptor effect row recorded in scheduled order. Effects describe memory,
-// counter, call, barrier, and control visibility used by dependency
-// construction and target-owned visibility planning.
+// counter, call, barrier, and control behavior used by dependency construction
+// and target-owned wait and hazard planning.
 typedef struct loom_low_schedule_effect_use_t {
   // Scheduled node carrying the effect row.
   uint32_t node_index;
@@ -660,18 +575,21 @@ typedef struct loom_low_schedule_block_t {
 
 // Options controlling low schedule construction.
 typedef struct loom_low_schedule_options_t {
-  // Descriptor registry available to the scheduler.
-  const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional runtime/device target overlay applied when compatible with the
-  // function's target record.
-  loom_target_selection_t target_selection;
-  // Optional source-derived memory summaries for |low_func_op|. Empty uses
-  // conservative descriptor effect summaries.
+  // Optional source-derived memory summaries for the modeled function. Empty
+  // uses conservative descriptor effect summaries.
   loom_low_memory_access_table_t memory_access_table;
-  // Optional target-provided register-pressure cliff table.
-  loom_low_schedule_pressure_cliff_list_t pressure_cliffs;
+  // Optional immutable target pressure policy.
+  const loom_low_pressure_model_t* pressure_model;
+  // Optional explicit allocation budgets. These are interpreted as hard
+  // pressure limits by the scheduler so resource-stall scheduling can shorten
+  // live ranges before allocation reaches the final physical storage ceiling.
+  const loom_low_allocation_budget_t* allocation_budgets;
+  // Number of entries in |allocation_budgets|.
+  iree_host_size_t allocation_budget_count;
   // Optional target-provided pair-affinity table.
   loom_low_schedule_pair_affinity_list_t pair_affinities;
+  // Optional concrete pair groups preferred when rescheduling rewritten IR.
+  loom_low_placement_pair_use_list_t preferred_pair_uses;
   // Optional target-provided implicit state reads for structural low
   // materializations that emit target packets without descriptor rows.
   loom_low_schedule_structural_state_read_list_t structural_state_reads;
@@ -706,24 +624,33 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_block_t* blocks;
   // Number of block records.
   iree_host_size_t block_count;
+  // Read-only control-flow graph shared by target planning overlays.
+  loom_cfg_graph_t cfg_graph;
   // Per-op schedule nodes in source order.
   const loom_low_schedule_node_t* nodes;
   // Number of schedule nodes.
   iree_host_size_t node_count;
-  // Dependency edges between schedule nodes.
-  const loom_low_schedule_dependency_t* dependencies;
-  // Number of dependency edges.
-  iree_host_size_t dependency_count;
+  // Stable ordering dependency graph consumed by scheduling and target
+  // planning.
+  loom_low_schedule_dependency_graph_t dependencies;
+  // Number of distinct producer-to-consumer dependency groups used by list
+  // scheduling.
+  uint32_t dependency_group_count;
+  // Number of consumers published to their final dependency producer while
+  // maintaining pressure summaries.
+  uint64_t unlock_summary_publication_count;
   // Node indices in scheduled order, grouped by block.
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.
   iree_host_size_t scheduled_node_count;
+  // Concrete placement-sensitive pair opportunities in scheduled order.
+  loom_low_placement_pair_use_list_t placement_pair_uses;
   // Number of error diagnostics emitted while attempting scheduling.
   uint32_t error_count;
   // Terminal hard-scheduling failure when |error_count| is non-zero.
   loom_low_schedule_failure_t failure;
-  // Pressure-model steps in scheduled order when the selected strategy records
-  // them. Empty for the default source-priority strategy.
+  // Pressure-model steps in scheduled order when explicitly retained for a
+  // scored strategy. Empty unless RETAIN_PRESSURE_STEPS was requested.
   const loom_low_schedule_pressure_step_t* pressure_steps;
   // Number of pressure-model steps.
   iree_host_size_t pressure_step_count;
@@ -733,10 +660,7 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_candidate_decision_t* candidate_decisions;
   // Number of candidate decision records.
   iree_host_size_t candidate_decision_count;
-  // Descriptor resource uses in scheduled order. Empty when scheduled nodes do
-  // not reference descriptor issue-use rows.
-  const loom_low_schedule_resource_use_t* resource_uses;
-  // Number of resource-use records.
+  // Number of descriptor issue-use rows referenced by scheduled nodes.
   iree_host_size_t resource_use_count;
   // Descriptor effects in scheduled order.
   const loom_low_schedule_effect_use_t* effect_uses;

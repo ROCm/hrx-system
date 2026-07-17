@@ -125,10 +125,10 @@ static iree_status_t loom_vector_to_scalar_aggregate_loop_axis(
 
 static iree_status_t loom_vector_to_scalar_dynamic_seed(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_seed) {
-  if (state->descriptor->seed_operand_index != UINT8_MAX &&
-      state->descriptor->seed_operand_index < state->op->operand_count) {
-    loom_value_id_t seed = loom_op_const_operands(
-        state->op)[state->descriptor->seed_operand_index];
+  if (state->descriptor.seed_operand_index != UINT8_MAX &&
+      state->descriptor.seed_operand_index < state->op->operand_count) {
+    loom_value_id_t seed =
+        loom_op_const_operands(state->op)[state->descriptor.seed_operand_index];
     loom_type_t seed_type =
         loom_module_value_type(state->rewriter->module, seed);
     if (loom_type_equal(seed_type, state->vector_type)) {

@@ -103,9 +103,9 @@ typedef struct loom_run_hal_profile_summary_t {
   iree_host_size_t artifact_path_length;
   // Path to the raw HAL profile bundle, truncated when necessary.
   char artifact_path[LOOM_RUN_HAL_PROFILE_ARTIFACT_PATH_CAPACITY];
-  // Length of the formatted profiling failure message.
+  // Length of the primary profiling failure message.
   iree_host_size_t error_message_length;
-  // Formatted profiling failure message, truncated when necessary.
+  // Primary profiling failure message, truncated when necessary.
   char error_message[512];
   // Producer profiling flags requested for the final batch.
   iree_hal_device_profiling_flags_t flags;

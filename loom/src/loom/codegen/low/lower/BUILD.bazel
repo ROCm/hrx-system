@@ -20,6 +20,7 @@ _LOWER_VISIBILITY = [
     "//loom/src/loom/target/arch:__subpackages__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/target/emit:__subpackages__",
+    "//loom/src/loom/target/reporting:__pkg__",
     "//loom/src/loom/target/test:__subpackages__",
     "//loom/src/loom/tools/loom-check:__pkg__",
     "//loom/src/loom/tools/loom-check:__pkg__",
@@ -32,6 +33,7 @@ loom_cc_library(
         "lower.c",
         "lower_context.c",
         "lower_policy.c",
+        "lower_report.c",
         "lower_rules.c",
     ],
     hdrs = [
@@ -72,9 +74,10 @@ loom_cc_library(
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

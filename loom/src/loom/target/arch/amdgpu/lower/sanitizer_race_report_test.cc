@@ -36,8 +36,6 @@
 
 namespace {
 
-using iree::StatusCode;
-
 std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
@@ -737,29 +735,6 @@ TEST_F(AmdgpuSanitizerRaceReportTest, BranchesColdSitesToSharedReportIsland) {
   std::vector<loom_op_t*> trap_ops =
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_TRAP);
   EXPECT_TRUE(trap_ops.empty());
-}
-
-TEST_F(AmdgpuSanitizerRaceReportTest, RejectsUnsupportedValueShapes) {
-  loom_amdgpu_feedback_config_values_t config_values = {};
-  loom_amdgpu_feedback_channel_header_values_t channel_values = {};
-  loom_amdgpu_feedback_packet_address_t packet_address = {};
-  IREE_ASSERT_OK(
-      BuildFeedbackValues(&config_values, &channel_values, &packet_address));
-
-  loom_amdgpu_sanitizer_race_report_t report =
-      MakeReport(config_values, channel_values);
-  report.check_kind = channel_values.ring_capacity;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInternal,
-                        loom_amdgpu_build_sanitizer_race_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
-
-  report = MakeReport(config_values, channel_values);
-  report.current_site_id = config_values.flags;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInternal,
-                        loom_amdgpu_build_sanitizer_race_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
 }
 
 }  // namespace

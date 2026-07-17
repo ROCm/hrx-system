@@ -7,9 +7,13 @@
 #include "loom/codegen/low/allocation/interval_order.h"
 
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/util/adaptive_sort.h"
 
 static bool loom_low_allocation_interval_order_less(
-    const loom_liveness_interval_t* lhs, const loom_liveness_interval_t* rhs) {
+    const loom_liveness_interval_t* const* lhs_ptr,
+    const loom_liveness_interval_t* const* rhs_ptr) {
+  const loom_liveness_interval_t* lhs = *lhs_ptr;
+  const loom_liveness_interval_t* rhs = *rhs_ptr;
   if (lhs->start_point != rhs->start_point) {
     return lhs->start_point < rhs->start_point;
   }
@@ -19,19 +23,9 @@ static bool loom_low_allocation_interval_order_less(
   return lhs->value_id < rhs->value_id;
 }
 
-static void loom_low_allocation_interval_order_sort(
-    const loom_liveness_interval_t** intervals, iree_host_size_t count) {
-  for (iree_host_size_t i = 1; i < count; ++i) {
-    const loom_liveness_interval_t* value = intervals[i];
-    iree_host_size_t j = i;
-    while (j > 0 &&
-           loom_low_allocation_interval_order_less(value, intervals[j - 1])) {
-      intervals[j] = intervals[j - 1];
-      --j;
-    }
-    intervals[j] = value;
-  }
-}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_low_allocation_interval_order_sort,
+                          const loom_liveness_interval_t*,
+                          loom_low_allocation_interval_order_less)
 
 iree_status_t loom_low_allocation_interval_order_build(
     const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,

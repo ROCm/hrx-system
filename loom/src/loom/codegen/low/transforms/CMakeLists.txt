@@ -20,16 +20,39 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
+    loom::codegen::low::allocation_live_range_splitting
     loom::codegen::low::allocation_materialization
     loom::codegen::low::allocation_rematerialization
     loom::codegen::low::descriptors
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::pipeline::pass_environment
     loom::ir
     loom::ops::low
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    cfg_tuple_decomposition
+  HDRS
+    "cfg_tuple_decomposition.h"
+  SRCS
+    "cfg_tuple_decomposition.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::rewriter
+    loom::target::registers
   PUBLIC
 )
 
@@ -64,6 +87,7 @@ loom_cc_library(
     "operand_forms.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::consumption
     loom::codegen::low::builder
@@ -85,7 +109,6 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
-    loom::util::math
   PUBLIC
 )
 

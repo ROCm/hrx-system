@@ -18,6 +18,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_param_row,
     guard_row,
     source_memory_row,
+    value_ref_row,
 )
 from loom.gen.target.contracts.lower_rules import (
     _validate_c_table_shape,
@@ -326,6 +327,22 @@ def test_validate_c_table_shape_rejects_value_ref_materializer_index_oob() -> No
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' value-ref 0 materializer index references missing materializer row",
     )
+
+
+def test_value_ref_row_emits_element_indices() -> None:
+    row = value_ref_row(
+        LowerValueRef(
+            kind=SourceValueKind.OPERAND,
+            index=1,
+            element_index=2,
+        )
+    )
+
+    assert row == [
+        ".kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND",
+        ".index = 1",
+        ".element_index = 2",
+    ]
 
 
 def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:

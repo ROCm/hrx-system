@@ -4,7 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "loom/codegen/low/lower/lower_internal.h"
@@ -194,6 +193,28 @@ loom_func_like_t loom_low_lower_context_source_function(
   return context->source_function;
 }
 
+uint16_t loom_low_lower_source_memory_root_argument_index(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan) {
+  if (context == NULL || source_plan == NULL ||
+      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
+      source_plan->root_value_id >= context->module->values.count ||
+      !loom_func_like_isa(context->source_function)) {
+    return UINT16_MAX;
+  }
+  loom_region_t* body = loom_func_like_body(context->source_function);
+  if (body == NULL || body->block_count == 0) {
+    return UINT16_MAX;
+  }
+  const loom_value_t* root_value =
+      loom_module_value(context->module, source_plan->root_value_id);
+  if (!loom_value_is_block_arg(root_value) ||
+      loom_value_def_block(root_value) != loom_region_const_entry_block(body)) {
+    return UINT16_MAX;
+  }
+  return loom_value_def_index(root_value);
+}
+
 const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
     const loom_low_lower_context_t* context, uint16_t* out_argument_count) {
   IREE_ASSERT_ARGUMENT(out_argument_count);
@@ -346,12 +367,7 @@ iree_status_t loom_low_lower_module_state_get_or_allocate(
     loom_low_lower_module_target_state_record_t* record =
         &module_state->target_state_records[i];
     if (record->key != key) continue;
-    if (record->data_length != data_length) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "module-scope target lowering state key reused with a different "
-          "size");
-    }
+    IREE_ASSERT_EQ(record->data_length, data_length);
     *out_data = record->data;
     return iree_ok_status();
   }
@@ -427,11 +443,7 @@ iree_status_t loom_low_lower_get_or_allocate_target_state(
     loom_low_lower_target_state_record_t* record =
         &context->lowering.target_state_records[i];
     if (record->key != key) continue;
-    if (record->data_length != data_length) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "target lowering state key reused with a different size");
-    }
+    IREE_ASSERT_EQ(record->data_length, data_length);
     *out_data = record->data;
     return iree_ok_status();
   }
@@ -653,12 +665,9 @@ iree_status_t loom_low_lower_materialize_structural_operand(
 
   const loom_type_t materialized_type =
       loom_module_value_type(context->module, materialized_low_value_id);
-  if (!loom_type_equal(materialized_type, required_low_type)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "lowering policy materialized a structural operand with the wrong "
-        "type");
-  }
+  IREE_ASSERT(loom_type_equal(materialized_type, required_low_type),
+              "lowering policy materialized a structural operand with the "
+              "wrong type");
   *inout_low_value_id = materialized_low_value_id;
   return iree_ok_status();
 }
@@ -687,11 +696,8 @@ iree_status_t loom_low_lower_remap_successor_args(
     const loom_type_t actual_type =
         loom_module_value_type(context->module, low_args[i]);
     if (!loom_type_equal(actual_type, required_type)) {
-      if (context->policy->materialize_branch_arg.fn == NULL) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "lowering policy produced a branch payload type mismatch");
-      }
+      IREE_ASSERT(context->policy->materialize_branch_arg.fn != NULL,
+                  "lowering policy produced a branch payload type mismatch");
       IREE_RETURN_IF_ERROR(context->policy->materialize_branch_arg.fn(
           context->policy->materialize_branch_arg.user_data, context,
           source_terminator, successor_index, i, source_args[i], low_args[i],
@@ -699,12 +705,9 @@ iree_status_t loom_low_lower_remap_successor_args(
 
       const loom_type_t materialized_type =
           loom_module_value_type(context->module, low_args[i]);
-      if (!loom_type_equal(materialized_type, required_type)) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "lowering policy materialized a branch payload with the wrong "
-            "type");
-      }
+      IREE_ASSERT(loom_type_equal(materialized_type, required_type),
+                  "lowering policy materialized a branch payload with the "
+                  "wrong type");
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_materialize_structural_operand(
         context, source_terminator, i, source_args[i], required_type,
@@ -872,6 +875,7 @@ iree_status_t loom_low_lower_record_memory_access_summary(
               .block_index = block_index,
               .block_ordinal = low_op->block_ordinal,
           },
+      .op = low_op,
       .summary = *summary,
   };
   if (summary->byte_interval != NULL) {
@@ -923,38 +927,17 @@ iree_status_t loom_low_lower_lookup_value(loom_low_lower_context_t* context,
                                           loom_value_id_t source_value_id,
                                           loom_value_id_t* out_low_value_id) {
   *out_low_value_id = LOOM_VALUE_ID_INVALID;
-  if (source_value_id == LOOM_VALUE_ID_INVALID ||
-      source_value_id >= context->module->values.count) {
-    const iree_string_view_t function_name =
-        loom_low_lower_context_function_name(context);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "source-to-low lookup for invalid source value %" PRIu32
-        " in function '%.*s'",
-        (uint32_t)source_value_id, (int)function_name.size, function_name.data);
-  }
+  IREE_ASSERT(source_value_id != LOOM_VALUE_ID_INVALID &&
+                  source_value_id < context->module->values.count,
+              "source-to-low lookup for invalid source value");
   const loom_value_ordinal_t source_ordinal =
       loom_low_lowering_frame_value_ordinal(&context->lowering,
                                             source_value_id);
   loom_value_id_t low_value_id = context->lowering.value_map[source_ordinal];
-  if (low_value_id == LOOM_VALUE_ID_INVALID) {
-    const iree_string_view_t function_name =
-        loom_low_lower_context_function_name(context);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "source-to-low missing target value binding for source value %" PRIu32
-        " in function '%.*s'",
-        (uint32_t)source_value_id, (int)function_name.size, function_name.data);
-  }
-  if (low_value_id == LOOM_LOW_LOWER_VALUE_ID_ELIDED) {
-    const iree_string_view_t function_name =
-        loom_low_lower_context_function_name(context);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "source-to-low requested elided source value %" PRIu32
-        " in function '%.*s'",
-        (uint32_t)source_value_id, (int)function_name.size, function_name.data);
-  }
+  IREE_ASSERT(low_value_id != LOOM_VALUE_ID_INVALID,
+              "source-to-low missing target value binding");
+  IREE_ASSERT(low_value_id != LOOM_LOW_LOWER_VALUE_ID_ELIDED,
+              "source-to-low requested elided source value");
   *out_low_value_id = low_value_id;
   return iree_ok_status();
 }

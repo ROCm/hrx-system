@@ -47,6 +47,8 @@ _DESCRIPTOR_SET_RDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdn
 _DESCRIPTOR_SET_RDNA4_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
 
 _AMDGPU_ENCODING_VISIBILITY = [
+    "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
     "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
     "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
 ]
@@ -74,6 +76,7 @@ loom_cc_library(
     name = "encoding_defs",
     hdrs = ["encoding.h"],
     textual_hdrs = [":encoding_field_ids.inl"],
+    visibility = _AMDGPU_ENCODING_VISIBILITY,
     deps = ["//runtime/src/iree/base"],
 )
 

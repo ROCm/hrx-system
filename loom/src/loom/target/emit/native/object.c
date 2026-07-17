@@ -26,12 +26,6 @@ static iree_status_t loom_native_object_validate_symbol_name(
   return iree_ok_status();
 }
 
-static bool loom_native_object_checked_add_uint64(uint64_t lhs, uint64_t rhs,
-                                                  uint64_t* out_result) {
-  *out_result = lhs + rhs;
-  return *out_result >= lhs;
-}
-
 static iree_status_t loom_native_object_validate_symbol(
     const loom_native_object_symbol_t* symbol, iree_host_size_t index,
     iree_host_size_t section_layout_count) {
@@ -93,9 +87,8 @@ iree_status_t loom_native_object_resolve_symbol_layouts(
     const loom_native_section_contribution_layout_t* section_layout =
         &section_layouts[symbol->section_contribution_index];
     uint64_t final_offset = 0;
-    if (!loom_native_object_checked_add_uint64(section_layout->section_offset,
-                                               symbol->section_offset,
-                                               &final_offset)) {
+    if (!iree_checked_add_u64(section_layout->section_offset,
+                              symbol->section_offset, &final_offset)) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "native object symbol %" PRIhsz " section offset overflows", i);
@@ -150,9 +143,8 @@ iree_status_t loom_native_object_resolve_fixup_layouts(
     const loom_native_section_contribution_layout_t* section_layout =
         &section_layouts[fixup->section_contribution_index];
     uint64_t final_offset = 0;
-    if (!loom_native_object_checked_add_uint64(section_layout->section_offset,
-                                               fixup->section_offset,
-                                               &final_offset)) {
+    if (!iree_checked_add_u64(section_layout->section_offset,
+                              fixup->section_offset, &final_offset)) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "native object fixup %" PRIhsz " section offset overflows", i);

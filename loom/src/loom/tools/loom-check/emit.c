@@ -15,6 +15,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet_json.h"
 #include "loom/codegen/low/schedule/json.h"
 #include "loom/codegen/low/schedule/run.h"
@@ -460,45 +461,18 @@ static iree_status_t loom_check_emit_parse_low_schedule_option(
     return iree_ok_status();
   }
   if (!iree_string_view_equal(name, IREE_SV("diagnostics"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown low-schedule-json option '%.*s'",
-                            (int)name.size, name.data);
+    return loom_check_low_emit_parse_allocation_budget(
+        token, IREE_SV("low-schedule-json"), request->low_allocation_budgets,
+        IREE_ARRAYSIZE(request->low_allocation_budgets),
+        &request->low_allocation_budget_count);
   }
   if (request->has_low_schedule_diagnostics_option) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "duplicate low-schedule-json option 'diagnostics'");
   }
-  if (iree_string_view_equal(value, IREE_SV("none"))) {
-    request->low_schedule_diagnostic_flags = 0;
-  } else if (iree_string_view_equal(value, IREE_SV("pressure"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS;
-  } else if (iree_string_view_equal(value, IREE_SV("resources"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS;
-  } else if (iree_string_view_equal(value, IREE_SV("hazards"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS;
-  } else if (iree_string_view_equal(value, IREE_SV("candidates"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("model"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY;
-  } else if (iree_string_view_equal(value, IREE_SV("all"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY;
-  } else {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low-schedule-json option 'diagnostics' expected 'none', 'pressure', "
-        "'resources', 'hazards', 'candidates', 'model', or 'all', got '%.*s'",
-        (int)value.size, value.data);
-  }
+  IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_diagnostics(
+      value, IREE_SV("low-schedule-json"),
+      &request->low_schedule_diagnostic_flags));
   request->has_low_schedule_diagnostics_option = true;
   return iree_ok_status();
 }
@@ -958,6 +932,60 @@ static iree_status_t loom_check_emit_write_liveness_json(
   return loom_liveness_format_json(&analysis, NULL, &result->actual_output);
 }
 
+static iree_status_t loom_check_emit_index_pressure_cliffs(
+    const loom_low_pressure_cliff_t* values, iree_host_size_t count,
+    iree_host_size_t descriptor_reg_class_count, iree_arena_allocator_t* arena,
+    loom_low_pressure_cliff_table_t* out_table) {
+  loom_low_pressure_cliff_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, descriptor_reg_class_count, sizeof(*ranges), (void**)&ranges));
+  memset(ranges, 0, descriptor_reg_class_count * sizeof(*ranges));
+
+  uint16_t previous_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  uint32_t previous_cliff_units = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_low_pressure_cliff_t* cliff = &values[i];
+    if (cliff->pressure_source_id >= descriptor_reg_class_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff references an invalid register "
+          "class");
+    }
+    if (cliff->cliff_units == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff units must be nonzero");
+    }
+    if (cliff->tier_after >= cliff->tier_before) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff must lower the target tier");
+    }
+    if (i != 0 && (cliff->pressure_source_id < previous_reg_class_id ||
+                   (cliff->pressure_source_id == previous_reg_class_id &&
+                    cliff->cliff_units <= previous_cliff_units))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliffs must be sorted by register "
+          "class and units");
+    }
+    loom_low_pressure_cliff_range_t* range = &ranges[cliff->pressure_source_id];
+    if (range->count == 0) {
+      range->start = (uint32_t)i;
+    }
+    ++range->count;
+    previous_reg_class_id = cliff->pressure_source_id;
+    previous_cliff_units = cliff->cliff_units;
+  }
+
+  *out_table = (loom_low_pressure_cliff_table_t){
+      .values = values,
+      .count = count,
+      .ranges = ranges,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
@@ -965,6 +993,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_check_emit_pressure_cliff_spec_t* pressure_cliff_specs,
     iree_host_size_t pressure_cliff_spec_count,
+    const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     loom_low_schedule_diagnostic_flags_t diagnostic_flags,
     loom_low_schedule_strategy_t strategy, iree_diagnostic_emitter_t emitter,
     iree_arena_allocator_t* analysis_arena, loom_check_result_t* result) {
@@ -975,7 +1004,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   if (!low_function) {
     return iree_ok_status();
   }
-  const loom_low_schedule_pressure_cliff_t* pressure_cliffs = NULL;
+  loom_low_pressure_cliff_table_t pressure_cliffs =
+      loom_low_pressure_cliff_table_empty();
   if (pressure_cliff_spec_count != 0) {
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
@@ -986,7 +1016,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
           IREE_STATUS_FAILED_PRECONDITION,
           "low-schedule-json target did not resolve descriptor set");
     }
-    loom_low_schedule_pressure_cliff_t* resolved_cliffs = NULL;
+    loom_low_pressure_cliff_t* resolved_cliffs = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         analysis_arena, pressure_cliff_spec_count, sizeof(*resolved_cliffs),
         (void**)&resolved_cliffs));
@@ -1017,8 +1047,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
         pressure_cliffs_resolved = false;
         continue;
       }
-      resolved_cliffs[i] = (loom_low_schedule_pressure_cliff_t){
-          .descriptor_reg_class_id = reg_class_id,
+      resolved_cliffs[i] = (loom_low_pressure_cliff_t){
+          .pressure_source_id = reg_class_id,
           .cliff_units = spec->cliff_units,
           .tier_before = spec->tier_before,
           .tier_after = spec->tier_after,
@@ -1027,24 +1057,38 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     if (!pressure_cliffs_resolved) {
       return iree_ok_status();
     }
-    pressure_cliffs = resolved_cliffs;
+    IREE_RETURN_IF_ERROR(loom_check_emit_index_pressure_cliffs(
+        resolved_cliffs, pressure_cliff_spec_count,
+        target.descriptor_set->reg_class_count, analysis_arena,
+        &pressure_cliffs));
   }
+  const loom_low_pressure_model_t pressure_model = {
+      .register_class_cliffs = pressure_cliffs,
+  };
   loom_low_schedule_options_t options = {
-      .descriptor_registry = descriptor_registry,
-      .pressure_cliffs =
-          {
-              .values = pressure_cliffs,
-              .count = pressure_cliff_spec_count,
-          },
+      .pressure_model = pressure_cliff_spec_count != 0 ? &pressure_model : NULL,
+      .allocation_budgets = budgets,
+      .allocation_budget_count = budget_count,
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
-      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS,
+      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
       .strategy = strategy,
   };
+  loom_low_function_model_t model = {0};
   loom_low_schedule_table_t table = {0};
-  IREE_RETURN_IF_ERROR(loom_low_schedule_function(
-      module, low_function, &options, analysis_arena, &table));
-  return loom_low_schedule_format_json(&table, &result->actual_output);
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function, descriptor_registry, loom_target_selection_empty(),
+      emitter, /*flags=*/0, analysis_arena, &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_schedule_function(&model, &options, analysis_arena, &table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_format_json(&table, &result->actual_output);
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static const char* loom_check_emit_low_allocation_mode_name(
@@ -1126,7 +1170,6 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
     return iree_ok_status();
   }
   loom_low_allocation_options_t options = {
-      .descriptor_registry = descriptor_registry,
       .budgets = budgets,
       .budget_count = budget_count,
       .fixed_values = fixed_values,
@@ -1134,10 +1177,18 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
   };
-  IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-      module, low_function, &options, analysis_arena, out_table));
-  *out_built = true;
-  return iree_ok_status();
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function, descriptor_registry, loom_target_selection_empty(),
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena,
+      &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_allocate_function(&model, &options, analysis_arena, out_table);
+  }
+  if (iree_status_is_ok(status)) *out_built = true;
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static iree_status_t loom_check_emit_write_low_allocation_json(
@@ -2054,6 +2105,7 @@ iree_status_t loom_check_execute_emit(
             test_case, filename, &diagnostic_collector,
             request.low_schedule_pressure_cliff_specs,
             request.low_schedule_pressure_cliff_spec_count,
+            request.low_allocation_budgets, request.low_allocation_budget_count,
             request.low_schedule_diagnostic_flags,
             request.low_schedule_strategy,
             (iree_diagnostic_emitter_t){

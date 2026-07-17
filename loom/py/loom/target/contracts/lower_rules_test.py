@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import conversion as scalar_conversion
@@ -19,6 +20,7 @@ from loom.dsl import Op
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     AttrProject,
     ContractFragment,
     DescriptorEmitForm,
@@ -30,6 +32,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopyKind,
     LowerEmitKind,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
     SourceMemoryConstraint,
@@ -344,6 +347,30 @@ def test_compile_lower_rule_set_compiles_value_alias_cases() -> None:
     assert compiled.spans[0].source_op is vector.vector_fragment
 
 
+def test_compile_lower_rule_set_compiles_ordinal_value_alias_cases() -> None:
+    table = ContractFragment(
+        name="test.ordinal_alias",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            OrdinalValueAliasRule(
+                source_op=scalar_analysis.scalar_assume,
+                source=ValueRef.operand("values"),
+                result=ValueRef.result("results"),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert compiled.authored_case_indices == (0,)
+    assert len(compiled.rules) == 1
+    assert compiled.rules[0].source_op is scalar_analysis.scalar_assume
+    assert compiled.rules[0].flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS
+    assert compiled.rules[0].alias_ref_count == 1
+    assert compiled.value_refs[0].kind == SourceValueKind.OPERAND
+    assert compiled.value_refs[1].kind == SourceValueKind.RESULT
+
+
 def test_compile_lower_rule_set_compiles_value_elide_cases() -> None:
     table = ContractFragment(
         name="test.elide",
@@ -458,7 +485,8 @@ def test_compile_lower_rule_set_offsets_variadic_operand_elements() -> None:
     value_refs = compiled.value_refs[
         emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
     ]
-    assert tuple(value_ref.index for value_ref in value_refs) == (0, 1, 2, 3)
+    assert tuple(value_ref.index for value_ref in value_refs) == (0, 0, 0, 0)
+    assert tuple(value_ref.element_index for value_ref in value_refs) == (0, 1, 2, 3)
 
 
 def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() -> None:

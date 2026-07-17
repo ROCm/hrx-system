@@ -37,6 +37,24 @@ uint16_t PacketOperandCount(const loom_low_descriptor_set_t* descriptor_set,
   return packet_operand_count;
 }
 
+const loom_low_storage_lease_record_t* FindSourceLeaseRecord(
+    const loom_low_storage_lease_table_t& table, uint16_t attachment_index,
+    uint32_t unit_count, uint32_t release_class_id,
+    uint32_t release_reason_id) {
+  for (iree_host_size_t i = 0; i < table.record_count; ++i) {
+    const loom_low_storage_lease_record_t& record = table.records[i];
+    if (record.kind == LOOM_LOW_STORAGE_LEASE_SOURCE_READ &&
+        record.attachment == LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND &&
+        record.attachment_index == attachment_index &&
+        record.unit_count == unit_count &&
+        record.release_class_id == release_class_id &&
+        record.release_reason_id == release_reason_id) {
+      return &record;
+    }
+  }
+  return nullptr;
+}
+
 void InitializeScheduleFixture(const loom_low_descriptor_set_t* descriptor_set,
                                const loom_low_descriptor_t* descriptor,
                                ScheduleFixture* fixture) {
@@ -50,45 +68,27 @@ void InitializeScheduleFixture(const loom_low_descriptor_set_t* descriptor_set,
   fixture->node = {
       /*.op=*/{},
       /*.block=*/{},
+      /*.descriptor=*/descriptor,
+      /*.schedule_class=*/
+      &descriptor_set->schedule_classes[descriptor->schedule_class_id],
       /*.block_index=*/0,
       /*.source_ordinal=*/0,
       /*.scheduled_ordinal=*/0,
-      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
-      /*.traits=*/{},
-      /*.descriptor=*/descriptor,
       /*.memory_access_record_index=*/{},
-      /*.schedule_class_id=*/{},
-      /*.schedule_class_name=*/{},
-      /*.latency_cycles=*/{},
-      /*.latency_kind=*/{},
-      /*.model_quality=*/{},
-      /*.issue_use_count=*/{},
-      /*.hazard_count=*/{},
-      /*.effect_count=*/{},
+      /*.traits=*/{},
+      /*.kind=*/LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
       /*.operand_count=*/PacketOperandCount(descriptor_set, descriptor),
       /*.result_count=*/descriptor->result_count,
   };
   fixture->scheduled_node_indices[0] = 0;
-  fixture->schedule = {
-      /*.module=*/{},
-      /*.function_op=*/{},
-      /*.target=*/
-      {/*.target_symbol=*/{}, /*.target_op=*/{}, /*.bundle_storage=*/{},
-       /*.target_name=*/{}, /*.descriptor_set_key=*/{}, /*.feature_bits=*/{},
-       /*.descriptor_set=*/descriptor_set},
-      /*.memory_access_table=*/{},
-      /*.value_ids=*/{},
-      /*.value_count=*/{},
-      /*.liveness=*/{},
-      /*.blocks=*/&fixture->block,
-      /*.block_count=*/1,
-      /*.nodes=*/&fixture->node,
-      /*.node_count=*/1,
-      /*.dependencies=*/{},
-      /*.dependency_count=*/{},
-      /*.scheduled_node_indices=*/fixture->scheduled_node_indices,
-      /*.scheduled_node_count=*/1,
-  };
+  fixture->schedule = {};
+  fixture->schedule.target.descriptor_set = descriptor_set;
+  fixture->schedule.blocks = &fixture->block;
+  fixture->schedule.block_count = 1;
+  fixture->schedule.nodes = &fixture->node;
+  fixture->schedule.node_count = 1;
+  fixture->schedule.scheduled_node_indices = fixture->scheduled_node_indices;
+  fixture->schedule.scheduled_node_count = 1;
 }
 
 class AmdgpuStorageLeaseTest : public ::testing::Test {
@@ -129,33 +129,34 @@ TEST_F(AmdgpuStorageLeaseTest, LeasesBufferStoreVgprSources) {
       loom_amdgpu_descriptor_ref_descriptor(
           descriptor_set_, LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_DWORD);
   ASSERT_NE(descriptor, nullptr);
-  ASSERT_EQ(descriptor->storage_lease_count, 2u);
+  ASSERT_EQ(descriptor->storage_lease_count, 4u);
 
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(BuildLeaseTable(descriptor, &table));
 
-  ASSERT_EQ(table.record_count, 2u);
-  EXPECT_EQ(table.records[0].kind, LOOM_LOW_STORAGE_LEASE_SOURCE_READ);
-  EXPECT_EQ(table.records[0].attachment,
-            LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND);
-  EXPECT_EQ(table.records[0].attachment_index, 0u);
-  EXPECT_EQ(table.records[0].unit_count, 1u);
-  EXPECT_EQ(table.records[0].release_class_id,
-            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE);
-  EXPECT_EQ(table.records[0].release_action_id,
+  ASSERT_EQ(table.record_count, 4u);
+  const loom_low_storage_lease_record_t* vaddr_record =
+      FindSourceLeaseRecord(table, /*attachment_index=*/0, /*unit_count=*/1,
+                            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE);
+  ASSERT_NE(vaddr_record, nullptr);
+  EXPECT_EQ(vaddr_record->release_action_id,
             LOOM_AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET);
-  EXPECT_EQ(table.records[0].release_reason_id,
-            LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE);
-
-  EXPECT_EQ(table.records[1].kind, LOOM_LOW_STORAGE_LEASE_SOURCE_READ);
-  EXPECT_EQ(table.records[1].attachment,
-            LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND);
-  EXPECT_EQ(table.records[1].attachment_index, 2u);
-  EXPECT_EQ(table.records[1].unit_count, 1u);
-  EXPECT_EQ(table.records[1].release_class_id,
-            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE);
-  EXPECT_EQ(table.records[1].release_reason_id,
-            LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE);
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/1, /*unit_count=*/4,
+                            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+      nullptr);
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/2, /*unit_count=*/1,
+                            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE),
+      nullptr);
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/3, /*unit_count=*/1,
+                            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+      nullptr);
 }
 
 TEST_F(AmdgpuStorageLeaseTest, LeasesGlobalLoadResult) {

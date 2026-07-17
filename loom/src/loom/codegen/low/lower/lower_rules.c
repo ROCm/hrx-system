@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/lower/lower_internal.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
@@ -16,10 +17,10 @@
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/registers.h"
-#include "loom/util/math.h"
 
 static const loom_low_lower_rule_span_t* loom_low_lower_rule_set_find_span(
     const loom_low_lower_rule_set_t* rule_set, loom_op_kind_t source_op_kind) {
@@ -80,9 +81,9 @@ static uint32_t loom_low_lower_rule_source_memory_minimum_alignment(
   }
   loom_low_source_memory_access_plan_t access = {0};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build(
-          match_context->module, match_context->fact_table, source_op, &access,
-          &diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_with_view_regions(
+          match_context->module, match_context->fact_table,
+          match_context->view_regions, source_op, &access, &diagnostic)) {
     return 0;
   }
   return access.minimum_alignment;
@@ -177,14 +178,18 @@ loom_low_lower_rule_value_materializer(
 }
 
 static loom_value_id_t loom_low_lower_rule_source_value(
-    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index) {
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index) {
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   switch (value_ref->kind) {
-    case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
-      IREE_ASSERT_LT(value_ref->index, source_op->operand_count);
-      return loom_op_const_operands(source_op)[value_ref->index];
+    case LOOM_LOW_LOWER_VALUE_REF_OPERAND: {
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, source_op);
+      loom_value_slice_t span =
+          loom_op_operand_field_span(vtable, source_op, value_ref->index);
+      IREE_ASSERT_LT(value_ref->element_index, span.count);
+      return span.values[value_ref->element_index];
+    }
     case LOOM_LOW_LOWER_VALUE_REF_RESULT:
       IREE_ASSERT_LT(value_ref->index, source_op->result_count);
       return loom_op_const_results(source_op)[value_ref->index];
@@ -205,17 +210,41 @@ static loom_value_id_t loom_low_lower_rule_source_value(
   }
 }
 
-static bool loom_low_lower_rule_can_materialize_value(
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index) {
+  const loom_low_lower_value_ref_t* value_ref =
+      &rule_set->value_refs[value_ref_index];
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, source_op);
+  switch (value_ref->kind) {
+    case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
+      return loom_op_operand_field_span(vtable, source_op, value_ref->index);
+    case LOOM_LOW_LOWER_VALUE_REF_RESULT:
+      return loom_op_result_field_span(vtable, source_op, value_ref->index);
+    case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+      return (loom_value_slice_t){0};
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown generated value ref kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static iree_status_t loom_low_lower_rule_can_materialize_value(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index) {
+    uint16_t value_ref_index, bool* out_can_materialize) {
+  *out_can_materialize = false;
   if (match_context->can_materialize.fn == NULL) {
-    return false;
+    return iree_ok_status();
   }
   return match_context->can_materialize.fn(
       match_context->can_materialize.user_data, match_context, rule_set,
       source_op, value_ref_index,
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index));
+      loom_low_lower_rule_source_value(match_context->module, rule_set,
+                                       source_op, value_ref_index),
+      out_can_materialize);
 }
 
 iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
@@ -301,7 +330,6 @@ static iree_status_t loom_low_lower_rule_resolve_materializer_descriptor(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
     loom_low_lower_descriptor_ref_t descriptor_ref,
-    iree_string_view_t descriptor_purpose,
     loom_low_lower_resolved_descriptor_t* out_descriptor) {
   *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
   IREE_ASSERT_NE(descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
@@ -316,13 +344,9 @@ static iree_status_t loom_low_lower_rule_resolve_materializer_descriptor(
   const loom_low_descriptor_t* descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
       &match_context, rule_set, descriptor_ref, &descriptor));
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "generated source-memory byte-offset materializer references missing "
-        "'%.*s' descriptor",
-        (int)descriptor_purpose.size, descriptor_purpose.data);
-  }
+  IREE_ASSERT(descriptor != NULL,
+              "generated source-memory byte-offset materializer references a "
+              "missing descriptor");
   return loom_low_lower_resolve_descriptor_row(context, descriptor,
                                                out_descriptor);
 }
@@ -337,7 +361,7 @@ static iree_status_t loom_low_lower_rule_emit_i64_const(
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_materializer_descriptor(
       context, rule_set, source_memory->byte_offset_const_i64_descriptor_ref,
-      IREE_SV("const.i64"), &descriptor));
+      &descriptor));
 
   loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -395,9 +419,10 @@ static uint16_t loom_low_lower_rule_materializer_packet_operand_index(
   uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
+    if (!loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
+                                                            descriptor, i)) {
+      continue;
+    }
     if (i == descriptor_operand_index) return packet_operand_index;
     ++packet_operand_index;
   }
@@ -420,7 +445,7 @@ static iree_status_t loom_low_lower_rule_materializer_copy_operands(
     loom_op_t* copy_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_low_copy_build(loom_low_lower_context_builder(context),
-                            operands[i], copy_type, location, &copy_op));
+                            operands[i], false, copy_type, location, &copy_op));
     operands[i] = loom_low_copy_result(copy_op);
   }
   return iree_ok_status();
@@ -498,14 +523,13 @@ static iree_status_t loom_low_lower_rule_materializer_tied_results(
 static iree_status_t loom_low_lower_rule_emit_i64_binary_op(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
-    loom_low_lower_descriptor_ref_t descriptor_ref,
-    iree_string_view_t descriptor_purpose, loom_value_id_t lhs,
+    loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_location_id_t location,
     loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_materializer_descriptor(
-      context, rule_set, descriptor_ref, descriptor_purpose, &descriptor));
+      context, rule_set, descriptor_ref, &descriptor));
 
   const loom_value_id_t operands[2] = {lhs, rhs};
   const loom_type_t result_type =
@@ -545,8 +569,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
         context, term->stride_values[i], &stride_value));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-        IREE_SV("mul.i64"), accumulator, stride_value, source_op->location,
-        &accumulator));
+        accumulator, stride_value, source_op->location, &accumulator));
   }
 
   if (term->byte_stride == 1) {
@@ -565,8 +588,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
         source_op->location, &shift));
     return loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_shl_i64_descriptor_ref,
-        IREE_SV("shl.i64"), accumulator, shift, source_op->location,
-        out_value_id);
+        accumulator, shift, source_op->location, out_value_id);
   }
 
   loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
@@ -575,8 +597,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
       source_op->location, &stride));
   return loom_low_lower_rule_emit_i64_binary_op(
       context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-      IREE_SV("mul.i64"), accumulator, stride, source_op->location,
-      out_value_id);
+      accumulator, stride, source_op->location, out_value_id);
 }
 
 static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
@@ -588,6 +609,13 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   *out_value_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT(source_memory_access != NULL);
   IREE_ASSERT_GT(source_memory_access->dynamic_term_count, 0);
+
+  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+          source_memory_access)) {
+    return loom_low_lower_lookup_value(
+        context, source_memory_access->dynamic_view_base_value_id,
+        out_value_id);
+  }
 
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
   for (uint8_t i = 0; i < source_memory_access->dynamic_term_count; ++i) {
@@ -601,8 +629,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_add_i64_descriptor_ref,
-        IREE_SV("add.i64"), accumulator, term_value, source_op->location,
-        &accumulator));
+        accumulator, term_value, source_op->location, &accumulator));
   }
 
   IREE_ASSERT_NE(accumulator, LOOM_VALUE_ID_INVALID);
@@ -624,7 +651,7 @@ static iree_status_t loom_low_lower_rule_low_value(
     case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
     case LOOM_LOW_LOWER_VALUE_REF_RESULT: {
       loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, value_ref_index);
+          context->module, rule_set, source_op, value_ref_index);
       if (value_ref->materializer_index != 0) {
         const loom_low_lower_value_materializer_t* materializer =
             loom_low_lower_rule_value_materializer(rule_set, value_ref);
@@ -759,9 +786,9 @@ static bool loom_low_lower_rule_vector_extract_shape_matches(
   if (static_indices.kind != LOOM_ATTR_I64_ARRAY) return false;
 
   const loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->value_ref_index);
+      match_context->module, rule_set, source_op, guard->value_ref_index);
   const loom_value_id_t result_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->other_value_ref_index);
+      match_context->module, rule_set, source_op, guard->other_value_ref_index);
   const loom_type_t source_type =
       loom_module_value_type(match_context->module, source_value_id);
   const loom_type_t result_type =
@@ -843,8 +870,8 @@ static iree_status_t loom_low_lower_rule_mapped_value(
     loom_low_lower_rule_mapped_value_t* out_mapped_value) {
   *out_mapped_value = loom_low_lower_rule_mapped_value_none();
   IREE_ASSERT(match_context->map_value.fn != NULL);
-  loom_value_id_t source_value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   return match_context->map_value.fn(match_context->map_value.user_data,
                                      match_context, source_op, source_value_id,
                                      out_mapped_value);
@@ -952,12 +979,12 @@ static bool loom_low_lower_rule_integer_element_range_facts(
       lane_count <= (uint64_t)INT64_MAX) {
     int64_t final_delta = 0;
     int64_t final_value = 0;
-    if (!loom_checked_mul_i64((int64_t)(lane_count - 1), step, &final_delta) ||
-        !loom_checked_add_i64(base, final_delta, &final_value)) {
+    if (!iree_checked_mul_i64((int64_t)(lane_count - 1), step, &final_delta) ||
+        !iree_checked_add_i64(base, final_delta, &final_value)) {
       return false;
     }
-    *out_facts = loom_value_facts_make(loom_min_i64(base, final_value),
-                                       loom_max_i64(base, final_value), 1);
+    *out_facts = loom_value_facts_make(iree_min(base, final_value),
+                                       iree_max(base, final_value), 1);
     return true;
   }
 
@@ -979,8 +1006,8 @@ static bool loom_low_lower_rule_result_index_assume_facts(
   // Borrowing its facts here keeps target guards strict for unassumed or
   // multiply-used producers while allowing authored postconditions to prove a
   // dynamic address calculation.
-  const loom_value_id_t source_value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   const loom_value_t* source_value =
       loom_module_value(match_context->module, source_value_id);
   if (!loom_value_has_single_use(source_value)) return false;
@@ -1011,8 +1038,8 @@ static bool loom_low_lower_rule_value_integer_element_range_facts(
           match_context, rule_set, source_op, value_ref_index, out_facts)) {
     return true;
   }
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   return loom_low_lower_rule_integer_element_range_facts(
       match_context->module, match_context->fact_table, value_id, out_facts);
 }
@@ -1052,7 +1079,7 @@ static double loom_low_lower_rule_attr_copy_exact_float(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_attr_copy_t* attr_copy) {
   const loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, attr_copy->value_ref_index);
+      context->module, rule_set, source_op, attr_copy->value_ref_index);
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
   loom_value_facts_t facts = loom_value_facts_unknown();
@@ -1159,8 +1186,8 @@ static iree_status_t loom_low_lower_rule_value_symbolically_fits_bit_count(
       match_context->symbolic_expr_context;
   if (expression_context == NULL) return iree_ok_status();
 
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_symbolic_expr_t value_expression = {0};
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
       expression_context, value_id, &value_expression));
@@ -1234,8 +1261,8 @@ static bool loom_low_lower_rule_value_facts_exact_i64(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_immediate_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
@@ -1249,8 +1276,8 @@ static bool loom_low_lower_rule_value_facts_exact_power_of_two_i64(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_immediate_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
@@ -1258,7 +1285,7 @@ static bool loom_low_lower_rule_value_facts_exact_power_of_two_i64(
   }
   int64_t exact_value = 0;
   return loom_value_facts_as_exact_i64(facts, &exact_value) &&
-         loom_is_power_of_two_i64(exact_value);
+         iree_math_is_power_of_two_i64(exact_value);
 }
 
 static bool loom_low_lower_rule_value_facts_u32_divisor_magic_info(
@@ -1284,8 +1311,8 @@ static bool loom_low_lower_rule_value_facts_u32_divisor_magic_is_add(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, bool expected_is_add) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_low_lower_u32_divisor_magic_info_t info = {0};
   return loom_low_lower_rule_value_facts_u32_divisor_magic_info(
              match_context->module, match_context->fact_table, value_id,
@@ -1297,8 +1324,8 @@ static bool loom_low_lower_rule_value_facts_exact_float(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_float_immediate_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
@@ -1314,8 +1341,8 @@ static bool loom_low_lower_rule_value_facts_float_equals(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, uint64_t expected_bits) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_float_immediate_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
@@ -1335,8 +1362,8 @@ static bool loom_low_lower_rule_value_facts_i64_range(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, int64_t minimum_i64, int64_t maximum_i64) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_element_range_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
@@ -1349,15 +1376,15 @@ static bool loom_low_lower_rule_value_facts_i64_range_le(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, uint16_t other_value_ref_index) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_element_range_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
     return false;
   }
   const loom_value_id_t other_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, other_value_ref_index);
+      match_context->module, rule_set, source_op, other_value_ref_index);
   loom_value_facts_t other_facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_element_range_facts(
           match_context->module, match_context->fact_table, other_value_id,
@@ -1371,15 +1398,15 @@ static bool loom_low_lower_rule_value_facts_i64_range_ge(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, uint16_t other_value_ref_index) {
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_element_range_facts(
           match_context->module, match_context->fact_table, value_id, &facts)) {
     return false;
   }
   const loom_value_id_t other_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, other_value_ref_index);
+      match_context->module, rule_set, source_op, other_value_ref_index);
   loom_value_facts_t other_facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_integer_element_range_facts(
           match_context->module, match_context->fact_table, other_value_id,
@@ -1397,8 +1424,8 @@ static bool loom_low_lower_rule_value_storage_element_format(
   if (expected_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_UNKNOWN) {
     return false;
   }
-  const loom_value_id_t value_id =
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+      match_context->module, rule_set, source_op, value_ref_index);
   const loom_type_t type =
       loom_module_value_type(match_context->module, value_id);
   const loom_fact_context_t* fact_context =
@@ -1531,9 +1558,9 @@ static bool loom_low_lower_source_memory_matches(
   }
   loom_low_source_memory_access_plan_t access = {0};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build(
-          match_context->module, match_context->fact_table, source_op, &access,
-          &diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_with_view_regions(
+          match_context->module, match_context->fact_table,
+          match_context->view_regions, source_op, &access, &diagnostic)) {
     return false;
   }
   if (access.operation_kind != source_memory->operation_kind ||
@@ -1610,9 +1637,9 @@ static bool loom_low_lower_rule_packed_integer_payload_from_lanes_matches(
   }
 
   const loom_value_id_t lane_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->value_ref_index);
+      match_context->module, rule_set, source_op, guard->value_ref_index);
   const loom_value_id_t storage_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->other_value_ref_index);
+      match_context->module, rule_set, source_op, guard->other_value_ref_index);
   loom_vector_packed_integer_payload_from_lanes_match_t match = {0};
   if (!loom_vector_packed_integer_payload_from_lanes_match(
           loom_module_value_type(match_context->module, lane_value_id),
@@ -1640,9 +1667,9 @@ static bool loom_low_lower_rule_packed_integer_lanes_from_payload_matches(
   }
 
   const loom_value_id_t storage_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->value_ref_index);
+      match_context->module, rule_set, source_op, guard->value_ref_index);
   const loom_value_id_t lane_value_id = loom_low_lower_rule_source_value(
-      rule_set, source_op, guard->other_value_ref_index);
+      match_context->module, rule_set, source_op, guard->other_value_ref_index);
   if (!loom_vector_packed_integer_lanes_from_payload_match(
           loom_module_value_type(match_context->module, storage_value_id),
           loom_module_value_type(match_context->module, lane_value_id), width,
@@ -1661,7 +1688,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
   switch (guard->kind) {
     case LOOM_LOW_LOWER_GUARD_VALUE_TYPE: {
       loom_value_id_t value_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, guard->value_ref_index);
+          match_context->module, rule_set, source_op, guard->value_ref_index);
       loom_type_t type =
           loom_module_value_type(match_context->module, value_id);
       *out_matches = loom_low_lower_rule_type_matches(
@@ -1741,9 +1768,9 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       return loom_low_lower_rule_descriptor_available(
           match_context, rule_set, guard->descriptor_ref, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_MATERIALIZABLE:
-      *out_matches = loom_low_lower_rule_can_materialize_value(
-          match_context, rule_set, source_op, guard->value_ref_index);
-      return iree_ok_status();
+      return loom_low_lower_rule_can_materialize_value(
+          match_context, rule_set, source_op, guard->value_ref_index,
+          out_matches);
     case LOOM_LOW_LOWER_GUARD_LOW_VALUE_REGISTER_CLASS: {
       loom_low_lower_rule_mapped_value_t mapped_value =
           loom_low_lower_rule_mapped_value_none();
@@ -1766,7 +1793,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
     case LOOM_LOW_LOWER_GUARD_VALUE_STATIC_DIM0_MULTIPLE: {
       IREE_ASSERT_GT(guard->u64, 0);
       loom_value_id_t value_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, guard->value_ref_index);
+          match_context->module, rule_set, source_op, guard->value_ref_index);
       loom_type_t type =
           loom_module_value_type(match_context->module, value_id);
       if (loom_type_rank(type) == 0 || loom_type_dim_is_dynamic_at(type, 0)) {
@@ -1800,9 +1827,10 @@ static iree_status_t loom_low_lower_rule_guard_matches(
     }
     case LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ: {
       const loom_value_id_t lhs_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, guard->value_ref_index);
+          match_context->module, rule_set, source_op, guard->value_ref_index);
       const loom_value_id_t rhs_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, guard->other_value_ref_index);
+          match_context->module, rule_set, source_op,
+          guard->other_value_ref_index);
       uint64_t lhs_count = 0;
       uint64_t rhs_count = 0;
       if (!loom_type_static_element_count(
@@ -1899,7 +1927,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_NO_USES: {
       const loom_value_id_t value_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, guard->value_ref_index);
+          match_context->module, rule_set, source_op, guard->value_ref_index);
       *out_matches = loom_value_has_no_uses(
           loom_module_value(match_context->module, value_id));
       return iree_ok_status();
@@ -2047,17 +2075,19 @@ static iree_status_t loom_low_lower_rule_match_map_value_from_lowering(
   return iree_ok_status();
 }
 
-static bool loom_low_lower_rule_match_can_materialize_from_lowering(
+static iree_status_t loom_low_lower_rule_match_can_materialize_from_lowering(
     void* user_data, const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, loom_value_id_t source_value_id) {
+    uint16_t value_ref_index, loom_value_id_t source_value_id,
+    bool* out_can_materialize) {
   (void)match_context;
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   const loom_low_lower_value_materializer_t* materializer =
       loom_low_lower_rule_value_materializer(rule_set, value_ref);
-  return materializer->can_materialize(context, source_value_id);
+  return materializer->can_materialize(context, source_op, source_value_id,
+                                       out_can_materialize);
 }
 
 static const loom_low_lower_rule_descriptor_map_t*
@@ -2168,7 +2198,8 @@ loom_low_lower_rule_symbolic_expr_context_from_lowering(
 
 static loom_low_lower_rule_match_context_t
 loom_low_lower_rule_match_context_from_lowering(
-    loom_low_lower_context_t* context) {
+    loom_low_lower_context_t* context,
+    const loom_view_region_table_t* view_regions) {
   return (loom_low_lower_rule_match_context_t){
       .module = loom_low_lower_context_module(context),
       .function = loom_low_lower_context_source_function(context),
@@ -2192,9 +2223,21 @@ loom_low_lower_rule_match_context_from_lowering(
               .user_data = context,
           },
       .fact_table = loom_low_lower_context_fact_table(context),
+      .view_regions = view_regions,
       .symbolic_expr_context =
           loom_low_lower_rule_symbolic_expr_context_from_lowering(context),
   };
+}
+
+static iree_status_t loom_low_lower_rule_set_match_view_regions(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_view_region_table_t** out_view_regions) {
+  *out_view_regions = NULL;
+  if (rule_set->source_memory_count == 0) {
+    return iree_ok_status();
+  }
+  return loom_low_lower_context_view_regions(context, out_view_regions);
 }
 
 void loom_low_lower_rule_materialize_diagnostic_params(
@@ -2234,7 +2277,7 @@ void loom_low_lower_rule_materialize_diagnostic_params(
         break;
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_VALUE_TYPE: {
         const loom_value_id_t value_id = loom_low_lower_rule_source_value(
-            rule_set, source_op, row->value_ref_index);
+            match_context->module, rule_set, source_op, row->value_ref_index);
         out_params[i] = loom_param_type(
             loom_module_value_type(match_context->module, value_id));
         break;
@@ -2275,8 +2318,11 @@ static iree_status_t loom_low_lower_rule_emit_diagnostic(
       &rule_set->diagnostics[diagnostic_index];
   loom_diagnostic_param_t params[LOOM_LOW_LOWER_MAX_DIAGNOSTIC_PARAMS] = {0};
   IREE_ASSERT_LE(diagnostic->param_count, IREE_ARRAYSIZE(params));
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_match_view_regions(
+      context, rule_set, &view_regions));
   const loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context, view_regions);
   loom_low_lower_rule_materialize_diagnostic_params(
       &match_context, rule_set, source_op, diagnostic, params);
   return loom_low_lower_emit_error_ref(context, source_op,
@@ -2288,8 +2334,11 @@ iree_status_t loom_low_lower_rule_set_select(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     loom_low_lower_rule_selection_t* out_selection) {
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_match_view_regions(
+      context, rule_set, &view_regions));
   const loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context, view_regions);
   return loom_low_lower_rule_set_select_with_match_context(
       &match_context, rule_set, source_op, out_selection);
 }
@@ -2298,8 +2347,11 @@ iree_status_t loom_low_lower_rule_set_select_contract(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     loom_low_lower_rule_selection_t* out_selection) {
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_match_view_regions(
+      context, rule_set, &view_regions));
   loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context, view_regions);
   match_context.flags |= LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY;
   return loom_low_lower_rule_set_select_with_match_context(
       &match_context, rule_set, source_op, out_selection);
@@ -2310,8 +2362,11 @@ iree_status_t loom_low_lower_rule_set_select_rule_range(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t rule_start, uint16_t rule_count,
     loom_low_lower_rule_selection_t* out_selection) {
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_match_view_regions(
+      context, rule_set, &view_regions));
   const loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context, view_regions);
   return loom_low_lower_rule_set_select_rule_range_with_match_context(
       &match_context, rule_set, source_op, rule_start, rule_count,
       out_selection);
@@ -2385,7 +2440,8 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
       context, rule->emit_count, sizeof(*resolved_emits),
       (void**)&resolved_emits));
   const loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context,
+                                                      /*view_regions=*/NULL);
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
     const uint16_t emit_index = (uint16_t)(rule->emit_start + i);
     const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
@@ -2394,14 +2450,8 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
     const loom_low_descriptor_t* descriptor = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
         &match_context, rule_set, emit->descriptor_ref, &descriptor));
-    if (descriptor == NULL) {
-      const iree_string_view_t key =
-          rule_set->descriptor_refs[emit->descriptor_ref].key;
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "generated target-low rule references missing descriptor '%.*s'",
-          (int)key.size, key.data);
-    }
+    IREE_ASSERT(descriptor != NULL,
+                "generated target-low rule references a missing descriptor");
     IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
         context, descriptor, &resolved_emits[i].descriptor));
   }
@@ -2409,7 +2459,7 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
   return iree_ok_status();
 }
 
-static void loom_low_lower_rule_source_memory_access(
+static iree_status_t loom_low_lower_rule_source_memory_access(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_emit_t* emit,
@@ -2422,13 +2472,17 @@ static void loom_low_lower_rule_source_memory_access(
       (uint16_t)(emit->source_memory_ordinal - 1);
   const loom_low_lower_source_memory_t* source_memory =
       &rule_set->source_memories[source_memory_index];
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
   const loom_low_lower_rule_match_context_t match_context =
-      loom_low_lower_rule_match_context_from_lowering(context);
+      loom_low_lower_rule_match_context_from_lowering(context, view_regions);
   if (!loom_low_lower_source_memory_matches(&match_context, source_op,
                                             source_memory, out_access, NULL)) {
     IREE_ASSERT_UNREACHABLE("selected source memory must still match");
     IREE_BUILTIN_UNREACHABLE();
   }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_rule_build_attrs(
@@ -2584,7 +2638,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         const loom_value_fact_table_t* fact_table =
             loom_low_lower_context_fact_table(context);
@@ -2612,7 +2667,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       }
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64_NEGATE: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         const loom_value_fact_table_t* fact_table =
             loom_low_lower_context_fact_table(context);
@@ -2643,7 +2699,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       }
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64_LOG2: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         const loom_value_fact_table_t* fact_table =
             loom_low_lower_context_fact_table(context);
@@ -2657,8 +2714,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         const bool has_exact_value =
             loom_value_facts_as_exact_i64(facts, &source_value);
         IREE_ASSERT(has_exact_value);
-        IREE_ASSERT(loom_is_power_of_two_i64(source_value));
-        const int64_t log2_value = loom_ilog2_i64(source_value);
+        IREE_ASSERT(iree_math_is_power_of_two_i64(source_value));
+        const int64_t log2_value = iree_math_floor_log2_u64(source_value);
         if (attr_copy->target_bit_offset == 0) {
           attrs[i].value = loom_attr_i64(log2_value);
           break;
@@ -2672,7 +2729,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       }
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64_MINUS_ONE: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         const loom_value_fact_table_t* fact_table =
             loom_low_lower_context_fact_table(context);
@@ -2704,7 +2762,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER:
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_SHIFT: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         loom_low_lower_u32_divisor_magic_info_t info = {0};
         const bool has_magic_info =
@@ -2729,7 +2788,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       }
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_I32_AS_U32_BITS: {
         const loom_value_id_t source_value_id =
-            loom_low_lower_rule_source_value(rule_set, source_op,
+            loom_low_lower_rule_source_value(context->module, rule_set,
+                                             source_op,
                                              attr_copy->value_ref_index);
         const loom_value_fact_table_t* fact_table =
             loom_low_lower_context_fact_table(context);
@@ -2884,8 +2944,8 @@ static iree_status_t loom_low_lower_rule_copy_low_operands(
     IREE_ASSERT(loom_low_type_is_register(copy_type));
     loom_op_t* copy_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_copy_build(
-        loom_low_lower_context_builder(context), low_operands[i], copy_type,
-        source_op->location, &copy_op));
+        loom_low_lower_context_builder(context), low_operands[i], false,
+        copy_type, source_op->location, &copy_op));
     low_operands[i] = loom_low_copy_result(copy_op);
   }
   return iree_ok_status();
@@ -2961,7 +3021,8 @@ static iree_status_t loom_low_lower_rule_build_result_types(
           context, alt->reg_class_id, operand->unit_count, &result_types[i]));
     } else {
       loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
-          rule_set, source_op, (uint16_t)(emit->result_ref_start + i));
+          context->module, rule_set, source_op,
+          (uint16_t)(emit->result_ref_start + i));
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_map_result_type(
           context, source_op, source_value_id, &result_types[i]));
     }
@@ -2994,7 +3055,7 @@ static iree_status_t loom_low_lower_rule_bind_results(
     switch (value_ref->kind) {
       case LOOM_LOW_LOWER_VALUE_REF_RESULT: {
         loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
-            rule_set, source_op, value_ref_index);
+            context->module, rule_set, source_op, value_ref_index);
         IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(context, source_value_id,
                                                        low_results[i]));
         break;
@@ -3025,8 +3086,8 @@ static iree_status_t loom_low_lower_rule_elide_results(
     const loom_low_lower_value_ref_t* value_ref =
         &rule_set->value_refs[value_ref_index];
     IREE_ASSERT_EQ(value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
-    loom_value_id_t source_value_id =
-        loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+    loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
+        context->module, rule_set, source_op, value_ref_index);
     IREE_RETURN_IF_ERROR(loom_low_lower_elide_value(context, source_value_id));
   }
   return iree_ok_status();
@@ -3036,6 +3097,30 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule) {
+  if (iree_all_bits_set(rule->flags,
+                        LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
+    IREE_ASSERT_EQ(rule->alias_ref_count, 1);
+    const uint16_t source_ref_index = rule->alias_ref_start;
+    const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
+    const loom_low_lower_value_ref_t* source_ref =
+        &rule_set->value_refs[source_ref_index];
+    const loom_low_lower_value_ref_t* result_ref =
+        &rule_set->value_refs[result_ref_index];
+    IREE_ASSERT_EQ(source_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
+    IREE_ASSERT_EQ(result_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
+    const loom_value_slice_t source_span =
+        loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
+                                                 source_op, source_ref_index);
+    const loom_value_slice_t result_span =
+        loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
+                                                 source_op, result_ref_index);
+    IREE_ASSERT_EQ(source_span.count, result_span.count);
+    for (iree_host_size_t i = 0; i < source_span.count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_value_alias(
+          context, source_span.values[i], result_span.values[i]));
+    }
+    return iree_ok_status();
+  }
   for (uint16_t i = 0; i < rule->alias_ref_count; ++i) {
     const uint16_t source_ref_index = (uint16_t)(rule->alias_ref_start + i * 2);
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
@@ -3045,10 +3130,10 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
         &rule_set->value_refs[result_ref_index];
     IREE_ASSERT_EQ(source_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
     IREE_ASSERT_EQ(result_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
-    loom_value_id_t source_value_id =
-        loom_low_lower_rule_source_value(rule_set, source_op, source_ref_index);
-    loom_value_id_t result_value_id =
-        loom_low_lower_rule_source_value(rule_set, source_op, result_ref_index);
+    loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
+        context->module, rule_set, source_op, source_ref_index);
+    loom_value_id_t result_value_id = loom_low_lower_rule_source_value(
+        context->module, rule_set, source_op, result_ref_index);
     IREE_RETURN_IF_ERROR(loom_low_lower_bind_value_alias(
         context, source_value_id, result_value_id));
   }
@@ -3104,8 +3189,8 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op(
     const uint16_t source_memory_index =
         (uint16_t)(emit->source_memory_ordinal - 1);
     source_memory = &rule_set->source_memories[source_memory_index];
-    loom_low_lower_rule_source_memory_access(context, rule_set, source_op, emit,
-                                             &source_memory_access);
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_access(
+        context, rule_set, source_op, emit, &source_memory_access));
     source_memory_access_ptr = &source_memory_access;
   }
 
@@ -3161,13 +3246,12 @@ static const loom_low_operand_t* loom_low_lower_rule_descriptor_packet_operand(
   uint16_t packet_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) {
+    if (!loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
+                                                            descriptor, i)) {
       continue;
     }
     if (packet_index == packet_operand_index) {
-      return operand;
+      return &descriptor_set->operands[descriptor->operand_start + i];
     }
     ++packet_index;
   }
@@ -3644,7 +3728,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_accumulate_lanes(
       context, source_op, emit, low_operands));
 
   loom_value_id_t source_result = loom_low_lower_rule_source_value(
-      rule_set, source_op, emit->result_ref_start);
+      context->module, rule_set, source_op, emit->result_ref_start);
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_map_result_type(
       context, source_op, source_result, &result_type));

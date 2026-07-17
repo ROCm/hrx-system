@@ -35,6 +35,8 @@ loom_generated_cc_library(
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_kernel_generator",
     deps = [
+        "//loom/src/loom/analysis:control_uniformity",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
@@ -47,11 +49,13 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:capability_facts",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base/internal",
     ],
 )

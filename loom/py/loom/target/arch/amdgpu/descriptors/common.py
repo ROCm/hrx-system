@@ -30,6 +30,7 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_FLAT,
     AMDGPU_ENCODING_FORMAT_MUBUF,
     AMDGPU_ENCODING_FORMAT_SOP1,
+    AMDGPU_ENCODING_FORMAT_SOP1_LITERAL,
     AMDGPU_ENCODING_FORMAT_SOP2,
     AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_SOPP,
@@ -47,6 +48,7 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_VOP2_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3,
+    AMDGPU_ENCODING_FORMAT_VOP3_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3_SDST,
     AMDGPU_ENCODING_FORMAT_VOP3P,
@@ -121,6 +123,12 @@ from loom.target.low_descriptors import (
 )
 
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -152,6 +160,7 @@ _RESOURCE_SWMMAC = "amdgpu.swmmac"
 _RESOURCE_CONTROL = "amdgpu.control"
 
 _SCHEDULE_SALU = "amdgpu.salu"
+_SCHEDULE_SALU_COMPARE = "amdgpu.salu.compare"
 _SCHEDULE_VALU = "amdgpu.valu"
 _SCHEDULE_TRANS = "amdgpu.trans"
 _SCHEDULE_PACKED_DOT = "amdgpu.dot.packed"
@@ -339,6 +348,18 @@ def _amdgpu_camel_case(value: str) -> str:
     return "".join(part[:1].upper() + part[1:] for part in value.split("_") if part)
 
 
+def _validate_amdgpu_reg_class_spill_slots(
+    key: str, reg_classes: tuple[RegClass, ...]
+) -> None:
+    for reg_class in reg_classes:
+        if reg_class.spill_slot_space is SpillSlotSpace.LDS:
+            raise ValueError(
+                f"AMDGPU descriptor set '{key}' register class "
+                f"'{reg_class.name}' uses LDS spill slots without a "
+                "lane-private LDS storage contract"
+            )
+
+
 def _amdgpu_core_descriptor_set(
     *,
     key: str,
@@ -353,6 +374,7 @@ def _amdgpu_core_descriptor_set(
     ),
     categories: tuple[DescriptorCategory, ...] = AMDGPU_DESCRIPTOR_CATEGORIES,
 ) -> DescriptorSet:
+    _validate_amdgpu_reg_class_spill_slots(key, reg_classes)
     file_stem = _amdgpu_descriptor_set_file_stem(key)
     c_suffix = _amdgpu_camel_case(file_stem)
     c_enum_stem = file_stem.upper()
@@ -560,8 +582,8 @@ class AmdgpuMemoryDescriptorDomain(CEnum):
 
 
 class AmdgpuMemoryOperationKind(CEnum):
-    LOAD = "LOOM_AMDGPU_MEMORY_OPERATION_LOAD"
-    STORE = "LOOM_AMDGPU_MEMORY_OPERATION_STORE"
+    LOAD = "LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD"
+    STORE = "LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE"
 
 
 class AmdgpuMemoryPayloadRegisterClass(CEnum):
@@ -601,6 +623,7 @@ class AmdgpuAtomicKind(CEnum):
 class AmdgpuAtomicValueKind(CEnum):
     I32 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32"
     F32 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_F32"
+    I64 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_I64"
     PACKED_F16 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_F16"
     PACKED_BF16 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_BF16"
 
@@ -705,6 +728,13 @@ def _common_scalar_vector_memory_schedule_classes(
             _SCHEDULE_SALU,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
+            model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_SALU_COMPARE,
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=2,
             issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
         ),
@@ -906,6 +936,66 @@ def _native_amdgpu_delay_alu_immediate(field_name: str) -> NativeAsmValue:
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
         field_name=field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    )
+
+
+def _native_amdgpu_scale_sel_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL,
+    )
+
+
+def _native_amdgpu_dpp_ctrl_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL,
+    )
+
+
+def _native_amdgpu_dpp_bank_mask_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK,
+    )
+
+
+def _native_amdgpu_named_bit_list_immediate(
+    field_name: str, bit_width: int, *, name: str | None = None
+) -> NativeAsmValue:
+    if bit_width <= 0 or bit_width >= 64:
+        raise ValueError("AMDGPU named bit-list width must be in [1, 63]")
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        bit_width=bit_width,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+    )
+
+
+def _native_amdgpu_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+
+
+def _native_amdgpu_named_flag_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
     )
 
 
@@ -1186,7 +1276,11 @@ def _mode_state_read(field_name: str = "mode_in") -> Operand:
         field_name,
         OperandRole.IMPLICIT,
         _MODE_ALT,
-        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        flags=(
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_READ,
+            OperandFlag.SCHEDULE_ONLY_STATE,
+        ),
         unit_count=1,
     )
 
@@ -1380,6 +1474,7 @@ _HAL_BUFFER_DESCRIPTOR_CACHE_SWIZZLE_STRIDE_IMMEDIATE = Immediate(
 
 _MANUAL_SCALAR_DESCRIPTOR_KEYS = (
     "amdgpu.s_mov_b32",
+    "amdgpu.s_mov_b32_vcc.imm",
     "amdgpu.s_getpc_b64",
     "amdgpu.s_mov_b32_m0",
     "amdgpu.s_mov_b32_m0.imm",
@@ -1428,6 +1523,37 @@ def _manual_scalar_descriptors(
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(
+            key="amdgpu.s_mov_b32_vcc.imm",
+            mnemonic="s_mov_b32",
+            semantic_tag="predicate.vcc.const.u32",
+            operands=(_vcc_result("mask"),),
+            immediates=(_LITERAL_U32_IMMEDIATE,),
+            encoding_field_values=(
+                EncodingFieldValue(
+                    amdgpu_encoding_field_id("SDST"),
+                    spec.operand_predefined_value("OPR_SDST", "VCC_LO"),
+                ),
+                EncodingFieldValue(
+                    amdgpu_encoding_field_id("SSRC0"),
+                    spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL"),
+                ),
+            ),
+            asm_forms=_asm(
+                mnemonic="s_mov_b32_vcc_imm",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("mask",),
+                immediates=("imm32",),
+                native_assembly_values=(
+                    _native_literal("vcc_lo"),
+                    _native_i64_immediate("imm32"),
+                ),
+            ),
+            schedule_class=_SCHEDULE_SALU,
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1_LITERAL,
+            encoding_id=s_mov_b32_opcode,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
             key="amdgpu.s_getpc_b64",
             mnemonic="s_getpc_b64",
             semantic_tag="address.pc.get.u64",
@@ -1470,7 +1596,14 @@ def _manual_scalar_descriptors(
                 ),
             ),
             asm_forms=_asm(
-                mnemonic="s_mov_b32_m0", results=("dst",), operands=("src",)
+                mnemonic="s_mov_b32_m0",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("dst",),
+                operands=("src",),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_operand("src"),
+                ),
             ),
             schedule_class=_SCHEDULE_SALU,
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
@@ -1490,7 +1623,14 @@ def _manual_scalar_descriptors(
                 ),
             ),
             asm_forms=_asm(
-                mnemonic="s_mov_b32_m0_imm", results=("dst",), immediates=("imm32",)
+                mnemonic="s_mov_b32_m0_imm",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("dst",),
+                immediates=("imm32",),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_i64_immediate("imm32"),
+                ),
             ),
             schedule_class=_SCHEDULE_SALU,
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
@@ -1771,6 +1911,33 @@ _MATRIX_B_REUSE_IMMEDIATE = Immediate(
     ImmediateKind.UNSIGNED,
     bit_width=1,
     unsigned_max=1,
+)
+
+_MATRIX_SIGN_SELECT_IMMEDIATE = Immediate(
+    "neg_lo",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE = Immediate(
+    "neg_hi",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_CLAMP_IMMEDIATE = Immediate(
+    "clamp",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=1,
+    unsigned_max=1,
+    default_value=0,
 )
 
 _GLOBAL_LOAD_EFFECT = Effect(
@@ -2199,10 +2366,13 @@ def _vcc_input(descriptor_operand: Operand) -> AmdgpuImplicitOperandOverlay:
 
 
 def _vcc_output(
-    descriptor_operand: Operand, *, xml_operand_required: bool = True
+    descriptor_operand: Operand,
+    *,
+    operand_type: str = "OPR_SDST",
+    xml_operand_required: bool = True,
 ) -> AmdgpuImplicitOperandOverlay:
     return AmdgpuImplicitOperandOverlay(
-        operand_type="OPR_SDST",
+        operand_type=operand_type,
         descriptor_operand=descriptor_operand,
         data_format_name="FMT_NUM_M64",
         size_bits=64,
@@ -2662,6 +2832,7 @@ __all__ = (
     "AMDGPU_ENCODING_FORMAT_VOP2_DPP16",
     "AMDGPU_ENCODING_FORMAT_VOP2_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3",
+    "AMDGPU_ENCODING_FORMAT_VOP3_DPP16",
     "AMDGPU_ENCODING_FORMAT_VOP3_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3P",
     "AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL",
@@ -2672,6 +2843,12 @@ __all__ = (
     "AMDGPU_MEMORY_DESCRIPTOR_CATEGORY",
     "AMDGPU_MISC_DESCRIPTOR_CATEGORY",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
     "AmdgpuAtomicDescriptorCandidate",
@@ -2855,6 +3032,9 @@ __all__ = (
     "_MATRIX_B_REUSE_IMMEDIATE",
     "_MATRIX_B_SCALE_FORMAT_IMMEDIATE",
     "_MATRIX_B_SCALE_IMMEDIATE",
+    "_MATRIX_CLAMP_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_IMMEDIATE",
     "_MUBUF_SOFFSET_INLINE_ZERO",
     "_MUBUF_VADDR_OFFSET_ONLY_SIZE_REASON",
     "_PC_RELATIVE_EFFECT",
@@ -2900,6 +3080,7 @@ __all__ = (
     "_SCHEDULE_MODE_CONTROL",
     "_SCHEDULE_PACKED_DOT",
     "_SCHEDULE_SALU",
+    "_SCHEDULE_SALU_COMPARE",
     "_SCHEDULE_SMEM_LOAD",
     "_SCHEDULE_SMEM_STORE",
     "_SCHEDULE_SWMMAC",
@@ -3015,8 +3196,14 @@ __all__ = (
     "_matrix_hazards",
     "_memory_asm_immediate_names",
     "_mubuf_vaddr_operand",
+    "_native_amdgpu_dpp_ctrl_immediate",
+    "_native_amdgpu_dpp_bank_mask_immediate",
+    "_native_amdgpu_named_bit_list_immediate",
+    "_native_amdgpu_named_flag_immediate",
+    "_native_amdgpu_named_i64_immediate",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
+    "_native_amdgpu_scale_sel_immediate",
     "_native_literal",
     "_native_operand",
     "_native_result",

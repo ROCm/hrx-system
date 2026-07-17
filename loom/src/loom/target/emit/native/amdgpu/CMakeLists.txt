@@ -17,6 +17,7 @@ loom_cc_library(
     "register_class.h"
   DEPS
     loom::codegen::low::descriptors
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
 endif()
@@ -478,7 +479,9 @@ loom_cc_library(
     iree::io::stream
     loom::analysis::symbol_facts
     loom::codegen::low::allocation_materialization
+    loom::codegen::low::diagnostics
     loom::codegen::low::frame
+    loom::codegen::low::storage_layout
     loom::codegen::low::verify
     loom::error::diagnostic
     loom::error::error_defs
@@ -489,6 +492,7 @@ loom_cc_library(
     loom::ops::target
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::address_state
     loom::target::arch::amdgpu::planning::descriptor_semantics
@@ -498,12 +502,12 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::target_info
-    loom::target::artifact_manifest_collect
-    loom::target::compile_report
-    loom::target::compile_report_low
     loom::target::entry_selection
     loom::target::function_contract
     loom::target::provider
+    loom::target::reporting::artifact_manifest_collect
+    loom::target::reporting::low
+    loom::target::reporting::report
     loom::target::types
     loom::verify
   PUBLIC
@@ -532,6 +536,7 @@ loom_cc_test(
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info

@@ -25,6 +25,7 @@
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -38,11 +39,6 @@ extern "C" {
 typedef struct loom_low_allocation_options_t {
   // Optional operation order used for live intervals.
   loom_liveness_order_t liveness_order;
-  // Descriptor registry available to the allocator.
-  const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional runtime/device target overlay applied when compatible with the
-  // function's target record.
-  loom_target_selection_t target_selection;
   // Explicit per-class register budgets.
   const loom_low_allocation_budget_t* budgets;
   // Number of entries in |budgets|.
@@ -58,19 +54,20 @@ typedef struct loom_low_allocation_options_t {
   // Optional target storage leases built over the same scheduled low function
   // represented by |liveness_order|.
   loom_low_storage_lease_table_t storage_leases;
+  // Concrete placement-sensitive pair opportunities from the final schedule.
+  loom_low_placement_pair_use_list_t placement_pair_uses;
   // Structured diagnostic emitter for allocation failures and feedback.
   iree_diagnostic_emitter_t emitter;
   // Optional structured allocation feedback to emit.
   loom_low_allocation_diagnostic_flags_t diagnostic_flags;
 } loom_low_allocation_options_t;
 
-// Allocates one target-low function body and writes an arena-owned table.
-// This first allocator is deliberately simple and deterministic: it performs
-// per-class linear-scan-style first-fit assignment over liveness intervals,
-// uses target allocatable unit counts or explicit budgets as hard limits, and
-// reports spills as table remarks without mutating IR.
+// Allocates one modeled target-low function body and writes an arena-owned
+// table. |model| must remain live and its function semantically immutable until
+// this function returns. The allocator performs deterministic per-class
+// interval assignment and reports spills as table facts without mutating IR.
 iree_status_t loom_low_allocate_function(
-    loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
     loom_low_allocation_table_t* out_table);
 

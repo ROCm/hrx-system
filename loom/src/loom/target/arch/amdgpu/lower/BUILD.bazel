@@ -33,6 +33,8 @@ _AMDGPU_LOWER_TABLE_VISIBILITY = (
 
 _AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:memory_candidates"
 
+_AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
+
 _AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
 
 loom_cc_library(
@@ -87,6 +89,55 @@ loom_generated_textual_header(
     output_flag = "--cache-policy-temporal-th",
 )
 
+loom_generated_textual_header(
+    name = "fp8_decode_plan_descriptor_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_decode_plan_descriptor_rows.inl",
+    output_flag = "--fp8-decode-plan-descriptor-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_encoded_operand_format_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_format_rows.inl",
+    output_flag = "--fp8-encoded-operand-format-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_encoded_operand_schema_requirement_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
+    output_flag = "--fp8-encoded-operand-schema-requirement-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_native_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_native_descriptor_ref_rows.inl",
+    output_flag = "--fp8-native-descriptor-ref-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_scaled_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_scaled_descriptor_ref_rows.inl",
+    output_flag = "--fp8-scaled-descriptor-ref-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_subnormal_table_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_subnormal_table_rows.inl",
+    output_flag = "--fp8-subnormal-table-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_packed_repair_reason_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_packed_repair_reason_rows.inl",
+    output_flag = "--fp8-packed-repair-reason-rows",
+)
+
 loom_cc_library(
     name = "lower",
     srcs = [
@@ -100,6 +151,7 @@ loom_cc_library(
         "collective_payload.c",
         "collective_reduce.c",
         "collective_scan.c",
+        "constants.c",
         "control.c",
         "control_packet.c",
         "data_symbol.c",
@@ -107,16 +159,33 @@ loom_cc_library(
         "dot.c",
         "emit_support.c",
         "feedback.c",
-        "lds_layout.c",
+        "legality.c",
         "mask.c",
+        "materializers.c",
         "matrix.c",
         "matrix_fragment.c",
+        "matrix_fragment_memory_access.c",
+        "matrix_fragment_memory_address.c",
+        "matrix_fragment_memory_emit.c",
+        "matrix_fragment_memory_narrow.c",
+        "matrix_fragment_memory_packet.c",
+        "matrix_fragment_memory_plan.c",
+        "matrix_fragment_repack.c",
+        "matrix_fragment_state.c",
         "memory.c",
         "memory_bank_conflict.c",
         "memory_cache.c",
         "memory_diagnostics.c",
         "memory_emit.c",
         "memory_legality.c",
+        "narrow_float/float16.c",
+        "narrow_float/fp8.c",
+        "narrow_float/fp8_descriptors.c",
+        "narrow_float/fp8_lane.c",
+        "narrow_float/fp8_packed.c",
+        "narrow_float/fp8_plan.c",
+        "narrow_float/fp8_vector_conversion.c",
+        "narrow_float/vector_conversion.c",
         "preamble.c",
         "prefetch.c",
         "registry.c",
@@ -126,6 +195,7 @@ loom_cc_library(
         "sanitizer_race_report.c",
         "sanitizer_report.c",
         "signal.c",
+        "source_alloca_layout.c",
         "structural.c",
         "subgroup_broadcast.c",
         "subgroup_crosslane.c",
@@ -135,7 +205,12 @@ loom_cc_library(
         "sync.c",
         "system_memory.c",
         "table.c",
-        "values.c",
+        "types.c",
+        "value/integer64.c",
+        "value/scalar_conversion.c",
+        "value/storage.c",
+        "value/vector_construct.c",
+        "value/vector_conversion.c",
     ],
     hdrs = [
         "abi.h",
@@ -158,8 +233,20 @@ loom_cc_library(
         "mask.h",
         "matrix.h",
         "matrix_fragment.h",
+        "matrix_fragment_memory_access.h",
+        "matrix_fragment_memory_address.h",
+        "matrix_fragment_memory_emit.h",
+        "matrix_fragment_memory_narrow.h",
+        "matrix_fragment_memory_packet.h",
+        "matrix_fragment_memory_plan.h",
+        "matrix_fragment_repack.h",
+        "matrix_fragment_state.h",
         "memory.h",
         "memory_bank_conflict.h",
+        "narrow_float/float16.h",
+        "narrow_float/fp8.h",
+        "narrow_float/fp8_vector_conversion.h",
+        "narrow_float/vector_conversion.h",
         "plan.h",
         "preamble.h",
         "sanitizer.h",
@@ -175,10 +262,22 @@ loom_cc_library(
         "table.h",
         "topology.h",
         "types.h",
-        "values.h",
+        "value/integer64.h",
+        "value/scalar_conversion.h",
+        "value/storage.h",
+        "value/vector_construct.h",
+        "value/vector_conversion.h",
         "workgroup.h",
     ],
     textual_hdrs = [
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+        ":narrow_float/fp8_decode_plan_descriptor_rows.inl",
+        ":narrow_float/fp8_encoded_operand_format_rows.inl",
+        ":narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
+        ":narrow_float/fp8_native_descriptor_ref_rows.inl",
+        ":narrow_float/fp8_packed_repair_reason_rows.inl",
+        ":narrow_float/fp8_scaled_descriptor_ref_rows.inl",
+        ":narrow_float/fp8_subnormal_table_rows.inl",
         ":memory_cache_policy_encoding_rows.inl",
         ":memory_cache_policy_temporal_th.inl",
         ":memory_descriptor_candidate_ranges.inl",
@@ -228,6 +327,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/abi:signal",
         "//loom/src/loom/target/arch/amdgpu/abi:tsan",
         "//loom/src/loom/target/arch/amdgpu/contracts",
+        "//loom/src/loom/target/arch/amdgpu/encoding:encoding_defs",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:arithmetic_candidates",
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:async_gather_candidates",
@@ -240,9 +340,11 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/records:target_records_tables",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
+        "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

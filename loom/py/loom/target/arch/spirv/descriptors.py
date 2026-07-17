@@ -56,6 +56,7 @@ from loom.target.low_descriptors import (
     EffectKind,
     Immediate,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     MemorySpace,
@@ -398,6 +399,7 @@ def _ptr_access_chain_storage_buffer_descriptor(
         asm_forms=_asm(results=("ptr",), operands=("base", "byte_offset")),
         schedule_class=_SCHEDULE_VARIABLE,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        instruction_classes=(InstructionClass.OTHER,),
     )
 
 
@@ -454,6 +456,7 @@ def _access_chain_workgroup_descriptor(
         asm_forms=_asm(results=("ptr",), operands=("base", "element_index")),
         schedule_class=_SCHEDULE_VARIABLE,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        instruction_classes=(InstructionClass.OTHER,),
     )
 
 
@@ -1007,6 +1010,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             operands=(_ptr_function_result(),),
             asm_forms=_asm(results=("ptr",)),
             schedule_class=_SCHEDULE_VARIABLE,
+            instruction_classes=(InstructionClass.OTHER,),
         ),
     ),
 )

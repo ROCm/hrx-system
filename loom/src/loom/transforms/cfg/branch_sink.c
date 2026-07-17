@@ -162,9 +162,8 @@ static bool loom_branch_sink_value_uses_target_one_region(
     }
   }
 
-  if (value_id >= module->type_uses.value_capacity) return true;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return false;
@@ -222,9 +221,8 @@ static bool loom_branch_sink_value_uses_only_op(const loom_module_t* module,
     *has_use = true;
   }
 
-  if (value_id >= module->type_uses.value_capacity) return true;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return false;

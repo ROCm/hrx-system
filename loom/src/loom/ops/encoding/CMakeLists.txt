@@ -45,6 +45,7 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::util::fact_table
+    loom::util::numeric_format
     loom::util::stable_id
 )
 

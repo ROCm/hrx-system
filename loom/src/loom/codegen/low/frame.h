@@ -22,6 +22,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation_materialization.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/planning_statistics.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/error/emitter.h"
@@ -40,8 +41,8 @@ typedef struct loom_low_emission_frame_options_t {
   loom_target_selection_t target_selection;
   // Optional source-derived memory summaries for the scheduled low function.
   loom_low_memory_access_table_t memory_access_table;
-  // Optional target-provided register-pressure cliff table.
-  loom_low_schedule_pressure_cliff_list_t schedule_pressure_cliffs;
+  // Optional immutable target pressure policy.
+  const loom_low_pressure_model_t* pressure_model;
   // Optional target-provided descriptor pair-affinity table.
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities;
   // Optional target-provided implicit state reads for structural low
@@ -52,7 +53,7 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_schedule_strategy_t schedule_strategy;
   // Optional structured scheduler feedback to emit.
   loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
-  // Explicit per-class register budgets passed to allocation.
+  // Explicit per-class register budgets passed to scheduling and allocation.
   const loom_low_allocation_budget_t* allocation_budgets;
   // Number of entries in |allocation_budgets|.
   iree_host_size_t allocation_budget_count;
@@ -71,6 +72,9 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Structured diagnostic emitter shared by scheduling and allocation.
   iree_diagnostic_emitter_t emitter;
+  // Optional caller-owned coarse planning statistics output. The build resets
+  // and populates this record without scanning completed tables.
+  loom_low_planning_statistics_t* statistics;
 } loom_low_emission_frame_options_t;
 
 // Emission-ready production frame for one prepared target-low function. The
@@ -86,6 +90,20 @@ typedef struct loom_low_emission_frame_t {
   loom_low_schedule_table_t schedule;
   // Allocation table for the prepared function.
   loom_low_allocation_table_t allocation;
+  // Cumulative spill storage materialized while reaching this frame.
+  uint64_t materialized_spill_storage_count;
+  // Cumulative materialized spill storage byte size.
+  uint64_t materialized_spill_storage_bytes;
+  // Cumulative low.spill stores materialized while reaching this frame.
+  uint64_t materialized_spill_store_count;
+  // Cumulative materialized low.spill store byte traffic.
+  uint64_t materialized_spill_store_bytes;
+  // Cumulative low.reload ops materialized while reaching this frame.
+  uint64_t materialized_reload_count;
+  // Cumulative materialized low.reload byte traffic.
+  uint64_t materialized_reload_bytes;
+  // Materialized spill records retained while reaching this frame.
+  loom_low_allocation_materialized_spill_list_t materialized_spills;
 } loom_low_emission_frame_t;
 
 // Summary from target structural spill-traffic lowering.
@@ -155,14 +173,17 @@ iree_status_t loom_low_emission_frame_build(
 
 // Builds an emission frame and greedily materializes target-lowerable spill
 // traffic until the final frame contains no spill assignments or spill plans.
-// The loop materializes one spill plan per iteration because each rewrite can
-// change liveness and invalidate later spill plans in the current frame.
+// Each iteration materializes the accepted allocation snapshot as a batch.
+// Individual plan traffic is recomputed from the current IR while consuming
+// that batch because earlier spill rewrites can make later allocation-time
+// traffic predictions stale.
 // Materialization, final addressability, and final-frame convergence
 // diagnostics follow the normal target-entry convention: if an error diagnostic
 // is emitted, the function returns OK and the caller must check its diagnostic
 // emitter before consuming the frame. Allocation diagnostics may return a
 // partial frame containing the schedule and allocation failure table for
 // reporting; later emission stages have not validated that frame.
+// |frame_options->emitter| must be initialized.
 iree_status_t loom_low_emission_frame_build_spill_free(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,

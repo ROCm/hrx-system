@@ -99,6 +99,16 @@ static loomc_status_t loomc_link_index_validate_builder_options(
         LOOMC_STATUS_UNIMPLEMENTED,
         "link index builder option extensions are not supported");
   }
+  if (options->block_size != 0) {
+    if (options->block_size < sizeof(iree_arena_block_t)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "link index builder block_size is too small");
+    }
+    if (!iree_arena_block_pool_is_valid_total_size(options->block_size)) {
+      return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
+                               "link index builder block_size is too large");
+    }
+  }
   return loomc_ok_status();
 }
 

@@ -66,6 +66,7 @@
     [LOOM_KW_ORDINAL] = (const uint8_t*)"\x07" "ordinal",
     [LOOM_KW_LINKAGE] = (const uint8_t*)"\x07" "linkage",
     [LOOM_KW_WORKGROUP_SIZE] = (const uint8_t*)"\x0e" "workgroup_size",
+    [LOOM_KW_WORKGROUP_COUNT] = (const uint8_t*)"\x0f" "workgroup_count",
     [LOOM_KW_FROM] = (const uint8_t*)"\x04" "from",
     [LOOM_KW_AXES] = (const uint8_t*)"\x04" "axes",
     [LOOM_KW_CONFIG] = (const uint8_t*)"\x06" "config",
@@ -78,3 +79,4 @@
     [LOOM_KW_UNROLL] = (const uint8_t*)"\x06" "unroll",
     [LOOM_KW_NAME] = (const uint8_t*)"\x04" "name",
     [LOOM_KW_ALIGN] = (const uint8_t*)"\x05" "align",
+    [LOOM_KW_BLOCKS] = (const uint8_t*)"\x06" "blocks",

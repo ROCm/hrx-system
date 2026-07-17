@@ -21,10 +21,10 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/greedy.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/legalization.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
+#include "loom/target/reporting/report.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/util/walk.h"
@@ -517,45 +517,6 @@ static bool loom_low_target_legalize_predicate_const_range(
   }
 }
 
-static bool loom_low_target_legalize_topology_domain(
-    loom_value_facts_t facts, iree_string_view_t* out_value_kind,
-    iree_string_view_t* out_axis) {
-  const uint32_t topology_flags =
-      facts.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
-  switch (topology_flags) {
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("x");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("y");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z:
-      *out_value_kind = IREE_SV("workitem.id");
-      *out_axis = IREE_SV("z");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("x");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("y");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z:
-      *out_value_kind = IREE_SV("workgroup.id");
-      *out_axis = IREE_SV("z");
-      return true;
-    case LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE:
-      *out_value_kind = IREE_SV("subgroup.lane.id");
-      *out_axis = IREE_SV("lane");
-      return true;
-    default:
-      return false;
-  }
-}
-
 static bool loom_low_target_legalize_lookup_assume_operand_facts(
     const loom_value_fact_table_t* fact_table, loom_value_slice_t values,
     const loom_predicate_t* predicate, loom_value_facts_t* out_facts) {
@@ -781,9 +742,9 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
             fact_table, values, &predicates[i], &facts)) {
       continue;
     }
-    iree_string_view_t value_kind = iree_string_view_empty();
-    iree_string_view_t axis = iree_string_view_empty();
-    if (!loom_low_target_legalize_topology_domain(facts, &value_kind, &axis)) {
+    const loom_value_fact_topology_domain_t* domain =
+        loom_value_facts_topology_domain(facts);
+    if (!domain) {
       continue;
     }
     if (assumed_minimum <= facts.range_lo &&
@@ -791,8 +752,8 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_low_target_legalize_emit_topology_assume_error(
-        state, op, value_kind, axis, facts.range_lo, facts.range_hi,
-        assumed_minimum, assumed_maximum));
+        state, op, domain->value_kind_name, domain->axis_name, facts.range_lo,
+        facts.range_hi, assumed_minimum, assumed_maximum));
   }
   return iree_ok_status();
 }
@@ -829,11 +790,16 @@ static iree_status_t loom_low_target_legalize_check_assume_predicates(
   return iree_ok_status();
 }
 
-static uint64_t loom_low_target_legalize_report_descriptor_id(
+static iree_string_view_t loom_low_target_legalize_report_descriptor_key(
+    const loom_low_target_legalize_function_state_t* state,
     const loom_target_contract_query_result_t* query_result) {
-  return query_result->selected_descriptor
-             ? query_result->selected_descriptor->stable_id
-             : UINT64_MAX;
+  const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
+  if (descriptor == NULL ||
+      descriptor->key_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    return iree_string_view_empty();
+  }
+  return loom_low_descriptor_set_string(state->descriptor_set,
+                                        descriptor->key_string_offset);
 }
 
 static bool loom_low_target_legalize_report_wants_rows(
@@ -955,8 +921,8 @@ static iree_status_t loom_low_target_legalize_record_report_row(
       .rule_set_index = query_result->rule_set_index,
       .rule_index = query_result->rule_index,
       .diagnostic_index = query_result->diagnostic_index,
-      .descriptor_id =
-          loom_low_target_legalize_report_descriptor_id(query_result),
+      .descriptor_key =
+          loom_low_target_legalize_report_descriptor_key(state, query_result),
       .source_rejection_bits = query_result->source_rejection_bits,
       .source_rejection_detail = query_result->source_rejection_detail,
       .target_rejection_bits = query_result->target_rejection_bits,
@@ -1534,8 +1500,8 @@ static iree_status_t loom_low_target_legalize_acquire_final_facts(
   loom_value_fact_table_t* fact_table = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,
-      loom_pass_value_fact_scope_function_for_target(selection->func,
-                                                     selection->target_bundle),
+      loom_pass_value_fact_scope_function_for_target(
+          selection->func, selection->target_bundle, selection->target_data),
       &fact_table));
   *out_fact_table = fact_table;
   return iree_ok_status();
@@ -1575,7 +1541,7 @@ static iree_status_t loom_low_target_legalize_function(
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle),
+            selection->func, selection->target_bundle, selection->target_data),
         &seed_facts));
   }
   state.lower_options = (loom_low_lower_options_t){

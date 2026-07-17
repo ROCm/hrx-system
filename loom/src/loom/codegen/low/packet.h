@@ -26,6 +26,14 @@ extern "C" {
 // Sentinel for absent packet indices.
 #define LOOM_LOW_PACKET_INDEX_NONE UINT32_MAX
 
+// Returns the named descriptor-attribute slice for |op| when it is a
+// descriptor-backed low packet op. When non-NULL, |out_attrs_attr_index|
+// receives the operation attribute field index that owns the dictionary for
+// diagnostics.
+bool loom_low_packet_try_op_attrs(const loom_op_t* op,
+                                  loom_named_attr_slice_t* out_attrs,
+                                  uint16_t* out_attrs_attr_index);
+
 // One scheduled packet in emitter order.
 typedef struct loom_low_packet_view_t {
   // Packet ordinal in the final scheduled stream.
@@ -37,6 +45,11 @@ typedef struct loom_low_packet_view_t {
   // Descriptor row for descriptor-backed packets, or NULL for structural ops.
   const loom_low_descriptor_t* descriptor;
 } loom_low_packet_view_t;
+
+// Returns the named descriptor-attribute slice for |packet|, or an empty slice
+// for structural packets.
+loom_named_attr_slice_t loom_low_packet_attrs(
+    const loom_low_packet_view_t* packet);
 
 // Optional selected asm-form table for scheduled packets. Target legality or
 // target emitters populate this table when descriptor-backed packets have

@@ -302,11 +302,10 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
   loom_low_emission_frame_t frame = {0};
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
-      options.allocation_budgets, options.allocation_budget_count,
-      options.allocation_fixed_value_specs,
+      /*schedule_diagnostic_flags=*/0, options.allocation_budgets,
+      options.allocation_budget_count, options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count,
-      loom_low_schedule_pressure_cliff_list_empty(),
-      loom_low_schedule_pair_affinity_list_empty(),
+      /*pressure_model=*/NULL, loom_low_schedule_pair_affinity_list_empty(),
       loom_low_schedule_structural_state_read_list_empty(),
       /*storage_lease_provider=*/NULL, /*spill_free_options=*/NULL, &frame));
   if (request->diagnostic_collector != NULL &&

@@ -129,21 +129,17 @@ func.def target(@target) @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>
 
 // ----
 low.func.def target(@target) abi(hal_kernel) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
-  %5 = v_lshlrev_b32_src0_inline %packed, 28
-  %6 = v_ashrrev_i32_src0_inline %5, 28
-  %7 = v_and_b32_lit %6, 255
-  %8 = v_lshlrev_b32_src0_inline %packed, 24
-  %9 = v_ashrrev_i32_src0_inline %8, 28
-  %10 = v_and_b32_lit %9, 255
-  %11 = v_lshl_add_u32_shift_imm %10, %7, 8
-  %12 = v_lshlrev_b32_src0_inline %packed, 20
-  %13 = v_ashrrev_i32_src0_inline %12, 28
+  %5 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 4}
+  %6 = v_and_b32_lit %5, 255
+  %7 = v_bfe_i32_offset_width_inline %packed {offset = 4, width = 4}
+  %8 = v_and_b32_lit %7, 255
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 8
+  %10 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 4}
+  %11 = v_and_b32_lit %10, 255
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 16
+  %13 = v_bfe_i32_offset_width_inline %packed {offset = 12, width = 4}
   %14 = v_and_b32_lit %13, 255
-  %15 = v_lshl_add_u32_shift_imm %14, %11, 16
-  %16 = v_lshlrev_b32_src0_inline %packed, 16
-  %17 = v_ashrrev_i32_src0_inline %16, 28
-  %18 = v_and_b32_lit %17, 255
-  %unpacked = v_lshl_add_u32_shift_imm %18, %15, 24
+  %unpacked = v_lshl_add_u32_shift_imm %14, %12, 24
   return %unpacked
 }
 
@@ -166,7 +162,7 @@ kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm<amdgpu.rdna3.core> {
   %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %13 = s_mov_b32 0

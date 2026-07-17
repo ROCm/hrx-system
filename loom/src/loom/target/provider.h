@@ -23,14 +23,14 @@
 #include "loom/ir/ir.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
-#include "loom/target/artifact_manifest.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/legalization.h"
 #include "loom/target/low_asm_diagnostics.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/reporting/artifact_manifest.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {

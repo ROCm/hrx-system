@@ -8,10 +8,10 @@
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/low_verify.h"
-#include "loom/target/artifact_manifest_collect.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_emitter.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/reporting/artifact_manifest_collect.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/target/spirv/vulkan_profile.h"
 

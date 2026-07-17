@@ -13,7 +13,7 @@ iree_c_embed_data(
   NAME
     benchmark_kernels
   SRCS
-    "kernels/double_i32_at_byte_offset.loom"
+    "kernels/i32_memory_chain.loom"
   C_FILE_OUTPUT
     "benchmark_kernels.c"
   H_FILE_OUTPUT

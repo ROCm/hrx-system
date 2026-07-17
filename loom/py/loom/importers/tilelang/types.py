@@ -75,9 +75,19 @@ class TileLangTypeConverter:
     def buffer_storage_schema(self, buffer: object) -> EncodingInstance | None:
         dtype = _attribute(buffer, "dtype")
         schema_name = _FP8_STORAGE_SCHEMAS.get(str(dtype))
+        rounding_policy = _buffer_storage_rounding_policy(buffer)
+        if schema_name is None and rounding_policy is not None:
+            schema_name = _FP8_RAW_STORAGE_SCHEMAS.get(str(dtype))
         if schema_name is None:
+            if rounding_policy is not None:
+                raise TileLangTypeConversionError(
+                    "`loom.storage.rounding` metadata requires an FP8 buffer dtype"
+                )
             return None
-        return EncodingInstance(name=schema_name)
+        params = ()
+        if rounding_policy is not None:
+            params = (("rounding", rounding_policy),)
+        return EncodingInstance(name=schema_name, params=params)
 
     def buffer_byte_length(self, buffer: object) -> int | None:
         view_type = self.view_type(buffer)
@@ -112,6 +122,32 @@ def _shape_dim(value: object) -> StaticDim | DynamicDim:
 
 def _attribute(value: object, name: str, default: object | None = None) -> object:
     return getattr(value, name, default)
+
+
+def _buffer_storage_rounding_policy(buffer: object) -> str | None:
+    for key, value in _metadata_attrs(buffer).items():
+        if key != _FP8_STORAGE_ROUNDING_ATTR:
+            continue
+        payload = getattr(value, "value", None)
+        if isinstance(payload, str):
+            return payload
+        return str(value)
+    return None
+
+
+def _metadata_attrs(value: object) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for source_name in ("attrs", "annotations"):
+        for key, item in _mapping_items(getattr(value, source_name, {})):
+            result[str(key)] = item
+    return result
+
+
+def _mapping_items(value: object) -> tuple[tuple[object, object], ...]:
+    items = getattr(value, "items", None)
+    if items is None:
+        return ()
+    return tuple(items())
 
 
 def _parse_vector_dtype(text: str) -> ShapedType | None:
@@ -200,6 +236,13 @@ _FP8_STORAGE_SCHEMAS: dict[str, str] = {
     "float8_e4m3fnuz": "fp8_e4m3fnuz",
     "float8_e5m2fnuz": "fp8_e5m2fnuz",
 }
+
+_FP8_RAW_STORAGE_SCHEMAS: dict[str, str] = {
+    "float8_e4m3": "ieee_fp8_e4m3",
+    "float8_e5m2": "ieee_fp8_e5m2",
+}
+
+_FP8_STORAGE_ROUNDING_ATTR = "loom.storage.rounding"
 
 _FORMAT_PRESERVING_FP8_DTYPES = set(_FP8_FORMATS) - set(_DTYPE_MAP)
 

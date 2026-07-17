@@ -35,8 +35,9 @@ using loomc::bench::WorkspacePtr;
 
 class TunerFlowScenario final : public CompileScenario {
  public:
-  explicit TunerFlowScenario(iree_host_size_t job_count)
-      : job_count_(job_count) {}
+  explicit TunerFlowScenario(iree_host_size_t job_count,
+                             iree_host_size_t workspace_block_size = 0)
+      : CompileScenario(workspace_block_size), job_count_(job_count) {}
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(CompileScenario::SetUp(worker_count));
@@ -360,9 +361,16 @@ class ModelFlowScenario final : public CompileScenario {
 };
 
 static std::unique_ptr<CompileScenario> CreateTunerFlowScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1));
+}
+
+static std::unique_ptr<CompileScenario> CreateTunerFlowWorkspaceScenario(
+    const ::benchmark::State& state, const void* user_data) {
+  (void)user_data;
+  return std::make_unique<TunerFlowScenario>((iree_host_size_t)state.range(1),
+                                             (iree_host_size_t)state.range(2));
 }
 
 static void BM_TunerFlowSmoke(::benchmark::State& state) {
@@ -384,8 +392,22 @@ BENCHMARK(BM_TunerFlow)
     ->Args({96, 6144})
     ->UseRealTime();
 
+static void BM_TunerFlowWorkspaceSmoke(::benchmark::State& state) {
+  RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
+}
+BENCHMARK(BM_TunerFlowWorkspaceSmoke)
+    ->ArgsProduct({{1}, {2}, {32 * 1024, 64 * 1024, 128 * 1024}})
+    ->UseRealTime();
+
+static void BM_TunerFlowWorkspace(::benchmark::State& state) {
+  RunCompileBenchmark(state, CreateTunerFlowWorkspaceScenario, nullptr);
+}
+BENCHMARK(BM_TunerFlowWorkspace)
+    ->ArgsProduct({{1}, {64}, {32 * 1024, 64 * 1024, 128 * 1024}})
+    ->UseRealTime();
+
 static std::unique_ptr<CompileScenario> CreateModelFlowScenario(
-    const ::benchmark::State& state, void* user_data) {
+    const ::benchmark::State& state, const void* user_data) {
   (void)user_data;
   return std::make_unique<ModelFlowScenario>((iree_host_size_t)state.range(1),
                                              (iree_host_size_t)state.range(2));

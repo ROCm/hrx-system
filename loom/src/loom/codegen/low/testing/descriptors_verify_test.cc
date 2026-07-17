@@ -1764,5 +1764,14 @@ TEST(LowDescriptorsTest, RejectsZeroIssueUseUnits) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsIssueUseUnitsAboveResourceCapacity) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.issue_uses[0].units = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 }  // namespace
 }  // namespace loom

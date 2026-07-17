@@ -49,9 +49,23 @@ bool loom_low_allocation_move_topology_concat_requires_packet_materialization(
       table->module, op);
 }
 
+loom_low_allocation_packet_move_op_kind_t
+loom_low_allocation_move_topology_packet_move_op_kind(const loom_op_t* op) {
+  IREE_ASSERT_ARGUMENT(op);
+  if (loom_low_copy_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY;
+  }
+  if (loom_low_slice_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE;
+  }
+  if (loom_low_concat_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT;
+  }
+  return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE;
+}
+
 bool loom_low_allocation_move_topology_op_has_packet_moves(
     const loom_op_t* op) {
-  IREE_ASSERT_ARGUMENT(op);
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op);
+  return loom_low_allocation_move_topology_packet_move_op_kind(op) !=
+         LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE;
 }

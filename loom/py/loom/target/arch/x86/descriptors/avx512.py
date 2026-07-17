@@ -16,6 +16,7 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     EnumDomain,
     EnumValue,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     ModelQuality,
@@ -325,6 +326,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
+            instruction_classes=(InstructionClass.SCALAR_ALU,),
         ),
         ScheduleClass(
             _SCHEDULE_MEMORY_LOAD_ZMM,

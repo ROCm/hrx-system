@@ -55,38 +55,6 @@ typedef struct loom_low_storage_layout_scan_state_t {
   void* callback_user_data;
 } loom_low_storage_layout_scan_state_t;
 
-static bool loom_low_storage_layout_u64_is_power_of_two(uint64_t value) {
-  return value != 0 && (value & (value - 1)) == 0;
-}
-
-static iree_status_t loom_low_storage_layout_checked_add_u64(
-    uint64_t lhs, uint64_t rhs, uint64_t* out_result) {
-  *out_result = 0;
-  if (lhs > UINT64_MAX - rhs) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low storage layout offset overflows");
-  }
-  *out_result = lhs + rhs;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_storage_layout_checked_align_u64(
-    uint64_t value, uint64_t alignment, uint64_t* out_aligned_value) {
-  *out_aligned_value = 0;
-  if (!loom_low_storage_layout_u64_is_power_of_two(alignment)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low storage layout alignment must be a power of two");
-  }
-  const uint64_t alignment_mask = alignment - 1;
-  if (value > UINT64_MAX - alignment_mask) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low storage layout alignment overflows");
-  }
-  *out_aligned_value = (value + alignment_mask) & ~alignment_mask;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_storage_layout_space_size_ptr(
     loom_low_storage_layout_space_sizes_t* sizes, loom_storage_space_t space,
     uint64_t** out_size) {
@@ -142,10 +110,19 @@ static iree_status_t loom_low_storage_layout_visit_reserve(
 
   const uint64_t byte_size = (uint64_t)signed_byte_size;
   const uint64_t byte_alignment = (uint64_t)signed_byte_alignment;
+  if (!iree_is_power_of_two_uint64(byte_alignment)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage layout alignment must be a power of two");
+  }
   uint64_t aligned_space_size = 0;
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_checked_align_u64(
-      *space_size, byte_alignment, &aligned_space_size));
-  if (aligned_space_size > UINT64_MAX - byte_size) {
+  if (!iree_checked_align_u64(*space_size, byte_alignment,
+                              &aligned_space_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low storage layout alignment overflows");
+  }
+  uint64_t next_space_size = 0;
+  if (!iree_checked_add_u64(aligned_space_size, byte_size, &next_space_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "low storage layout space size overflows");
   }
@@ -173,7 +150,7 @@ static iree_status_t loom_low_storage_layout_visit_reserve(
     state->resolved = true;
   }
   ++state->record_count;
-  *space_size = aligned_space_size + byte_size;
+  *space_size = next_space_size;
   if (state->callback != NULL) {
     IREE_RETURN_IF_ERROR(state->callback(state->callback_user_data,
                                          storage_value_id, &reservation));
@@ -309,8 +286,11 @@ iree_status_t loom_low_storage_layout_resolve_reference_from_reservations(
         "low storage layout view range exceeds its source storage");
   }
   uint64_t byte_offset = 0;
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_checked_add_u64(
-      source_reference.byte_offset, offset, &byte_offset));
+  if (!iree_checked_add_u64(source_reference.byte_offset, offset,
+                            &byte_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low storage layout offset overflows");
+  }
   *out_reference = (loom_low_storage_layout_reference_t){
       .reservation = source_reference.reservation,
       .byte_offset = byte_offset,

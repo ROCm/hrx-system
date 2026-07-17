@@ -1362,6 +1362,10 @@ class BuildFileFunctions(object):
             f")\n\n"
             f"add_custom_target({name}\n"
             f"    DEPENDS {stamp_file}\n"
+            f")\n"
+            f"iree_register_generated_compile_input({name}\n"
+            f"  OUTPUTS\n"
+            f'    "${{CMAKE_CURRENT_BINARY_DIR}}/{stamp_file}"\n'
             f")\n\n"
         )
 

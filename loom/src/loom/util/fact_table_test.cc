@@ -35,6 +35,14 @@ class FactTableTest : public ::testing::Test {
 
 static constexpr uint8_t kTestRawPayloadTag = 42;
 
+static loom_value_fact_uniform_scale_origin_t UniformScaleOrigin(
+    loom_value_id_t source_value_id, loom_value_id_t scale_value_id) {
+  loom_value_fact_uniform_scale_origin_t origin = {};
+  origin.source_value_id = source_value_id;
+  origin.scale_value_id = scale_value_id;
+  return origin;
+}
+
 static const loom_value_fact_domain_t* FactTableTestResolveDomain(
     void* user_data, const loom_fact_context_t* context,
     const loom_module_t* module, loom_type_t type) {
@@ -276,6 +284,57 @@ TEST_F(FactTableTest, UniformElementOriginsClearOnlyTouchedEntries) {
   EXPECT_EQ(table.uniform_element_origins.entries[5], 7u);
 }
 
+TEST_F(FactTableTest, UniformScaleOriginsClearOnlyTouchedEntries) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 5,
+      UniformScaleOrigin(/*source_value_id=*/2,
+                         /*scale_value_id=*/3)));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 8,
+      UniformScaleOrigin(/*source_value_id=*/4,
+                         /*scale_value_id=*/5)));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 8,
+      UniformScaleOrigin(/*source_value_id=*/6,
+                         /*scale_value_id=*/7)));
+
+  EXPECT_GE(table.uniform_scale_origins.capacity, (iree_host_size_t)9);
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 2u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id, 2u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id, 3u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].source_value_id, 6u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].scale_value_id, 7u);
+
+  loom_value_fact_uniform_scale_origin_t* const entries =
+      table.uniform_scale_origins.entries;
+  loom_value_id_t* const touched_values =
+      table.uniform_scale_origins.touched_values;
+  loom_value_fact_table_clear_scope(&table);
+
+  EXPECT_EQ(table.uniform_scale_origins.entries, entries);
+  EXPECT_EQ(table.uniform_scale_origins.touched_values, touched_values);
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 0u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].source_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].scale_value_id,
+            LOOM_VALUE_ID_INVALID);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 5,
+      UniformScaleOrigin(/*source_value_id=*/9,
+                         /*scale_value_id=*/10)));
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 1u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id, 9u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id, 10u);
+}
+
 //===----------------------------------------------------------------------===//
 // Capacity
 //===----------------------------------------------------------------------===//
@@ -369,6 +428,24 @@ TEST_F(FactTableTest, UniformElementExtensionRoundTrips) {
       loom_value_facts_query_uniform_element(&table.context, facts, &uniform));
   EXPECT_TRUE(loom_value_facts_is_exact(uniform.element));
   EXPECT_EQ(uniform.element.range_lo, 42);
+}
+
+TEST_F(FactTableTest, UniformElementPreservesFloatPredicateFacts) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  loom_value_facts_t element = loom_value_facts_unknown();
+  element.flags |= LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(
+      loom_value_facts_make_uniform_element(&table.context, element, &facts));
+
+  EXPECT_TRUE(loom_value_facts_is_float(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_inf(facts));
+  EXPECT_TRUE(loom_value_facts_is_finite(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(facts));
 }
 
 TEST_F(FactTableTest, IdenticalExtensionsInternToSameId) {
@@ -617,6 +694,31 @@ TEST_F(FactTableTest, CloneDefinedFactsCopiesUniformElementOrigins) {
       &target.context, loom_value_fact_table_lookup(&target, 7), nullptr));
   ASSERT_GE(target.uniform_element_origins.capacity, (iree_host_size_t)8);
   EXPECT_EQ(target.uniform_element_origins.entries[7], 2u);
+
+  iree_arena_deinitialize(&target_arena);
+}
+
+TEST_F(FactTableTest, CloneDefinedFactsCopiesUniformScaleOrigins) {
+  loom_value_fact_table_t source = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&source, &arena_, 8));
+
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&source, 7, loom_value_facts_unknown()));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &source, 7,
+      UniformScaleOrigin(/*source_value_id=*/2,
+                         /*scale_value_id=*/3)));
+
+  iree_arena_allocator_t target_arena;
+  iree_arena_initialize(&block_pool_, &target_arena);
+  loom_value_fact_table_t target = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_clone_defined_facts(&target, &source, nullptr));
+
+  ASSERT_GE(target.uniform_scale_origins.capacity, (iree_host_size_t)8);
+  EXPECT_EQ(target.uniform_scale_origins.entries[7].source_value_id, 2u);
+  EXPECT_EQ(target.uniform_scale_origins.entries[7].scale_value_id, 3u);
 
   iree_arena_deinitialize(&target_arena);
 }

@@ -28,7 +28,6 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 #define LOOM_LOW_SELECT_OPERAND_FORMS_STATISTICS(V, statistics_type)      \
   V(statistics_type, forms_selected, "forms-selected",                    \
@@ -374,10 +373,8 @@ static uint16_t loom_low_descriptor_packet_operand_index(
   uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
        ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (loom_low_operand_role_is_packet_operand(operand->role) &&
-        !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    if (loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+            descriptor_set, descriptor, i)) {
       ++packet_operand_index;
     }
   }
@@ -613,8 +610,8 @@ static iree_status_t loom_low_select_operand_forms_consumption_query(
   const loom_region_t* region = consuming_op->parent_block->parent_region;
   if (!state->consumption_query_initialized ||
       state->consumption_query.region != region) {
-    IREE_RETURN_IF_ERROR(loom_consumption_region_query_initialize(
-        state->module, region, state->pass->arena, &state->consumption_query));
+    loom_consumption_region_query_initialize(
+        state->module, region, state->pass->arena, &state->consumption_query);
     state->consumption_query_initialized = true;
   }
   *out_query = &state->consumption_query;
@@ -671,11 +668,11 @@ loom_low_select_operand_form_relation_source_has_dynamic_use_after_consume(
     return iree_ok_status();
   }
 
-  const uint16_t relation_count =
-      loom_low_storage_relation_count(state->module, defining_op);
-  for (uint16_t i = 0; i < relation_count; ++i) {
-    loom_low_storage_relation_t relation = {0};
-    loom_low_storage_relation_get(state->module, defining_op, i, &relation);
+  loom_low_storage_relation_iterator_t iterator;
+  loom_low_storage_relation_iterator_initialize(state->module, defining_op,
+                                                &iterator);
+  loom_low_storage_relation_t relation;
+  while (loom_low_storage_relation_iterator_next(&iterator, &relation)) {
     if (relation.destination_value_id != value_id ||
         relation.source_value_id == value_id) {
       continue;
@@ -1016,7 +1013,7 @@ static iree_status_t loom_low_select_operand_form_resolve_immediate_value(
         *out_reject_reason_key = IREE_SV("missing_source_immediate");
         return iree_ok_status();
       }
-      if (!loom_checked_add_i64(source_value, matched_value,
+      if (!iree_checked_add_i64(source_value, matched_value,
                                 &replacement_value)) {
         *out_can_rewrite = false;
         *out_reject_reason_key = IREE_SV("immediate_overflow");
@@ -1025,9 +1022,8 @@ static iree_status_t loom_low_select_operand_form_resolve_immediate_value(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown low operand-form immediate action %u",
-                              (unsigned)form->immediate_action);
+      IREE_ASSERT_UNREACHABLE("unknown low operand-form immediate action");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   IREE_ASSERT(form->replacement_immediate_index <
@@ -1287,7 +1283,7 @@ static iree_status_t loom_low_select_operand_forms_function(
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            function, &target.bundle_storage.bundle),
+            function, &target.bundle_storage.bundle, NULL),
         &value_facts));
   }
 

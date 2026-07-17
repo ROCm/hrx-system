@@ -23,6 +23,7 @@ loom_cc_library(
     "workgroup.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::analysis::contract_vector
     loom::codegen::low::descriptors
     loom::codegen::low::lower
@@ -45,7 +46,6 @@ loom_cc_library(
     loom::target::arch::spirv::scalar_types
     loom::target::registers
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 endif()

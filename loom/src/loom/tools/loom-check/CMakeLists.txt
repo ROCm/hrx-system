@@ -74,6 +74,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::lower
     loom::codegen::low::packet_json
     loom::codegen::low::pipeline::pass_environment
@@ -99,7 +100,6 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::sanitizer::options
-    loom::target::compile_report_format
     loom::target::entry_selection
     loom::target::legalization
     loom::target::low_asm_diagnostics
@@ -109,6 +109,7 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::pipeline
     loom::target::predicate
+    loom::target::reporting::format
     loom::target::types
     loom::tooling::compile::pipeline
     loom::tools::loom-format::convert
@@ -177,6 +178,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
@@ -399,6 +401,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream

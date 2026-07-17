@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 26
+LOW_DESCRIPTOR_SET_ABI_VERSION = 27
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -202,6 +202,39 @@ class DescriptorFlag(CEnum):
     TERMINATOR = "LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR"
     DEAD_REMOVABLE = "LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE"
     PSEUDO = "LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO"
+    BARRIER = "LOOM_LOW_DESCRIPTOR_FLAG_BARRIER"
+    EARLY_CLOBBER = "LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER"
+
+
+class InstructionClass(CEnum):
+    """Target-neutral semantic classes for generated low descriptors."""
+
+    OTHER = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_OTHER"
+    SCALAR_ALU = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU"
+    VECTOR_ALU = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU"
+    MATRIX = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX"
+    MFMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA"
+    SMFMAC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC"
+    WMMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA"
+    SWMMAC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC"
+    DOT = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_DOT"
+    GLOBAL_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY"
+    GLOBAL_LOAD = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD"
+    GLOBAL_STORE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_STORE"
+    BUFFER_LOAD = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD"
+    BUFFER_STORE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_STORE"
+    FLAT_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY"
+    LOCAL_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY"
+    SCALAR_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY"
+    PRIVATE_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY"
+    GENERIC_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY"
+    ATOMIC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC"
+    BRANCH = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH"
+    BARRIER = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER"
+    CONTROL = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL"
+    CONVERSION = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION"
+    CACHE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE"
+    REGISTER_MOVE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE"
 
 
 class DescriptorAsmSurface(Enum):
@@ -289,6 +322,7 @@ class Operand:
     unit_count: int = 1
     address_map_kind: OperandAddressMapKind = OperandAddressMapKind.DIRECT
     addressable_unit_count: int = 0
+    address_state_slot: int = 0
     encoding_field_id: int = 0
     data_format_id: int = 0
     register_part: str | None = None
@@ -484,6 +518,7 @@ class ScheduleClass:
     hazards: tuple[Hazard, ...] = ()
     flags: tuple[ScheduleClassFlag, ...] = ()
     pressure_deltas: tuple[PressureDelta, ...] = ()
+    instruction_classes: tuple[InstructionClass, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,6 +540,7 @@ class Descriptor:
     encoding_format_id: int = 0
     encoding_id: int = 0
     flags: tuple[DescriptorFlag, ...] = ()
+    instruction_classes: tuple[InstructionClass, ...] = ()
     operand_forms: tuple[OperandForm, ...] = ()
     category: DescriptorCategory | None = None
 

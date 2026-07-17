@@ -1333,9 +1333,9 @@ void loom_testbench_reference_matmul_oracle_provider_initialize(
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_testbench_oracle_provider_t){
       .name = IREE_SV("reference.matmul"),
-      .invoke =
+      .provider =
           {
-              .fn = loom_testbench_reference_matmul_invoke,
+              .invoke = loom_testbench_reference_matmul_invoke,
               .user_data = (void*)options,
           },
   };
@@ -1348,9 +1348,9 @@ void loom_testbench_reference_tiled_matmul_oracle_provider_initialize(
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_testbench_oracle_provider_t){
       .name = IREE_SV("reference.tiled_matmul"),
-      .invoke =
+      .provider =
           {
-              .fn = loom_testbench_reference_tiled_matmul_invoke,
+              .invoke = loom_testbench_reference_tiled_matmul_invoke,
               .user_data = (void*)options,
           },
   };

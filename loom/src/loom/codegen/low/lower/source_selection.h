@@ -46,6 +46,9 @@ typedef struct loom_low_source_selection_options_t {
 
   // Module-local target record materialized for |target_selection|, or null.
   loom_symbol_ref_t target_ref;
+
+  // True to collect compatible different-topology target candidates.
+  bool collect_target_candidates;
 } loom_low_source_selection_options_t;
 
 typedef enum loom_low_source_selection_kind_e {
@@ -62,8 +65,17 @@ typedef struct loom_low_source_selection_t {
   // Source func-like op selected for lowering.
   loom_func_like_t func;
 
+  // Borrowed source function symbol name.
+  iree_string_view_t function_name;
+
+  // Whether |target_ref| came from source IR or invocation selection.
+  loom_target_selection_source_t target_source;
+
   // Module-local target record symbol referenced by |func|.
   loom_symbol_ref_t target_ref;
+
+  // Borrowed module symbol name for |target_ref|.
+  iree_string_view_t target_symbol_name;
 
   // Storage for the effective target bundle selected by |func|.
   loom_target_bundle_storage_t target_bundle_storage;
@@ -74,6 +86,24 @@ typedef struct loom_low_source_selection_t {
   // Target-owned payload associated with |target_bundle|, or NULL when the
   // bundle came only from module target records.
   const void* target_data;
+
+  // Number of compatible module target records with different topology.
+  uint32_t candidate_target_count;
+
+  // First compatible different-topology target symbol name, if any.
+  iree_string_view_t candidate_target_symbol_name;
+
+  // First compatible different-topology target bundle name, if any.
+  iree_string_view_t candidate_target_bundle_name;
+
+  // First compatible different-topology target snapshot name, if any.
+  iree_string_view_t candidate_target_snapshot_name;
+
+  // First compatible different-topology target config name, if any.
+  iree_string_view_t candidate_target_config_name;
+
+  // First compatible different-topology target fixed subgroup size, if any.
+  uint32_t candidate_target_subgroup_size;
 
   // Lowering policy selected by |target_bundle|.
   const loom_low_lower_policy_t* policy;

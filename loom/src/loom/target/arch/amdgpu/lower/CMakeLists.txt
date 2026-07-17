@@ -87,6 +87,97 @@ loom_generated_textual_header(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_decode_plan_descriptor_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-decode-plan-descriptor-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_encoded_operand_format_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_encoded_operand_format_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-encoded-operand-format-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_encoded_operand_schema_requirement_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-encoded-operand-schema-requirement-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_native_descriptor_ref_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_native_descriptor_ref_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-native-descriptor-ref-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_scaled_descriptor_ref_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_scaled_descriptor_ref_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-scaled-descriptor-ref-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_subnormal_table_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_subnormal_table_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-subnormal-table-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_packed_repair_reason_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_packed_repair_reason_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-packed-repair-reason-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     lower
@@ -111,8 +202,20 @@ loom_cc_library(
     "mask.h"
     "matrix.h"
     "matrix_fragment.h"
+    "matrix_fragment_memory_access.h"
+    "matrix_fragment_memory_address.h"
+    "matrix_fragment_memory_emit.h"
+    "matrix_fragment_memory_narrow.h"
+    "matrix_fragment_memory_packet.h"
+    "matrix_fragment_memory_plan.h"
+    "matrix_fragment_repack.h"
+    "matrix_fragment_state.h"
     "memory.h"
     "memory_bank_conflict.h"
+    "narrow_float/float16.h"
+    "narrow_float/fp8.h"
+    "narrow_float/fp8_vector_conversion.h"
+    "narrow_float/vector_conversion.h"
     "plan.h"
     "preamble.h"
     "sanitizer.h"
@@ -128,13 +231,25 @@ loom_cc_library(
     "table.h"
     "topology.h"
     "types.h"
-    "values.h"
+    "value/integer64.h"
+    "value/scalar_conversion.h"
+    "value/storage.h"
+    "value/vector_construct.h"
+    "value/vector_conversion.h"
     "workgroup.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/records/target_records_tables.inl"
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
+    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
+    "narrow_float/fp8_encoded_operand_format_rows.inl"
+    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+    "narrow_float/fp8_native_descriptor_ref_rows.inl"
+    "narrow_float/fp8_packed_repair_reason_rows.inl"
+    "narrow_float/fp8_scaled_descriptor_ref_rows.inl"
+    "narrow_float/fp8_subnormal_table_rows.inl"
     "registry_tables.inl"
   SRCS
     "abi.c"
@@ -147,6 +262,7 @@ loom_cc_library(
     "collective_payload.c"
     "collective_reduce.c"
     "collective_scan.c"
+    "constants.c"
     "control.c"
     "control_packet.c"
     "data_symbol.c"
@@ -154,16 +270,33 @@ loom_cc_library(
     "dot.c"
     "emit_support.c"
     "feedback.c"
-    "lds_layout.c"
+    "legality.c"
     "mask.c"
+    "materializers.c"
     "matrix.c"
     "matrix_fragment.c"
+    "matrix_fragment_memory_access.c"
+    "matrix_fragment_memory_address.c"
+    "matrix_fragment_memory_emit.c"
+    "matrix_fragment_memory_narrow.c"
+    "matrix_fragment_memory_packet.c"
+    "matrix_fragment_memory_plan.c"
+    "matrix_fragment_repack.c"
+    "matrix_fragment_state.c"
     "memory.c"
     "memory_bank_conflict.c"
     "memory_cache.c"
     "memory_diagnostics.c"
     "memory_emit.c"
     "memory_legality.c"
+    "narrow_float/float16.c"
+    "narrow_float/fp8.c"
+    "narrow_float/fp8_descriptors.c"
+    "narrow_float/fp8_lane.c"
+    "narrow_float/fp8_packed.c"
+    "narrow_float/fp8_plan.c"
+    "narrow_float/fp8_vector_conversion.c"
+    "narrow_float/vector_conversion.c"
     "preamble.c"
     "prefetch.c"
     "registry.c"
@@ -173,6 +306,7 @@ loom_cc_library(
     "sanitizer_race_report.c"
     "sanitizer_report.c"
     "signal.c"
+    "source_alloca_layout.c"
     "structural.c"
     "subgroup_broadcast.c"
     "subgroup_crosslane.c"
@@ -182,11 +316,17 @@ loom_cc_library(
     "sync.c"
     "system_memory.c"
     "table.c"
-    "values.c"
+    "types.c"
+    "value/integer64.c"
+    "value/scalar_conversion.c"
+    "value/storage.c"
+    "value/vector_construct.c"
+    "value/vector_conversion.c"
   DEPS
     ::kinds
     ::materializers
     iree::base
+    iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::symbolic_expr
@@ -221,6 +361,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::abi::signal
     loom::target::arch::amdgpu::abi::tsan
     loom::target::arch::amdgpu::contracts
+    loom::target::arch::amdgpu::encoding::encoding_defs
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::lower::candidates::arithmetic_candidates
@@ -238,8 +379,9 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_info_defs
     loom::target::low_legality
     loom::target::registers
+    loom::util::cfg_graph
     loom::util::fact_table
-    loom::util::math
+    loom::util::numeric_format
   PUBLIC
 )
 endif()

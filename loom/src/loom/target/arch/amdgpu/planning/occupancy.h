@@ -20,7 +20,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/codegen/low/schedule/types.h"
+#include "loom/codegen/low/pressure.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 
 #ifdef __cplusplus
@@ -194,13 +194,9 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Builds target-provided schedule pressure cliffs for |descriptor_set|. The
-// returned list is sorted by descriptor register-class ID and cliff unit count
-// and is suitable for loom_low_schedule_options_t::pressure_cliffs.
-iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena,
-    loom_low_schedule_pressure_cliff_list_t* out_pressure_cliffs);
+// Returns the generated target pressure model for |descriptor_set|.
+const loom_low_pressure_model_t* loom_amdgpu_occupancy_pressure_model(
+    const loom_low_descriptor_set_t* descriptor_set);
 
 // Appends a compact JSON representation of |table| to |builder|.
 iree_status_t loom_amdgpu_occupancy_format_json(

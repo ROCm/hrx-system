@@ -16,10 +16,10 @@
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
-#include "loom/target/artifact_manifest_collect.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/provider.h"
+#include "loom/target/reporting/artifact_manifest_collect.h"
+#include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 

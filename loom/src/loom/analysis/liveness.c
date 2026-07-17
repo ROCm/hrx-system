@@ -6,13 +6,13 @@
 
 #include "loom/analysis/liveness.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/target/registers.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
 
 typedef struct loom_liveness_bitset_t {
@@ -33,6 +33,13 @@ typedef struct loom_liveness_mutable_interval_t {
   // True once either a definition or live point has established bounds.
   bool has_bounds;
 } loom_liveness_mutable_interval_t;
+
+typedef struct loom_liveness_mutable_segment_t {
+  // Value owning |segment|.
+  loom_value_ordinal_t value_ordinal;
+  // Block-local live segment.
+  loom_liveness_segment_t segment;
+} loom_liveness_mutable_segment_t;
 
 typedef struct loom_liveness_pressure_state_t {
   // Mutable pressure summaries being built.
@@ -65,6 +72,22 @@ typedef struct loom_liveness_build_state_t {
   loom_liveness_block_state_t* block_states;
   // Mutable intervals indexed by region-local value ordinal.
   loom_liveness_mutable_interval_t* interval_states;
+  // Block-local segments collected in increasing block order.
+  loom_liveness_mutable_segment_t* segments;
+  // Number of initialized entries in |segments|.
+  iree_host_size_t segment_count;
+  // Number of allocated entries in |segments|.
+  iree_host_size_t segment_capacity;
+  // Mutable block-local segment starts indexed by value ordinal.
+  uint32_t* segment_start_points;
+  // Mutable block-local segment ends indexed by value ordinal.
+  uint32_t* segment_end_points;
+  // Value ordinals touched in the current top-level block.
+  loom_value_ordinal_t* touched_segment_value_ordinals;
+  // Number of initialized entries in |touched_segment_value_ordinals|.
+  iree_host_size_t touched_segment_value_count;
+  // True while interval finalization is collecting one top-level block.
+  bool collecting_segments;
   // Region-local value ordinal to interval-index table.
   uint32_t* value_interval_indices;
   // Mutable pressure summary state.
@@ -304,6 +327,33 @@ static iree_status_t loom_liveness_ensure_interval(
                                                   out_interval);
 }
 
+static void loom_liveness_note_segment_bounds(
+    loom_liveness_build_state_t* state, loom_value_id_t value_id,
+    uint32_t start_point, uint32_t end_point) {
+  if (!state->collecting_segments) {
+    return;
+  }
+  const loom_value_ordinal_t value_ordinal =
+      loom_liveness_value_ordinal(state, value_id);
+  uint32_t* segment_start = &state->segment_start_points[value_ordinal];
+  uint32_t* segment_end = &state->segment_end_points[value_ordinal];
+  if (*segment_start == UINT32_MAX) {
+    IREE_ASSERT_LT(state->touched_segment_value_count, state->value_count);
+    state
+        ->touched_segment_value_ordinals[state->touched_segment_value_count++] =
+        value_ordinal;
+    *segment_start = start_point;
+    *segment_end = end_point;
+    return;
+  }
+  if (start_point < *segment_start) {
+    *segment_start = start_point;
+  }
+  if (end_point > *segment_end) {
+    *segment_end = end_point;
+  }
+}
+
 static iree_status_t loom_liveness_note_definition(
     loom_liveness_build_state_t* state, loom_value_id_t value_id,
     uint32_t point) {
@@ -317,6 +367,7 @@ static iree_status_t loom_liveness_note_definition(
   } else if (point < interval_state->interval.start_point) {
     interval_state->interval.start_point = point;
   }
+  loom_liveness_note_segment_bounds(state, value_id, point, point);
   return iree_ok_status();
 }
 
@@ -334,6 +385,7 @@ static iree_status_t loom_liveness_note_live_point(
     interval_state->interval.start_point = point;
     interval_state->interval.end_point = point + 1u;
     interval_state->has_bounds = true;
+    loom_liveness_note_segment_bounds(state, value_id, point, point + 1u);
     return iree_ok_status();
   }
   if (point < interval_state->interval.start_point) {
@@ -342,6 +394,75 @@ static iree_status_t loom_liveness_note_live_point(
   if (point + 1u > interval_state->interval.end_point) {
     interval_state->interval.end_point = point + 1u;
   }
+  loom_liveness_note_segment_bounds(state, value_id, point, point + 1u);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_liveness_append_segment(
+    loom_liveness_build_state_t* state, loom_value_ordinal_t value_ordinal,
+    uint32_t start_point, uint32_t end_point) {
+  if (start_point >= end_point) {
+    return iree_ok_status();
+  }
+  if (state->segment_count >= state->segment_capacity) {
+    const iree_host_size_t minimum_capacity = state->segment_count + 1;
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->arena, state->segment_count, minimum_capacity,
+        sizeof(*state->segments), &state->segment_capacity,
+        (void**)&state->segments));
+  }
+  state->segments[state->segment_count++] = (loom_liveness_mutable_segment_t){
+      .value_ordinal = value_ordinal,
+      .segment =
+          {
+              .start_point = start_point,
+              .end_point = end_point,
+          },
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_liveness_initialize_segment_scratch(
+    loom_liveness_build_state_t* state) {
+  if (state->value_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_count, sizeof(*state->segment_start_points),
+      (void**)&state->segment_start_points));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_count, sizeof(*state->segment_end_points),
+      (void**)&state->segment_end_points));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_count,
+      sizeof(*state->touched_segment_value_ordinals),
+      (void**)&state->touched_segment_value_ordinals));
+  for (iree_host_size_t i = 0; i < state->value_count; ++i) {
+    state->segment_start_points[i] = UINT32_MAX;
+    state->segment_end_points[i] = UINT32_MAX;
+  }
+  return iree_ok_status();
+}
+
+static void loom_liveness_begin_block_segments(
+    loom_liveness_build_state_t* state) {
+  IREE_ASSERT_EQ(state->touched_segment_value_count, 0);
+  state->collecting_segments = true;
+}
+
+static iree_status_t loom_liveness_finish_block_segments(
+    loom_liveness_build_state_t* state) {
+  state->collecting_segments = false;
+  for (iree_host_size_t i = 0; i < state->touched_segment_value_count; ++i) {
+    const loom_value_ordinal_t value_ordinal =
+        state->touched_segment_value_ordinals[i];
+    IREE_RETURN_IF_ERROR(loom_liveness_append_segment(
+        state, value_ordinal, state->segment_start_points[value_ordinal],
+        state->segment_end_points[value_ordinal]));
+    state->segment_start_points[value_ordinal] = UINT32_MAX;
+    state->segment_end_points[value_ordinal] = UINT32_MAX;
+  }
+  state->touched_segment_value_count = 0;
   return iree_ok_status();
 }
 
@@ -932,6 +1053,7 @@ static iree_status_t loom_liveness_finalize_region_tree_intervals(
 static iree_status_t loom_liveness_finalize_intervals(
     loom_liveness_build_state_t* state,
     const loom_liveness_block_info_t* block_infos) {
+  IREE_RETURN_IF_ERROR(loom_liveness_initialize_segment_scratch(state));
   for (iree_host_size_t block_index = 0;
        block_index < state->region->block_count; ++block_index) {
     const loom_block_t* block =
@@ -940,6 +1062,7 @@ static iree_status_t loom_liveness_finalize_intervals(
     const loom_liveness_block_state_t* block_state =
         &state->block_states[block_index];
 
+    loom_liveness_begin_block_segments(state);
     IREE_RETURN_IF_ERROR(loom_liveness_note_bitset_live_point(
         state, block_state->live_in, block_info->start_point));
     IREE_RETURN_IF_ERROR(loom_liveness_note_bitset_live_point(
@@ -959,6 +1082,7 @@ static iree_status_t loom_liveness_finalize_intervals(
                               "liveness block point span changed while "
                               "finalizing intervals");
     }
+    IREE_RETURN_IF_ERROR(loom_liveness_finish_block_segments(state));
   }
   return iree_ok_status();
 }
@@ -1008,29 +1132,21 @@ typedef struct loom_liveness_pressure_event_t {
   int8_t value_delta;
 } loom_liveness_pressure_event_t;
 
-static int loom_liveness_pressure_event_compare(const void* lhs_ptr,
-                                                const void* rhs_ptr) {
-  const loom_liveness_pressure_event_t* lhs =
-      (const loom_liveness_pressure_event_t*)lhs_ptr;
-  const loom_liveness_pressure_event_t* rhs =
-      (const loom_liveness_pressure_event_t*)rhs_ptr;
+static bool loom_liveness_pressure_event_less(
+    const loom_liveness_pressure_event_t* lhs,
+    const loom_liveness_pressure_event_t* rhs) {
   if (lhs->point != rhs->point) {
-    return lhs->point < rhs->point ? -1 : 1;
+    return lhs->point < rhs->point;
   }
   if (lhs->value_delta != rhs->value_delta) {
-    return lhs->value_delta < rhs->value_delta ? -1 : 1;
+    return lhs->value_delta < rhs->value_delta;
   }
-  if (lhs->interval->value_id == rhs->interval->value_id) {
-    return 0;
-  }
-  return lhs->interval->value_id < rhs->interval->value_id ? -1 : 1;
+  return lhs->interval->value_id < rhs->interval->value_id;
 }
 
-static void loom_liveness_pressure_event_sort(
-    loom_liveness_pressure_event_t* events, iree_host_size_t event_count) {
-  qsort(events, event_count, sizeof(*events),
-        loom_liveness_pressure_event_compare);
-}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_liveness_pressure_event_sort,
+                          loom_liveness_pressure_event_t,
+                          loom_liveness_pressure_event_less)
 
 typedef struct loom_liveness_pressure_sweep_t {
   // Analysis build state owning summary output.
@@ -1300,44 +1416,30 @@ static iree_status_t loom_liveness_compute_block_pressure(
 static iree_status_t loom_liveness_compute_region_tree_pressure(
     loom_liveness_build_state_t* state,
     const loom_liveness_block_info_t* block_infos) {
-  iree_host_size_t live_interval_count = 0;
-  for (iree_host_size_t value_ordinal = 0; value_ordinal < state->value_count;
-       ++value_ordinal) {
-    const loom_liveness_mutable_interval_t* interval_state =
-        &state->interval_states[value_ordinal];
-    if (interval_state->has_bounds && interval_state->interval.start_point <
-                                          interval_state->interval.end_point) {
-      ++live_interval_count;
-    }
-  }
-  if (live_interval_count == 0) {
+  if (state->segment_count == 0) {
     return iree_ok_status();
   }
-  if (live_interval_count > IREE_HOST_SIZE_MAX / 2) {
+  if (state->segment_count > IREE_HOST_SIZE_MAX / 2) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "liveness pressure event count exceeds host size");
   }
-  const iree_host_size_t event_count = live_interval_count * 2;
+  const iree_host_size_t event_count = state->segment_count * 2;
   loom_liveness_pressure_event_t* events = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->arena, event_count, sizeof(*events), (void**)&events));
   iree_host_size_t event_index = 0;
-  for (iree_host_size_t value_ordinal = 0; value_ordinal < state->value_count;
-       ++value_ordinal) {
+  for (iree_host_size_t i = 0; i < state->segment_count; ++i) {
+    const loom_liveness_mutable_segment_t* segment = &state->segments[i];
     const loom_liveness_mutable_interval_t* interval_state =
-        &state->interval_states[value_ordinal];
-    if (!interval_state->has_bounds || interval_state->interval.start_point >=
-                                           interval_state->interval.end_point) {
-      continue;
-    }
+        &state->interval_states[segment->value_ordinal];
     const loom_liveness_interval_t* interval = &interval_state->interval;
     events[event_index++] = (loom_liveness_pressure_event_t){
-        .point = interval->end_point,
+        .point = segment->segment.end_point,
         .interval = interval,
         .value_delta = -1,
     };
     events[event_index++] = (loom_liveness_pressure_event_t){
-        .point = interval->start_point,
+        .point = segment->segment.start_point,
         .interval = interval,
         .value_delta = 1,
     };
@@ -1436,6 +1538,65 @@ static iree_status_t loom_liveness_finalize_interval_array(
   }
   *out_intervals = intervals;
   *out_count = count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_liveness_finalize_segment_array(
+    loom_liveness_build_state_t* state, loom_liveness_segment_t** out_segments,
+    iree_host_size_t* out_segment_count,
+    loom_liveness_segment_range_t** out_value_segment_ranges) {
+  *out_segments = NULL;
+  *out_segment_count = 0;
+  *out_value_segment_ranges = NULL;
+  if (state->value_count == 0) {
+    return iree_ok_status();
+  }
+  if (state->segment_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "liveness segment count exceeds uint32_t");
+  }
+
+  loom_liveness_segment_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_count, sizeof(*ranges), (void**)&ranges));
+  memset(ranges, 0, state->value_count * sizeof(*ranges));
+  for (iree_host_size_t i = 0; i < state->segment_count; ++i) {
+    const loom_value_ordinal_t value_ordinal = state->segments[i].value_ordinal;
+    IREE_ASSERT_LT(value_ordinal, state->value_count);
+    IREE_ASSERT_NE(ranges[value_ordinal].count, UINT32_MAX);
+    ++ranges[value_ordinal].count;
+  }
+
+  uint32_t next_start = 0;
+  for (iree_host_size_t i = 0; i < state->value_count; ++i) {
+    ranges[i].start = next_start;
+    IREE_ASSERT_LE(ranges[i].count, UINT32_MAX - next_start);
+    next_start += ranges[i].count;
+  }
+  IREE_ASSERT_EQ(next_start, (uint32_t)state->segment_count);
+
+  loom_liveness_segment_t* segments = NULL;
+  if (state->segment_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->arena, state->segment_count,
+                                  sizeof(*segments), (void**)&segments));
+  }
+  uint32_t* cursors = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, state->value_count, sizeof(*cursors), (void**)&cursors));
+  for (iree_host_size_t i = 0; i < state->value_count; ++i) {
+    cursors[i] = ranges[i].start;
+  }
+  for (iree_host_size_t i = 0; i < state->segment_count; ++i) {
+    const loom_liveness_mutable_segment_t* mutable_segment =
+        &state->segments[i];
+    segments[cursors[mutable_segment->value_ordinal]++] =
+        mutable_segment->segment;
+  }
+
+  *out_segments = segments;
+  *out_segment_count = state->segment_count;
+  *out_value_segment_ranges = ranges;
   return iree_ok_status();
 }
 
@@ -1684,6 +1845,26 @@ iree_status_t loom_liveness_analyze_local_value_domain(
     const loom_local_value_domain_t* value_domain, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
+  const loom_region_t* region = value_domain->region;
+  loom_cfg_graph_t cfg_graph = {
+      .module = value_domain->module,
+      .region = region,
+      .block_count = region->block_count,
+  };
+  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
+    IREE_RETURN_IF_ERROR(
+        loom_cfg_graph_build(value_domain->module, region, arena, &cfg_graph));
+  }
+  return loom_liveness_analyze_local_value_domain_with_cfg_graph(
+      value_domain, &cfg_graph, order, arena, out_analysis);
+}
+
+iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
+    iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis) {
+  IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
+  IREE_ASSERT_ARGUMENT(cfg_graph);
   memset(out_analysis, 0, sizeof(*out_analysis));
   loom_module_t* module = value_domain->module;
   const loom_region_t* region = value_domain->region;
@@ -1735,19 +1916,18 @@ iree_status_t loom_liveness_analyze_local_value_domain(
   }
 
   bool is_cfg = iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
-  loom_cfg_graph_t graph = {0};
   if (iree_status_is_ok(status) && is_cfg) {
-    status = loom_cfg_graph_build(module, region, arena, &graph);
-  }
-  if (iree_status_is_ok(status) && is_cfg) {
-    if (graph.malformed) {
+    IREE_ASSERT(cfg_graph->module == module);
+    IREE_ASSERT(cfg_graph->region == region);
+    IREE_ASSERT_EQ(cfg_graph->block_count, region->block_count);
+    if (cfg_graph->malformed) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "CFG graph is malformed; run Loom verification "
                                 "before liveness analysis");
     }
   }
   if (iree_status_is_ok(status) && is_cfg) {
-    status = loom_liveness_run_dataflow(&state, &graph);
+    status = loom_liveness_run_dataflow(&state, cfg_graph);
   } else if (iree_status_is_ok(status)) {
     loom_liveness_initialize_local_liveness(&state, region->block_count);
   }
@@ -1773,6 +1953,14 @@ iree_status_t loom_liveness_analyze_local_value_domain(
                                                    &interval_count);
   }
 
+  loom_liveness_segment_t* segments = NULL;
+  iree_host_size_t segment_count = 0;
+  loom_liveness_segment_range_t* value_segment_ranges = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_liveness_finalize_segment_array(
+        &state, &segments, &segment_count, &value_segment_ranges);
+  }
+
   if (iree_status_is_ok(status)) {
     *out_analysis = (loom_liveness_analysis_t){
         .module = module,
@@ -1786,6 +1974,9 @@ iree_status_t loom_liveness_analyze_local_value_domain(
         .value_ids = state.value_ids,
         .value_count = state.value_count,
         .value_interval_indices = state.value_interval_indices,
+        .segments = segments,
+        .segment_count = segment_count,
+        .value_segment_ranges = value_segment_ranges,
         .pressure_summaries = state.pressure_state.summaries,
         .pressure_summary_count = state.pressure_state.count,
     };
@@ -1818,6 +2009,42 @@ const loom_liveness_interval_t* loom_liveness_interval_for_value_ordinal(
     return NULL;
   }
   return &analysis->intervals[interval_index];
+}
+
+loom_liveness_segment_range_t loom_liveness_segment_range_for_value_ordinal(
+    const loom_liveness_analysis_t* analysis,
+    loom_value_ordinal_t value_ordinal) {
+  if (analysis == NULL || analysis->value_segment_ranges == NULL ||
+      value_ordinal >= analysis->value_count) {
+    return (loom_liveness_segment_range_t){0};
+  }
+  return analysis->value_segment_ranges[value_ordinal];
+}
+
+bool loom_liveness_segment_ranges_overlap(
+    const loom_liveness_analysis_t* analysis, loom_liveness_segment_range_t lhs,
+    loom_liveness_segment_range_t rhs) {
+  IREE_ASSERT_ARGUMENT(analysis);
+  IREE_ASSERT_LE((uint64_t)lhs.start + lhs.count, analysis->segment_count);
+  IREE_ASSERT_LE((uint64_t)rhs.start + rhs.count, analysis->segment_count);
+  uint32_t lhs_index = 0;
+  uint32_t rhs_index = 0;
+  while (lhs_index < lhs.count && rhs_index < rhs.count) {
+    const loom_liveness_segment_t* lhs_segment =
+        &analysis->segments[lhs.start + lhs_index];
+    const loom_liveness_segment_t* rhs_segment =
+        &analysis->segments[rhs.start + rhs_index];
+    if (lhs_segment->start_point < rhs_segment->end_point &&
+        rhs_segment->start_point < lhs_segment->end_point) {
+      return true;
+    }
+    if (lhs_segment->end_point <= rhs_segment->start_point) {
+      ++lhs_index;
+    } else {
+      ++rhs_index;
+    }
+  }
+  return false;
 }
 
 const loom_liveness_block_info_t* loom_liveness_block_info_for_block(

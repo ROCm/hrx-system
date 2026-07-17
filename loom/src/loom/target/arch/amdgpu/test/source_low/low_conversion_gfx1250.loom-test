@@ -1,0 +1,41 @@
+// RUN: emit amdgpu-assembly @gfx1250_native_packed_float_ops
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %packed8: reg<amdgpu.vgpr x2>, %packed4: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %f16_fp8 = v_cvt_pk_f16_fp8 %low
+  %f16_bf8 = v_cvt_pk_f16_bf8 %high
+  %packed = v_cvt_pk_bf16_f32 %low, %high
+  %scaled_f16_fp4 = v_cvt_scale_pk8_f16_fp4 %packed4, %scale
+  %scaled_bf16_fp4 = v_cvt_scale_pk8_bf16_fp4 %packed4, %scale
+  %scaled_f32_fp4 = v_cvt_scale_pk8_f32_fp4 %packed4, %scale
+  %scaled_f16_fp8 = v_cvt_scale_pk8_f16_fp8 %packed8, %scale
+  %scaled_bf16_fp8 = v_cvt_scale_pk8_bf16_fp8 %packed8, %scale
+  %scaled_f32_fp8 = v_cvt_scale_pk8_f32_fp8 %packed8, %scale
+  %scaled_f16_bf8 = v_cvt_scale_pk8_f16_bf8 %packed8, %scale
+  %scaled_bf16_bf8 = v_cvt_scale_pk8_bf16_bf8 %packed8, %scale
+  %scaled_f32_bf8 = v_cvt_scale_pk8_f32_bf8 %packed8, %scale {scale_sel = 3}
+  %sum = v_pk_add_bf16 %packed, %scale
+  %product = v_pk_mul_bf16 %sum, %scale
+  %fma = v_pk_fma_bf16 %packed, %scale, %product
+  return
+}
+
+// ----
+  v_cvt_pk_f16_fp8 v6, v0
+  v_cvt_pk_bf16_f32 v0, v0, v1
+  v_cvt_pk_f16_bf8 v1, v1
+  v_cvt_scale_pk8_f16_fp4 v[8:11], v2, v3, scale_sel:0
+  v_cvt_scale_pk8_bf16_fp4 v[8:11], v2, v3, scale_sel:0
+  v_cvt_scale_pk8_f32_fp4 v[8:15], v2, v3, scale_sel:0
+  v_cvt_scale_pk8_f16_fp8 v[8:11], v[4:5], v3, scale_sel:0
+  v_cvt_scale_pk8_bf16_fp8 v[8:11], v[4:5], v3, scale_sel:0
+  v_cvt_scale_pk8_f32_fp8 v[8:15], v[4:5], v3, scale_sel:0
+  v_cvt_scale_pk8_f16_bf8 v[8:11], v[4:5], v3, scale_sel:0
+  v_cvt_scale_pk8_bf16_bf8 v[8:11], v[4:5], v3, scale_sel:0
+  v_cvt_scale_pk8_f32_bf8 v[8:15], v[4:5], v3, scale_sel:3
+  v_pk_add_bf16 v1, v0, v3
+  s_delay_alu instid0(VALU_DEP_1)
+  v_pk_mul_bf16 v1, v1, v3
+  s_delay_alu instid0(VALU_DEP_1)
+  v_pk_fma_bf16 v0, v0, v3, v1
+  s_endpgm

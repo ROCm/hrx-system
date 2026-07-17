@@ -23,27 +23,6 @@ typedef struct loom_amdgpu_storage_layout_projection_t {
   bool resolved;
 } loom_amdgpu_storage_layout_projection_t;
 
-static bool loom_amdgpu_storage_layout_u64_is_power_of_two(uint64_t value) {
-  return value != 0 && (value & (value - 1)) == 0;
-}
-
-static iree_status_t loom_amdgpu_storage_layout_checked_align_u64(
-    uint64_t value, uint64_t alignment, uint64_t* out_aligned_value) {
-  *out_aligned_value = 0;
-  if (!loom_amdgpu_storage_layout_u64_is_power_of_two(alignment)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU storage layout alignment must be a power of two");
-  }
-  const uint64_t alignment_mask = alignment - 1;
-  if (value > UINT64_MAX - alignment_mask) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU storage layout alignment overflows");
-  }
-  *out_aligned_value = (value + alignment_mask) & ~alignment_mask;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_storage_layout_segment_size_ptr(
     loom_amdgpu_storage_layout_segment_sizes_t* sizes,
     loom_storage_space_t storage_space, uint64_t** out_segment_size) {
@@ -76,10 +55,20 @@ static iree_status_t loom_amdgpu_storage_layout_project_reservation(
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_segment_size_ptr(
       &projection->sizes, low_reservation->space, &segment_size));
 
+  if (!iree_is_power_of_two_uint64(low_reservation->byte_alignment)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU storage layout alignment must be a power of two");
+  }
   uint64_t aligned_segment_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_checked_align_u64(
-      *segment_size, low_reservation->byte_alignment, &aligned_segment_size));
-  if (aligned_segment_size > UINT64_MAX - low_reservation->byte_size) {
+  if (!iree_checked_align_u64(*segment_size, low_reservation->byte_alignment,
+                              &aligned_segment_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU storage layout alignment overflows");
+  }
+  uint64_t next_segment_size = 0;
+  if (!iree_checked_add_u64(aligned_segment_size, low_reservation->byte_size,
+                            &next_segment_size)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "AMDGPU storage layout fixed segment size overflows");
@@ -109,7 +98,7 @@ static iree_status_t loom_amdgpu_storage_layout_project_reservation(
     projection->resolved = true;
   }
   ++projection->record_count;
-  *segment_size = aligned_segment_size + low_reservation->byte_size;
+  *segment_size = next_segment_size;
   return iree_ok_status();
 }
 

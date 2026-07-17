@@ -10,7 +10,8 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
   %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
   %lane_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
   %lane = vector.extract %lane_vector[0] : vector<1xi32> -> i32
-  %value = scalar.constant 1 : i32
+  %workitem = kernel.workitem.id<x> : index
+  %value = index.cast %workitem : index to i32
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.lane_range"}
   %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
   kernel.return
@@ -25,7 +26,8 @@ kernel.def target(@target) @subgroup_broadcast_lane_out_of_range_rejected() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
-  %value = scalar.constant 1 : i32
+  %workitem = kernel.workitem.id<x> : index
+  %value = index.cast %workitem : index to i32
   %lane = scalar.constant 32 : i32
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.lane_range"}
   %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
@@ -391,7 +393,8 @@ kernel.def target(@target) @subgroup_broadcast_wave64_native_width_rejected() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
-  %value = scalar.constant 1 : i32
+  %workitem = kernel.workitem.id<x> : index
+  %value = index.cast %workitem : index to i32
   %lane = scalar.constant 63 : i32
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.native_width"}
   %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
@@ -406,7 +409,8 @@ kernel.def target(@target) @subgroup_broadcast_first_wave64_native_width_rejecte
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
-  %value = scalar.constant 1 : i32
+  %workitem = kernel.workitem.id<x> : index
+  %value = index.cast %workitem : index to i32
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast_first.native_width"}
   %broadcast = kernel.subgroup.broadcast.first %value : i32
   kernel.return

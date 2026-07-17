@@ -18,28 +18,33 @@ extern "C" {
 
 // Returns true when a source i32 scalar or vector value can be materialized as
 // a VGPR operand for vector-style packets.
-bool loom_amdgpu_value_can_materialize_as_vgpr_i32(
-    loom_low_lower_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_i32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
 
 // Returns true when a source f32 scalar or vector value can be materialized as
 // a VGPR operand for vector-style packets.
-bool loom_amdgpu_value_can_materialize_as_vgpr_f32(
-    loom_low_lower_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_f32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
 
 // Returns true when a source i64 scalar can be materialized as a VGPR pair for
 // vector-style packets.
-bool loom_amdgpu_value_can_materialize_as_vgpr_i64(
-    loom_low_lower_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_i64(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
 
 // Returns true when a source address scalar can be materialized as a VGPR
 // operand for vector-style address arithmetic.
-bool loom_amdgpu_value_can_materialize_as_vgpr_address(
-    loom_low_lower_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
 
 // Returns true when a source scalar i1 value can be materialized as an
 // EXEC-width SGPR mask for divergent predicate arithmetic.
-bool loom_amdgpu_value_can_materialize_as_native_i1_mask(
-    loom_low_lower_context_t* context, loom_value_id_t value_id);
+iree_status_t loom_amdgpu_value_can_materialize_as_native_i1_mask(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
 
 // Looks up a lowered i32 scalar or vector value and materializes exact source
 // constants into VGPRs when a vector-style packet cannot consume the existing

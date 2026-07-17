@@ -15,7 +15,7 @@ kernel.def target(@target) export("mixed_scalar_buffer_scalar") @mixed_scalar_bu
 }
 
 // ----
-low.kernel.def target(@target) abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "value32", arg1 = "value64"}, direct_arg_offsets = [0, 16], direct_arg_parameter_indices = [0, 2], direct_arg_sizes = [4, 8], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) export("mixed_scalar_buffer_scalar") workgroup_size(64, 1, 1) @mixed_scalar_buffer_scalar(%value32: reg<amdgpu.sgpr>, %value64: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "value32", arg1 = "value64"}, direct_arg_offsets = [0, 16], direct_arg_parameter_indices = [0, 2], direct_arg_sizes = [4, 8], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) export("mixed_scalar_buffer_scalar") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_scalar_buffer_scalar(%value32: reg<amdgpu.sgpr>, %value64: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %stored = v_mov_b32_copy %value32
   %13 = v_mov_b32 0
@@ -41,7 +41,7 @@ kernel.def target(@target) export("unused_buffer_parameters") @unused_buffer_par
 }
 
 // ----
-low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) export("unused_buffer_parameters") workgroup_size(64, 1, 1) @unused_buffer_parameters() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) export("unused_buffer_parameters") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @unused_buffer_parameters() asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0

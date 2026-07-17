@@ -802,7 +802,7 @@ class LowKernelEmitter {
         /*.descriptor_registry=*/&target_registry_.registry,
         /*.target_selection=*/{},
         /*.memory_access_table=*/{},
-        /*.schedule_pressure_cliffs=*/{},
+        /*.pressure_cliffs=*/{},
         /*.schedule_pair_affinities=*/{},
         /*.schedule_structural_state_reads=*/{},
         /*.schedule_strategy=*/{},
@@ -882,10 +882,7 @@ iree_status_t PrepareTargetProcessorForLowHsaco(
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_processor(
       iree_make_string_view(target.processor.data(), target.processor.size()),
       &processor));
-  bool hsaco_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &hsaco_supported));
-  if (!hsaco_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU processor '%s' does not have native "
                             "HSACO support",

@@ -6,13 +6,20 @@
 
 from dataclasses import dataclass
 
-from loom.importers.tilelang.types import TileLangTypeConverter
+import pytest
+
+from loom.importers.tilelang.types import (
+    TileLangTypeConversionError,
+    TileLangTypeConverter,
+)
 
 
 @dataclass
 class Buffer:
     dtype: str
     shape: tuple[object, ...]
+    attrs: dict[str, object] | None = None
+    annotations: dict[str, object] | None = None
 
 
 def test_maps_tilelang_float8_spelling_variants() -> None:
@@ -50,6 +57,14 @@ def test_counts_tilelang_float8_buffers_as_one_byte_per_element() -> None:
 def test_preserves_tilelang_float8_storage_format_as_schema() -> None:
     converter = TileLangTypeConverter()
 
+    assert converter.buffer_storage_schema(Buffer("float8_e4m3", (16,))) is None
+    assert (
+        str(converter.view_type(Buffer("float8_e4m3fn", (16,))).element_type)
+        == "f8E4M3"
+    )
+    e4m3fn_schema = converter.buffer_storage_schema(Buffer("float8_e4m3fn", (16,)))
+    assert e4m3fn_schema is not None
+    assert e4m3fn_schema.name == "fp8_e4m3fn"
     assert (
         str(converter.view_type(Buffer("float8_e4m3fnuz", (16,))).element_type)
         == "f8E4M3"
@@ -64,3 +79,45 @@ def test_preserves_tilelang_float8_storage_format_as_schema() -> None:
     e5m2fnuz_schema = converter.buffer_storage_schema(Buffer("float8_e5m2fnuz", (16,)))
     assert e5m2fnuz_schema is not None
     assert e5m2fnuz_schema.name == "fp8_e5m2fnuz"
+
+
+def test_preserves_explicit_tilelang_float8_storage_rounding() -> None:
+    converter = TileLangTypeConverter()
+
+    finite_fn_schema = converter.buffer_storage_schema(
+        Buffer(
+            "float8_e4m3fn",
+            (16,),
+            attrs={"loom.storage.rounding": "finite_only"},
+        )
+    )
+    assert finite_fn_schema is not None
+    assert finite_fn_schema.name == "fp8_e4m3fn"
+    assert finite_fn_schema.params == (("rounding", "finite_only"),)
+
+    raw_finite_schema = converter.buffer_storage_schema(
+        Buffer(
+            "float8_e4m3",
+            (16,),
+            annotations={"loom.storage.rounding": "finite_only"},
+        )
+    )
+    assert raw_finite_schema is not None
+    assert raw_finite_schema.name == "ieee_fp8_e4m3"
+    assert raw_finite_schema.params == (("rounding", "finite_only"),)
+
+
+def test_rejects_storage_rounding_on_non_float8_buffer() -> None:
+    converter = TileLangTypeConverter()
+
+    with pytest.raises(
+        TileLangTypeConversionError,
+        match="requires an FP8 buffer dtype",
+    ):
+        converter.buffer_storage_schema(
+            Buffer(
+                "float32",
+                (16,),
+                attrs={"loom.storage.rounding": "finite_only"},
+            )
+        )

@@ -69,11 +69,20 @@ typedef struct loom_view_region_t {
   // SSA value whose type is a view.
   loom_value_id_t view_value_id;
 
+  // SSA view value that materializes the root-relative base resource.
+  loom_value_id_t base_view_value_id;
+
   // SSA value representing the storage root identity.
   loom_value_id_t root_value_id;
 
   // Symbolic byte offset of the view base relative to root_value_id.
   loom_symbolic_expr_t begin_byte_offset;
+
+  // Symbolic byte offset of base_view_value_id relative to root_value_id.
+  loom_symbolic_expr_t base_begin_byte_offset;
+
+  // Symbolic byte offset from base_view_value_id to view_value_id.
+  loom_symbolic_expr_t projection_byte_offset;
 
   // Existing SSA value that materializes begin_byte_offset, or invalid when
   // the begin offset only exists as a symbolic expression.

@@ -8,7 +8,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
+    MatrixFragmentReductionGroup,
+    MatrixFragmentRoleLayout,
+    layout_roles,
+)
+
+AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS = {
+    "f64": 64,
+    "f32": 32,
+    "f16": 16,
+    "bf16": 16,
+    "xf32": 32,
+    "i32": 32,
+    "i8": 8,
+    "iu8": 8,
+    "i4": 4,
+    "iu4": 4,
+    "fp8": 8,
+    "bf8": 8,
+    "fp6": 6,
+    "bf6": 6,
+    "fp4": 4,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,11 +59,13 @@ class AmdgpuMatrixContract:
     accumulator: AmdgpuMatrixPayload
     result: AmdgpuMatrixPayload
     scale_kind: str
+    block_count: int = 1
     wave_size: str = "any"
     intrinsic_name: str | None = None
     semantic_tag: str | None = None
     fragment_layout: str | None = None
     source_requirements: tuple[str, ...] = ()
+    implicit_scale_formats: tuple[str, ...] = ()
 
 
 def payload(
@@ -47,13 +74,14 @@ def payload(
     return AmdgpuMatrixPayload(numeric_type, register_count, element_count)
 
 
-AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
+_AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x1.f32",
         family="mfma",
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(16, 16, 1),
+        block_count=4,
         lhs=payload("f32", 1, 1),
         rhs=payload("f32", 1, 1),
         accumulator=payload("f32", 16, 16),
@@ -66,6 +94,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908_gfx90a",),
         flags=(),
         tile_shape=(16, 16, 2),
+        block_count=4,
         lhs=payload("bf16", 1, 2),
         rhs=payload("bf16", 1, 2),
         accumulator=payload("f32", 16, 16),
@@ -78,6 +107,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(16, 16, 4),
+        block_count=4,
         lhs=payload("f16", 2, 4),
         rhs=payload("f16", 2, 4),
         accumulator=payload("f32", 16, 16),
@@ -108,6 +138,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x8_packed16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x16.f16",
@@ -146,6 +177,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_bf16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x32.bf8.bf8",
@@ -158,6 +190,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x32.bf8.fp8",
@@ -170,6 +203,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x32.f16",
@@ -182,6 +216,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_f16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x32.fp8.bf8",
@@ -194,6 +229,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x32.fp8.fp8",
@@ -206,6 +242,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x32_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x4.bf16.1k",
@@ -213,6 +250,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx90a_bf16_1k",),
         flags=(),
         tile_shape=(16, 16, 4),
+        block_count=4,
         lhs=payload("bf16", 2, 4),
         rhs=payload("bf16", 2, 4),
         accumulator=payload("f32", 16, 16),
@@ -230,6 +268,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 4, 4),
         result=payload("f32", 4, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_16x16x8_xf32",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x1.f32",
@@ -237,6 +276,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(32, 32, 1),
+        block_count=2,
         lhs=payload("f32", 1, 1),
         rhs=payload("f32", 1, 1),
         accumulator=payload("f32", 32, 32),
@@ -249,6 +289,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908_gfx90a",),
         flags=(),
         tile_shape=(32, 32, 2),
+        block_count=2,
         lhs=payload("bf16", 1, 2),
         rhs=payload("bf16", 1, 2),
         accumulator=payload("f32", 32, 32),
@@ -266,6 +307,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x2_f32",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.bf16",
@@ -278,6 +320,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x4_packed16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.f16",
@@ -285,6 +328,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(32, 32, 4),
+        block_count=2,
         lhs=payload("f16", 2, 4),
         rhs=payload("f16", 2, 4),
         accumulator=payload("f32", 32, 32),
@@ -302,6 +346,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x8_packed16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.bf16",
@@ -314,6 +359,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_bf16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.bf8.bf8",
@@ -326,6 +372,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.bf8.fp8",
@@ -338,6 +385,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.f16",
@@ -350,6 +398,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_f16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.fp8.bf8",
@@ -362,6 +411,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x16.fp8.fp8",
@@ -374,6 +424,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.bf16.1k",
@@ -381,6 +432,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx90a_bf16_1k",),
         flags=(),
         tile_shape=(32, 32, 4),
+        block_count=2,
         lhs=payload("bf16", 2, 4),
         rhs=payload("bf16", 2, 4),
         accumulator=payload("f32", 32, 32),
@@ -398,6 +450,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x8_packed16",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.xf32",
@@ -410,6 +463,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 16, 16),
         result=payload("f32", 16, 16),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f32_32x32x4_xf32",
     ),
     AmdgpuMatrixContract(
         name="mfma.f32.4x4x1.f32",
@@ -417,6 +471,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(4, 4, 1),
+        block_count=16,
         lhs=payload("f32", 1, 1),
         rhs=payload("f32", 1, 1),
         accumulator=payload("f32", 4, 4),
@@ -429,6 +484,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908_gfx90a",),
         flags=(),
         tile_shape=(4, 4, 2),
+        block_count=16,
         lhs=payload("bf16", 1, 2),
         rhs=payload("bf16", 1, 2),
         accumulator=payload("f32", 4, 4),
@@ -441,6 +497,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(4, 4, 4),
+        block_count=16,
         lhs=payload("f16", 2, 4),
         rhs=payload("f16", 2, 4),
         accumulator=payload("f32", 4, 4),
@@ -453,6 +510,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx90a_bf16_1k",),
         flags=(),
         tile_shape=(4, 4, 4),
+        block_count=16,
         lhs=payload("bf16", 2, 4),
         rhs=payload("bf16", 2, 4),
         accumulator=payload("f32", 4, 4),
@@ -477,6 +535,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx90a_f64",),
         flags=(),
         tile_shape=(4, 4, 4),
+        block_count=4,
         lhs=payload("f64", 2, 1),
         rhs=payload("f64", 2, 1),
         accumulator=payload("f64", 2, 1),
@@ -489,6 +548,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(4, 4, 4),
+        block_count=16,
         lhs=payload("i8", 1, 4),
         rhs=payload("i8", 1, 4),
         accumulator=payload("i32", 4, 4),
@@ -501,6 +561,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(16, 16, 4),
+        block_count=4,
         lhs=payload("i8", 1, 4),
         rhs=payload("i8", 1, 4),
         accumulator=payload("i32", 16, 16),
@@ -549,6 +610,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         features=("mfma_gfx908",),
         flags=(),
         tile_shape=(32, 32, 4),
+        block_count=2,
         lhs=payload("i8", 1, 4),
         rhs=payload("i8", 1, 4),
         accumulator=payload("i32", 32, 32),
@@ -596,6 +658,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         family="mfma",
         features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
         flags=("scaled", "matrix_formats", "zero_scale_fallback"),
+        implicit_scale_formats=("e8m0",),
         tile_shape=(16, 16, 128),
         lhs=payload("f8f6f4", 8, 32),
         rhs=payload("f8f6f4", 8, 32),
@@ -608,6 +671,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         family="mfma",
         features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
         flags=("scaled", "matrix_formats", "zero_scale_fallback"),
+        implicit_scale_formats=("e8m0",),
         tile_shape=(32, 32, 64),
         lhs=payload("f8f6f4", 8, 32),
         rhs=payload("f8f6f4", 8, 32),
@@ -1364,6 +1428,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x64_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x64.fp8.bf8",
@@ -1376,6 +1441,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x64_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x64.bf8.fp8",
@@ -1388,6 +1454,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x64_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x64.bf8.bf8",
@@ -1400,6 +1467,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x64_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f16.16x16x64.fp8.fp8",
@@ -1508,6 +1576,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x128_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x128.fp8.bf8",
@@ -1520,6 +1589,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x128_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x128.bf8.fp8",
@@ -1532,6 +1602,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x128_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x128.bf8.bf8",
@@ -1544,6 +1615,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x128_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.32x16x128.f4",
@@ -1776,6 +1848,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x16.bf8.bf8",
@@ -1788,6 +1861,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x16.bf8.fp8",
@@ -1800,6 +1874,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x16.fp8.bf8",
@@ -1812,6 +1887,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x16.f16",
@@ -1965,8 +2041,148 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
 )
 
 
+def _payload_matches_fragment_role(
+    payload: AmdgpuMatrixPayload, role: MatrixFragmentRoleLayout
+) -> bool:
+    element_bit_count = AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS.get(payload.numeric_type)
+    return element_bit_count is not None and (
+        payload.register_count,
+        payload.element_count,
+        element_bit_count,
+    ) == (
+        role.register_count,
+        role.payload_element_count,
+        role.element_bit_count,
+    )
+
+
+def _complete_sparse_fragment_layout(
+    contract: AmdgpuMatrixContract,
+) -> AmdgpuMatrixContract:
+    if "sparse" not in contract.flags:
+        return contract
+
+    wave_size_by_family = {"smfmac": 64, "swmmac": 32}
+    wave_size = wave_size_by_family.get(contract.family)
+    if wave_size is None:
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' has "
+            f"unsupported family '{contract.family}'"
+        )
+    if contract.wave_size not in ("any", str(wave_size)):
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' has wave size "
+            f"{contract.wave_size}, expected {wave_size}"
+        )
+
+    contract_payloads = (
+        contract.lhs,
+        contract.rhs,
+        contract.accumulator,
+        contract.result,
+    )
+    candidates = tuple(
+        layout
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        if layout.wave_size == wave_size
+        and layout.tile_shape == (contract.block_count, *contract.tile_shape)
+        and layout.lhs.reduction_group == MatrixFragmentReductionGroup(2, 4)
+        and layout.rhs.reduction_group is None
+        and all(
+            _payload_matches_fragment_role(payload, role)
+            for payload, role in zip(
+                contract_payloads, layout_roles(layout), strict=True
+            )
+        )
+    )
+    if len(candidates) != 1:
+        candidate_keys = ", ".join(layout.key for layout in candidates) or "none"
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' matched "
+            f"{len(candidates)} fragment layouts: {candidate_keys}"
+        )
+    fragment_layout = candidates[0].key
+    if (
+        contract.fragment_layout is not None
+        and contract.fragment_layout != fragment_layout
+    ):
+        raise ValueError(
+            f"sparse AMDGPU matrix contract '{contract.name}' names fragment "
+            f"layout '{contract.fragment_layout}', expected '{fragment_layout}'"
+        )
+    source_requirements = tuple(
+        requirement
+        for requirement in contract.source_requirements
+        if requirement != "fragment_layout"
+    )
+    return replace(
+        contract,
+        wave_size=str(wave_size),
+        fragment_layout=fragment_layout,
+        source_requirements=source_requirements,
+    )
+
+
+def _complete_blocked_fragment_layout(
+    contract: AmdgpuMatrixContract,
+) -> AmdgpuMatrixContract:
+    if contract.block_count == 1 or "sparse" in contract.flags:
+        return contract
+
+    contract_payloads = (
+        contract.lhs,
+        contract.rhs,
+        contract.accumulator,
+        contract.result,
+    )
+    candidates = tuple(
+        layout
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        if layout.wave_size == 64
+        and layout.tile_shape == (contract.block_count, *contract.tile_shape)
+        and all(
+            _payload_matches_fragment_role(payload, role)
+            for payload, role in zip(
+                contract_payloads, layout_roles(layout), strict=True
+            )
+        )
+    )
+    if len(candidates) != 1:
+        candidate_keys = ", ".join(layout.key for layout in candidates) or "none"
+        raise ValueError(
+            f"blocked AMDGPU matrix contract '{contract.name}' matched "
+            f"{len(candidates)} fragment layouts: {candidate_keys}"
+        )
+    fragment_layout = candidates[0].key
+    if (
+        contract.fragment_layout is not None
+        and contract.fragment_layout != fragment_layout
+    ):
+        raise ValueError(
+            f"blocked AMDGPU matrix contract '{contract.name}' names fragment "
+            f"layout '{contract.fragment_layout}', expected '{fragment_layout}'"
+        )
+    return replace(
+        contract,
+        wave_size="64",
+        fragment_layout=fragment_layout,
+        source_requirements=tuple(
+            requirement
+            for requirement in contract.source_requirements
+            if requirement != "fragment_layout"
+        ),
+    )
+
+
+AMDGPU_MATRIX_CONTRACTS = tuple(
+    _complete_blocked_fragment_layout(_complete_sparse_fragment_layout(contract))
+    for contract in _AMDGPU_MATRIX_CONTRACT_ROWS
+)
+
+
 __all__ = (
     "AMDGPU_MATRIX_CONTRACTS",
+    "AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS",
     "AmdgpuMatrixContract",
     "AmdgpuMatrixPayload",
     "payload",

@@ -18,6 +18,7 @@
 #include "loom/ops/special_values.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/config/config.h"
+#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/util/fact_table.h"
 
 void loom_run_hal_testbench_context_initialize(
@@ -328,7 +329,7 @@ static iree_string_view_t loom_run_hal_testbench_value_name(
   if (module == NULL || value_id >= module->values.count) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return iree_string_view_empty();
   }
@@ -574,9 +575,11 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
   loom_tooling_config_materialize_options_t options = {0};
   loom_tooling_config_materialize_options_initialize(&options);
   options.config_set = provider->config_set;
-  return loom_tooling_config_materialize_module(
+  IREE_RETURN_IF_ERROR(loom_tooling_config_materialize_module(
       provider->compile_module.module, &options,
-      loom_run_session_block_pool(provider->session), NULL);
+      loom_run_session_block_pool(provider->session), NULL));
+  return loom_run_compile_report_record_materialized_config(
+      provider->report, provider->compile_module.module, provider->config_set);
 }
 
 static void loom_run_hal_testbench_record_compile_rejection(
@@ -701,9 +704,11 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_record_compile_rejection(
         provider, IREE_SV("compile"), IREE_SV("unresolved_workgroup_count"),
         IREE_SV("HAL actual invocation requires a statically resolved "
-                "workgroup count after sample constants are applied; use "
-                "--sample-compilation=per_sample or make launch geometry "
-                "static for once-compiled candidates"));
+                "workgroup count after config bindings and sample constants "
+                "are applied; bind launch config values, use "
+                "--sample-compilation=per_sample when launch geometry depends "
+                "on benchmark samples, or make launch geometry static for "
+                "once-compiled candidates"));
     return iree_ok_status();
   }
   provider->invocation_options.workgroup_count[0] = workgroup_count.x;
@@ -964,9 +969,7 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_actual_provider_compile(provider));
   if (provider->compile_rejected) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "HAL actual invocation compile was rejected before dispatch");
+    return iree_ok_status();
   }
 
   loom_run_hal_invocation_options_t invocation_options =
@@ -1107,6 +1110,34 @@ iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "HAL actual sequence received an unexpected invocation");
+}
+
+iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue) {
+  *out_issue = (loom_testbench_sample_issue_t){0};
+  loom_run_hal_testbench_actual_sequence_t* sequence =
+      (loom_run_hal_testbench_actual_sequence_t*)user_data;
+  for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
+    const loom_run_hal_testbench_actual_provider_t* provider =
+        &sequence->providers[i];
+    if (provider->actual_invocation != invocation) {
+      continue;
+    }
+    if (provider->compile_rejected) {
+      *out_issue = (loom_testbench_sample_issue_t){
+          .category = LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED,
+          .provider = IREE_SV("actual"),
+          .stage = provider->compile_failure_stage,
+          .kind = provider->compile_failure_kind,
+          .message = provider->compile_failure_message,
+      };
+    }
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "HAL actual sequence received an unexpected invocation issue query");
 }
 
 iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(

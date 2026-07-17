@@ -40,6 +40,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::special_values
     loom::target::registers
+    loom::util::adaptive_sort
   PUBLIC
 )
 

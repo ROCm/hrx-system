@@ -51,6 +51,80 @@ static inline bool iree_math_fuzzy_compare_f64(double actual, double expected,
 }
 
 //==============================================================================
+// Saturating integer arithmetic
+//==============================================================================
+
+static inline uint32_t iree_math_saturating_add_u32(uint32_t lhs,
+                                                    uint32_t rhs) {
+  return lhs > UINT32_MAX - rhs ? UINT32_MAX : lhs + rhs;
+}
+
+static inline uint64_t iree_math_saturating_add_u64(uint64_t lhs,
+                                                    uint64_t rhs) {
+  return lhs > UINT64_MAX - rhs ? UINT64_MAX : lhs + rhs;
+}
+
+static inline uint64_t iree_math_saturating_mul_u64(uint64_t lhs,
+                                                    uint64_t rhs) {
+  if (lhs == 0 || rhs == 0) return 0;
+  return lhs > UINT64_MAX / rhs ? UINT64_MAX : lhs * rhs;
+}
+
+//==============================================================================
+// Integer number theory
+//==============================================================================
+
+// Returns the greatest common divisor of |a| and |b|. Returns zero when both
+// inputs are zero.
+static inline uint64_t iree_math_gcd_u64(uint64_t a, uint64_t b) {
+  while (b != 0) {
+    const uint64_t remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
+// Returns the unsigned magnitude of |value| without overflowing on INT64_MIN.
+static inline uint64_t iree_math_magnitude_i64(int64_t value) {
+  return value >= 0 ? (uint64_t)value : (uint64_t)(-(value + 1)) + 1;
+}
+
+// Returns the greatest common divisor of the magnitudes of |a| and |b|. The
+// unsigned return type represents gcd(INT64_MIN, 0) without truncation.
+static inline uint64_t iree_math_gcd_i64(int64_t a, int64_t b) {
+  return iree_math_gcd_u64(iree_math_magnitude_i64(a),
+                           iree_math_magnitude_i64(b));
+}
+
+// Computes the least common multiple of |a| and |b| in |out_result|. Returns
+// true on success or false if the result overflows. Either input being zero
+// produces zero.
+static inline bool iree_math_checked_lcm_u64(uint64_t a, uint64_t b,
+                                             uint64_t* out_result) {
+  if (a == 0 || b == 0) {
+    *out_result = 0;
+    return true;
+  }
+  return iree_checked_mul_u64(a / iree_math_gcd_u64(a, b), b, out_result);
+}
+
+// Computes the non-negative least common multiple of |a| and |b| in
+// |out_result|. Returns true on success or false if the result cannot be
+// represented by int64_t. Either input being zero produces zero.
+static inline bool iree_math_checked_lcm_i64(int64_t a, int64_t b,
+                                             int64_t* out_result) {
+  uint64_t result = 0;
+  if (!iree_math_checked_lcm_u64(iree_math_magnitude_i64(a),
+                                 iree_math_magnitude_i64(b), &result) ||
+      result > INT64_MAX) {
+    return false;
+  }
+  *out_result = (int64_t)result;
+  return true;
+}
+
+//==============================================================================
 // Bitwise rotation (aka circular shifts)
 //==============================================================================
 
@@ -235,6 +309,59 @@ static inline int iree_math_count_ones_u64(uint64_t n) {
   return iree_math_count_ones_u32(n >> 32) +
          iree_math_count_ones_u32(n & 0xFFFFFFFFu);
 #endif
+}
+
+// Masks |value| to its low |bit_count| bits. Counts outside the storage width
+// clamp to the empty or full domain.
+static inline uint32_t iree_math_mask_low_bits_u32(uint32_t value,
+                                                   int32_t bit_count) {
+  if (bit_count <= 0) return 0;
+  if (bit_count >= 32) return value;
+  return value & ((UINT32_C(1) << bit_count) - 1);
+}
+
+// Masks |value| to its low |bit_count| bits. Counts outside the storage width
+// clamp to the empty or full domain.
+static inline uint64_t iree_math_mask_low_bits_u64(uint64_t value,
+                                                   int32_t bit_count) {
+  if (bit_count <= 0) return 0;
+  if (bit_count >= 64) return value;
+  return value & ((UINT64_C(1) << bit_count) - 1);
+}
+
+// Counts leading zeros in the low |bit_count| bits of |value|.
+static inline int iree_math_count_leading_zeros_u64_width(uint64_t value,
+                                                          int32_t bit_count) {
+  bit_count = iree_max(0, iree_min(bit_count, 64));
+  value = iree_math_mask_low_bits_u64(value, bit_count);
+  if (value == 0) return bit_count;
+  return iree_math_count_leading_zeros_u64(value) - (64 - bit_count);
+}
+
+// Counts trailing zeros in the low |bit_count| bits of |value|.
+static inline int iree_math_count_trailing_zeros_u64_width(uint64_t value,
+                                                           int32_t bit_count) {
+  bit_count = iree_max(0, iree_min(bit_count, 64));
+  value = iree_math_mask_low_bits_u64(value, bit_count);
+  if (value == 0) return bit_count;
+  return iree_math_count_trailing_zeros_u64(value);
+}
+
+// Counts set bits in the low |bit_count| bits of |value|.
+static inline int iree_math_count_ones_u64_width(uint64_t value,
+                                                 int32_t bit_count) {
+  return iree_math_count_ones_u64(
+      iree_math_mask_low_bits_u64(value, bit_count));
+}
+
+// Returns floor(log2(|value|)). |value| must be nonzero.
+static inline int iree_math_floor_log2_u64(uint64_t value) {
+  return 63 - iree_math_count_leading_zeros_u64(value);
+}
+
+// Returns true when |value| is a positive power of two.
+static inline bool iree_math_is_power_of_two_i64(int64_t value) {
+  return value > 0 && iree_is_power_of_two_uint64((uint64_t)value);
 }
 
 //==============================================================================

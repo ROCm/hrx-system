@@ -51,6 +51,9 @@ typedef struct loom_value_fact_table_t loom_value_fact_table_t;
 typedef struct loom_value_fact_extension_entry_t
     loom_value_fact_extension_entry_t;
 typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
+typedef struct loom_value_fact_cfg_graph_entry_t
+    loom_value_fact_cfg_graph_entry_t;
+typedef struct loom_cfg_graph_t loom_cfg_graph_t;
 typedef struct loom_target_bundle_t loom_target_bundle_t;
 
 typedef const loom_value_fact_domain_t* (
@@ -117,7 +120,9 @@ typedef struct loom_value_fact_vector_iota_t {
 } loom_value_fact_vector_iota_t;
 
 // Static strided logical-lane origin for one aggregate value. Result lane N is
-// materialized from source lane source_lane_offset + N * source_lane_stride.
+// derived from source lane source_lane_offset + N * source_lane_stride. The
+// source and result may have different element types when an operation
+// preserves lane provenance while changing representation.
 typedef struct loom_value_fact_static_lane_origin_t {
   // Aggregate source value containing the materialized lanes.
   loom_value_id_t source_value_id;
@@ -126,6 +131,15 @@ typedef struct loom_value_fact_static_lane_origin_t {
   // Logical source lane stride between adjacent result lanes.
   uint32_t source_lane_stride;
 } loom_value_fact_static_lane_origin_t;
+
+// Uniform scalar scale applied lanewise to one aggregate value. Result lane N
+// is source lane N multiplied by scale_value_id.
+typedef struct loom_value_fact_uniform_scale_origin_t {
+  // Aggregate source value containing the unscaled lanes.
+  loom_value_id_t source_value_id;
+  // Scalar value uniformly multiplied into each result lane.
+  loom_value_id_t scale_value_id;
+} loom_value_fact_uniform_scale_origin_t;
 
 // Vector value is a prefix mask produced by vector.mask.range.
 typedef struct loom_value_fact_vector_prefix_mask_t {
@@ -375,8 +389,14 @@ typedef struct loom_value_fact_encoded_operand_schema_t {
   // Bitset of loom_value_fact_encoded_operand_flag_bits_t values.
   loom_value_fact_encoded_operand_flags_t flags;
 
-  // Reserved zero bits keep the descriptor padding-free for raw equality.
-  uint32_t reserved;
+  // Structured sparsity density within one logical reduction group.
+  struct {
+    // Number of physically stored nonzero elements in each group.
+    uint16_t nonzero_element_count;
+
+    // Number of logical elements represented by each group.
+    uint16_t element_count;
+  } sparsity_group;
 
   // Number of 32-bit payload registers in a prepared fragment, or zero when
   // not target-fragment-shaped.
@@ -396,8 +416,8 @@ static_assert(sizeof(loom_value_fact_encoded_operand_schema_t) == 64,
 
 // Summary of a storage-schema encoding.
 typedef struct loom_value_fact_storage_schema_t {
-  // One-based static schema encoding ID when known. Zero means no exact nested
-  // storage schema is known.
+  // One-based static schema encoding ID when a complete static schema is known.
+  // Zero means no exact nested storage schema replacement is known.
   uint16_t static_spec_encoding_id;
 
   // Target-independent encoded operand facts.
@@ -426,13 +446,18 @@ bool loom_value_fact_encoded_operand_schema_has_scale(
 bool loom_value_fact_encoded_operand_schema_scale_is_complete(
     loom_value_fact_encoded_operand_schema_t schema);
 
+// Returns true when structured sparsity density is either absent or complete
+// and valid for the selected sparsity policy.
+bool loom_value_fact_encoded_operand_schema_sparsity_is_complete(
+    loom_value_fact_encoded_operand_schema_t schema);
+
 // Summary of an SSA encoding value.
 typedef struct loom_value_fact_encoding_summary_t {
   // Known semantic role from the value type or encoding family.
   loom_encoding_role_t role;
 
-  // One-based static encoding spec ID when the value came from
-  // encoding.define. Zero means no exact static spec is known.
+  // One-based static encoding spec ID when a complete static encoding is known.
+  // Zero means no exact static replacement is known.
   uint16_t static_spec_encoding_id;
 
   // Address-layout facts when this encoding directly is a layout or composes a
@@ -529,6 +554,12 @@ struct loom_fact_context_t {
   // Generic analyses leave this NULL and receive source-level facts.
   const loom_target_bundle_t* target_bundle;
 
+  // Optional target-family-owned immutable payload associated with
+  // target_bundle. Target-independent fact domains leave this NULL; target
+  // family fact domains may interpret it only after proving the owning target
+  // family.
+  const void* target_data;
+
   // Optional type-domain resolver installed by layers that own registered type
   // descriptors. The fact table itself intentionally does not depend on the
   // generated type registry; callers that can map |type| to a descriptor can
@@ -612,6 +643,20 @@ struct loom_value_fact_table_t {
   // Context object passed to op-specific fact inference callbacks.
   loom_fact_context_t context;
 
+  // CFG graphs built while solving block argument facts. Entries and buckets
+  // have transient scope lifetime and let downstream analyses reuse the graph
+  // extraction already paid for by value-fact computation.
+  struct {
+    // Hash buckets containing collision chains keyed by region address.
+    loom_value_fact_cfg_graph_entry_t** buckets;
+    // Power-of-two hash bucket count.
+    iree_host_size_t bucket_count;
+    // Number of cached CFG region graphs.
+    iree_host_size_t count;
+    // Intrusive list of all entries for bucket-table rehashing.
+    loom_value_fact_cfg_graph_entry_t* entries;
+  } cfg_graphs;
+
   // Interned fact extension payloads. Extension IDs stored in
   // loom_value_facts_t are one-based indexes into entries and are only valid
   // for this table/context.
@@ -657,6 +702,21 @@ struct loom_value_fact_table_t {
     // Allocated touched_values entry count.
     iree_host_size_t touched_capacity;
   } static_lane_origins;
+
+  // Uniform scalar-scale origins keyed by aggregate value ID. An entry with
+  // source_value_id == LOOM_VALUE_ID_INVALID has no known scaled origin.
+  struct {
+    // Dense origin entries indexed by aggregate value ID.
+    loom_value_fact_uniform_scale_origin_t* entries;
+    // Allocated origin entry count.
+    iree_host_size_t capacity;
+    // Aggregate value IDs with origins defined in the current populated scope.
+    loom_value_id_t* touched_values;
+    // Number of populated entries in touched_values.
+    iree_host_size_t touched_count;
+    // Allocated touched_values entry count.
+    iree_host_size_t touched_capacity;
+  } uniform_scale_origins;
 
   // Reusable scratch buffers for fact inference calls. Allocated on first use,
   // grown only when an op needs more slots. Never shrinks. Old buffers are
@@ -718,6 +778,12 @@ static inline loom_value_facts_t loom_value_fact_table_lookup(
   return table->entries[value_id];
 }
 
+// Returns the CFG graph built while computing facts for |region|, or NULL when
+// the region was not part of the populated fact scope. The returned graph is
+// borrowed from |table| and remains valid until the table scope is cleared.
+const loom_cfg_graph_t* loom_value_fact_table_lookup_cfg_graph(
+    const loom_value_fact_table_t* table, const loom_region_t* region);
+
 // Defines (or updates) facts for a value, growing the table if needed.
 iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
                                            loom_value_id_t value_id,
@@ -746,11 +812,27 @@ iree_status_t loom_value_fact_table_define_static_lane_origin(
     loom_value_fact_static_lane_origin_t origin);
 
 // Returns true when |value_id| has a known static source-lane view. The query
-// validates that both values are vectors with matching element types, static
-// lane counts, and an in-bounds strided source lane mapping.
+// validates that both values are vectors with static lane counts and an
+// in-bounds strided source lane mapping. Element types may differ when the
+// defining operation preserves lane provenance while changing representation.
 bool loom_value_fact_table_query_static_lane_origin(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, loom_value_fact_static_lane_origin_t* out_origin);
+
+// Defines a value as the lanewise multiplication of |origin.source_value_id|
+// and scalar |origin.scale_value_id|. The relation is a materialization proof
+// and is validated by the query API against the current module value types.
+iree_status_t loom_value_fact_table_define_uniform_scale_origin(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_uniform_scale_origin_t origin);
+
+// Returns true when |value_id| has a known uniform scalar-scale origin. The
+// query validates that the result/source are same-typed vectors and the scale
+// is a same-element scalar.
+bool loom_value_fact_table_query_uniform_scale_origin(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id,
+    loom_value_fact_uniform_scale_origin_t* out_origin);
 
 // Clones |facts| from |source| into |target|, re-interning any context-local
 // extension payloads in the target table. The returned facts are valid for

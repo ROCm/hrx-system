@@ -21,6 +21,11 @@ extern "C" {
 bool loom_low_kernel_def_static_workgroup_size(
     const loom_op_t* op, loom_target_workgroup_size_t* out_size);
 
+// Returns the fixed dispatch workgroup count declared by |op|, if |op| is a
+// low.kernel.def with concrete workgroup_count attrs.
+bool loom_low_kernel_def_static_workgroup_count(
+    const loom_op_t* op, loom_target_dispatch_workgroup_count_t* out_count);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

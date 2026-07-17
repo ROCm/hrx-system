@@ -19,9 +19,9 @@
 #include "loom/ir/ir.h"
 #include "loom/pass/interpreter.h"
 #include "loom/pass/trace.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/pipeline.h"
+#include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 

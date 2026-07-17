@@ -161,3 +161,113 @@ iree_status_t loom_low_packet_progress_build(
   };
   return iree_ok_status();
 }
+
+static loom_low_packet_progress_class_index_entry_t*
+loom_low_packet_progress_class_index_find_mutable(
+    loom_low_packet_progress_class_index_entry_t* classes, uint32_t class_count,
+    uint16_t progress_class_id) {
+  for (uint32_t i = 0; i < class_count; ++i) {
+    if (classes[i].progress_class_id == progress_class_id) {
+      return &classes[i];
+    }
+  }
+  return NULL;
+}
+
+const loom_low_packet_progress_class_index_entry_t*
+loom_low_packet_progress_class_index_lookup(
+    const loom_low_packet_progress_class_index_t* index,
+    uint16_t progress_class_id) {
+  if (index == NULL) return NULL;
+  for (uint32_t i = 0; i < index->class_count; ++i) {
+    if (index->classes[i].progress_class_id == progress_class_id) {
+      return &index->classes[i];
+    }
+  }
+  return NULL;
+}
+
+iree_status_t loom_low_packet_progress_class_index_build(
+    const loom_low_packet_progress_table_t* progress,
+    iree_arena_allocator_t* arena,
+    loom_low_packet_progress_class_index_t* out_index) {
+  memset(out_index, 0, sizeof(*out_index));
+  if (progress == NULL || progress->record_count == 0) {
+    return iree_ok_status();
+  }
+  if (arena == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "packet-progress class index requires an arena for non-empty tables");
+  }
+  if (progress->record_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "packet-progress record count exceeds uint32_t");
+  }
+
+  loom_low_packet_progress_class_index_entry_t* classes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, progress->record_count, sizeof(*classes), (void**)&classes));
+  uint32_t* next_record_indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, progress->record_count,
+                                                 sizeof(*next_record_indices),
+                                                 (void**)&next_record_indices));
+
+  uint32_t class_count = 0;
+  for (iree_host_size_t i = progress->record_count; i > 0; --i) {
+    const uint32_t record_index = (uint32_t)(i - 1);
+    next_record_indices[record_index] =
+        LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE;
+
+    const loom_low_packet_progress_record_t* record =
+        &progress->records[record_index];
+    loom_low_packet_progress_class_index_entry_t* class_entry =
+        loom_low_packet_progress_class_index_find_mutable(
+            classes, class_count, record->progress_class_id);
+    if (class_entry == NULL) {
+      class_entry = &classes[class_count++];
+      *class_entry = (loom_low_packet_progress_class_index_entry_t){
+          .progress_class_id = record->progress_class_id,
+          .first_record_index = LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE,
+      };
+    }
+    next_record_indices[record_index] = class_entry->first_record_index;
+    class_entry->first_record_index = record_index;
+  }
+
+  *out_index = (loom_low_packet_progress_class_index_t){
+      .progress = progress,
+      .classes = classes,
+      .class_count = class_count,
+      .next_record_indices = next_record_indices,
+  };
+  return iree_ok_status();
+}
+
+uint32_t loom_low_packet_progress_class_index_observed_progress(
+    const loom_low_packet_progress_class_index_t* index,
+    iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,
+    uint16_t progress_class_id) {
+  const loom_low_packet_progress_class_index_entry_t* class_entry =
+      loom_low_packet_progress_class_index_lookup(index, progress_class_id);
+  if (class_entry == NULL) return 0;
+
+  uint32_t observed_progress = 0;
+  const loom_low_packet_progress_table_t* progress = index->progress;
+  for (uint32_t record_index = class_entry->first_record_index;
+       record_index != LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE;
+       record_index = index->next_record_indices[record_index]) {
+    const loom_low_packet_progress_record_t* record =
+        &progress->records[record_index];
+    if (record->packet_index <= start_packet_index) continue;
+    if (record->packet_index >= end_packet_index) break;
+    if (record->action == LOOM_LOW_PACKET_PROGRESS_ACTION_RESET) {
+      return UINT32_MAX;
+    } else if (observed_progress <= UINT32_MAX - record->units) {
+      observed_progress += record->units;
+    } else {
+      observed_progress = UINT32_MAX;
+    }
+  }
+  return observed_progress;
+}

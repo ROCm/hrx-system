@@ -498,11 +498,8 @@ static iree_status_t loom_rewriter_add_users_to_worklist(
     IREE_RETURN_IF_ERROR(
         loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, user_op));
   }
-  if (value_id >= rewriter->module->type_uses.value_capacity) {
-    return iree_ok_status();
-  }
   loom_type_use_id_t use_id =
-      rewriter->module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(rewriter->module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use =
         &rewriter->module->type_uses.records[use_id];

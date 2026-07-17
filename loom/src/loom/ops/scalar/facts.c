@@ -14,12 +14,12 @@
 
 #include <math.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Macros for mechanical fact inference functions
@@ -37,7 +37,7 @@ static void loom_scalar_expand_result_facts_to_domain_on_overflow(
     if (facts->range_lo < domain_lo || facts->range_hi > domain_hi) {
       const uint32_t preserved_flags =
           facts->flags &
-          (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+          (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING |
            LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
       const int64_t known_divisor = facts->known_divisor;
       *facts = loom_value_facts_make(domain_lo, domain_hi, known_divisor);
@@ -102,16 +102,10 @@ static float div_f32(float a, float b) { return a / b; }
 static double div_f64(double a, double b) { return a / b; }
 static float rsqrt_f32(float x) { return 1.0f / sqrtf(x); }
 static double rsqrt_f64(double x) { return 1.0 / sqrt(x); }
-static float sinturns_f32(float x) { return sinf(6.28318530717958647692f * x); }
-static double sinturns_f64(double x) { return sin(6.28318530717958647692 * x); }
-static float costurns_f32(float x) { return cosf(6.28318530717958647692f * x); }
-static double costurns_f64(double x) { return cos(6.28318530717958647692 * x); }
 static float roundeven_f32(float x) { return nearbyintf(x); }
 static double roundeven_f64(double x) { return nearbyint(x); }
-static float logistic_f32(float x) { return 1.0f / (1.0f + expf(-x)); }
-static double logistic_f64(double x) { return 1.0 / (1.0 + exp(-x)); }
-static float silu_f32(float x) { return x * logistic_f32(x); }
-static double silu_f64(double x) { return x * logistic_f64(x); }
+static float silu_f32(float x) { return x * loom_float_logistic_f32(x); }
+static double silu_f64(double x) { return x * loom_float_logistic_f64(x); }
 static float softplus_f32(float x) {
   return log1pf(expf(-fabsf(x))) + fmaxf(x, 0.0f);
 }
@@ -136,10 +130,10 @@ static double gelu_tanh_f64(double x) {
   return 0.5 * x * (1.0 + tanh(sqrt_2_over_pi * (x + 0.044715 * x * x * x)));
 }
 static float gelu_logistic_f32(float x, float scale) {
-  return x * logistic_f32(scale * x);
+  return x * loom_float_logistic_f32(scale * x);
 }
 static double gelu_logistic_f64(double x, double scale) {
-  return x * logistic_f64(scale * x);
+  return x * loom_float_logistic_f64(scale * x);
 }
 
 //===----------------------------------------------------------------------===//
@@ -292,8 +286,32 @@ FLOAT_UNARY_FACTS(loom_scalar_rsqrtf_facts, rsqrt_f32, rsqrt_f64)
 FLOAT_UNARY_FACTS(loom_scalar_cbrtf_facts, cbrtf, cbrt)
 FLOAT_UNARY_FACTS(loom_scalar_sinf_facts, sinf, sin)
 FLOAT_UNARY_FACTS(loom_scalar_cosf_facts, cosf, cos)
-FLOAT_UNARY_FACTS(loom_scalar_sinturnsf_facts, sinturns_f32, sinturns_f64)
-FLOAT_UNARY_FACTS(loom_scalar_costurnsf_facts, costurns_f32, costurns_f64)
+
+static iree_status_t loom_scalar_turnsf_facts(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_float_turns_kind_t kind) {
+  loom_value_facts_eval_float_turns(loom_scalar_result_element_type(module, op),
+                                    kind, &operand_facts[0], &result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_scalar_sinturnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_turnsf_facts(module, op, operand_facts, result_facts,
+                                  LOOM_FLOAT_TURNS_SIN);
+}
+
+iree_status_t loom_scalar_costurnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_turnsf_facts(module, op, operand_facts, result_facts,
+                                  LOOM_FLOAT_TURNS_COS);
+}
+
 FLOAT_UNARY_FACTS(loom_scalar_tanf_facts, tanf, tan)
 FLOAT_UNARY_FACTS(loom_scalar_asinf_facts, asinf, asin)
 FLOAT_UNARY_FACTS(loom_scalar_acosf_facts, acosf, acos)
@@ -307,7 +325,8 @@ FLOAT_UNARY_FACTS(loom_scalar_acoshf_facts, acoshf, acosh)
 FLOAT_UNARY_FACTS(loom_scalar_atanhf_facts, atanhf, atanh)
 FLOAT_UNARY_FACTS(loom_scalar_erff_facts, erff, erf)
 FLOAT_UNARY_FACTS(loom_scalar_erfcf_facts, erfcf, erfc)
-FLOAT_UNARY_FACTS(loom_scalar_logisticf_facts, logistic_f32, logistic_f64)
+FLOAT_UNARY_FACTS(loom_scalar_logisticf_facts, loom_float_logistic_f32,
+                  loom_float_logistic_f64)
 FLOAT_UNARY_FACTS(loom_scalar_siluf_facts, silu_f32, silu_f64)
 FLOAT_UNARY_FACTS(loom_scalar_softplusf_facts, softplus_f32, softplus_f64)
 
@@ -551,11 +570,11 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
   }
 
 BIT_COUNT_FACTS(loom_scalar_ctlzi_facts, loom_scalar_ctlzi_result,
-                loom_count_leading_zeros_u64_width)
+                iree_math_count_leading_zeros_u64_width)
 BIT_COUNT_FACTS(loom_scalar_cttzi_facts, loom_scalar_cttzi_result,
-                loom_count_trailing_zeros_u64_width)
+                iree_math_count_trailing_zeros_u64_width)
 BIT_COUNT_FACTS(loom_scalar_ctpopi_facts, loom_scalar_ctpopi_result,
-                loom_count_ones_u64_width)
+                iree_math_count_ones_u64_width)
 
 #undef BIT_COUNT_FACTS
 
@@ -565,14 +584,10 @@ BIT_COUNT_FACTS(loom_scalar_ctpopi_facts, loom_scalar_ctpopi_result,
 
 static void loom_scalar_mark_compare_distribution(
     const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts) {
-  if (loom_value_facts_is_lane_predicate(operand_facts[0]) ||
-      loom_value_facts_is_lane_predicate(operand_facts[1]) ||
-      loom_value_facts_is_lane_varying(operand_facts[0]) ||
-      loom_value_facts_is_lane_varying(operand_facts[1])) {
+  loom_value_facts_propagate_binary_distribution(
+      operand_facts[0], operand_facts[1], result_facts);
+  if (loom_value_facts_is_lane_varying(*result_facts)) {
     loom_value_facts_mark_lane_predicate(result_facts);
-  } else if (loom_value_facts_is_uniform(operand_facts[0]) &&
-             loom_value_facts_is_uniform(operand_facts[1])) {
-    loom_value_facts_mark_uniform(result_facts);
   }
 }
 
@@ -904,7 +919,7 @@ static bool loom_scalar_zero_extend_exact_i64(int64_t value, int32_t bitwidth,
   if (bitwidth <= 0 || bitwidth >= 63) {
     return false;
   }
-  *out_value = (int64_t)loom_mask_to_bitwidth_u64((uint64_t)value, bitwidth);
+  *out_value = (int64_t)iree_math_mask_low_bits_u64((uint64_t)value, bitwidth);
   return true;
 }
 
@@ -914,7 +929,8 @@ static bool loom_scalar_truncate_exact_i64(
   if (bitwidth <= 0 || bitwidth > 64) {
     return false;
   }
-  const uint64_t masked = loom_mask_to_bitwidth_u64((uint64_t)value, bitwidth);
+  const uint64_t masked =
+      iree_math_mask_low_bits_u64((uint64_t)value, bitwidth);
   if (result_scalar_type == LOOM_SCALAR_TYPE_I1) {
     *out_value = (int64_t)masked;
     return true;
@@ -925,7 +941,7 @@ static bool loom_scalar_truncate_exact_i64(
   }
   const uint64_t sign_bit = UINT64_C(1) << (bitwidth - 1);
   const uint64_t sign_extension_mask =
-      ~loom_mask_to_bitwidth_u64(~0ull, bitwidth);
+      ~iree_math_mask_low_bits_u64(~0ull, bitwidth);
   *out_value =
       (int64_t)((masked & sign_bit) ? masked | sign_extension_mask : masked);
   return true;
@@ -983,7 +999,7 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
     result_facts[0] = loom_value_facts_make(
         input_facts.range_lo + unsigned_extent,
         input_facts.range_hi + unsigned_extent,
-        loom_gcd_i64(input_facts.known_divisor, unsigned_extent));
+        iree_math_gcd_i64(input_facts.known_divisor, unsigned_extent));
     loom_value_facts_propagate_unary_distribution(operand_facts[0],
                                                   &result_facts[0]);
     result_facts[0] =

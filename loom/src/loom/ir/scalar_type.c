@@ -76,6 +76,31 @@ bool loom_scalar_type_integer_domain(loom_scalar_type_t type, int64_t* out_lo,
   }
 }
 
+bool loom_scalar_type_fp8_format(loom_scalar_type_t type,
+                                 loom_scalar_type_fp8_format_t* out_format) {
+  switch (type) {
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      *out_format = (loom_scalar_type_fp8_format_t){
+          .exponent_bits = 4,
+          .mantissa_bits = 3,
+          .exponent_bias = 7,
+          .special_policy = LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN,
+      };
+      return true;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      *out_format = (loom_scalar_type_fp8_format_t){
+          .exponent_bits = 5,
+          .mantissa_bits = 2,
+          .exponent_bias = 15,
+          .special_policy = LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE,
+      };
+      return true;
+    default:
+      *out_format = (loom_scalar_type_fp8_format_t){0};
+      return false;
+  }
+}
+
 bool loom_scalar_type_parse(iree_string_view_t name,
                             loom_scalar_type_t* out_type) {
   for (int i = 0; i < (int)LOOM_SCALAR_TYPE_COUNT_; ++i) {

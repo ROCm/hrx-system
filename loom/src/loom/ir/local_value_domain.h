@@ -92,7 +92,7 @@ static inline loom_value_ordinal_t loom_local_value_domain_try_ordinal(
     return LOOM_VALUE_ORDINAL_INVALID;
   }
   const loom_value_ordinal_t value_ordinal =
-      scratch->values_by_value_id[value_id];
+      loom_value_u32_scratch_load(scratch, value_id);
   if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }

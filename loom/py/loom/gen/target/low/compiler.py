@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 
 from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.low import validation
@@ -26,16 +27,19 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
     Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorSet,
     Effect,
+    EffectKind,
     EncodingFieldValue,
     EnumValue,
     Hazard,
     Immediate,
     ImmediateEncodingSlice,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     NativeAsmValue,
     NativeAsmValueKind,
@@ -45,9 +49,176 @@ from loom.target.low_descriptors import (
     OperandRole,
     PressureDelta,
     RegClassAltFlag,
+    Resource,
+    ResourceKind,
+    ScheduleClass,
+    ScheduleClassFlag,
     StorageLease,
     descriptor_stable_id,
 )
+
+_SEMANTIC_INSTRUCTION_CLASSES = (
+    ("matrix.smfmac", (InstructionClass.SMFMAC,)),
+    ("matrix.mfma", (InstructionClass.MFMA,)),
+    ("matrix.swmmac", (InstructionClass.SWMMAC,)),
+    ("matrix.wmma", (InstructionClass.WMMA,)),
+    ("matrix", (InstructionClass.MATRIX,)),
+    ("dot", (InstructionClass.DOT,)),
+    ("memory.cache", (InstructionClass.CACHE,)),
+    ("memory.global", (InstructionClass.GLOBAL_MEMORY,)),
+    ("memory.workgroup", (InstructionClass.LOCAL_MEMORY,)),
+    ("memory.stack", (InstructionClass.PRIVATE_MEMORY,)),
+    ("memory.private", (InstructionClass.PRIVATE_MEMORY,)),
+    ("memory.generic", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.load", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.store", (InstructionClass.GENERIC_MEMORY,)),
+    ("memory.hal", (InstructionClass.GENERIC_MEMORY,)),
+    ("control.branch", (InstructionClass.BRANCH,)),
+    ("control.cond_branch", (InstructionClass.BRANCH,)),
+    ("control.return", (InstructionClass.BRANCH,)),
+    ("control.call", (InstructionClass.BRANCH,)),
+    ("control.barrier", (InstructionClass.BARRIER,)),
+    ("control", (InstructionClass.CONTROL,)),
+    ("convert", (InstructionClass.CONVERSION,)),
+    ("register.copy", (InstructionClass.REGISTER_MOVE,)),
+    ("integer.move", (InstructionClass.REGISTER_MOVE,)),
+)
+
+_RESOURCE_INSTRUCTION_CLASSES = {
+    ResourceKind.SCALAR_ALU: InstructionClass.SCALAR_ALU,
+    ResourceKind.VECTOR_ALU: InstructionClass.VECTOR_ALU,
+    ResourceKind.MATRIX: InstructionClass.MATRIX,
+    ResourceKind.CONTROL: InstructionClass.CONTROL,
+}
+
+_MEMORY_INSTRUCTION_CLASSES = frozenset(
+    {
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.GLOBAL_LOAD,
+        InstructionClass.GLOBAL_STORE,
+        InstructionClass.BUFFER_LOAD,
+        InstructionClass.BUFFER_STORE,
+        InstructionClass.FLAT_MEMORY,
+        InstructionClass.LOCAL_MEMORY,
+        InstructionClass.SCALAR_MEMORY,
+        InstructionClass.PRIVATE_MEMORY,
+        InstructionClass.GENERIC_MEMORY,
+    }
+)
+
+_INSTRUCTION_CLASS_IMPLICATIONS = {
+    InstructionClass.SMFMAC: (InstructionClass.MFMA,),
+    InstructionClass.MFMA: (InstructionClass.MATRIX,),
+    InstructionClass.SWMMAC: (InstructionClass.WMMA,),
+    InstructionClass.WMMA: (InstructionClass.MATRIX,),
+    InstructionClass.BRANCH: (InstructionClass.CONTROL,),
+    InstructionClass.BARRIER: (InstructionClass.CONTROL,),
+    InstructionClass.GLOBAL_LOAD: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.GLOBAL_STORE: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.BUFFER_LOAD: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.BUFFER_STORE: (InstructionClass.GLOBAL_MEMORY,),
+    InstructionClass.FLAT_MEMORY: (InstructionClass.GLOBAL_MEMORY,),
+}
+
+
+def _semantic_tag_has_prefix(semantic_tag: str, prefix: str) -> bool:
+    return semantic_tag == prefix or semantic_tag.startswith(f"{prefix}.")
+
+
+def _derive_instruction_classes(
+    descriptor: Descriptor,
+    schedule_class: ScheduleClass,
+    resources: dict[str, Resource],
+) -> tuple[InstructionClass, ...]:
+    classes = set(descriptor.instruction_classes)
+    if len(classes) != len(descriptor.instruction_classes):
+        raise ValueError(f"descriptor '{descriptor.key}' repeats an instruction class")
+    if len(set(schedule_class.instruction_classes)) != len(schedule_class.instruction_classes):
+        raise ValueError(f"schedule class '{schedule_class.name}' repeats an instruction class")
+    classes.update(schedule_class.instruction_classes)
+
+    for issue_use in schedule_class.issue_uses:
+        resource = resources.get(issue_use.resource)
+        if resource is None:
+            raise ValueError(f"descriptor '{descriptor.key}' schedule class '{schedule_class.name}' references unknown resource '{issue_use.resource}'")
+        instruction_class = _RESOURCE_INSTRUCTION_CLASSES.get(resource.kind)
+        if instruction_class is not None:
+            classes.add(instruction_class)
+    if ScheduleClassFlag.CONTROL in schedule_class.flags:
+        classes.add(InstructionClass.CONTROL)
+
+    semantic_tag = descriptor.semantic_tag
+    if semantic_tag is not None:
+        for prefix, semantic_classes in _SEMANTIC_INSTRUCTION_CLASSES:
+            if _semantic_tag_has_prefix(semantic_tag, prefix):
+                classes.update(semantic_classes)
+        if "atomic" in semantic_tag.split("."):
+            classes.add(InstructionClass.ATOMIC)
+
+    effect_kinds = {effect.kind for effect in descriptor.effects}
+    if EffectKind.BARRIER in effect_kinds:
+        classes.add(InstructionClass.BARRIER)
+    if EffectKind.CALL in effect_kinds:
+        classes.add(InstructionClass.BRANCH)
+    if EffectKind.CONTROL in effect_kinds:
+        classes.add(InstructionClass.CONTROL)
+
+    has_memory_effect = bool({EffectKind.READ, EffectKind.WRITE}.intersection(effect_kinds))
+    has_memory_resource = any(resources[issue_use.resource].kind in (ResourceKind.LOAD, ResourceKind.STORE) for issue_use in schedule_class.issue_uses)
+    if (has_memory_effect or has_memory_resource) and not _MEMORY_INSTRUCTION_CLASSES.intersection(classes):
+        classes.add(InstructionClass.GENERIC_MEMORY)
+
+    pending_classes = list(classes)
+    while pending_classes:
+        instruction_class = pending_classes.pop()
+        for implied_class in _INSTRUCTION_CLASS_IMPLICATIONS.get(instruction_class, ()):
+            if implied_class not in classes:
+                classes.add(implied_class)
+                pending_classes.append(implied_class)
+
+    if InstructionClass.OTHER in classes and len(classes) != 1:
+        class_names = ", ".join(sorted(item.name for item in classes))
+        raise ValueError(f"descriptor '{descriptor.key}' combines the exclusive OTHER instruction class with {class_names}")
+    if not classes:
+        raise ValueError(f"descriptor '{descriptor.key}' has no generated instruction class; classify it explicitly or use OTHER")
+    if InstructionClass.PRIVATE_MEMORY in classes and InstructionClass.GLOBAL_MEMORY in classes:
+        raise ValueError(f"descriptor '{descriptor.key}' combines private and global memory instruction classes")
+    if InstructionClass.ATOMIC in classes and not has_memory_effect:
+        raise ValueError(f"descriptor '{descriptor.key}' has the atomic instruction class without a read or write effect")
+    if InstructionClass.BARRIER in classes and EffectKind.BARRIER not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has the barrier instruction class without a barrier effect")
+    read_classes = {
+        InstructionClass.GLOBAL_LOAD,
+        InstructionClass.BUFFER_LOAD,
+    }
+    if read_classes.intersection(classes) and EffectKind.READ not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has a load instruction class without a read effect")
+    write_classes = {
+        InstructionClass.GLOBAL_STORE,
+        InstructionClass.BUFFER_STORE,
+    }
+    if write_classes.intersection(classes) and EffectKind.WRITE not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has a store instruction class without a write effect")
+
+    return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
+
+
+def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
+    has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
+    has_barrier_flag = DescriptorFlag.BARRIER in descriptor.flags
+    if has_barrier_flag and not has_barrier_effect:
+        raise ValueError(f"descriptor '{descriptor.key}' has the barrier flag without a barrier effect")
+    has_early_clobber_constraint = any(constraint.kind is ConstraintKind.EARLY_CLOBBER for constraint in descriptor.constraints)
+    has_early_clobber_flag = DescriptorFlag.EARLY_CLOBBER in descriptor.flags
+    if has_early_clobber_flag and not has_early_clobber_constraint:
+        raise ValueError(f"descriptor '{descriptor.key}' has the early-clobber flag without an early-clobber constraint")
+
+    derived_flags = list(descriptor.flags)
+    if has_barrier_effect and not has_barrier_flag:
+        derived_flags.append(DescriptorFlag.BARRIER)
+    if has_early_clobber_constraint and not has_early_clobber_flag:
+        derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
+    return replace(descriptor, flags=tuple(derived_flags))
 
 
 def _dedupe_by_name[T](items: Sequence[T], get_name: Callable[[T], str]) -> dict[str, T]:
@@ -460,7 +631,7 @@ def _compile_native_asm_value(
         NativeAsmValueKind.IMMEDIATE_UNSIGNED_HEX,
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
     ):
-        if literal is not None:
+        if kind is not NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT and literal is not None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native immediate value {value_ordinal} unexpectedly specifies a literal")
         name = require_field_name()
         immediate_index = immediate_indices.get(name)
@@ -473,10 +644,15 @@ def _compile_native_asm_value(
             if bit_width <= 0 or bit_width > 32:
                 raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native unsigned-hex immediate '{name}' bit width must be in [1, 32]")
         elif kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT:
-            if bit_width != 0:
-                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' unexpectedly specifies a bit width")
+            if bit_width < 0 or bit_width > 0xFF:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' bit width must be in [0, 255]")
             if target_format_id <= 0 or target_format_id > 0xFF:
                 raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' target format must be in [1, 255]")
+            if literal is not None:
+                if literal == "":
+                    raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' has an empty literal")
+                if len(literal.encode()) > 255:
+                    raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native target-format immediate '{name}' literal exceeds 255 bytes")
         if kind is not NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT and target_format_id != 0:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native immediate '{name}' unexpectedly specifies a target format")
         return CompiledNativeAsmValue(
@@ -484,8 +660,15 @@ def _compile_native_asm_value(
             index=immediate_index,
             bit_width=bit_width,
             target_format_id=target_format_id,
-            literal_label=None,
-            literal=None,
+            literal_label=(
+                string_pool.intern(
+                    scoped_label("asm_native_value", str(value_ordinal)),
+                    literal,
+                )
+                if literal is not None
+                else None
+            ),
+            literal=literal,
         )
 
     raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native value {value_ordinal} has unsupported kind {kind!r}")
@@ -559,13 +742,14 @@ def compile_descriptor_set(
     if spec.generator_version == 0:
         raise ValueError(f"descriptor set '{spec.key}' has zero generator version")
     reg_class_inputs = _dedupe_by_name(spec.reg_classes, lambda item: item.name)
+    validation.validate_register_classes(spec.key, tuple(reg_class_inputs.values()))
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
     resource_inputs = _dedupe_by_name(spec.resources, lambda item: item.name)
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
-    selected_descriptors = _select_descriptors(spec, allowlist)
+    selected_descriptors = [_derive_descriptor_flags(descriptor) for descriptor in _select_descriptors(spec, allowlist)]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
@@ -584,9 +768,11 @@ def compile_descriptor_set(
     used_resource_names: set[str] = set()
     used_schedule_names: set[str] = set()
     used_enum_domain_names: set[str] = set()
+    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
 
     for descriptor in selected_descriptors:
         result_count = validation.validate_descriptor_operands(descriptor)
+        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:
@@ -707,6 +893,15 @@ def compile_descriptor_set(
                 raise ValueError(f"schedule class '{schedule_name}' references unknown pressure register class '{pressure_delta.reg_class}'")
             used_reg_class_names.add(pressure_delta.reg_class)
 
+    instruction_classes = [
+        _derive_instruction_classes(
+            descriptor,
+            schedule_inputs[descriptor.schedule_class],
+            resource_inputs,
+        )
+        for descriptor in selected_descriptors
+    ]
+
     changed = True
     while changed:
         changed = False
@@ -814,6 +1009,7 @@ def compile_descriptor_set(
     storage_lease_group_starts: dict[tuple[StorageLease, ...], int] = {}
     operands: list[Operand] = []
     operand_alt_starts: list[int] = []
+    operand_rematerializable: list[bool] = []
     immediates: list[Immediate] = []
     immediate_encoding_slices: list[ImmediateEncodingSlice] = []
     immediate_encoding_slice_starts: list[int] = []
@@ -866,7 +1062,8 @@ def compile_descriptor_set(
 
     for descriptor in selected_descriptors:
         operand_start = len(operands)
-        for operand in descriptor.operands:
+        rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
+        for operand_index, operand in enumerate(descriptor.operands):
             alt_group: tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...] = tuple(
                 (
                     None if reg_alt.reg_class is None else reg_class_ids[reg_alt.reg_class],
@@ -881,6 +1078,7 @@ def compile_descriptor_set(
                 reg_class_alts.extend(alt_group)
             operands.append(operand)
             operand_alt_starts.append(alt_start)
+            operand_rematerializable.append(operand_index in rematerializable_result_set)
         immediate_start = len(immediates)
         for immediate in descriptor.immediates:
             slice_start = 0
@@ -966,6 +1164,7 @@ def compile_descriptor_set(
     return CompiledDescriptorSet(
         spec=spec,
         descriptors=selected_descriptors,
+        instruction_classes=instruction_classes,
         reg_classes=reg_classes,
         register_parts=register_parts,
         resources=resources,
@@ -980,6 +1179,7 @@ def compile_descriptor_set(
         reg_class_alts=reg_class_alts,
         operands=operands,
         operand_alt_starts=operand_alt_starts,
+        operand_rematerializable=operand_rematerializable,
         immediates=immediates,
         immediate_encoding_slices=immediate_encoding_slices,
         immediate_encoding_slice_starts=immediate_encoding_slice_starts,

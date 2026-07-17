@@ -6,11 +6,11 @@
 
 #include "loom/analysis/func_provider_catalog.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/util/adaptive_sort.h"
 
 #define LOOM_FUNC_PROVIDER_INDEX_INVALID ((uint32_t)UINT32_MAX)
 
@@ -36,27 +36,27 @@ static bool loom_func_provider_symbol_is_live_provider(
          !iree_any_bit_set(symbol->defining_op->flags, LOOM_OP_FLAG_DEAD);
 }
 
-static int loom_func_provider_summary_compare(const void* lhs,
-                                              const void* rhs) {
-  const loom_func_provider_summary_t* left =
-      (const loom_func_provider_summary_t*)lhs;
-  const loom_func_provider_summary_t* right =
-      (const loom_func_provider_summary_t*)rhs;
+static bool loom_func_provider_summary_less(
+    const loom_func_provider_summary_t* left,
+    const loom_func_provider_summary_t* right) {
   if (left->contract_id != right->contract_id) {
-    return left->contract_id < right->contract_id ? -1 : 1;
+    return left->contract_id < right->contract_id;
   }
   if (left->priority != right->priority) {
-    return left->priority > right->priority ? -1 : 1;
+    return left->priority > right->priority;
   }
   if (left->kind != right->kind) {
-    return left->kind < right->kind ? -1 : 1;
+    return left->kind < right->kind;
   }
   if (left->origin != right->origin) {
-    return left->origin < right->origin ? -1 : 1;
+    return left->origin < right->origin;
   }
-  if (left->provider_id == right->provider_id) return 0;
-  return left->provider_id < right->provider_id ? -1 : 1;
+  return left->provider_id < right->provider_id;
 }
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_func_provider_summary_sort,
+                          loom_func_provider_summary_t,
+                          loom_func_provider_summary_less)
 
 static iree_status_t loom_func_provider_catalog_count_local(
     const loom_module_t* module, iree_host_size_t* out_provider_count) {
@@ -85,8 +85,8 @@ static iree_status_t loom_func_provider_catalog_lookup_facts(
   const loom_func_symbol_facts_t* facts =
       loom_func_symbol_facts_cast(base_facts);
   if (!facts) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "func provider symbol has no func facts");
+    IREE_ASSERT_UNREACHABLE("func provider symbol has no func facts");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (facts->implements_id == LOOM_STRING_ID_INVALID ||
       facts->implements_id >= module->strings.count) {
@@ -155,8 +155,8 @@ static iree_status_t loom_func_provider_catalog_populate_local(
     loom_func_like_t function =
         loom_func_like_cast(module, symbol->defining_op);
     if (!loom_func_like_isa(function)) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "func provider symbol is not function-like");
+      IREE_ASSERT_UNREACHABLE("func provider symbol is not function-like");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     loom_func_provider_summary_t* provider = &providers[provider_index];
@@ -191,8 +191,7 @@ static iree_status_t loom_func_provider_catalog_populate_local(
   }
   catalog->provider_count = provider_index;
   if (provider_index > 1) {
-    qsort(providers, provider_index, sizeof(*providers),
-          loom_func_provider_summary_compare);
+    loom_func_provider_summary_sort(providers, provider_index);
   }
   return iree_ok_status();
 }

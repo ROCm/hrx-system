@@ -462,7 +462,8 @@ static iree_status_t loom_low_verify_native_asm_values(
       }
       continue;
     }
-    if (value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+    if (value->kind != LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
+        value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm form for descriptor %" PRIu32
                               " non-literal native value has a literal string",
@@ -590,19 +591,19 @@ static iree_status_t loom_low_verify_native_asm_values(
               " but descriptor has only %" PRIu16 " immediates",
               descriptor_index, value->index, descriptor->immediate_count);
         }
-        if (value->bit_width != 0) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "low asm form for descriptor %" PRIu32
-              " native target-format immediate must not set bit width",
-              descriptor_index);
-        }
         if (value->target_format_id == 0) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "low asm form for descriptor %" PRIu32
               " native target-format immediate must set target format",
               descriptor_index);
+        }
+        if (value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+          iree_string_view_t literal = iree_string_view_empty();
+          IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
+              descriptor_set, value->literal_string_offset,
+              "native_asm_value.literal", &literal));
+          (void)literal;
         }
         break;
       default:
@@ -1711,13 +1712,14 @@ static iree_status_t loom_low_verify_descriptor(
     uint32_t descriptor_index) {
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[descriptor_index];
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_known_flags(descriptor->flags,
-                                  LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
-                                      LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO,
-                                  "descriptor", descriptor_index));
+  IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
+      descriptor->flags,
+      LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+          LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+          LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
+          LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
+          LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER,
+      "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
       descriptor_set, descriptor->key_string_offset, "descriptor.key",
@@ -1819,7 +1821,8 @@ static iree_status_t loom_low_verify_operand(
       LOOM_LOW_OPERAND_FLAG_IMPLICIT | LOOM_LOW_OPERAND_FLAG_TIED |
           LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER | LOOM_LOW_OPERAND_FLAG_OPTIONAL |
           LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE |
-          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE,
+          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
+          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));
@@ -2369,6 +2372,16 @@ static iree_status_t loom_low_verify_issue_use(
                             "low issue-use %" PRIu32
                             " consumes zero resource units",
                             issue_use_index);
+  }
+  const loom_low_resource_t* resource =
+      &descriptor_set->resources[issue_use->resource_id];
+  if (issue_use->units > resource->capacity_per_cycle) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low issue-use %" PRIu32 " consumes %" PRIu16
+        " units of resource %" PRIu16 " with capacity %" PRIu16,
+        issue_use_index, issue_use->units, issue_use->resource_id,
+        resource->capacity_per_cycle);
   }
   return iree_ok_status();
 }

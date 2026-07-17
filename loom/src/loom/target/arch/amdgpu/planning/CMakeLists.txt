@@ -64,7 +64,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::descriptors
     loom::codegen::low::schedule
-    loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
@@ -103,6 +102,25 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    structural_packet
+  HDRS
+    "structural_packet.h"
+  SRCS
+    "structural_packet.c"
+  DEPS
+    iree::base
+    loom::codegen::low::allocation
+    loom::codegen::low::allocation::move_topology
+    loom::codegen::low::move_sequence
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_states
   HDRS
     "wait_states.h"
@@ -111,10 +129,10 @@ loom_cc_library(
   DEPS
     ::descriptor_semantics
     ::matrix_wait_states
+    ::structural_packet
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json
@@ -136,6 +154,39 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    wait_counters
+  HDRS
+    "wait_counters.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_frontier
+  HDRS
+    "wait_frontier.h"
+  SRCS
+    "wait_frontier.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation::table
+    loom::codegen::low::memory_access
+    loom::codegen::low::schedule
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::util::cfg_graph
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_plan
   HDRS
     "wait_plan.h"
@@ -143,11 +194,15 @@ loom_cc_library(
     "wait_plan.c"
   DEPS
     ::descriptor_semantics
+    ::structural_packet
+    ::wait_counters
+    ::wait_frontier
+    ::wait_packet_tables
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json
@@ -157,6 +212,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
+    loom::util::segmented_storage
   PUBLIC
 )
 endif()
@@ -216,6 +272,32 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_textual_header(
   NAME
+    wait_packet_descriptor_lookups_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
+  OUTPUT
+    "wait_packet_descriptor_lookups.inl"
+  OUTPUT_FLAG
+    "--descriptor-lookups"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
     wait_packet_immediates_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
@@ -240,18 +322,223 @@ loom_generated_textual_header(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    wait_packet_selections_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
+  OUTPUT
+    "wait_packet_selections.inl"
+  OUTPUT_FLAG
+    "--selection-rows"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_component_rules_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_component_rules.inl"
+  OUTPUT_FLAG
+    "--component-rules"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_component_descriptor_lookup_ranges_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_component_descriptor_lookup_ranges.inl"
+  OUTPUT_FLAG
+    "--descriptor-lookup-ranges"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_component_descriptor_lookups_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_component_descriptor_lookups.inl"
+  OUTPUT_FLAG
+    "--descriptor-lookups"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_pair_affinity_ranges_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_pair_affinity_ranges.inl"
+  OUTPUT_FLAG
+    "--pair-affinity-ranges"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_pair_affinities_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_pair_affinities.inl"
+  OUTPUT_FLAG
+    "--pair-affinities"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    vopd_pair_placement_recipes_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::planning::vopd_component_tables
+  OUTPUT
+    "vopd_pair_placement_recipes.inl"
+  OUTPUT_FLAG
+    "--pair-placement-recipes"
+  ARGS
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  INPUTS
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_packet_tables
+  HDRS
+    "wait_packet_tables.h"
+  TEXTUAL_HDRS
+    "wait_packet_descriptor_lookups.inl"
+    "wait_packet_descriptor_ranges.inl"
+    "wait_packet_descriptors.inl"
+    "wait_packet_immediates.inl"
+    "wait_packet_selections.inl"
+  SRCS
+    "wait_packet_tables.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     wait_packets
   HDRS
     "wait_packets.h"
-  TEXTUAL_HDRS
-    "wait_packet_descriptor_ranges.inl"
-    "wait_packet_descriptors.inl"
-    "wait_packet_immediates.inl"
   SRCS
     "wait_packets.c"
   DEPS
+    ::wait_packet_tables
     ::wait_plan
     iree::base
     iree::base::internal
@@ -259,9 +546,7 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::ir
-    loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -292,16 +577,24 @@ loom_cc_library(
     vopd_plan
   HDRS
     "vopd_plan.h"
+  TEXTUAL_HDRS
+    "vopd_component_descriptor_lookup_ranges.inl"
+    "vopd_component_descriptor_lookups.inl"
+    "vopd_component_rules.inl"
+    "vopd_pair_affinities.inl"
+    "vopd_pair_affinity_ranges.inl"
+    "vopd_pair_placement_recipes.inl"
   SRCS
     "vopd_plan.c"
   DEPS
+    ::descriptor_semantics
+    ::structural_packet
     ::wait_packets
     ::wait_states
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::schedule
@@ -309,6 +602,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
@@ -404,6 +698,7 @@ loom_generated_cc_library(
     "occupancy_model.h"
   DEPS
     iree::base
+    loom::codegen::low::pressure
     loom::target::arch::amdgpu::target_info
 )
 endif()
@@ -422,9 +717,10 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::schedule
+    loom::codegen::low::pressure
     loom::error::error_defs
     loom::ir
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info_defs
     loom::target::launch

@@ -629,21 +629,52 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_widen_round(%lhs: 
   %33 = v_add_f32 %16, %23
   %37 = v_lshrrev_b32_src0_inline %27, 16
   %38 = v_and_b32_src0_inline %37, 1
-  %39 = v_add_u32_lit %38, 32767
-  %40 = v_add_u32 %27, %39
-  %41 = v_lshrrev_b32_src0_inline %40, 16
-  %42 = v_lshrrev_b32_src0_inline %30, 16
-  %43 = v_and_b32_src0_inline %42, 1
-  %44 = v_add_u32_lit %43, 32767
-  %45 = v_add_u32 %30, %44
-  %46 = v_lshrrev_b32_src0_inline %45, 16
-  %47 = v_cvt_pk_u16_u32 %41, %46
-  %49 = v_lshrrev_b32_src0_inline %33, 16
-  %50 = v_and_b32_src0_inline %49, 1
-  %51 = v_add_u32_lit %50, 32767
-  %52 = v_add_u32 %33, %51
-  %53 = v_lshrrev_b32_src0_inline %52, 16
-  %result = concat(%47, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_add3_u32_src2_lit %27, %38, 32767
+  %40 = v_lshrrev_b32_src0_inline %39, 16
+  %41 = v_lshrrev_b32_src0_inline %30, 16
+  %42 = v_and_b32_src0_inline %41, 1
+  %43 = v_add3_u32_src2_lit %30, %42, 32767
+  %44 = v_lshrrev_b32_src0_inline %43, 16
+  %45 = v_cvt_pk_u16_u32 %40, %44
+  %47 = v_lshrrev_b32_src0_inline %33, 16
+  %48 = v_and_b32_src0_inline %47, 1
+  %49 = v_add3_u32_src2_lit %33, %48, 32767
+  %50 = v_lshrrev_b32_src0_inline %49, 16
+  %result = concat(%45, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_add_native_pack_gfx1250(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.addf %lhs, %rhs : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %result = v_pk_add_bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.addf %lhs, %rhs : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %14 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = v_pk_add_bf16 %14, %15
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_pk_add_bf16 %17, %18
+  %result = concat(%16, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -672,21 +703,18 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round(%lhs: 
   %33 = v_mul_f32 %16, %23
   %37 = v_lshrrev_b32_src0_inline %27, 16
   %38 = v_and_b32_src0_inline %37, 1
-  %39 = v_add_u32_lit %38, 32767
-  %40 = v_add_u32 %27, %39
-  %41 = v_lshrrev_b32_src0_inline %40, 16
-  %42 = v_lshrrev_b32_src0_inline %30, 16
-  %43 = v_and_b32_src0_inline %42, 1
-  %44 = v_add_u32_lit %43, 32767
-  %45 = v_add_u32 %30, %44
-  %46 = v_lshrrev_b32_src0_inline %45, 16
-  %47 = v_cvt_pk_u16_u32 %41, %46
-  %49 = v_lshrrev_b32_src0_inline %33, 16
-  %50 = v_and_b32_src0_inline %49, 1
-  %51 = v_add_u32_lit %50, 32767
-  %52 = v_add_u32 %33, %51
-  %53 = v_lshrrev_b32_src0_inline %52, 16
-  %result = concat(%47, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_add3_u32_src2_lit %27, %38, 32767
+  %40 = v_lshrrev_b32_src0_inline %39, 16
+  %41 = v_lshrrev_b32_src0_inline %30, 16
+  %42 = v_and_b32_src0_inline %41, 1
+  %43 = v_add3_u32_src2_lit %30, %42, 32767
+  %44 = v_lshrrev_b32_src0_inline %43, 16
+  %45 = v_cvt_pk_u16_u32 %40, %44
+  %47 = v_lshrrev_b32_src0_inline %33, 16
+  %48 = v_and_b32_src0_inline %47, 1
+  %49 = v_add3_u32_src2_lit %33, %48, 32767
+  %50 = v_lshrrev_b32_src0_inline %49, 16
+  %result = concat(%45, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -835,15 +863,83 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round_source
   %22 = v_mul_f32 %12, %15
   %26 = v_lshrrev_b32_src0_inline %19, 16
   %27 = v_and_b32_src0_inline %26, 1
-  %28 = v_add_u32_lit %27, 32767
-  %29 = v_add_u32 %19, %28
-  %30 = v_lshrrev_b32_src0_inline %29, 16
-  %31 = v_lshrrev_b32_src0_inline %22, 16
-  %32 = v_and_b32_src0_inline %31, 1
-  %33 = v_add_u32_lit %32, 32767
-  %34 = v_add_u32 %22, %33
-  %35 = v_lshrrev_b32_src0_inline %34, 16
-  %result = v_cvt_pk_u16_u32 %30, %35
+  %28 = v_add3_u32_src2_lit %19, %27, 32767
+  %29 = v_lshrrev_b32_src0_inline %28, 16
+  %30 = v_lshrrev_b32_src0_inline %22, 16
+  %31 = v_and_b32_src0_inline %30, 1
+  %32 = v_add3_u32_src2_lit %22, %31, 32767
+  %33 = v_lshrrev_b32_src0_inline %32, 16
+  %result = v_cvt_pk_u16_u32 %29, %33
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_mul_native_pack_gfx1250(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.mulf %lhs, %rhs : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %result = v_pk_mul_bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.mulf %lhs, %rhs : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %14 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = v_pk_mul_bf16 %14, %15
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_pk_mul_bf16 %17, %18
+  %result = concat(%16, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_fma_native_pk_gfx1250(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.fmaf %a, %b, %c : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_native_pk_gfx1250(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %result = v_pk_fma_bf16 %a, %b, %c
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_fma_wide_native_pk_gfx1250(%a: vector<4xbf16>, %b: vector<4xbf16>, %c: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.fmaf %a, %b, %c : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_wide_native_pk_gfx1250(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %18 = slice %a[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %b[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %c[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_fma_bf16 %18, %19, %20
+  %22 = slice %a[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %b[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %c[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_pk_fma_bf16 %22, %23, %24
+  %result = concat(%21, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 

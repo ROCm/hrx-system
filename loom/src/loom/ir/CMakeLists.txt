@@ -22,7 +22,6 @@ loom_cc_library(
     ::ir
     iree::base
     iree::base::internal
-    loom::util::math
   PUBLIC
 )
 
@@ -67,6 +66,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::util::bstring
+    loom::util::segmented_storage
   PUBLIC
 )
 

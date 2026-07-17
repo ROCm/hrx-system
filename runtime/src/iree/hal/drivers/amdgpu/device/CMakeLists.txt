@@ -21,6 +21,10 @@ add_custom_command(OUTPUT bitcode_srcs.stamp
 add_custom_target(bitcode_srcs
     DEPENDS bitcode_srcs.stamp
 )
+iree_register_generated_compile_input(bitcode_srcs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_srcs.stamp"
+)
 
 add_custom_command(OUTPUT bitcode_hdrs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_hdrs.stamp
@@ -42,6 +46,10 @@ add_custom_command(OUTPUT bitcode_hdrs.stamp
 
 add_custom_target(bitcode_hdrs
     DEPENDS bitcode_hdrs.stamp
+)
+iree_register_generated_compile_input(bitcode_hdrs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_hdrs.stamp"
 )
 
 if(IREE_HAL_DRIVER_AMDGPU)

@@ -7,10 +7,10 @@
 // Module construction: create modules, define values, intern strings and
 // types, create blocks and regions, insert ops into blocks.
 //
-// All allocations go through the module's arena (bump-pointer, O(1) bulk
-// free on module destruction). Tables are pre-sized from capacity hints
-// when available (bytecode reading, cloning) and grow by doubling when
-// hints are absent (text parsing, test construction).
+// All allocations go through the module's arena (bump-pointer, O(1) bulk free
+// on module destruction). Module values use stable fixed-capacity segments.
+// Smaller contiguous intern/metadata tables are pre-sized from capacity hints
+// when available and grow when needed.
 //
 // Thread safety: modules are single-owner. No locks. Parallel compilation
 // uses separate modules with separate arenas.
@@ -29,13 +29,18 @@ extern "C" {
 // Capacity hints from bytecode header or source module (for cloning).
 // NULL = use defaults (text parsing, test construction).
 typedef struct loom_module_size_hints_t {
+  // Expected value count. Values allocate lazily in stable segments, so this
+  // does not reserve speculative row capacity.
   iree_host_size_t value_count;
+  // Expected interned string count.
   iree_host_size_t string_count;
+  // Expected interned type count.
   iree_host_size_t type_count;
+  // Expected module symbol count.
   iree_host_size_t symbol_count;
 } loom_module_size_hints_t;
 
-// Growth factor applied to size hints during module creation:
+// Growth factor applied to contiguous-table size hints during module creation:
 //   actual_capacity = (iree_host_size_t)(count * LOOM_MODULE_GROWTH_FACTOR)
 // Provides headroom for passes that add values/ops during compilation.
 // Tunable: profile real compilation pipelines to find the right value.
@@ -46,8 +51,9 @@ typedef struct loom_module_size_hints_t {
 // and freed in O(1) when the module is destroyed. The module struct
 // itself is allocated with |allocator|.
 //
-// |hints| may be NULL for default capacities (text parsing, tests).
-// When non-NULL, tables are pre-allocated at hint * growth_factor.
+// |hints| may be NULL for default capacities (text parsing, tests). When
+// non-NULL, contiguous tables are pre-allocated at hint * growth_factor while
+// value segments remain lazy.
 iree_status_t loom_module_allocate(loom_context_t* context,
                                    iree_string_view_t name,
                                    iree_arena_block_pool_t* block_pool,
@@ -62,20 +68,6 @@ void loom_module_free(loom_module_t* module);
 // definitions, globals, executables) live in this block.
 static inline loom_block_t* loom_module_block(loom_module_t* module) {
   return loom_region_entry_block(module->body);
-}
-
-// Returns a pointer to a value by ID.
-static inline loom_value_t* loom_module_value(const loom_module_t* module,
-                                              loom_value_id_t value_id) {
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
-}
-
-// Returns the type of a value by ID.
-static inline loom_type_t loom_module_value_type(const loom_module_t* module,
-                                                 loom_value_id_t value_id) {
-  IREE_ASSERT(value_id < module->values.count);
-  return module->values.entries[value_id].type;
 }
 
 // Sets the type of a value by ID, updating SSA references carried by the old
@@ -150,7 +142,7 @@ static inline loom_type_t loom_block_arg_type(const loom_module_t* module,
 
 // Defines a fresh SSA value in the module's value table with the given type.
 // The stored type is canonicalized through the module type interner unless it
-// is NONE. Returns the value ID (index into module->values.entries[]). The
+// is NONE. Returns the value ID in the module value table. The
 // value's def pointer is unset; the builder fills it when finalizing the
 // defining op or loom_block_add_arg fills it for block arguments.
 iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
@@ -178,6 +170,21 @@ void loom_value_u32_scratch_acquire_zeroed(loom_value_u32_scratch_t* scratch,
 // Releases |scratch| from zeroed u32 payload use.
 void loom_value_u32_scratch_release_zeroed(loom_value_u32_scratch_t* scratch);
 
+// Loads one row from an acquired value-id indexed u32 scratch table.
+static inline uint32_t loom_value_u32_scratch_load(
+    const loom_value_u32_scratch_t* scratch, loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < scratch->value_table->count);
+  return *loom_value_table_const_u32_scratch(scratch->value_table, value_id);
+}
+
+// Stores one row in an acquired value-id indexed u32 scratch table.
+static inline void loom_value_u32_scratch_store(
+    loom_value_u32_scratch_t* scratch, loom_value_id_t value_id,
+    uint32_t value) {
+  IREE_ASSERT(value_id < scratch->value_table->count);
+  *loom_value_table_u32_scratch(scratch->value_table, value_id) = value;
+}
+
 // Returns true while a compiler frame owns the module value-ordinal scratch
 // map.
 static inline bool loom_module_value_ordinal_scratch_is_active(
@@ -197,9 +204,9 @@ static inline void loom_module_value_ordinal_scratch_set(
                  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
   IREE_ASSERT(value_id < module->values.count);
   IREE_ASSERT(ordinal != LOOM_VALUE_ORDINAL_INVALID);
-  IREE_ASSERT_EQ(scratch->values_by_value_id[value_id],
+  IREE_ASSERT_EQ(loom_value_u32_scratch_load(scratch, value_id),
                  LOOM_VALUE_ORDINAL_INVALID);
-  scratch->values_by_value_id[value_id] = ordinal;
+  loom_value_u32_scratch_store(scratch, value_id, ordinal);
 }
 
 // Clears a previously-registered |value_id| from the active value-ordinal
@@ -211,7 +218,7 @@ static inline void loom_module_value_ordinal_scratch_clear(
   IREE_ASSERT_EQ(scratch->state,
                  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
   IREE_ASSERT(value_id < module->values.count);
-  scratch->values_by_value_id[value_id] = LOOM_VALUE_ORDINAL_INVALID;
+  loom_value_u32_scratch_store(scratch, value_id, LOOM_VALUE_ORDINAL_INVALID);
 }
 
 // Returns the active local ordinal for |value_id|, or INVALID when the active
@@ -225,7 +232,7 @@ static inline loom_value_ordinal_t loom_module_value_ordinal_scratch_lookup(
   if (value_id >= module->values.count) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }
-  return scratch->values_by_value_id[value_id];
+  return loom_value_u32_scratch_load(scratch, value_id);
 }
 
 // Registers a source identifier (filename, system tag, etc.) in |module| and
@@ -270,6 +277,15 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module);
 // Returns true if |value_id| is referenced by any currently-active value type.
 bool loom_module_value_has_type_uses(const loom_module_t* module,
                                      loom_value_id_t value_id);
+
+// Returns the first type-use record that references |value_id|, or INVALID
+// when the value is out of range or has no incoming type uses.
+static inline loom_type_use_id_t loom_module_value_first_incoming_type_use(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (value_id >= module->values.count) return LOOM_TYPE_USE_ID_INVALID;
+  return loom_value_table_const_type_use_heads(&module->values, value_id)
+      ->first_incoming_use_id;
+}
 
 // Replaces SSA references to |old_id| embedded in |type| with |new_id| and
 // interns the resulting type in |module|. The module value table and type-use
@@ -485,6 +501,14 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
 // relationship.
 iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
                                  loom_value_id_t value_id);
+
+// Inserts a block argument at |arg_index|. The value_id must already be
+// defined in the module's value table (via loom_module_define_value). Following
+// block arguments keep their value IDs and receive updated definition indices.
+// Passing block->arg_count appends.
+iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
+                                    uint16_t arg_index,
+                                    loom_value_id_t value_id);
 
 // Removes an unused block argument and compacts following argument slots.
 //

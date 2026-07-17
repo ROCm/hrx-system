@@ -88,7 +88,7 @@ static bool loom_print_value_has_name(const loom_module_t* module,
   if (value_id >= module->values.count) {
     return false;
   }
-  loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   return name_id != LOOM_STRING_ID_INVALID && name_id < module->strings.count;
 }
 

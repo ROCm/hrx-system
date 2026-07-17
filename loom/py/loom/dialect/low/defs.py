@@ -51,6 +51,7 @@ from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
@@ -238,6 +239,9 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef("workgroup_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_z", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_x", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_y", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_z", ATTR_TYPE_I64, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
@@ -348,6 +352,24 @@ _KERNEL_WORKGROUP_SIZE_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="workgroup_size_x",
+    ),
+]
+
+_KERNEL_WORKGROUP_COUNT_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("workgroup_count"),
+            GLUE,
+            LPAREN,
+            Attr("workgroup_count_x"),
+            COMMA,
+            Attr("workgroup_count_y"),
+            COMMA,
+            Attr("workgroup_count_z"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="workgroup_count_x",
     ),
 ]
 
@@ -492,6 +514,7 @@ low_kernel_def = Op(
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_KERNEL_EXPORT_FORMAT,
         *_KERNEL_WORKGROUP_SIZE_FORMAT,
+        *_KERNEL_WORKGROUP_COUNT_FORMAT,
         *_KERNEL_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],
@@ -687,7 +710,7 @@ low_scf_yield = Op(
     phase=OpPhase.EXECUTABLE,
     doc="Forward register values from a low structured-control region.",
     operands=[Operand("values", REGISTER, variadic=True)],
-    traits=[TERMINATOR],
+    traits=[TERMINATOR, STORAGE_RELATION],
     format=[
         OptionalGroup(
             [Refs("values"), COLON, TypesOf("values")],
@@ -823,7 +846,7 @@ low_scf_for = Op(
         YieldCountMatchesResults("body", "results"),
         YieldTypesMatchResults("body", "results"),
     ],
-    traits=[ImplicitTerminator("low.scf.yield")],
+    traits=[ImplicitTerminator("low.scf.yield"), STORAGE_RELATION],
     format=[
         LBRACKET,
         Ref("lower_bound"),
@@ -937,6 +960,15 @@ low_copy = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity."),
     operands=[Operand("source", REGISTER)],
+    attrs=[
+        AttrDef(
+            "detached",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Prefer physical storage disjoint from the copy source.",
+        ),
+    ],
     results=[Result("result", REGISTER, allocates=True)],
     constraints=[
         SameRegisterClass("source", "result"),
@@ -946,6 +978,7 @@ low_copy = Op(
     facts="loom_low_copy_facts",
     format=[
         Ref("source"),
+        AttrDict(),
         COLON,
         TypeOf("source"),
         ARROW,

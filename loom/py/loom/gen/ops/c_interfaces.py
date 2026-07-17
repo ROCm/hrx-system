@@ -16,9 +16,11 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     CallLikeInterface,
     CallLikeKind,
+    EffectKind,
     FuncLikeInterface,
     LoopLikeInterface,
     MemoryAccessInterface,
+    MemoryAccessOperationKind,
     Op,
     RegionBranchInterface,
     TargetLikeInterface,
@@ -27,6 +29,15 @@ from loom.fields import compute_layout
 from loom.gen.ops import c_queries, c_symbols
 from loom.gen.ops.c_enums import CALL_LIKE_KIND_MAP
 from loom.gen.ops.c_names import c_prefix
+
+_MEMORY_ACCESS_OPERATION_KIND_MAP: dict[MemoryAccessOperationKind, str] = {
+    MemoryAccessOperationKind.LOAD: "LOOM_MEMORY_ACCESS_OPERATION_LOAD",
+    MemoryAccessOperationKind.STORE: "LOOM_MEMORY_ACCESS_OPERATION_STORE",
+    MemoryAccessOperationKind.PREFETCH: "LOOM_MEMORY_ACCESS_OPERATION_PREFETCH",
+    MemoryAccessOperationKind.ATOMIC_REDUCE: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE",
+    MemoryAccessOperationKind.ATOMIC_RMW: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW",
+    MemoryAccessOperationKind.ATOMIC_CMPXCHG: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG",
+}
 
 # Interfaces declared in the Python DSL are emitted as per-op .rodata vtable
 # structs on the C side. Each interface also has a pointer slot on cache line 3
@@ -181,6 +192,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
         c_struct="loom_memory_access_vtable_t",
         vtable_field="memory_access",
         fields=(
+            InterfaceFieldSpec("operation_kind", "operation_kind", "memory_access_operation"),
             InterfaceFieldSpec("view", "view_operand_index", "operand", required=True),
             InterfaceFieldSpec("value", "value_operand_index", "operand"),
             InterfaceFieldSpec("expected", "expected_operand_index", "operand"),
@@ -188,7 +200,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("mask", "mask_operand_index", "operand"),
             InterfaceFieldSpec("passthrough", "passthrough_operand_index", "operand"),
             InterfaceFieldSpec("offsets", "offsets_operand_index", "operand"),
-            InterfaceFieldSpec("indices", "indices_operand_offset", "operand"),
+            InterfaceFieldSpec("indices", "indices_operand_field_index", "operand"),
             InterfaceFieldSpec("static_indices", "static_indices_attr_index", "attr"),
             InterfaceFieldSpec("cache_scope", "cache_scope_attr_index", "attr"),
             InterfaceFieldSpec("cache_temporal", "cache_temporal_attr_index", "attr"),
@@ -323,6 +335,9 @@ def _resolve_interface_field(
         if not isinstance(py_value, str) or not py_value:
             raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected C symbol name or None, got {py_value!r}")
         return f"&{c_symbols.normalize_c_symbol_reference(py_value)}"
+    if field_spec.kind == "memory_access_operation":
+        operation_kind = _memory_access_operation_kind(op, iface, interface_name)
+        return _MEMORY_ACCESS_OPERATION_KIND_MAP[operation_kind]
     raise ValueError(f"{interface_name} field {field_spec.py_field!r}: unknown kind {field_spec.kind!r}")
 
 
@@ -345,6 +360,50 @@ def _resolve_soft_memory_field(
     else:
         raise ValueError(f"unsupported MemoryAccessInterface field kind {field_kind!r}")
     return None if index == 0xFF else index
+
+
+def _memory_access_operation_kind(op: Op, iface: MemoryAccessInterface, interface_name: str) -> MemoryAccessOperationKind:
+    """Infers and validates the operation family represented by MemoryAccess."""
+    value_index = _resolve_soft_memory_field(op, iface, "value", "operand", interface_name)
+    expected_index = _resolve_soft_memory_field(op, iface, "expected", "operand", interface_name)
+    replacement_index = _resolve_soft_memory_field(op, iface, "replacement", "operand", interface_name)
+    atomic_indices = (
+        _resolve_soft_memory_field(op, iface, "atomic_kind", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_success_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_failure_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_scope", "attr", interface_name),
+    )
+    has_atomic_attrs = any(index is not None for index in atomic_indices)
+    has_hint_trait = any(trait.name == "Hint" for trait in op.traits)
+    reads = any(effect.kind in (EffectKind.READ, EffectKind.READWRITE) for effect in op.effects)
+    writes = any(effect.kind in (EffectKind.WRITE, EffectKind.READWRITE) for effect in op.effects)
+
+    inferred_kind: MemoryAccessOperationKind | None = None
+    if expected_index is not None or replacement_index is not None:
+        if expected_index is None or replacement_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: compare-exchange requires both expected and replacement operands")
+        if not reads or not writes or not has_atomic_attrs:
+            raise ValueError(f"{interface_name} on {op.name!r}: compare-exchange requires read/write effects and atomic attrs")
+        inferred_kind = MemoryAccessOperationKind.ATOMIC_CMPXCHG
+    elif has_atomic_attrs:
+        if not reads or not writes or value_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: atomic update requires read/write effects and a value operand")
+        inferred_kind = MemoryAccessOperationKind.ATOMIC_REDUCE if not op.results else MemoryAccessOperationKind.ATOMIC_RMW
+    elif reads and not writes:
+        inferred_kind = MemoryAccessOperationKind.LOAD
+    elif writes and not reads:
+        if value_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: write access requires a value operand")
+        inferred_kind = MemoryAccessOperationKind.STORE
+    elif not reads and not writes and has_hint_trait:
+        inferred_kind = MemoryAccessOperationKind.PREFETCH
+
+    if inferred_kind is None:
+        raise ValueError(f"{interface_name} on {op.name!r}: unable to infer memory access operation kind from effects and roles")
+    if iface.operation_kind is not None and iface.operation_kind != inferred_kind:
+        raise ValueError(f"{interface_name} on {op.name!r}: explicit operation kind {iface.operation_kind.value!r} does not match inferred kind {inferred_kind.value!r}")
+    return inferred_kind
 
 
 def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_name: str) -> None:
@@ -374,8 +433,6 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         indices_operand = op.operands[indices_index]
         if not indices_operand.variadic:
             raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be variadic")
-        if indices_index + 1 != len(op.operands):
-            raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be the trailing operand field")
 
     cache_scope_index = _resolve_soft_memory_field(op, iface, "cache_scope", "attr", interface_name)
     cache_temporal_index = _resolve_soft_memory_field(op, iface, "cache_temporal", "attr", interface_name)
@@ -389,6 +446,7 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         raise ValueError(f"{interface_name} on {op.name!r}: atomic_success_ordering and atomic_failure_ordering must be declared together")
     if atomic_ordering_index is not None and atomic_success_ordering_index is not None:
         raise ValueError(f"{interface_name} on {op.name!r}: use either atomic_ordering or success/failure orderings, not both")
+    _memory_access_operation_kind(op, iface, interface_name)
 
 
 def _target_like_projection_entries(op: Op) -> list[tuple[int, str, str]]:

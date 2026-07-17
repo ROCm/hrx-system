@@ -184,3 +184,24 @@ kernel.def @lds_atomic_minmax_i32() {
   %old_maxui = view.atomic.rmw<maxui> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
   kernel.return
 }
+
+// ====
+
+kernel.def @lds_atomic_second_alloca_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %first_bytes = index.constant 64 : offset
+  %second_bytes = index.constant 256 : offset
+  %first_scratch = buffer.alloca %first_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca %second_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_view = buffer.view %first_scratch[%zero] : buffer -> view<16xi32, #dense>
+  %second_view = buffer.view %second_scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = scalar.constant 1 : i32
+  view.store %one, %first_view[%tid] : i32, view<16xi32, #dense>
+  view.atomic.reduce<addi> %one, %second_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %one, %second_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}

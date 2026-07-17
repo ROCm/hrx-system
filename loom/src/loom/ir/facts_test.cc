@@ -40,6 +40,70 @@ TEST(FactsUnknown, NoFlagsSet) {
   EXPECT_FALSE(loom_value_facts_is_boolean(f));
 }
 
+TEST(FactsFloatPredicates, FiniteImpliesNotNanAndNotInf) {
+  loom_value_facts_t f = loom_value_facts_unknown();
+  f.flags = LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_FINITE;
+  EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(f));
+  EXPECT_TRUE(loom_value_facts_is_not_inf(f));
+}
+
+TEST(FactsTopologyDomain, LookupAndMarkRoundTrip) {
+  struct TestCase {
+    loom_value_fact_flags_t fact_flag;
+    loom_value_fact_topology_value_kind_t value_kind;
+    loom_value_fact_topology_axis_t axis;
+  };
+  const TestCase cases[] = {
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
+      {LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE},
+  };
+  for (const TestCase& test_case : cases) {
+    const loom_value_fact_topology_domain_t* domain =
+        loom_value_fact_topology_domain_from_flags(test_case.fact_flag);
+    ASSERT_NE(domain, nullptr);
+    EXPECT_EQ(domain->value_kind, test_case.value_kind);
+    EXPECT_EQ(domain->axis, test_case.axis);
+
+    loom_value_facts_t facts = loom_value_facts_make(0, 63, 1);
+    facts.flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X;
+    ASSERT_TRUE(loom_value_facts_mark_topology_domain(
+        &facts, test_case.value_kind, test_case.axis));
+    EXPECT_EQ(facts.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK,
+              test_case.fact_flag);
+    EXPECT_EQ(loom_value_facts_topology_domain(facts), domain);
+  }
+
+  EXPECT_EQ(loom_value_fact_topology_domain_from_flags(0), nullptr);
+  EXPECT_EQ(loom_value_fact_topology_domain_from_flags(
+                LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X |
+                LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y),
+            nullptr);
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  EXPECT_FALSE(loom_value_facts_mark_topology_domain(
+      &facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE,
+      LOOM_VALUE_FACT_TOPOLOGY_AXIS_X));
+}
+
 TEST(FactsExactI64, Zero) {
   loom_value_facts_t f = loom_value_facts_exact_i64(0);
   EXPECT_TRUE(loom_value_facts_is_exact(f));
@@ -120,6 +184,7 @@ TEST(FactsExactF64, Pi) {
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(f));
   double value = 0.0;
   ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
   EXPECT_DOUBLE_EQ(value, 3.14159265358979);
@@ -132,9 +197,23 @@ TEST(FactsExactF64, Zero) {
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(f));
   double value = 1.0;
   ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
   EXPECT_DOUBLE_EQ(value, 0.0);
+}
+
+TEST(FactsExactF64, Subnormal) {
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::denorm_min());
+  EXPECT_TRUE(loom_value_facts_is_exact(f));
+  EXPECT_TRUE(loom_value_facts_is_float(f));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(f));
+  EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_FALSE(loom_value_facts_is_not_subnormal(f));
+  double value = 0.0;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
+  EXPECT_DOUBLE_EQ(value, std::numeric_limits<double>::denorm_min());
 }
 
 TEST(FactsExactF64, NaN) {
@@ -702,6 +781,57 @@ TEST(FactsApplyPredicate, ComposedTilePredicate) {
 }
 
 //===----------------------------------------------------------------------===//
+// Execution distribution
+//===----------------------------------------------------------------------===//
+
+TEST(ExecutionDistribution, ExactValuesAreWorkgroupUniform) {
+  const loom_value_facts_t facts = loom_value_facts_exact_i64(7);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(facts));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+}
+
+TEST(ExecutionDistribution, UnaryPreservesSubgroupScope) {
+  loom_value_facts_t input = loom_value_facts_unknown();
+  loom_value_facts_mark_subgroup_uniform(&input);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_unary_distribution(input, &output);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_workgroup_uniform(output));
+}
+
+TEST(ExecutionDistribution, BinaryUsesWeakestUniformScope) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_mark_subgroup_uniform(&rhs);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_workgroup_uniform(output));
+}
+
+TEST(ExecutionDistribution, UnknownInputPreventsUniformProof) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  const loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(output));
+  EXPECT_FALSE(loom_value_facts_is_lane_varying(output));
+}
+
+TEST(ExecutionDistribution, LaneVaryingInputDominatesUniformScope) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_workgroup_uniform(&lhs);
+  loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&rhs);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(output));
+  EXPECT_FALSE(loom_value_facts_is_subgroup_uniform(output));
+}
+
+//===----------------------------------------------------------------------===//
 // Transfer functions: addi
 //===----------------------------------------------------------------------===//
 
@@ -742,7 +872,7 @@ TEST(AddiTransfer, Overflow) {
   loom_value_facts_addi(&a, &b, &out);
   EXPECT_EQ(out.range_lo, INT64_MIN);
   EXPECT_EQ(out.range_hi, INT64_MAX);
-  EXPECT_TRUE(loom_value_facts_is_uniform(out));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(out));
 }
 
 TEST(AddiTransfer, InPlaceAccumulation) {

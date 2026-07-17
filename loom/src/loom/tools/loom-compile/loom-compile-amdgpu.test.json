@@ -8,7 +8,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/targetless_amdgpu.loom",
-            "text": "kernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
+            "text": "amdgpu.target<gfx1100> @nearby_wave64 {subgroup_size = 64}\n\nkernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
           }
         },
         {
@@ -30,7 +30,12 @@
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
                 "\"artifact_format\":\"elf\"",
-                "\"status\":\"OK\""
+                "\"target_selections\":{\"count\":1,\"rows\":[",
+                "\"function\":\"targetless_store_i32\",\"target_source\":\"invocation\"",
+                "\"candidate_target_count\":1",
+                "\"candidate_target_symbol\":\"nearby_wave64\"",
+                "\"candidate_target_subgroup_size\":64",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -67,7 +72,7 @@
               "unordered": [
                 "\"target_key\":\"gfx1151\"",
                 "\"artifact_format\":\"elf\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -115,7 +120,10 @@
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
                 "\"artifact_format\":\"elf\"",
-                "\"status\":\"OK\""
+                "\"config_bindings\":{\"count\":2,\"rows\":[",
+                "\"key\":\"smoke.workgroups_x\",\"value\":\"2\"",
+                "\"key\":\"smoke.workgroup_size_x\",\"value\":\"64\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -165,19 +173,27 @@
               "unordered": [
                 "\"target_export\":null",
                 "\"entries\":{\"count\":2,\"rows\":[",
-                "\"target_resources\":{\"scalar_register_class\":\"amdgpu.sgpr\"",
+                { "regex": "\"planning\":\\{\"frame_build_count\":[1-9][0-9]*,\"allocation_run_count\":[1-9][0-9]*,\"repair\":\\{" },
+                "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\"",
+                "\"target_capability_rows\":{\"count\":",
+                "\"target_capability_row_count\":",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"workload\":{\"workgroup_size\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"workgroup_count\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"dispatch_workitem_count\":1}",
                 "\"memory_write_byte_count\":5",
                 "\"global_store_byte_count\":5",
                 "\"scalar_read_byte_count\":16",
-                { "regex": "\"scalar_pressure_peak_live_units\":[1-9][0-9]*" },
-                "\"scalar_register_overhead_units\":",
-                "\"vector_register_class\":\"amdgpu.vgpr\"",
-                { "regex": "\"vector_pressure_peak_live_units\":[1-9][0-9]*" },
-                "\"vector_register_overhead_units\":",
+                { "regex": "\"scheduled_pressure\":\\{\"peak_live_units\":[1-9][0-9]*\\}" },
+                "\"overhead_units\":",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\"",
                 "\"subgroup_size\":",
                 "\"occupancy_percent\":",
                 "\"limiting_resource\":",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -214,20 +230,29 @@
                 "\"function\":\"compile_report_store_i8\"",
                 "\"source_function\":\"compile_report_store_i32\"",
                 "\"source_function\":\"compile_report_store_i8\"",
-                "\"target_resources\":{\"scalar_register_class\":\"amdgpu.sgpr\"",
+                "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\"",
+                "\"target_capability_rows\":{\"count\":",
+                "\"target_capability_row_count\":",
+                "\"namespace\":\"amdgpu\",\"key\":\"processor\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"target\",\"key\":\"subgroup_size\"",
+                "\"workload\":{\"workgroup_size\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"workgroup_count\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"dispatch_workitem_count\":1}",
                 "\"memory_write_byte_count\":5",
                 "\"global_store_byte_count\":5",
                 "\"scalar_read_byte_count\":16",
-                "\"scalar_pressure_peak_live_units\":",
-                "\"scalar_register_overhead_units\":",
-                "\"vector_register_class\":\"amdgpu.vgpr\"",
-                "\"vector_pressure_peak_live_units\":",
-                "\"vector_register_overhead_units\":",
+                "\"scheduled_pressure\":{\"peak_live_units\":",
+                "\"overhead_units\":",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\"",
                 "\"subgroup_size\":",
                 "\"occupancy_percent\":",
                 "\"limiting_resource\":",
                 "\"pressure_rows\":{\"count\":",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },
@@ -271,7 +296,7 @@
             "contains": {
               "unordered": [
                 "\"function\":\"compile_report_branch_mix\"",
-                "\"status\":\"OK\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"branch_count\":3",
                 "\"control_count\":3"
@@ -281,6 +306,445 @@
           "files": [
             {
               "path": "{tmp}/branch_mix_report_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports exact loop-weighted AMDGPU memory economics",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_loop_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/loop_memory_economics_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_loop_memory_economics\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":20",
+                "\"memory_write_byte_count\":4",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":32",
+                "\"memory_write_byte_count\":16",
+                "\"global_load_byte_count\":16",
+                "\"global_store_byte_count\":16",
+                "\"scalar_read_byte_count\":16",
+                "\"economics\":{\"operations\":{\"per_workitem\":{\"scalar_alu_count\":35,\"vector_alu_count\":4,\"branch_count\":10,\"control_count\":10},\"dispatch\":{\"scalar_alu_count\":35,\"vector_alu_count\":4,\"branch_count\":10,\"control_count\":10}}",
+                "\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
+                "\"dispatch_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
+                "\"source_low\":{\"selected_op_count\":10,\"emitted_op_count\":23,\"count\":10",
+                "\"memory\":{\"packet_count\":2",
+                "\"dispatch_source\":{\"read_bytes\":16,\"write_bytes\":16,\"total_bytes\":32}",
+                "\"dispatch_issued\":{\"read_bytes\":16,\"write_bytes\":16,\"total_bytes\":32}",
+                "\"root_count\":2,\"roots\":[",
+                "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
+                "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":0,\"store_packet_count\":1",
+                "\"argument_count\":2,\"arguments\":["
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/loop_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports exact carried loop-weighted AMDGPU memory economics",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_carried_loop_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/carried_loop_memory_economics_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_carried_loop_memory_economics\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":20",
+                "\"memory_write_byte_count\":8",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":32",
+                "\"memory_write_byte_count\":20",
+                "\"global_load_byte_count\":16",
+                "\"global_store_byte_count\":20",
+                "\"economics\":{\"operations\":{\"per_workitem\":{\"scalar_alu_count\":",
+                "\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":20,\"total_bytes\":52",
+                "\"source_low\":{\"packet_count\":3,\"load_packet_count\":1,\"store_packet_count\":2,\"scalar_packet_count\":3,\"vector_packet_count\":0,\"source_lane_count\":3,\"source_byte_count\":12,\"read_byte_count\":4,\"write_byte_count\":8,\"issued_read_byte_count\":4,\"issued_write_byte_count\":8,\"issued_read_unknown_width_count\":0,\"issued_write_unknown_width_count\":0,\"exact_dynamic_packet_count\":3,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":9,\"dynamic_source_byte_count\":36,\"dynamic_read_byte_count\":16,\"dynamic_write_byte_count\":20,\"dynamic_issued_read_byte_count\":16,\"dynamic_issued_write_byte_count\":20",
+                "\"interval_envelope\":{\"packet_count\":3,\"begin_min_bytes\":0,\"end_max_bytes\":16,\"byte_count\":16}",
+                "\"source_low\":{\"selected_op_count\":13,\"emitted_op_count\":27,\"count\":13",
+                "\"memory\":{\"packet_count\":3",
+                "\"exact_dynamic_packet_count\":3,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":9,\"dynamic_source_byte_count\":36,\"dynamic_read_byte_count\":16,\"dynamic_write_byte_count\":20",
+                "\"dynamic_issued_read_byte_count\":16,\"dynamic_issued_write_byte_count\":20",
+                "\"root_count\":2,\"roots\":[",
+                "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
+                "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":2,\"load_packet_count\":0,\"store_packet_count\":2",
+                "\"memory_rows\":[{\"index\":0,\"function\":\"compile_report_carried_loop_memory_economics\",\"source_op\":\"view.load\"",
+                "\"execution_count\":4,\"source_interval\":{\"begin_min_bytes\":0,\"begin_max_bytes\":12",
+                "\"argument_count\":2,\"arguments\":["
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/carried_loop_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports fixed-trip loop-weighted AMDGPU matrix mix",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_loop_matrix_mix_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/loop_matrix_mix_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_loop_matrix_mix\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"matrix_count\":1",
+                "\"wmma_count\":1",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"matrix_count\":2",
+                "\"wmma_count\":2",
+                "\"source_low\":{\"selected_op_count\":12,\"emitted_op_count\":42,\"count\":12",
+                "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\",\"final\":{\"register_count\":4,\"overhead_units\":0},\"scheduled_pressure\":{\"peak_live_units\":4}},\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":24,\"overhead_units\":7},\"scheduled_pressure\":{\"peak_live_units\":17}}",
+                "\"source_op\":\"vector.mma\"",
+                "\"descriptor_key\":\"amdgpu.v_wmma_f32_16x16x16_f16\"",
+                "\"descriptor_semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\"",
+                "\"selected_op_count\":1,\"emitted_low_op_count\":2,\"exact_dynamic_op_count\":1,\"unknown_dynamic_op_count\":0,\"dynamic_selected_op_count\":2,\"dynamic_emitted_low_op_count\":4",
+                "\"schedule_band_summary_rows\":{\"count\":",
+                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\"",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":2",
+                "\"wmma_count\":2"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/loop_matrix_mix_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports materialized AMDGPU fragment spill traffic",
+      "steps": [
+        {
+          "name": "compile-summary",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_materialized_fragment_spills_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--root=@report_materialized_fragment_spills",
+              "--output={tmp}/materialized_fragment_spills_summary_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"report_materialized_fragment_spills\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"spill_count\":0,\"spill_plan_count\":0",
+                {
+                  "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_spill_store_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_reload_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_memory_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_read_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_write_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"barrier_count\":[1-9][0-9]*"
+                }
+              ]
+            },
+            "not_contains": [
+              "\"spill_rows\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/materialized_fragment_spills_summary_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-details",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_materialized_fragment_spills_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--root=@report_materialized_fragment_spills",
+              "--output={tmp}/materialized_fragment_spills_details_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"report_materialized_fragment_spills\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"spill_count\":0,\"spill_plan_count\":0",
+                {
+                  "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_spill_store_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_reload_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_memory_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_read_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_write_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"barrier_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"wait_plan\":\\{\"action_count\":[1-9][0-9]*,\"explicit_action_count\":0,\"planned_action_count\":[1-9][0-9]*,\"full_drain_count\":[1-9][0-9]*,\"partial_wait_count\":[1-9][0-9]*,\"drained_count\":[1-9][0-9]*,\"max_drained_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"wait_counter_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                {
+                  "regex": "\"wait_reason_summary_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                {
+                  "regex": "\"reason\":\"amdgpu\\.[^\"]+\",\"reason_id\":[0-9]+,\"summary\":\\{\"action_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"summary\":\\{\"action_count\":[1-9][0-9]*,\"explicit_action_count\":0,\"planned_action_count\":[1-9][0-9]*,\"full_drain_count\":[1-9][0-9]*,\"partial_wait_count\":[0-9]+,\"drained_count\":[1-9][0-9]*,\"max_drained_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"wait_action_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                {
+                  "regex": "\"target_count\":[0-9]+,\"outstanding_before\":[1-9][0-9]*,\"outstanding_after\":[0-9]+,\"drained_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"spill_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                {
+                  "regex": "\"move_causes\":\\{\"kind_count\":[1-9][0-9]*,\"packet_count\":[1-9][0-9]*,\"unit_count\":[1-9][0-9]*,\"causes\":\\["
+                },
+                "\"cause\":\"low_concat\"",
+                "\"kind\":\"materialized\"",
+                "\"origin\":\"matrix\"",
+                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.bf16\"",
+                "\"origin\":\"barrier\"",
+                "\"semantic_tag\":\"control.barrier.workgroup\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/materialized_fragment_spills_details_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports dispatch-scaled AMDGPU memory economics",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_dispatch_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/dispatch_memory_economics_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_dispatch_memory_economics\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"workload\":{\"workgroup_size\":{\"x\":8,\"y\":1,\"z\":1,\"flat\":8},\"workgroup_count\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1},\"dispatch_workitem_count\":8}",
+                "\"economics\":{\"operations\":{\"per_workitem\":{\"scalar_alu_count\":35,\"vector_alu_count\":4,\"branch_count\":10,\"control_count\":10},\"dispatch\":{\"scalar_alu_count\":280,\"vector_alu_count\":32,\"branch_count\":80,\"control_count\":80}}",
+                "\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
+                "\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48,\"global_load_count\":4,\"global_store_count\":4",
+                "\"dispatch_issued\":{\"read_bytes\":256,\"write_bytes\":128,\"total_bytes\":384",
+                "\"dispatch_issued\":{\"read_bytes\":256,\"write_bytes\":128,\"total_bytes\":384,\"global_load_count\":32,\"global_store_count\":32",
+                "\"source_low\":{\"selected_op_count\":10,\"emitted_op_count\":23,\"count\":10",
+                "\"memory\":{\"packet_count\":2",
+                "\"selection_summaries\":{\"count\":",
+                "\"selected_op_count\":",
+                "\"emitted_low_op_count\":",
+                "\"dispatch_source\":{\"read_bytes\":128,\"write_bytes\":128,\"total_bytes\":256}",
+                "\"dispatch_issued\":{\"read_bytes\":128,\"write_bytes\":128,\"total_bytes\":256}",
+                "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
+                "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":0,\"store_packet_count\":1"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/dispatch_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports private AMDGPU scratch traffic in static mix",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_private_memory_mix_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/private_memory_mix_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_private_memory_mix\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":24",
+                "\"memory_write_byte_count\":8",
+                "\"global_load_byte_count\":4",
+                "\"global_store_byte_count\":4",
+                "\"private_read_byte_count\":4",
+                "\"private_write_byte_count\":4",
+                "\"unclassified_read_byte_count\":0",
+                "\"unclassified_write_byte_count\":0",
+                "\"memory\":{\"private_bytes\":256,\"local_bytes\":0}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/private_memory_mix_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports source-low memory coverage for unmodeled loop CFG",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_complex_loop_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/complex_loop_memory_economics_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_complex_loop_memory_economics\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":20",
+                "\"memory_write_byte_count\":4",
+                "\"economics\":{\"memory\":{\"source_low\":{\"packet_count\":2",
+                "\"unknown_dynamic_packet_count\":2"
+              ]
+            },
+            "not_contains": [
+              "\"dynamic_instruction_mix\"",
+              "\"dispatch_issued\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/complex_loop_memory_economics_amdgpu.hsaco",
               "non_empty": true
             }
           ]
@@ -310,7 +774,7 @@
                 "\"target_bundle\":\"gfx1100_target\"",
                 "\"artifact_format\":\"elf\"",
                 "\"function\":\"selected_store_i32\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             },
             "not_contains": [
@@ -329,6 +793,166 @@
             },
             {
               "path": "{tmp}/selected_root_amdgpu.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports CDNA3 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx942",
+              "--output={tmp}/targetless_native_matrix_gfx942.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx942\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"mfma-gfx940\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx942.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports CDNA4 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx950",
+              "--output={tmp}/targetless_native_matrix_gfx950.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx950\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"mfma-gfx950\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx950.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports RDNA4 gfx1200 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx1200",
+              "--output={tmp}/targetless_native_matrix_gfx1200.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1200\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"wmma-gfx12\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx1200.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports RDNA4 gfx1250 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx1250",
+              "--output={tmp}/targetless_native_matrix_gfx1250.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"wmma-gfx1250\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx1250.hsaco",
               "non_empty": true
             }
           ]
@@ -394,10 +1018,10 @@
           },
           "stdout": {
             "contains": [
-              "\"status\":\"FAILED_PRECONDITION\""
+              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
             ],
             "not_contains": [
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "stderr": {

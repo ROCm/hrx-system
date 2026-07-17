@@ -114,6 +114,69 @@ TEST(PopulationCountTest, Ones64) {
   EXPECT_EQ(63, iree_math_count_ones_u64(UINT64_MAX - 1ull));
 }
 
+TEST(BitWidthTest, MaskLowBits) {
+  EXPECT_EQ(0u, iree_math_mask_low_bits_u32(UINT32_MAX, 0));
+  EXPECT_EQ(UINT32_C(0xFF), iree_math_mask_low_bits_u32(UINT32_MAX, 8));
+  EXPECT_EQ(UINT32_C(0x5678),
+            iree_math_mask_low_bits_u32(UINT32_C(0x12345678), 16));
+  EXPECT_EQ(UINT32_C(0x12345678),
+            iree_math_mask_low_bits_u32(UINT32_C(0x12345678), 32));
+  EXPECT_EQ(0ull, iree_math_mask_low_bits_u64(UINT64_MAX, -1));
+  EXPECT_EQ(UINT64_C(0xFFFF), iree_math_mask_low_bits_u64(UINT64_MAX, 16));
+  EXPECT_EQ(UINT64_MAX, iree_math_mask_low_bits_u64(UINT64_MAX, 65));
+}
+
+TEST(BitWidthTest, CountBits) {
+  EXPECT_EQ(31, iree_math_count_leading_zeros_u64_width(1, 32));
+  EXPECT_EQ(7, iree_math_count_leading_zeros_u64_width(1, 8));
+  EXPECT_EQ(32, iree_math_count_leading_zeros_u64_width(0, 32));
+  EXPECT_EQ(0, iree_math_count_leading_zeros_u64_width(1, 0));
+  EXPECT_EQ(3, iree_math_count_trailing_zeros_u64_width(8, 32));
+  EXPECT_EQ(8, iree_math_count_trailing_zeros_u64_width(0, 8));
+  EXPECT_EQ(32, iree_math_count_ones_u64_width(UINT64_MAX, 32));
+  EXPECT_EQ(8, iree_math_count_ones_u64_width(UINT64_MAX, 8));
+}
+
+TEST(IntegerNumberTheoryTest, GreatestCommonDivisor) {
+  EXPECT_EQ(0ull, iree_math_gcd_u64(0, 0));
+  EXPECT_EQ(5ull, iree_math_gcd_u64(0, 5));
+  EXPECT_EQ(4ull, iree_math_gcd_u64(12, 8));
+  EXPECT_EQ(1ull, iree_math_gcd_u64(17, 13));
+  EXPECT_EQ(256ull, iree_math_gcd_u64(256, 1024));
+  EXPECT_EQ(4ull, iree_math_gcd_i64(-12, 8));
+  EXPECT_EQ(UINT64_C(1) << 63, iree_math_gcd_i64(INT64_MIN, 0));
+}
+
+TEST(IntegerNumberTheoryTest, LeastCommonMultiple) {
+  uint64_t result = 0;
+  EXPECT_TRUE(iree_math_checked_lcm_u64(0, 5, &result));
+  EXPECT_EQ(0ull, result);
+  EXPECT_TRUE(iree_math_checked_lcm_u64(16, 24, &result));
+  EXPECT_EQ(48ull, result);
+  EXPECT_FALSE(iree_math_checked_lcm_u64(UINT64_MAX, 2, &result));
+
+  int64_t signed_result = 0;
+  EXPECT_TRUE(iree_math_checked_lcm_i64(-16, 24, &signed_result));
+  EXPECT_EQ(48, signed_result);
+  EXPECT_FALSE(iree_math_checked_lcm_i64(INT64_MIN, 1, &signed_result));
+}
+
+TEST(IntegerNumberTheoryTest, FloorLog2) {
+  EXPECT_EQ(0, iree_math_floor_log2_u64(1));
+  EXPECT_EQ(1, iree_math_floor_log2_u64(3));
+  EXPECT_EQ(10, iree_math_floor_log2_u64(1024));
+  EXPECT_EQ(63, iree_math_floor_log2_u64(UINT64_MAX));
+}
+
+TEST(IntegerNumberTheoryTest, IsPowerOfTwoSigned) {
+  EXPECT_TRUE(iree_math_is_power_of_two_i64(1));
+  EXPECT_TRUE(iree_math_is_power_of_two_i64(INT64_C(1) << 62));
+  EXPECT_FALSE(iree_math_is_power_of_two_i64(0));
+  EXPECT_FALSE(iree_math_is_power_of_two_i64(-1));
+  EXPECT_FALSE(iree_math_is_power_of_two_i64(INT64_MIN));
+  EXPECT_FALSE(iree_math_is_power_of_two_i64(6));
+}
+
 //==============================================================================
 // Rounding and alignment
 //==============================================================================

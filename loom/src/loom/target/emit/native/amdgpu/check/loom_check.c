@@ -29,17 +29,24 @@ typedef enum loom_amdgpu_loom_check_wait_mode_e {
   LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE = 1,
 } loom_amdgpu_loom_check_wait_mode_t;
 
+enum loom_amdgpu_loom_check_option_flag_bits_e {
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY = 1u << 0,
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS = 1u << 1,
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE = 1u << 2,
+};
+typedef uint8_t loom_amdgpu_loom_check_option_flags_t;
+
 typedef struct loom_amdgpu_loom_check_emit_options_t {
   // Module-local target-low function symbol selected by the RUN line.
   iree_string_view_t function_symbol_name;
   // Candidate selection strategy used by low frame.
   loom_low_schedule_strategy_t schedule_strategy;
-  // True once a strategy option has been parsed.
-  bool has_schedule_strategy_option;
+  // Low scheduler diagnostic feedback requested by the RUN line.
+  loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
   // Wait-packet materialization mode for the emitted fragment.
   loom_amdgpu_loom_check_wait_mode_t wait_mode;
-  // True once a waits option has been parsed.
-  bool has_wait_mode_option;
+  // Parsed loom_amdgpu_loom_check_option_flag_bits_e bits.
+  loom_amdgpu_loom_check_option_flags_t option_flags;
   // Low allocation budget overrides parsed from target options.
   loom_low_allocation_budget_t
       allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
@@ -87,18 +94,37 @@ static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
   name = iree_string_view_trim(name);
   value = iree_string_view_trim(value);
   if (iree_string_view_equal(name, IREE_SV("strategy"))) {
-    if (options->has_schedule_strategy_option) {
+    if (iree_any_bit_set(
+            options->option_flags,
+            LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate AMDGPU assembly option 'strategy'");
     }
     IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_strategy(
         value, IREE_SV("AMDGPU assembly"), &options->schedule_strategy));
-    options->has_schedule_strategy_option = true;
+    options->option_flags |=
+        LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY;
+    *out_matched = true;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(name, IREE_SV("diagnostics"))) {
+    if (iree_any_bit_set(
+            options->option_flags,
+            LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "duplicate AMDGPU assembly option 'diagnostics'");
+    }
+    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_diagnostics(
+        value, IREE_SV("AMDGPU assembly"),
+        &options->schedule_diagnostic_flags));
+    options->option_flags |=
+        LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS;
     *out_matched = true;
     return iree_ok_status();
   }
   if (iree_string_view_equal(name, IREE_SV("waits"))) {
-    if (options->has_wait_mode_option) {
+    if (iree_any_bit_set(options->option_flags,
+                         LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate AMDGPU assembly option 'waits'");
     }
@@ -113,7 +139,7 @@ static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
           "'%.*s'",
           (int)value.size, value.data);
     }
-    options->has_wait_mode_option = true;
+    options->option_flags |= LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE;
     *out_matched = true;
     return iree_ok_status();
   }
@@ -301,10 +327,10 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
 static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    loom_low_schedule_pressure_cliff_list_t* out_pressure_cliffs,
+    const loom_low_pressure_model_t** out_pressure_model,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
     loom_low_schedule_structural_state_read_list_t* out_state_reads) {
-  *out_pressure_cliffs = loom_low_schedule_pressure_cliff_list_empty();
+  *out_pressure_model = NULL;
   *out_affinities = loom_low_schedule_pair_affinity_list_empty();
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
@@ -335,8 +361,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
-      target.descriptor_set, request->case_arena, out_pressure_cliffs));
+  *out_pressure_model =
+      loom_amdgpu_occupancy_pressure_model(target.descriptor_set);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &target, request->case_arena, out_affinities));
   return loom_amdgpu_descriptor_build_structural_state_reads(
@@ -373,20 +399,19 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
                                                   &options)
           ? &storage_lease_provider
           : NULL;
-  loom_low_schedule_pressure_cliff_list_t schedule_pressure_cliffs =
-      loom_low_schedule_pressure_cliff_list_empty();
+  const loom_low_pressure_model_t* pressure_model = NULL;
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
       loom_low_schedule_structural_state_read_list_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
-      request, options.function_symbol_name, &schedule_pressure_cliffs,
+      request, options.function_symbol_name, &pressure_model,
       &schedule_pair_affinities, &schedule_state_reads));
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
-      options.allocation_budgets, options.allocation_budget_count,
-      options.allocation_fixed_value_specs,
-      options.allocation_fixed_value_spec_count, schedule_pressure_cliffs,
+      options.schedule_diagnostic_flags, options.allocation_budgets,
+      options.allocation_budget_count, options.allocation_fixed_value_specs,
+      options.allocation_fixed_value_spec_count, pressure_model,
       schedule_pair_affinities, schedule_state_reads,
       selected_storage_lease_provider, &spill_free_options, &frame));
   if (request->diagnostic_collector != NULL &&

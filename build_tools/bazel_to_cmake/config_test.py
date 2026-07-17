@@ -464,6 +464,25 @@ loom_check_test_suite(
         )
         self.assertNotIn("$<TARGET_FILE:", converter.body)
 
+    def test_filegroup_registers_stamp_output_producer(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/example",
+            repo_root="/repo",
+        )
+
+        functions.filegroup(name="device_headers", srcs=["device.h"])
+
+        self.assertIn("add_custom_target(device_headers", converter.body)
+        self.assertIn(
+            "iree_register_generated_compile_input(device_headers\n"
+            "  OUTPUTS\n"
+            '    "${CMAKE_CURRENT_BINARY_DIR}/device_headers.stamp"',
+            converter.body,
+        )
+
     def test_py_test_allows_unlocated_source_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")

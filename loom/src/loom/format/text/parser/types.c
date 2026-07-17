@@ -351,7 +351,7 @@ static iree_status_t loom_assign_type_binding_value_type(
     loom_parser_t* parser, loom_value_id_t value_id, loom_type_t binding_type) {
   loom_parser_unresolved_placeholder_t* placeholder =
       loom_type_binding_lookup_placeholder(parser, value_id);
-  loom_value_t* value = &parser->module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(parser->module, value_id);
 
   if (placeholder) {
     if (!placeholder->resolved &&

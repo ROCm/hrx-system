@@ -28,6 +28,8 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
+    Effect,
+    EffectKind,
     EncodingFieldValue,
     EnumDomain,
     EnumValue,
@@ -37,6 +39,7 @@ from loom.target.low_descriptors import (
     ImmediateEncodingSlice,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     NativeAsmValue,
     NativeAsmValueKind,
     OperandAddressMapKind,
@@ -47,13 +50,21 @@ from loom.target.low_descriptors import (
     OperandRole,
     RegClassAlt,
     RegClassAltFlag,
+    RegClassFlag,
+    StorageLease,
+    StorageLeaseAttachment,
+    StorageLeaseFlag,
+    StorageLeaseKind,
+    StorageLeaseReleaseScope,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_BARRIER_DESCRIPTOR,
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
 )
 
 
@@ -344,8 +355,341 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
         )
 
 
+def test_compiler_rejects_contradictory_storage_lease_boundary_flags() -> None:
+    lease = StorageLease(
+        kind=StorageLeaseKind.RESULT_WRITE,
+        attachment=StorageLeaseAttachment.RESULT,
+        attachment_index=0,
+        unit_offset=0,
+        unit_count=1,
+        release_scope=StorageLeaseReleaseScope.PROGRESS_CLASS,
+        release_class_id=1,
+        release_class_name="test.progress",
+        release_action_id=1,
+        release_action_name="test.release",
+        release_reason_id=1,
+        release_reason_name="test.result_reuse",
+        flags=(
+            StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+            StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
+        ),
+    )
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        storage_leases=(lease,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' storage lease 0 cannot both release before and carry across a boundary"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_sparse_register_alias_set_ids() -> None:
+    register_classes = tuple(
+        replace(register_class, alias_set_id=register_class.alias_set_id + 1) if register_class.alias_set_id != 0 else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias-set IDs must be dense from 1; found [2, 3]"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_location_kind_mismatch() -> None:
+    register_classes = tuple(
+        replace(
+            register_class,
+            flags=(RegClassFlag.VIRTUAL_ONLY,),
+            allocatable_count=0,
+        )
+        if register_class.name == "test.alias64"
+        else register_class
+        for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 mixes physical and virtual location classes 'test.alias32' and 'test.alias64'"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_target_bank_mismatch() -> None:
+    register_classes = tuple(replace(register_class, target_bank_id=1) if register_class.name == "test.alias64" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 classes 'test.alias32' and 'test.alias64' use different target banks"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_capacity_mismatch() -> None:
+    register_classes = tuple(replace(register_class, allocatable_count=2) if register_class.name == "test.alias64" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 classes 'test.alias32' and 'test.alias64' have different allocatable counts"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_derives_barrier_descriptor_flag() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_BARRIER_DESCRIPTOR,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.BARRIER in compiled.descriptors[0].flags
+
+
+def test_compiler_rejects_barrier_flag_without_effect() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        flags=(*TEST_LOW_ADD_I32_DESCRIPTOR.flags, DescriptorFlag.BARRIER),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has the barrier flag without a barrier effect"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_derives_early_clobber_descriptor_flag() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.EARLY_CLOBBER in compiled.descriptors[0].flags
+
+
+def test_compiler_derives_instruction_classes_from_structured_metadata() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag="dot.s8s8.i32x1",
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.instruction_classes == [(InstructionClass.SCALAR_ALU, InstructionClass.DOT)]
+
+
+def test_compiler_closes_instruction_class_hierarchies() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        instruction_classes=(InstructionClass.SMFMAC,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.instruction_classes == [
+        (
+            InstructionClass.SCALAR_ALU,
+            InstructionClass.MATRIX,
+            InstructionClass.MFMA,
+            InstructionClass.SMFMAC,
+        )
+    ]
+
+
+def test_compiler_requires_explicit_other_instruction_class() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        instruction_classes=(),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' has no generated instruction class; classify it explicitly or use OTHER"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_other_with_derived_instruction_class() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        semantic_tag="control.return",
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' combines the exclusive OTHER instruction class"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_contradictory_memory_instruction_classes() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        effects=(Effect(EffectKind.READ),),
+        instruction_classes=(
+            InstructionClass.GLOBAL_MEMORY,
+            InstructionClass.PRIVATE_MEMORY,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' combines private and global memory instruction classes"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_load_instruction_class_without_read_effect() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        semantic_tag=None,
+        instruction_classes=(InstructionClass.GLOBAL_LOAD,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has a load instruction class without a read effect"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_early_clobber_flag_without_constraint() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        flags=(
+            *TEST_LOW_ADD_I32_DESCRIPTOR.flags,
+            DescriptorFlag.EARLY_CLOBBER,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' has the early-clobber flag without an early-clobber constraint"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_projects_validated_rematerializable_results() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.operand_rematerializable == [True]
+
+
+def test_compiler_rejects_rematerializable_result_without_dead_removal() -> None:
+    descriptor = replace(TEST_LOW_CONST_I32_DESCRIPTOR, flags=())
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' rematerializable result 0 requires the dead-removable flag"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_effectful_rematerializable_result() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        effects=(Effect(EffectKind.READ),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' rematerializable result 0 requires an effect-free descriptor"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_rematerialization_across_target_state() -> None:
+    descriptor = replace(
+        TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.state.add.special' rematerializable result 0 cannot replay target state operand 'state_out'"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_allowlist_closes_over_operand_form_replacements() -> None:
-    base_descriptor = TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[1]
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
     replacement_descriptor = replace(
         base_descriptor,
         key="test.add.i32.rhs_zero",
@@ -522,7 +866,7 @@ def test_shared_source_allows_view_local_non_authorable_surface() -> None:
 def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
     first_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
-        descriptors=(TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[0],),
+        descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
     )
     sibling_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -530,11 +874,14 @@ def test_shared_source_emits_sibling_view_descriptor_surfaces() -> None:
         function_name="loom_test_low_sibling_core_descriptor_set",
         c_table_prefix="TestLowSiblingCore",
         c_enum_prefix="TEST_LOW_SIBLING_CORE",
-        descriptors=(TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[1],),
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
     )
     storage_set = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
-        descriptors=TEST_LOW_CORE_DESCRIPTOR_SET.descriptors[:2],
+        descriptors=(
+            TEST_LOW_CONST_I32_DESCRIPTOR,
+            TEST_LOW_ADD_I32_DESCRIPTOR,
+        ),
     )
 
     source = generate_descriptor_set_shared_source(
@@ -560,6 +907,7 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"test.low"' in generated.source
     assert '"test.spv.op_iadd.i32"' in generated.source
     assert '"OpIAdd"' in generated.source
+    assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
 
 
 def test_generator_resolves_symbolic_hazard_resources() -> None:
@@ -861,6 +1209,8 @@ def test_generator_emits_target_native_asm_immediate_values() -> None:
                     NativeAsmValue(
                         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
                         field_name="delay",
+                        literal="delay_bits",
+                        bit_width=16,
                         target_format_id=1,
                     ),
                 ),
@@ -873,10 +1223,12 @@ def test_generator_emits_target_native_asm_immediate_values() -> None:
 
     assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT" in generated.source
     assert ".index = 0," in generated.source
+    assert ".bit_width = 16," in generated.source
     assert ".target_format_id = 1," in generated.source
+    assert '"delay_bits"' in generated.source
 
 
-def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
+def test_generator_rejects_target_native_asm_immediate_oversized_bit_width() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         immediates=(
@@ -893,7 +1245,7 @@ def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
                     NativeAsmValue(
                         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
                         field_name="delay",
-                        bit_width=16,
+                        bit_width=256,
                         target_format_id=1,
                     ),
                 ),
@@ -904,7 +1256,7 @@ def test_generator_rejects_target_native_asm_immediate_bit_width() -> None:
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' native target-format immediate 'delay' unexpectedly specifies a bit width"),
+        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' native target-format immediate 'delay' bit width must be in [0, 255]"),
     ):
         generate_descriptor_set(descriptor_set)
 
@@ -1332,6 +1684,7 @@ def test_generator_emits_operand_target_state_address_map() -> None:
                 base_descriptor.operands[0],
                 address_map_kind=OperandAddressMapKind.TARGET_STATE,
                 addressable_unit_count=256,
+                address_state_slot=3,
             ),
             *base_descriptor.operands[1:],
         ),
@@ -1342,6 +1695,26 @@ def test_generator_emits_operand_target_state_address_map() -> None:
 
     assert ".address_map_kind = LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE" in generated.source
     assert ".addressable_unit_count = 256" in generated.source
+    assert ".address_state_slot = 3" in generated.source
+
+
+def test_generator_rejects_target_state_address_map_without_slot() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    descriptor = replace(
+        base_descriptor,
+        operands=(
+            replace(
+                base_descriptor.operands[0],
+                address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                addressable_unit_count=256,
+            ),
+            *base_descriptor.operands[1:],
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(ValueError, match="target-state address map must set"):
+        generate_descriptor_set(descriptor_set)
 
 
 def test_generator_rejects_direct_address_map_with_unit_count() -> None:

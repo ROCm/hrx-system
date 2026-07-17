@@ -2466,7 +2466,7 @@ static iree_status_t loom_bytecode_body_reader_define_value(
           IREE_SV("predefined_value_is_not_present_in_the_module"));
     }
     const loom_value_t* value =
-        &body_reader->reader->output_module->values.entries[value_id];
+        loom_module_value(body_reader->reader->output_module, value_id);
     if (!loom_type_equal(value->type, type)) {
       return loom_bytecode_reader_emit_invalid_ir_body(
           body_reader, name_offset,

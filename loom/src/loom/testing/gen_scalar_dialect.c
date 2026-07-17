@@ -186,33 +186,25 @@ static iree_status_t loom_test_gen_hook_scalar_float_binary(
     return iree_ok_status();
   }
 
-  // copysignf is unflagged; all other float binary ops take fast-math flags.
-  static const loom_scalar_float_binary_fn_t flagged_ops[] = {
+  static const loom_scalar_float_binary_fn_t ops[] = {
       loom_scalar_addf_build,     loom_scalar_subf_build,
       loom_scalar_mulf_build,     loom_scalar_divf_build,
       loom_scalar_remf_build,     loom_scalar_minimumf_build,
       loom_scalar_maximumf_build, loom_scalar_minnumf_build,
       loom_scalar_maxnumf_build,  loom_scalar_powf_build,
-      loom_scalar_atan2f_build,
+      loom_scalar_atan2f_build,   loom_scalar_copysignf_build,
   };
-  static const uint32_t flagged_count = IREE_ARRAYSIZE(flagged_ops);
-  // +1 for copysignf.
-  uint32_t total = flagged_count + 1;
 
   loom_op_t* op = NULL;
-  uint32_t pick = loom_test_gen_next_range(context->gen, total);
-  if (pick < flagged_count) {
-    uint8_t flags = 0;
-    if (loom_test_gen_next_probability(context->gen, 15)) {
-      flags = (uint8_t)loom_test_gen_next_range(
-          context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
-    }
-    IREE_RETURN_IF_ERROR(flagged_ops[pick](context->builder, flags, lhs, rhs,
-                                           type, LOOM_LOCATION_UNKNOWN, &op));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_scalar_copysignf_build(
-        context->builder, lhs, rhs, type, LOOM_LOCATION_UNKNOWN, &op));
+  const uint32_t pick =
+      loom_test_gen_next_range(context->gen, IREE_ARRAYSIZE(ops));
+  uint8_t flags = 0;
+  if (loom_test_gen_next_probability(context->gen, 15)) {
+    flags = (uint8_t)loom_test_gen_next_range(
+        context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
   }
+  IREE_RETURN_IF_ERROR(ops[pick](context->builder, flags, lhs, rhs, type,
+                                 LOOM_LOCATION_UNKNOWN, &op));
   loom_test_gen_values_add(context->values, loom_op_results(op)[0], type);
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;
   return iree_ok_status();

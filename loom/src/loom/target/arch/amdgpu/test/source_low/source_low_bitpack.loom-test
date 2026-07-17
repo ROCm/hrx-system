@@ -242,7 +242,7 @@ kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm<amdgpu.rdna3.core> {
   %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %13 = s_mov_b32 0

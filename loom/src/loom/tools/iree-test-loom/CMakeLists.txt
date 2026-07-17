@@ -101,6 +101,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-test-loom=::iree-test-loom"
   DATA
+    "testdata/amdgpu_compile_rejection.loom"
     "testdata/amdgpu_hal_actual.loom"
     "testdata/generated_tensor_cases.loom"
   LABELS

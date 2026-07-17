@@ -25,16 +25,17 @@ iree_status_t loom_vector_to_scalar_lower_mma(
     loom_value_id_t* out_replacement);
 
 // Returns true when result fragment physical lanes can be mapped back to
-// logical row/column terms by the shared scalarization helpers.
+// logical block/row/column terms by the shared scalarization helpers.
 bool loom_vector_to_scalar_result_fragment_layout_is_supported(
     const loom_matrix_fragment_layout_t* layout);
 
-// Builds logical result row/column terms for a physical result payload register
-// addressed by |register_index| in the current subgroup lane.
+// Builds logical result block/row/column terms for a physical result payload
+// element addressed by |payload_element_index| in the current subgroup lane.
 iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_term_t lane_id,
-    loom_vector_to_scalar_index_term_t register_index,
+    loom_vector_to_scalar_index_term_t payload_element_index,
+    loom_vector_to_scalar_index_term_t* out_block,
     loom_vector_to_scalar_index_term_t* out_row,
     loom_vector_to_scalar_index_term_t* out_column);
 

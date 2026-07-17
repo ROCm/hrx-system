@@ -727,6 +727,48 @@ enum loom_operand_flag_bits_e {
 };
 typedef uint8_t loom_operand_flags_t;
 
+// Semantic role of an operand field independent of its author-facing name.
+enum loom_operand_role_e {
+  // Operand has no special cross-op semantic role.
+  LOOM_OPERAND_ROLE_NONE = 0,
+  // Operand controls a branch or region transfer.
+  LOOM_OPERAND_ROLE_CONTROL_CONDITION = 1,
+  // Operand selects between value payloads.
+  LOOM_OPERAND_ROLE_SELECT_CONDITION = 2,
+  // Operand is one arm of a value-selecting operation.
+  LOOM_OPERAND_ROLE_SELECT_PAYLOAD = 3,
+  // Operand is broadcast into every element of a composite result.
+  LOOM_OPERAND_ROLE_BROADCAST_SOURCE = 4,
+  // Operand contributes one logical element to a composite result.
+  LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT = 5,
+  // Operand is widened by a floating-point precision extension.
+  LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE = 6,
+};
+typedef uint8_t loom_operand_role_t;
+
+enum loom_operand_role_mask_bits_e {
+  LOOM_OPERAND_ROLE_MASK_CONTROL_CONDITION =
+      1u << LOOM_OPERAND_ROLE_CONTROL_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION =
+      1u << LOOM_OPERAND_ROLE_SELECT_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD = 1u
+                                          << LOOM_OPERAND_ROLE_SELECT_PAYLOAD,
+  LOOM_OPERAND_ROLE_MASK_BROADCAST_SOURCE =
+      1u << LOOM_OPERAND_ROLE_BROADCAST_SOURCE,
+  LOOM_OPERAND_ROLE_MASK_COMPOSITE_ELEMENT =
+      1u << LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT,
+  LOOM_OPERAND_ROLE_MASK_FLOAT_EXTENSION_SOURCE =
+      1u << LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE,
+};
+typedef uint8_t loom_operand_role_mask_t;
+
+static inline loom_operand_role_mask_t loom_operand_role_mask_bit(
+    loom_operand_role_t role) {
+  return role == LOOM_OPERAND_ROLE_NONE || role >= 8
+             ? 0
+             : (loom_operand_role_mask_t)(1u << role);
+}
+
 enum loom_result_flag_bits_e {
   LOOM_RESULT_VARIADIC = 1u << 0,
   LOOM_RESULT_ALLOCATES = 1u << 1,
@@ -758,6 +800,9 @@ enum loom_region_flag_bits_e {
   // This is a region signature contract, not a property of the generic buffer
   // type.
   LOOM_REGION_GLOBAL_BUFFER_ARGS = 1u << 3,
+  // Scalar entry block arguments are identical across the workgroup. This is
+  // a region signature contract and does not apply to nested region arguments.
+  LOOM_REGION_WORKGROUP_UNIFORM_ARGS = 1u << 4,
 };
 typedef uint8_t loom_region_flags_t;
 
@@ -773,6 +818,8 @@ typedef struct loom_operand_descriptor_t {
   loom_operand_ownership_effect_t ownership_effect;
   // Carrier mode for the operand ownership action.
   loom_ownership_carrier_t ownership_carrier;
+  // Semantic role of this operand field.
+  loom_operand_role_t role;
 } loom_operand_descriptor_t;
 
 static_assert(sizeof(loom_operand_descriptor_t) == 16,
@@ -1009,6 +1056,12 @@ loom_value_slice_t loom_op_operand_field_span(const loom_op_vtable_t* vtable,
 bool loom_op_operand_field_present(const loom_op_vtable_t* vtable,
                                    const loom_op_t* op, uint8_t field_index);
 
+// Resolves an author-facing result field to its flat result span. For
+// variadic result fields the returned span covers the trailing variadic tail.
+loom_value_slice_t loom_op_result_field_span(const loom_op_vtable_t* vtable,
+                                             const loom_op_t* op,
+                                             uint8_t field_index);
+
 // Maps a flat operand index back to the operand descriptor that owns it.
 // Returns false if the index is out of range or the op kind has no descriptor
 // metadata.
@@ -1016,6 +1069,32 @@ bool loom_op_operand_descriptor_at(
     const loom_op_vtable_t* vtable, const loom_op_t* op, uint16_t operand_index,
     const loom_operand_descriptor_t** out_descriptor, uint8_t* out_field_index,
     uint16_t* out_element_index);
+
+// Returns the semantic role for a flat operand index, or
+// LOOM_OPERAND_ROLE_NONE when the op has no descriptor metadata or the operand
+// has no declared role.
+loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
+                                            const loom_op_t* op,
+                                            uint16_t operand_index);
+
+// Returns the semantic role for a flat operand index using the op's module
+// vtable, or LOOM_OPERAND_ROLE_NONE when unavailable.
+loom_operand_role_t loom_op_operand_role(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         uint16_t operand_index);
+
+// Returns true when the op operand at |operand_index| has |role|.
+bool loom_op_operand_has_role(const loom_module_t* module, const loom_op_t* op,
+                              uint16_t operand_index, loom_operand_role_t role);
+
+// Returns the first operand value with |role|, if present.
+bool loom_op_first_operand_with_role(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     loom_operand_role_t role,
+                                     loom_value_id_t* out_value_id);
+
+// Returns true when |op| defines |value_id| as one of its results.
+bool loom_op_defines_value(const loom_op_t* op, loom_value_id_t value_id);
 
 // Binding kind for BindingList format elements.
 typedef enum loom_binding_kind_e {
@@ -1040,8 +1119,7 @@ static inline loom_value_t* loom_op_operand_value(const loom_module_t* module,
                                                   uint16_t index) {
   IREE_ASSERT(index < op->operand_count);
   loom_value_id_t value_id = loom_op_operands(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Resolves an op's result value ID to the value struct in the module's
@@ -1055,8 +1133,7 @@ static inline loom_value_t* loom_op_result_value(const loom_module_t* module,
                                                  uint16_t index) {
   IREE_ASSERT(index < op->result_count);
   loom_value_id_t value_id = loom_op_results(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Returns a pointer to the single use entry if the value has exactly
@@ -1421,9 +1498,10 @@ bool loom_region_branch_region_yield_only_operands(
 //===----------------------------------------------------------------------===//
 
 // Returns true if |access| refers to a valid memory-access op. All accessor
-// helpers below tolerate a NULL vtable and return safe defaults.
+// helpers below tolerate a NULL op vtable and return safe defaults.
 static inline bool loom_memory_access_isa(loom_memory_access_t access) {
-  return access.op != NULL;
+  return access.op != NULL && access.op_vtable != NULL &&
+         access.op_vtable->memory_access != NULL;
 }
 
 // Casts |op| to loom_memory_access_t if it implements the MemoryAccess
@@ -1432,6 +1510,15 @@ static inline bool loom_memory_access_isa(loom_memory_access_t access) {
 // loom_memory_access_isa().
 loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
                                              const loom_op_t* op);
+
+// Returns the memory operation family represented by the op shape.
+loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
+    loom_memory_access_t access);
+
+// Returns true when the operand at |operand_index| is a written value,
+// compare-exchange expected value, or compare-exchange replacement value.
+bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
+                                                 uint16_t operand_index);
 
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);

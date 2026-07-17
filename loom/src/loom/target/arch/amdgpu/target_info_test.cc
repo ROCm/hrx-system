@@ -72,9 +72,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx11Processor) {
   EXPECT_EQ(processor->wavefront.default_size, 32u);
   ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
                          8, 4, kRdna3DescriptorFlags);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
@@ -90,9 +92,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
             LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
@@ -171,6 +175,27 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetDelayAluOpcodesMatchRdnaFamilies) {
   }
 }
 
+TEST(AmdgpuTargetInfoTest, DescriptorSetVopdSupportMatchesPacketFamilies) {
+  const struct {
+    uint16_t descriptor_set_ordinal;
+    bool supports_vopd;
+  } cases[] = {
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4, false},
+  };
+  for (const auto& c : cases) {
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
+        loom_amdgpu_target_info_descriptor_set_at(c.descriptor_set_ordinal);
+    ASSERT_NE(descriptor_set, nullptr);
+    EXPECT_EQ(loom_amdgpu_descriptor_set_info_supports_vopd(descriptor_set),
+              c.supports_vopd);
+  }
+}
+
 TEST(AmdgpuTargetInfoTest, LooksUpGfx942Processor) {
   const loom_amdgpu_processor_info_t* processor = nullptr;
   IREE_ASSERT_OK(
@@ -189,7 +214,8 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx942Processor) {
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
@@ -207,7 +233,31 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
+}
+
+TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
+  struct Case {
+    iree_string_view_t processor_name;
+    loom_amdgpu_matrix_feature_profile_t expected_matrix_profile;
+    bool supports_hsaco;
+  };
+  static const Case cases[] = {
+      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
+      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
+      {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
+  };
+  for (const Case& c : cases) {
+    const loom_amdgpu_processor_info_t* processor = nullptr;
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
+    ASSERT_NE(processor, nullptr);
+    EXPECT_EQ(processor->features.matrix, c.expected_matrix_profile)
+        << std::string(c.processor_name.data, c.processor_name.size);
+    EXPECT_EQ(loom_amdgpu_processor_supports_hsaco(processor), c.supports_hsaco)
+        << std::string(c.processor_name.data, c.processor_name.size);
+  }
 }
 
 TEST(AmdgpuTargetInfoTest, WavefrontSizeSupportMatchesGfxFamilies) {
@@ -348,9 +398,11 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1170Processor) {
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
             LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
@@ -362,12 +414,13 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
   EXPECT_EQ(processor->descriptor_set.ordinal,
             LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE);
   ExpectSchedulingBits(
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, ParsesAmdhsaTargetIdWithFeatureSuffix) {

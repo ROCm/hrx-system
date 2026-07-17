@@ -89,10 +89,13 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   uint32_t unit_end_point_start[] = {0};
   uint32_t unit_end_points[] = {8, 8};
+  uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_start;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
+                                                  edge_handoff_words};
 
   loom_low_placement_relation_range_t placement_ranges[] = {
       {
@@ -201,10 +204,13 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   uint32_t unit_end_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {6, 6};
+  uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
+                                                  edge_handoff_words};
 
   const uint32_t relation_indices_by_source[] = {0};
   loom_low_placement_relation_t relation = {};

@@ -34,7 +34,9 @@ static bool loom_contract_shape_is_valid(
     loom_contract_shape_t shape, loom_contract_shape_value_refs_t value_refs) {
   return loom_contract_shape_dimension_is_valid(shape.m, value_refs.m) &&
          loom_contract_shape_dimension_is_valid(shape.n, value_refs.n) &&
-         loom_contract_shape_dimension_is_valid(shape.k, value_refs.k);
+         loom_contract_shape_dimension_is_valid(shape.k, value_refs.k) &&
+         loom_contract_shape_dimension_is_valid(shape.block_count,
+                                                value_refs.block_count);
 }
 
 static bool loom_contract_k_group_size_is_valid(
@@ -156,6 +158,7 @@ loom_contract_plain_fragment_available_capability_flags(
 
 void loom_contract_request_initialize(loom_contract_request_t* out_request) {
   *out_request = (loom_contract_request_t){
+      .shape.block_count = 1,
       .policy = LOOM_LOWERING_POLICY_REFERENCE_ALLOWED,
   };
 }
@@ -257,6 +260,12 @@ bool loom_contract_numeric_type_from_scalar(
     case LOOM_SCALAR_TYPE_BF16:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF16;
       return true;
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP8;
+      return true;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF8;
+      return true;
     case LOOM_SCALAR_TYPE_F32:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
       return true;
@@ -293,6 +302,8 @@ iree_string_view_t loom_contract_numeric_type_name(
       return IREE_SV("bf16");
     case LOOM_CONTRACT_NUMERIC_F32:
       return IREE_SV("f32");
+    case LOOM_CONTRACT_NUMERIC_TF32:
+      return IREE_SV("tf32");
     case LOOM_CONTRACT_NUMERIC_F64:
       return IREE_SV("f64");
     case LOOM_CONTRACT_NUMERIC_FP8:
@@ -309,6 +320,22 @@ iree_string_view_t loom_contract_numeric_type_name(
     default:
       return IREE_SV("unknown");
   }
+}
+
+bool loom_contract_numeric_type_is_signed_integer(
+    loom_contract_numeric_type_t numeric_type) {
+  return numeric_type == LOOM_CONTRACT_NUMERIC_I4 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I8 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I16 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_I32;
+}
+
+bool loom_contract_numeric_type_is_unsigned_integer(
+    loom_contract_numeric_type_t numeric_type) {
+  return numeric_type == LOOM_CONTRACT_NUMERIC_U4 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U8 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U16 ||
+         numeric_type == LOOM_CONTRACT_NUMERIC_U32;
 }
 
 iree_string_view_t loom_contract_rejection_detail(

@@ -22,7 +22,6 @@
 #include "loom/ir/location.h"
 #include "loom/ir/types.h"
 #include "loom/ops/cache.h"
-#include "loom/target/arch/amdgpu/target_info.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,11 +38,6 @@ enum loom_amdgpu_system_memory_load_flag_bits_e {
   // Emits acquire ordering after the vector-memory load.
   LOOM_AMDGPU_SYSTEM_MEMORY_LOAD_FLAG_ACQUIRE = 1u << 0,
 };
-
-// Returns the vector-memory cache policy encoding for |descriptor_set|.
-loom_amdgpu_vector_memory_cache_policy_encoding_t
-loom_amdgpu_system_memory_cache_policy_encoding(
-    const loom_low_descriptor_set_t* descriptor_set);
 
 // Builds a 32-bit integer descriptor attr.
 iree_status_t loom_amdgpu_system_memory_build_u32_attr(

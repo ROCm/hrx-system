@@ -30,15 +30,6 @@ enum loom_amdgpu_runtime_requirement_bit_e {
 // Bitset of loom_amdgpu_runtime_requirement_bit_e values.
 typedef uint32_t loom_amdgpu_runtime_requirements_t;
 
-#define LOOM_AMDGPU_RUNTIME_REQUIREMENTS_KNOWN                                        \
-  ((loom_amdgpu_runtime_requirements_t)(LOOM_AMDGPU_RUNTIME_REQUIREMENT_FEEDBACK |    \
-                                        LOOM_AMDGPU_RUNTIME_REQUIREMENT_ASAN_SHADOW | \
-                                        LOOM_AMDGPU_RUNTIME_REQUIREMENT_TSAN_SHADOW))
-
-// Validates that all target runtime requirements are understood.
-iree_status_t loom_amdgpu_runtime_requirements_validate(
-    loom_amdgpu_runtime_requirements_t requirements);
-
 // Returns target runtime requirements implied by |options|.
 loom_amdgpu_runtime_requirements_t
 loom_amdgpu_runtime_requirements_from_target_pipeline_options(

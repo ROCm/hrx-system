@@ -24,5 +24,9 @@ add_custom_command(OUTPUT executable_srcs.stamp
 add_custom_target(executable_srcs
     DEPENDS executable_srcs.stamp
 )
+iree_register_generated_compile_input(executable_srcs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/executable_srcs.stamp"
+)
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

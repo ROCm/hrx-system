@@ -223,6 +223,27 @@ def _gfx1250_matrix_reuse_immediates() -> tuple[Immediate, ...]:
     )
 
 
+def _gfx1250_matrix_reuse_native_values() -> tuple[NativeAsmValue, ...]:
+    return tuple(
+        _native_amdgpu_named_flag_immediate(field_name)
+        for field_name in _GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS
+    )
+
+
+def _gfx1250_matrix_integer_control_immediates() -> tuple[Immediate, ...]:
+    return (
+        _encoded_immediate(_MATRIX_SIGN_SELECT_IMMEDIATE, "NEG"),
+        _encoded_immediate(_MATRIX_CLAMP_IMMEDIATE, "CLAMP"),
+    )
+
+
+def _gfx1250_matrix_integer_control_native_values() -> tuple[NativeAsmValue, ...]:
+    return (
+        _native_amdgpu_named_bit_list_immediate("neg_lo", 3),
+        _native_amdgpu_named_flag_immediate("clamp"),
+    )
+
+
 def _gfx1250_swmmac_index_immediate(field_name: str) -> Immediate:
     # gfx1250 SWMMAC index-key variants share encoding bit 11.
     return _encoded_immediate(
@@ -279,8 +300,15 @@ def _gfx1250_wmma_descriptor(
     has_reuse_immediates: bool,
 ) -> Descriptor:
     suffix = name.replace(".", "_")
-    immediates = _gfx1250_matrix_reuse_immediates() if has_reuse_immediates else ()
-    immediate_fields = (
+    has_integer_controls = name == "i32.16x16x64.iu8"
+    integer_immediates = (
+        _gfx1250_matrix_integer_control_immediates() if has_integer_controls else ()
+    )
+    reuse_immediates = (
+        _gfx1250_matrix_reuse_immediates() if has_reuse_immediates else ()
+    )
+    immediates = (*integer_immediates, *reuse_immediates)
+    immediate_fields = (("neg_lo", "clamp") if has_integer_controls else ()) + (
         _GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS if has_reuse_immediates else ()
     )
     return Descriptor(
@@ -305,6 +333,22 @@ def _gfx1250_wmma_descriptor(
             operands=("a", "b", "acc"),
             immediates=immediate_fields,
             named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("a"),
+                _native_operand("b"),
+                _native_operand("acc"),
+                *(
+                    _gfx1250_matrix_integer_control_native_values()
+                    if has_integer_controls
+                    else ()
+                ),
+                *(
+                    _gfx1250_matrix_reuse_native_values()
+                    if has_reuse_immediates
+                    else ()
+                ),
+            ),
         ),
         schedule_class=_SCHEDULE_WMMA,
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3P,
@@ -416,6 +460,11 @@ def _gfx1250_swmmac_descriptor(
     index_units: int,
 ) -> Descriptor:
     suffix = name.replace(".", "_")
+    has_integer_controls = name == "i32.16x16x128.iu8"
+    integer_immediates = (
+        _gfx1250_matrix_integer_control_immediates() if has_integer_controls else ()
+    )
+    integer_immediate_fields = ("neg_lo", "clamp") if has_integer_controls else ()
     return Descriptor(
         key=f"amdgpu.v_swmmac_{suffix}",
         mnemonic=f"v_swmmac_{suffix}",
@@ -429,6 +478,7 @@ def _gfx1250_swmmac_descriptor(
         ),
         immediates=(
             _gfx1250_swmmac_index_immediate(index_immediate),
+            *integer_immediates,
             *_gfx1250_matrix_reuse_immediates(),
         ),
         constraints=_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
@@ -438,8 +488,25 @@ def _gfx1250_swmmac_descriptor(
         asm_forms=_asm(
             results=("dst",),
             operands=("acc", "a", "b", "index"),
-            immediates=(index_immediate, *_GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS),
+            immediates=(
+                index_immediate,
+                *integer_immediate_fields,
+                *_GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS,
+            ),
             named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("a"),
+                _native_operand("b"),
+                _native_operand("index"),
+                _native_amdgpu_named_i64_immediate(index_immediate, name="index_key"),
+                *(
+                    _gfx1250_matrix_integer_control_native_values()
+                    if has_integer_controls
+                    else ()
+                ),
+                *_gfx1250_matrix_reuse_native_values(),
+            ),
         ),
         schedule_class=_SCHEDULE_SWMMAC,
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3P,

@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
@@ -17,7 +18,6 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 typedef enum loom_spirv_workgroup_plan_kind_e {
   LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA = 1,
@@ -49,7 +49,8 @@ typedef struct loom_spirv_workgroup_view_plan_t {
 } loom_spirv_workgroup_view_plan_t;
 
 static bool loom_spirv_workgroup_i64_is_power_of_two(int64_t value) {
-  return value > 0 && value <= UINT32_MAX && loom_is_power_of_two_i64(value);
+  return value > 0 && value <= UINT32_MAX &&
+         iree_math_is_power_of_two_i64(value);
 }
 
 static bool loom_spirv_workgroup_exact_positive_i64(loom_value_facts_t facts,
@@ -136,12 +137,13 @@ static bool loom_spirv_workgroup_view_root_is_alloca(
          loom_buffer_alloca_isa(loom_value_def_op(root));
 }
 
-static bool loom_spirv_workgroup_view_plan_from_source(
+static iree_status_t loom_spirv_workgroup_view_plan_from_source(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_spirv_workgroup_view_plan_t* out_plan) {
+    loom_spirv_workgroup_view_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_spirv_workgroup_view_plan_t){
       .dynamic_index_value_id = LOOM_VALUE_ID_INVALID,
   };
+  *out_selected = false;
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
@@ -149,28 +151,32 @@ static bool loom_spirv_workgroup_view_plan_from_source(
   loom_low_source_memory_access_plan_t source_plan = {0};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   const loom_vector_memory_cache_policy_t cache_policy = {0};
-  if (!loom_low_source_memory_access_plan_build_view(
-          module, fact_table, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, result,
-          cache_policy, &source_plan, &diagnostic)) {
-    return false;
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
+  if (!loom_low_source_memory_access_plan_build_view_with_view_regions(
+          module, fact_table, view_regions,
+          LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, result, cache_policy,
+          &source_plan, &diagnostic)) {
+    return iree_ok_status();
   }
   if (source_plan.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    return false;
+    return iree_ok_status();
   }
   if (!loom_spirv_workgroup_view_root_is_alloca(module,
                                                 source_plan.root_value_id)) {
-    return false;
+    return iree_ok_status();
   }
 
   loom_spirv_scalar_type_t scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
   const loom_type_t view_type = loom_module_value_type(module, result);
   if (!loom_spirv_workgroup_view_scalar_type(view_type, &scalar_type)) {
-    return false;
+    return iree_ok_status();
   }
   const loom_spirv_scalar_type_descriptor_t* scalar_descriptor =
       loom_spirv_scalar_type_descriptor(scalar_type);
   if (scalar_descriptor == NULL || (scalar_descriptor->bit_width % 8) != 0) {
-    return false;
+    return iree_ok_status();
   }
   const int64_t element_byte_count = scalar_descriptor->bit_width / 8;
   if (source_plan.element_byte_count != element_byte_count ||
@@ -178,12 +184,12 @@ static bool loom_spirv_workgroup_view_plan_from_source(
       source_plan.vector_lane_byte_stride != element_byte_count ||
       source_plan.static_byte_offset < 0 ||
       (source_plan.static_byte_offset % element_byte_count) != 0) {
-    return false;
+    return iree_ok_status();
   }
   const int64_t static_element_index =
       source_plan.static_byte_offset / element_byte_count;
   if (static_element_index > INT32_MAX || source_plan.dynamic_term_count > 1) {
-    return false;
+    return iree_ok_status();
   }
   if (source_plan.dynamic_term_count == 1) {
     const loom_low_source_memory_dynamic_term_t* term =
@@ -192,7 +198,7 @@ static bool loom_spirv_workgroup_view_plan_from_source(
         term->byte_stride != element_byte_count ||
         !loom_spirv_workgroup_source_index_type_supported(
             loom_module_value_type(module, term->index))) {
-      return false;
+      return iree_ok_status();
     }
     out_plan->dynamic_index_value_id = term->index;
   }
@@ -206,10 +212,11 @@ static bool loom_spirv_workgroup_view_plan_from_source(
       loom_spirv_ptr_workgroup_reg_class_id(scalar_type);
   out_plan->access_chain_descriptor_ref =
       loom_spirv_workgroup_access_chain_descriptor_ref(scalar_type);
-  return out_plan->array_pointer_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
-         out_plan->element_pointer_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
-         out_plan->access_chain_descriptor_ref !=
-             LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+  *out_selected =
+      out_plan->array_pointer_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+      out_plan->element_pointer_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+      out_plan->access_chain_descriptor_ref != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+  return iree_ok_status();
 }
 
 static bool loom_spirv_workgroup_view_has_workgroup_facts(
@@ -263,7 +270,10 @@ static iree_status_t loom_spirv_select_workgroup_view(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
   loom_spirv_workgroup_view_plan_t plan = {0};
-  if (!loom_spirv_workgroup_view_plan_from_source(context, source_op, &plan)) {
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_spirv_workgroup_view_plan_from_source(
+      context, source_op, &plan, &selected));
+  if (!selected) {
     if (loom_spirv_workgroup_view_has_workgroup_facts(context, source_op)) {
       return loom_spirv_workgroup_emit_rejected(
           context, source_op, IREE_SV("workgroup_view"),

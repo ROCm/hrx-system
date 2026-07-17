@@ -86,6 +86,7 @@ __all__ = [
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
+    "OperandRole",
     "Operand",
     "Result",
     "TiedResult",
@@ -229,6 +230,7 @@ __all__ = [
     "FuncLikeInterface",
     "LoopLikeInterface",
     "MemoryAccessInterface",
+    "MemoryAccessOperationKind",
     "RegionBranchInterface",
     "TargetLikeInterface",
     # Op declaration.
@@ -386,6 +388,19 @@ def type_constraint_name(constraint: TypeConstraint) -> str:
 # ============================================================================
 
 
+@unique
+class OperandRole(Enum):
+    """Semantic role of an operand field independent of its display name."""
+
+    NONE = "none"
+    CONTROL_CONDITION = "control_condition"
+    SELECT_CONDITION = "select_condition"
+    SELECT_PAYLOAD = "select_payload"
+    BROADCAST_SOURCE = "broadcast_source"
+    COMPOSITE_ELEMENT = "composite_element"
+    FLOAT_EXTENSION_SOURCE = "float_extension_source"
+
+
 @dataclass(frozen=True, slots=True)
 class Operand:
     """An SSA value operand (input to the op at runtime).
@@ -395,6 +410,7 @@ class Operand:
     doc: Human-readable description.
     variadic: If True, this is zero-or-more values (list[Value]).
     optional: If True, this operand may be absent.
+    role: Semantic role consumed by generic analyses.
     """
 
     name: str
@@ -402,6 +418,7 @@ class Operand:
     doc: str = ""
     variadic: bool = False
     optional: bool = False
+    role: OperandRole = OperandRole.NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -720,6 +737,9 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
+    arg_uniform_scope: Optional execution scope over which scalar entry block
+        arguments are identical. This is a region boundary contract rather
+        than a property inferred from argument types.
     """
 
     name: str
@@ -731,6 +751,7 @@ class RegionDef:
     implicit_args: tuple[tuple[str, str], ...] = ()
     arg_source: str | None = None
     buffer_arg_memory_space: str | None = None
+    arg_uniform_scope: str | None = None
 
 
 # ============================================================================
@@ -3454,6 +3475,18 @@ class RegionBranchInterface(NamedTuple):
 _DEFAULT_INTERFACE_FIELD = object()
 
 
+@unique
+class MemoryAccessOperationKind(Enum):
+    """Operation family represented by a MemoryAccess op shape."""
+
+    LOAD = "load"
+    STORE = "store"
+    PREFETCH = "prefetch"
+    ATOMIC_REDUCE = "atomic_reduce"
+    ATOMIC_RMW = "atomic_rmw"
+    ATOMIC_CMPXCHG = "atomic_cmpxchg"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class MemoryAccessInterface:
     """Interface for ops that access memory through a view-like operand.
@@ -3499,6 +3532,8 @@ class MemoryAccessInterface:
     atomic_failure_ordering: str | None = None
     # Atomic synchronization scope attr.
     atomic_scope: str | None = None
+    # Operation family represented by this op shape.
+    operation_kind: MemoryAccessOperationKind | None = None
     # Fields explicitly supplied by the op declaration author.
     _explicit_fields: frozenset[str] = frozenset()
 
@@ -3521,6 +3556,7 @@ class MemoryAccessInterface:
         atomic_success_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_failure_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_scope: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        operation_kind: MemoryAccessOperationKind | None = None,
     ) -> None:
         explicit_fields: set[str] = set()
 
@@ -3603,6 +3639,14 @@ class MemoryAccessInterface:
             "atomic_scope",
             _resolve("atomic_scope", atomic_scope, "scope"),
         )
+        if operation_kind is not None and not isinstance(
+            operation_kind, MemoryAccessOperationKind
+        ):
+            raise TypeError(
+                "MemoryAccessInterface field 'operation_kind': expected "
+                f"MemoryAccessOperationKind or None, got {operation_kind!r}"
+            )
+        object.__setattr__(self, "operation_kind", operation_kind)
         object.__setattr__(self, "_explicit_fields", frozenset(explicit_fields))
 
 
@@ -4135,6 +4179,7 @@ def cast_op(
     from_constraint: TypeConstraint,
     to_constraint: TypeConstraint,
     doc: str,
+    input_role: OperandRole = OperandRole.NONE,
     traits: list[Trait] | None = None,
     **kwargs: Any,
 ) -> Op:
@@ -4152,7 +4197,7 @@ def cast_op(
         name=name,
         group=group,
         doc=doc,
-        operands=[Operand("input", from_constraint)],
+        operands=[Operand("input", from_constraint, role=input_role)],
         results=[Result("result", to_constraint)],
         traits=op_traits,
         format=[

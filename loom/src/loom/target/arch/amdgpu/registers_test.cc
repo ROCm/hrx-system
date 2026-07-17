@@ -153,24 +153,32 @@ void ExpectOccupancyRegisterClass(const loom_amdgpu_occupancy_model_t* model,
       << ToString(expected_name);
   EXPECT_EQ(reg_class->allocation_granularity, expected_allocation_granularity)
       << ToString(expected_name);
-  ASSERT_EQ(reg_class->pressure_cliff_count, expected_cliff_count)
+  const loom_low_pressure_cliff_table_t* pressure_cliffs =
+      &model->pressure_model.register_class_cliffs;
+  const loom_low_pressure_cliff_range_t cliff_range =
+      loom_low_pressure_cliff_table_range(pressure_cliffs,
+                                          reg_class->descriptor_reg_class_id);
+  ASSERT_EQ(cliff_range.count, expected_cliff_count) << ToString(expected_name);
+  ASSERT_LE(cliff_range.start + cliff_range.count, pressure_cliffs->count)
       << ToString(expected_name);
-  ASSERT_NE(reg_class->pressure_cliffs, nullptr) << ToString(expected_name);
-  for (iree_host_size_t i = 0; i < reg_class->pressure_cliff_count; ++i) {
-    const loom_amdgpu_occupancy_pressure_cliff_model_t* cliff =
-        &reg_class->pressure_cliffs[i];
+  ASSERT_NE(cliff_range.count, 0u) << ToString(expected_name);
+  for (iree_host_size_t i = 0; i < cliff_range.count; ++i) {
+    const loom_low_pressure_cliff_t* cliff =
+        &pressure_cliffs->values[cliff_range.start + i];
+    EXPECT_EQ(cliff->pressure_source_id, reg_class->descriptor_reg_class_id)
+        << ToString(expected_name) << " cliff " << i;
     EXPECT_GT(cliff->tier_before, cliff->tier_after)
         << ToString(expected_name) << " cliff " << i;
     if (i > 0) {
-      const loom_amdgpu_occupancy_pressure_cliff_model_t* previous =
-          &reg_class->pressure_cliffs[i - 1];
+      const loom_low_pressure_cliff_t* previous =
+          &pressure_cliffs->values[cliff_range.start + i - 1];
       EXPECT_GT(cliff->cliff_units, previous->cliff_units)
           << ToString(expected_name) << " cliff " << i;
       EXPECT_EQ(cliff->tier_before, previous->tier_after)
           << ToString(expected_name) << " cliff " << i;
     }
   }
-  EXPECT_EQ(reg_class->pressure_cliffs[reg_class->pressure_cliff_count - 1]
+  EXPECT_EQ(pressure_cliffs->values[cliff_range.start + cliff_range.count - 1]
                 .tier_after,
             0u)
       << ToString(expected_name);
@@ -183,23 +191,35 @@ void ExpectOccupancyPressureResource(
     uint32_t expected_vgpr_contribution_granularity,
     uint16_t expected_agpr_index,
     uint32_t expected_agpr_contribution_granularity) {
-  ASSERT_LT(index, model->resource_count) << ToString(expected_name);
-  const loom_amdgpu_occupancy_resource_model_t* resource =
-      &model->resources[index];
-  EXPECT_EQ(ToString(resource->resource), ToString(expected_name));
+  const loom_low_pressure_resource_table_t* resource_table =
+      &model->pressure_model.resources;
+  ASSERT_LT(index, resource_table->resource_count) << ToString(expected_name);
+  ASSERT_LT(expected_vgpr_index, model->register_class_count);
+  ASSERT_LT(expected_agpr_index, model->register_class_count);
+  const loom_low_pressure_resource_t* resource =
+      &resource_table->resources[index];
+  EXPECT_EQ(ToString(resource->name), ToString(expected_name));
   EXPECT_EQ(resource->pool_units, expected_pool_units)
       << ToString(expected_name);
   EXPECT_EQ(resource->allocation_granularity, expected_allocation_granularity)
       << ToString(expected_name);
   ASSERT_EQ(resource->member_count, 2u) << ToString(expected_name);
-  EXPECT_EQ(resource->members[0].register_class_index, expected_vgpr_index)
+  const loom_low_pressure_resource_member_t* members =
+      &resource_table->members[resource->member_start];
+  EXPECT_EQ(members[0].resource_id, index) << ToString(expected_name);
+  EXPECT_EQ(
+      members[0].descriptor_reg_class_id,
+      model->register_classes[expected_vgpr_index].descriptor_reg_class_id)
       << ToString(expected_name);
-  EXPECT_EQ(resource->members[0].contribution_granularity,
+  EXPECT_EQ(members[0].contribution_granularity,
             expected_vgpr_contribution_granularity)
       << ToString(expected_name);
-  EXPECT_EQ(resource->members[1].register_class_index, expected_agpr_index)
+  EXPECT_EQ(members[1].resource_id, index) << ToString(expected_name);
+  EXPECT_EQ(
+      members[1].descriptor_reg_class_id,
+      model->register_classes[expected_agpr_index].descriptor_reg_class_id)
       << ToString(expected_name);
-  EXPECT_EQ(resource->members[1].contribution_granularity,
+  EXPECT_EQ(members[1].contribution_granularity,
             expected_agpr_contribution_granularity)
       << ToString(expected_name);
 }
@@ -441,9 +461,9 @@ TEST_F(AmdgpuRegistersTest, OccupancyPoolsStaySeparateFromAddressability) {
             c.descriptor_set_ordinal);
     ASSERT_NE(model, nullptr);
     EXPECT_EQ(model->descriptor_set_ordinal, c.descriptor_set_ordinal);
-    EXPECT_EQ(model->pressure_cliff_count, c.sgpr_pressure_cliff_count +
-                                               c.vgpr_pressure_cliff_count +
-                                               c.agpr_pressure_cliff_count);
+    EXPECT_EQ(model->pressure_model.register_class_cliffs.count,
+              c.sgpr_pressure_cliff_count + c.vgpr_pressure_cliff_count +
+                  c.agpr_pressure_cliff_count);
     ExpectOccupancyRegisterClass(
         model, 0, IREE_SV("amdgpu.sgpr"), c.sgpr_pool_units,
         c.sgpr_allocation_granularity, c.sgpr_pressure_cliff_count);
@@ -452,13 +472,13 @@ TEST_F(AmdgpuRegistersTest, OccupancyPoolsStaySeparateFromAddressability) {
         c.vgpr_allocation_granularity, c.vgpr_pressure_cliff_count);
     if (c.agpr_pool_units == 0) {
       EXPECT_EQ(model->register_class_count, 2u);
-      EXPECT_EQ(model->resource_count, 0u);
+      EXPECT_EQ(model->pressure_model.resources.resource_count, 0u);
     } else {
       ASSERT_EQ(model->register_class_count, 3u);
       ExpectOccupancyRegisterClass(
           model, 2, IREE_SV("amdgpu.agpr"), c.agpr_pool_units,
           c.agpr_allocation_granularity, c.agpr_pressure_cliff_count);
-      ASSERT_EQ(model->resource_count, 1u);
+      ASSERT_EQ(model->pressure_model.resources.resource_count, 1u);
       ExpectOccupancyPressureResource(
           model, 0, IREE_SV("amdgpu.vgpr_agpr"), c.combined_pool_units,
           c.combined_allocation_granularity, /*expected_vgpr_index=*/1,

@@ -11,19 +11,25 @@
 namespace loom {
 namespace {
 
-TEST(LowPlacementTest, ClassifiesAliasingCauses) {
+TEST(LowPlacementTest, ClassifiesEdgeCauses) {
   EXPECT_FALSE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN));
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));
   EXPECT_TRUE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT));
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH));
   EXPECT_TRUE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY));
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR));
   EXPECT_TRUE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE));
-  EXPECT_TRUE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));
-  EXPECT_TRUE(
-      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH));
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD));
+  EXPECT_FALSE(loom_low_placement_cause_is_edge(
+      LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY));
 }
 
 }  // namespace

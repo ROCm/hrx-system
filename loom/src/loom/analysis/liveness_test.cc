@@ -104,12 +104,35 @@ class LivenessTest : public ::testing::Test {
     return analysis;
   }
 
+  loom_liveness_analysis_t AnalyzeBodyRegionTree(loom_module_t* module,
+                                                 loom_func_like_t func) {
+    loom_local_value_domain_t value_domain = {};
+    IREE_CHECK_OK(loom_local_value_domain_acquire_for_region_tree(
+        module, loom_func_like_body(func), &analysis_arena_, &value_domain));
+    loom_liveness_analysis_t analysis;
+    IREE_CHECK_OK(loom_liveness_analyze_local_value_domain(
+        &value_domain, loom_liveness_order_empty(), &analysis_arena_,
+        &analysis));
+    loom_local_value_domain_release(&value_domain);
+    return analysis;
+  }
+
   static bool ContainsValue(const loom_value_id_t* values,
                             iree_host_size_t count, loom_value_id_t value) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       if (values[i] == value) return true;
     }
     return false;
+  }
+
+  static loom_value_ordinal_t FindValueOrdinal(
+      const loom_liveness_analysis_t& analysis, loom_value_id_t value_id) {
+    for (iree_host_size_t i = 0; i < analysis.value_count; ++i) {
+      if (analysis.value_ids[i] == value_id) {
+        return static_cast<loom_value_ordinal_t>(i);
+      }
+    }
+    return LOOM_VALUE_ORDINAL_INVALID;
   }
 
   static const loom_liveness_pressure_summary_t* FindRegisterPressure(
@@ -121,6 +144,19 @@ class LivenessTest : public ::testing::Test {
           summary->value_class.register_descriptor_set_stable_id ==
               descriptor_set_stable_id &&
           summary->value_class.register_class_id == class_id) {
+        return summary;
+      }
+    }
+    return nullptr;
+  }
+
+  static const loom_liveness_pressure_summary_t* FindScalarPressure(
+      const loom_liveness_analysis_t& analysis,
+      loom_scalar_type_t scalar_type) {
+    for (iree_host_size_t i = 0; i < analysis.pressure_summary_count; ++i) {
+      const auto* summary = &analysis.pressure_summaries[i];
+      if (summary->value_class.type_kind == LOOM_TYPE_SCALAR &&
+          summary->value_class.element_type == scalar_type) {
         return summary;
       }
     }
@@ -272,6 +308,30 @@ func.def @cfg_loop(%cond: i1, %x: i32) -> (i32) {
   EXPECT_TRUE(ContainsValue(loop.live_in_values, loop.live_in_count, args[1]));
   EXPECT_TRUE(ContainsValue(body.live_in_values, body.live_in_count, args[1]));
   EXPECT_EQ(exit.live_in_count, 1u);
+
+  const loom_value_id_t iter = loom_block_arg_id(loop.block, 0);
+  const loom_op_t* add = loom_block_const_op(body.block, 0);
+  const loom_value_id_t next = loom_op_const_results(add)[0];
+  const loom_liveness_segment_range_t iter_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, iter));
+  const loom_liveness_segment_range_t next_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, next));
+  const loom_liveness_segment_range_t invariant_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(iter_segments.count, 3u);
+  EXPECT_EQ(next_segments.count, 1u);
+  EXPECT_FALSE(loom_liveness_segment_ranges_overlap(&analysis, iter_segments,
+                                                    next_segments));
+  EXPECT_TRUE(loom_liveness_segment_ranges_overlap(
+      &analysis, invariant_segments, next_segments));
+
+  const loom_liveness_pressure_summary_t* pressure =
+      FindScalarPressure(analysis, LOOM_SCALAR_TYPE_I32);
+  ASSERT_NE(pressure, nullptr);
+  EXPECT_EQ(pressure->peak_live_units, 2u);
 }
 
 TEST_F(LivenessTest, OperandTypeReferencesKeepDynamicDimsLive) {
@@ -339,6 +399,29 @@ low.func.def target(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<
       loom_region_const_entry_block(loom_func_like_body(func));
   EXPECT_EQ(pressure->peak_op, loom_block_const_op(entry, 1));
   EXPECT_EQ(pressure->peak_point, 1u);
+}
+
+TEST_F(LivenessTest, RegionTreePressureIncludesNestedOperations) {
+  ModulePtr module = ParseModule(R"(
+func.def @region_tree_pressure(%input: tile<4xf32>) -> (tile<4xf32>) {
+  %mapped = test.map(%element = %input : tile<4xf32>) {
+    %neg0 = test.neg %element : f32
+    %neg1 = test.neg %neg0 : f32
+    test.yield %neg1 : f32
+  } -> (tile<4xf32>)
+  func.return %mapped : tile<4xf32>
+}
+)");
+  loom_func_like_t func =
+      FindFunction(module.get(), IREE_SV("region_tree_pressure"));
+  loom_liveness_analysis_t analysis = AnalyzeBodyRegionTree(module.get(), func);
+
+  EXPECT_TRUE(loom_liveness_analysis_includes_region_tree(&analysis));
+  const loom_liveness_pressure_summary_t* pressure =
+      FindScalarPressure(analysis, LOOM_SCALAR_TYPE_F32);
+  ASSERT_NE(pressure, nullptr);
+  EXPECT_GE(pressure->peak_live_units, 1u);
+  EXPECT_GE(pressure->peak_live_values, 1u);
 }
 
 TEST_F(LivenessTest, PressureBudgetReportsHighUnrolledRegisterUse) {

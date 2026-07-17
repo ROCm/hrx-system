@@ -704,10 +704,12 @@ LOOM_DEFINE_ISA(loom_scalar_copysignf_isa, LOOM_OP_SCALAR_COPYSIGNF)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_rhs, 1)
 LOOM_DEFINE_RESULT(loom_scalar_copysignf_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_copysignf_fastmath)
 iree_status_t loom_scalar_copysignf_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder, uint8_t instance_flags,
+    loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_scalar_copysignf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_copysignf_facts(
     loom_fact_context_t* context,
@@ -926,7 +928,7 @@ iree_status_t loom_scalar_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.sinturnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_sinturnsf_isa, LOOM_OP_SCALAR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_sinturnsf_input, 0)
@@ -942,7 +944,7 @@ iree_status_t loom_scalar_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.costurnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_costurnsf_isa, LOOM_OP_SCALAR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_costurnsf_input, 0)
@@ -1882,7 +1884,7 @@ iree_status_t loom_scalar_bitfield_extracts_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on integer payload results. Use index.assume for index or offset values.
+// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on scalar payload results. Use index.assume for index or offset values.
 // %n2 = scalar.assume %n [mul(%n, 16)] : i64
 LOOM_DEFINE_ISA(loom_scalar_assume_isa, LOOM_OP_SCALAR_ASSUME)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_scalar_assume_values, 0)

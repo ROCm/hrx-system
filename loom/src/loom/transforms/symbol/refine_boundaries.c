@@ -2848,7 +2848,8 @@ iree_status_t loom_refine_boundaries_run_with_options(
   uint32_t max_iterations = options && options->max_iterations > 0
                                 ? options->max_iterations
                                 : LOOM_REFINE_BOUNDARIES_DEFAULT_MAX_ITERATIONS;
-  const iree_host_size_t boundary_fact_value_capacity = module->values.capacity;
+  const iree_host_size_t boundary_fact_value_capacity =
+      loom_value_table_capacity(&module->values);
 
   iree_arena_allocator_t facts_arena_a;
   iree_arena_allocator_t facts_arena_b;

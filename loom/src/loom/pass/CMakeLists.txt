@@ -281,6 +281,7 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::pipeline::pass_requirements
     loom::codegen::low::transforms::allocation
+    loom::codegen::low::transforms::cfg_tuple_decomposition
     loom::codegen::low::transforms::dce
     loom::codegen::low::transforms::operand_forms
     loom::codegen::low::transforms::pipeline::source_to_low
@@ -297,6 +298,7 @@ loom_cc_library(
     loom::transforms::kernel::kernel_async_legality
     loom::transforms::kernel::kernel_resources
     loom::transforms::kernel::promote_private_fragments
+    loom::transforms::kernel::stage_loop_carried_fragments
     loom::transforms::loop::licm
     loom::transforms::loop::loop_fusion
     loom::transforms::math::legalize
@@ -308,6 +310,7 @@ loom_cc_library(
     loom::transforms::symbol::symbol_dce
     loom::transforms::symbol::template_selection
     loom::transforms::vector::memory_footprint
+    loom::transforms::vector::sink_single_use_reads
     loom::transforms::vector::to_scalar
     loom::transforms::view::linearize_view_accesses
   PUBLIC

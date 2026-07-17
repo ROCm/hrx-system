@@ -63,6 +63,8 @@ typedef struct loom_low_source_workload_pipeline_counters_t {
   iree_host_size_t allocation_coalesced_copy_count;
   // Number of low.copy ops left materialized by allocation.
   iree_host_size_t allocation_materialized_copy_count;
+  // Number of accepted allocation frames checked independently.
+  iree_host_size_t allocation_check_count;
 } loom_low_source_workload_pipeline_counters_t;
 
 // Runs the generated workload through source verification, source-to-low

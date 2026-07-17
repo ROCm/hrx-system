@@ -37,10 +37,21 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.matrix_contracts import (  # noqa: E402
     AMDGPU_MATRIX_CONTRACTS,
+    AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS,
     AmdgpuMatrixContract,
     AmdgpuMatrixPayload,
 )
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
+    AmdgpuMatrixFragmentLayout,
+    MatrixFragmentRoleLayout,
+    layout_roles,
+    role_has_contiguous_lane_xor1_columns,
+)
 from loom.target.low_descriptors import (  # noqa: E402
+    Immediate,
+    ImmediateFlag,
     Operand,
     target_relative_name,
 )
@@ -101,6 +112,11 @@ _SCALE_KIND_C_NAMES = {
     "scale16": "LOOM_AMDGPU_MATRIX_SCALE_16",
 }
 
+_SCALE_FORMAT_C_NAMES = {
+    "e8m0": "LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0",
+    "fp8_e4m3": "LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3",
+}
+
 _FLAG_C_NAMES = {
     "sparse": "LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE",
     "scaled": "LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED",
@@ -119,29 +135,34 @@ _SOURCE_REQUIREMENT_C_NAMES = {
     "fragment_layout": ("LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT"),
 }
 
+_MATRIX_ATTR_IMMEDIATE_FIELDS = frozenset(
+    (
+        "matrix_a_fmt",
+        "matrix_b_fmt",
+        "matrix_a_scale",
+        "matrix_b_scale",
+        "matrix_a_scale_fmt",
+        "matrix_b_scale_fmt",
+        "matrix_a_reuse",
+        "matrix_b_reuse",
+        "neg_lo",
+        "neg_hi",
+        "clamp",
+    )
+)
+
+_MATRIX_FLAG_REQUIRED_IMMEDIATE_FIELDS = {
+    "sign_select": frozenset(("neg_lo",)),
+    "clamp": frozenset(("clamp",)),
+}
+
 _FRAGMENT_LAYOUT_C_NAMES = {
     None: "LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN",
-    "rdna3_wmmar3_f32_16x16x16_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_F16"),
-    "rdna3_wmmar3_f32_16x16x16_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_BF16"),
-    "rdna3_wmmar3_f32_16x16x16_f16_w64": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_F16_W64"),
-    "rdna3_wmmar3_f32_16x16x16_bf16_w64": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_BF16_W64"),
-    "rdna3_wmmar3_f16_16x16x16_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F16_16X16X16_F16"),
-    "rdna3_wmmar3_bf16_16x16x16_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_BF16_16X16X16_BF16"),
-    "rdna3_wmmar3_f16_16x16x16_f16_w64": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F16_16X16X16_F16_W64"),
-    "rdna3_wmmar3_bf16_16x16x16_bf16_w64": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_BF16_16X16X16_BF16_W64"),
-    "rdna4_wmma_f16_16x16x16_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F16_16X16X16_F16"),
-    "rdna4_wmma_bf16_16x16x16_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_BF16_16X16X16_BF16"),
-    "rdna4_wmma_f16_16x16x32_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F16_16X16X32_F16"),
-    "rdna4_wmma_bf16_16x16x32_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_BF16_16X16X32_BF16"),
-    "rdna4_wmma_f32_16x16x16_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_F16"),
-    "rdna4_wmma_f32_16x16x16_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_BF16"),
-    "rdna4_wmma_f32_16x16x32_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X32_F16"),
-    "rdna4_wmma_f32_16x16x32_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X32_BF16"),
-    "rdna4_wmma_f32_16x16x4_f32": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X4_F32"),
-    "cdna_mfma_f32_16x16x16_f16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X16_F16"),
-    "cdna_mfma_f32_16x16x16_bf16": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X16_BF16"),
-    "cdna_mfma_f32_16x16x4_f32": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X4_F32"),
+    **{key: layout.c_kind for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items()},
 }
+
+_MATRIX_WAIT_RESULT_FAMILIES = frozenset(("mfma", "smfmac"))
+_MATRIX_WAIT_RESULT_REGISTER_COUNTS = frozenset((2, 4, 8, 16, 32))
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +211,19 @@ def _c_bitset(
     if not values:
         return "0"
     return " | ".join(c_names[value] for value in values)
+
+
+def _c_selector_bitset(
+    values: Sequence[str],
+    c_names: Mapping[str, str],
+    *,
+    field_name: str,
+    contract: AmdgpuMatrixContract,
+) -> str:
+    _validate_known_values(values, c_names, field_name=field_name, contract=contract)
+    if not values:
+        return "0"
+    return "(loom_amdgpu_matrix_scale_format_selector_bits_t)(" + " | ".join(f"(1u << {c_names[value]})" for value in values) + ")"
 
 
 def _contract_semantic_tag(contract: AmdgpuMatrixContract) -> str:
@@ -280,6 +314,36 @@ def _matrix_descriptor_shapes_by_key() -> dict[str, tuple[_MatrixDescriptorShape
     return {descriptor_key: tuple(sorted(shapes, key=_matrix_descriptor_shape_sort_key)) for descriptor_key, shapes in shapes_by_key.items()}
 
 
+def _matrix_descriptor_immediates_by_key() -> dict[str, tuple[Immediate, ...]]:
+    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
+    immediates_by_key: dict[str, list[Immediate]] = {}
+
+    def add_descriptor_immediates(
+        descriptor_key: str,
+        semantic_tag: str | None,
+        immediates: Iterable[Immediate],
+    ) -> None:
+        if semantic_tag is None or not semantic_tag.startswith("matrix.") or descriptor_key not in descriptor_ref_key_set:
+            return
+        immediates_by_key.setdefault(descriptor_key, []).extend(immediates)
+
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        for descriptor in descriptor_set.descriptors:
+            add_descriptor_immediates(descriptor.key, descriptor.semantic_tag, descriptor.immediates)
+
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        for overlay in overlays:
+            add_descriptor_immediates(overlay.descriptor_key, overlay.semantic_tag, overlay.immediates)
+
+    return {descriptor_key: tuple(immediates) for descriptor_key, immediates in immediates_by_key.items()}
+
+
 def _matrix_descriptor_shape_sort_key(
     shape: _MatrixDescriptorShape,
 ) -> tuple[int, int, int, int, bool, bool]:
@@ -362,6 +426,119 @@ def _validate_contract_descriptor_shape(
     )
 
 
+def _validate_contract_descriptor_immediates(
+    contract: AmdgpuMatrixContract,
+    descriptor_key: str,
+    *,
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> None:
+    immediates = descriptor_immediates_by_key.get(descriptor_key)
+    if immediates is None:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' references low descriptor '{descriptor_key}' without matrix immediate metadata")
+    immediate_fields = frozenset(immediate.field_name for immediate in immediates)
+    for flag, required_fields in _MATRIX_FLAG_REQUIRED_IMMEDIATE_FIELDS.items():
+        if flag not in contract.flags:
+            continue
+        missing_fields = required_fields - immediate_fields
+        if missing_fields:
+            missing_text = ", ".join(sorted(missing_fields))
+            raise ValueError(f"AMDGPU matrix contract '{contract.name}' selects low descriptor '{descriptor_key}' without required immediate field(s): {missing_text}")
+    for immediate in immediates:
+        if immediate.field_name in _MATRIX_ATTR_IMMEDIATE_FIELDS:
+            continue
+        if ImmediateFlag.DEFAULT_VALUE in immediate.flags:
+            continue
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' selects low descriptor '{descriptor_key}' with unmapped immediate '{immediate.field_name}'")
+
+
+def _validate_contract_wait_state_payload(contract: AmdgpuMatrixContract) -> None:
+    if contract.family not in _MATRIX_WAIT_RESULT_FAMILIES:
+        return
+    if contract.result.register_count in _MATRIX_WAIT_RESULT_REGISTER_COUNTS:
+        return
+    expected_counts = ", ".join(str(count) for count in sorted(_MATRIX_WAIT_RESULT_REGISTER_COUNTS))
+    raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unsupported wait-state result payload register count {contract.result.register_count}; expected one of {expected_counts}")
+
+
+def _contract_descriptor_key(
+    contract: AmdgpuMatrixContract,
+    *,
+    keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
+    descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> str | None:
+    descriptor_key = _resolve_contract_descriptor_key(
+        contract,
+        keys_by_semantic_tag=keys_by_semantic_tag,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+    )
+    if descriptor_key is None:
+        return None
+    _validate_contract_descriptor_shape(
+        contract,
+        descriptor_key,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+    )
+    _validate_contract_descriptor_immediates(
+        contract,
+        descriptor_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
+    )
+    return descriptor_key
+
+
+def _contract_descriptor_keys(
+    *,
+    keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
+    descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> tuple[str | None, ...]:
+    descriptor_keys: list[str | None] = []
+    seen_keys: dict[str, AmdgpuMatrixContract] = {}
+    for contract in AMDGPU_MATRIX_CONTRACTS:
+        descriptor_key = _contract_descriptor_key(
+            contract,
+            keys_by_semantic_tag=keys_by_semantic_tag,
+            descriptor_shapes_by_key=descriptor_shapes_by_key,
+            descriptor_immediates_by_key=descriptor_immediates_by_key,
+        )
+        descriptor_keys.append(descriptor_key)
+        if descriptor_key is None:
+            continue
+        signature = _contract_wait_state_signature(contract)
+        if signature is None:
+            continue
+        previous_contract = seen_keys.get(descriptor_key)
+        if previous_contract is not None:
+            previous_signature = _contract_wait_state_signature(previous_contract)
+            if previous_signature != signature:
+                raise ValueError(f"AMDGPU matrix contracts '{previous_contract.name}' and '{contract.name}' both map to low descriptor '{descriptor_key}' but have different wait-state signatures")
+            continue
+        seen_keys[descriptor_key] = contract
+    return tuple(descriptor_keys)
+
+
+def _contract_wait_state_signature(
+    contract: AmdgpuMatrixContract,
+) -> tuple[str, int] | None:
+    if contract.family not in _MATRIX_WAIT_RESULT_FAMILIES:
+        return None
+    return (contract.family, contract.result.register_count)
+
+
+def _contract_wait_state_ordinals_by_descriptor_ref(
+    descriptor_keys: Sequence[str | None],
+) -> list[int | None]:
+    contract_ordinals_by_descriptor_key: dict[str, int] = {}
+    for ordinal, (contract, descriptor_key) in enumerate(zip(AMDGPU_MATRIX_CONTRACTS, descriptor_keys, strict=True)):
+        if descriptor_key is None:
+            continue
+        if _contract_wait_state_signature(contract) is None:
+            continue
+        contract_ordinals_by_descriptor_key.setdefault(descriptor_key, ordinal)
+    return [contract_ordinals_by_descriptor_key.get(descriptor_key) for descriptor_key in amdgpu_descriptor_ref_keys()]
+
+
 def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
     numeric_type = _NUMERIC_TYPE_C_NAMES.get(payload.numeric_type)
     if numeric_type is None:
@@ -377,11 +554,65 @@ def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
     )
 
 
+def _validate_contract_fragment_layout(contract: AmdgpuMatrixContract) -> None:
+    if contract.fragment_layout is None:
+        if "sparse" in contract.flags:
+            raise ValueError(f"sparse AMDGPU matrix contract '{contract.name}' has no fragment layout")
+        return
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.get(contract.fragment_layout)
+    if layout is None:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unknown fragment layout '{contract.fragment_layout}'")
+    block_count, *layout_tile_shape = layout.tile_shape
+    if (block_count, *layout_tile_shape) != (
+        contract.block_count,
+        *contract.tile_shape,
+    ):
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' shape {contract.tile_shape} disagrees with fragment layout '{layout.key}' shape {layout.tile_shape}")
+    if contract.wave_size != "any" and int(contract.wave_size) != layout.wave_size:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' wave size {contract.wave_size} disagrees with fragment layout '{layout.key}' wave size {layout.wave_size}")
+    compressed_roles = tuple(role.role for role in layout_roles(layout) if role.reduction_group is not None)
+    if "sparse" in contract.flags:
+        reduction_group = layout.lhs.reduction_group
+        if compressed_roles != ("lhs",) or reduction_group is None or reduction_group.storage_element_count != 2 or reduction_group.logical_element_count != 4:
+            raise ValueError(f"sparse AMDGPU matrix contract '{contract.name}' uses fragment layout '{layout.key}' without an exact 2:4 LHS")
+    elif compressed_roles:
+        raise ValueError(f"dense AMDGPU matrix contract '{contract.name}' uses compressed fragment layout '{layout.key}'")
+    contract_payloads = (
+        contract.lhs,
+        contract.rhs,
+        contract.accumulator,
+        contract.result,
+    )
+    for contract_payload, role_layout in zip(contract_payloads, layout_roles(layout), strict=True):
+        element_bit_count = AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS.get(contract_payload.numeric_type)
+        if element_bit_count is None:
+            raise ValueError(f"AMDGPU matrix contract '{contract.name}' role '{role_layout.role}' uses fragment layout '{layout.key}' with unsupported numeric type '{contract_payload.numeric_type}'")
+        actual_payload = (
+            role_layout.register_count,
+            role_layout.payload_element_count,
+            role_layout.element_bit_count,
+        )
+        expected_payload = (
+            contract_payload.register_count,
+            contract_payload.element_count,
+            element_bit_count,
+        )
+        if actual_payload != expected_payload:
+            raise ValueError(f"AMDGPU matrix contract '{contract.name}' role '{role_layout.role}' payload {expected_payload} disagrees with fragment layout '{layout.key}' payload {actual_payload}")
+
+
+def _validate_contract_tile_shape(contract: AmdgpuMatrixContract) -> None:
+    tile_shape = (contract.block_count, *contract.tile_shape)
+    if any(count <= 0 or count > 0xFFFF for count in tile_shape):
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' has invalid tile shape {tile_shape}")
+
+
 def _contract_initializer(
     contract: AmdgpuMatrixContract,
     *,
     keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
     descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
 ) -> str:
     _validate_known_values(
         contract.features,
@@ -396,17 +627,27 @@ def _contract_initializer(
         field_name="source requirement",
         contract=contract,
     )
-    descriptor_key = _resolve_contract_descriptor_key(
+    _validate_known_values(
+        contract.implicit_scale_formats,
+        _SCALE_FORMAT_C_NAMES,
+        field_name="implicit scale format",
+        contract=contract,
+    )
+    if contract.implicit_scale_formats and "scale_formats" in contract.flags:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' cannot have both scale-format selector operands and implicit scale formats")
+    if contract.implicit_scale_formats and contract.scale_kind == "none":
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' cannot have implicit scale formats without scale operands")
+    if contract.scale_kind != "none" and "scale_formats" not in contract.flags and not contract.implicit_scale_formats:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' with scale operands must have selector operands or implicit scale formats")
+    _validate_contract_tile_shape(contract)
+    _validate_contract_wait_state_payload(contract)
+    _validate_contract_fragment_layout(contract)
+    descriptor_key = _contract_descriptor_key(
         contract,
         keys_by_semantic_tag=keys_by_semantic_tag,
         descriptor_shapes_by_key=descriptor_shapes_by_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
     )
-    if descriptor_key is not None:
-        _validate_contract_descriptor_shape(
-            contract,
-            descriptor_key,
-            descriptor_shapes_by_key=descriptor_shapes_by_key,
-        )
     low_descriptor_ref = "LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE" if descriptor_key is None else _descriptor_ref_constant_name(descriptor_key)
     family = _FAMILY_C_NAMES.get(contract.family)
     if family is None:
@@ -420,6 +661,12 @@ def _contract_initializer(
     fragment_layout = _FRAGMENT_LAYOUT_C_NAMES.get(contract.fragment_layout)
     if fragment_layout is None:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unknown fragment layout '{contract.fragment_layout}'")
+    implicit_scale_format_selector_bits = _c_selector_bitset(
+        contract.implicit_scale_formats,
+        _SCALE_FORMAT_C_NAMES,
+        field_name="implicit scale format",
+        contract=contract,
+    )
     result_row_count, result_column_count, reduction_count = contract.tile_shape
     return "\n".join(
         [
@@ -433,6 +680,7 @@ def _contract_initializer(
             f"    .flags = {_c_bitset(contract.flags, _FLAG_C_NAMES, field_name='flag', contract=contract)},",
             f"    .source_requirement_flags = {_c_bitset(contract.source_requirements, _SOURCE_REQUIREMENT_C_NAMES, field_name='source requirement', contract=contract)},",
             "    .tile_shape = {",
+            f"        .block_count = {contract.block_count},",
             f"        .result_row_count = {result_row_count},",
             f"        .result_column_count = {result_column_count},",
             f"        .reduction_count = {reduction_count},",
@@ -442,6 +690,7 @@ def _contract_initializer(
             f"    .accumulator_payload = {_payload_initializer(contract.accumulator)},",
             f"    .result_payload = {_payload_initializer(contract.result)},",
             f"    .scale_kind = {scale_kind},",
+            f"    .implicit_scale_format_selector_bits = {implicit_scale_format_selector_bits},",
             f"    .fragment_layout_kind = {fragment_layout},",
             "},",
         ]
@@ -472,6 +721,8 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_contract_descriptor_t",
         "    kLoomAmdgpuMatrixContractDescriptors[];",
         "extern const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount;",
+        "extern const uint16_t",
+        "    kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[];",
         "",
         "#ifdef __cplusplus",
         '}  // extern "C"',
@@ -482,9 +733,111 @@ def _emit_header() -> str:
     return "\n".join(lines) + "\n"
 
 
+_ROLE_C_NAMES = {
+    "lhs": "LOOM_CONTRACT_OPERAND_ROLE_LHS",
+    "rhs": "LOOM_CONTRACT_OPERAND_ROLE_RHS",
+    "accumulator": "LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR",
+    "result": "LOOM_CONTRACT_OPERAND_ROLE_RESULT",
+}
+
+_AXIS_C_NAMES = (
+    "LOOM_MATRIX_FRAGMENT_AXIS_BLOCK",
+    "LOOM_MATRIX_FRAGMENT_AXIS_ROW",
+    "LOOM_MATRIX_FRAGMENT_AXIS_COLUMN",
+    "LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION",
+)
+
+_COORDINATE_FLAG_C_NAMES = (
+    "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
+    "LOOM_MATRIX_FRAGMENT_COORDINATE_ROW",
+    "LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN",
+    "LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION",
+)
+
+_CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME = "LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS"
+
+
+def _fragment_role_initializer(
+    layout: AmdgpuMatrixFragmentLayout,
+    role: MatrixFragmentRoleLayout,
+) -> list[str]:
+    coordinate_flags = " | ".join(flag_name for flag_name, axis in zip(_COORDINATE_FLAG_C_NAMES, role.axes, strict=True) if axis is not None)
+    flags = _CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME if role_has_contiguous_lane_xor1_columns(layout, role) else "0"
+    lines = [
+        "{",
+        f"    .role = {_ROLE_C_NAMES[role.role]},",
+        f"    .register_count = {role.register_count},",
+        f"    .element_bit_count = {role.element_bit_count},",
+        f"    .payload_element_count = {role.payload_element_count},",
+        f"    .coordinate_element_offset = {role.coordinate_element_offset},",
+        f"    .coordinate_element_stride = {role.coordinate_element_stride},",
+        f"    .flags = {flags},",
+        f"    .coordinate_flags = {coordinate_flags},",
+    ]
+    if role.reduction_group is not None:
+        lines.extend(
+            [
+                "    .reduction_group = {",
+                f"        .storage_element_count = {role.reduction_group.storage_element_count},",
+                f"        .logical_element_count = {role.reduction_group.logical_element_count},",
+                "    },",
+            ]
+        )
+    lines.append("    .axes = {")
+    for axis_name, axis in zip(_AXIS_C_NAMES, role.axes, strict=True):
+        if axis is None:
+            continue
+        lines.extend(
+            [
+                f"        [{axis_name}] = {{",
+                f"            .outer_count = {axis.outer_count},",
+                f"            .thread_count = {axis.thread_count},",
+                f"            .thread_stride = {axis.thread_stride},",
+                f"            .element_count = {axis.element_count},",
+                "        },",
+            ]
+        )
+    lines.extend(["    },", "},"])
+    return lines
+
+
+def _fragment_layout_initializer(
+    layout: AmdgpuMatrixFragmentLayout,
+) -> list[str]:
+    block_count, row_count, column_count, reduction_count = layout.tile_shape
+    lines = [
+        f"[{layout.c_kind}] = {{",
+        f"    .kind = {layout.c_kind},",
+        f'    .name = IREE_SVL("{layout.name}"),',
+        f"    .wave_size = {layout.wave_size},",
+        "    .tile_shape = {",
+        f"        .block_count = {block_count},",
+        f"        .result_row_count = {row_count},",
+        f"        .result_column_count = {column_count},",
+        f"        .reduction_count = {reduction_count},",
+        "    },",
+    ]
+    for field_name, role in zip(
+        ("lhs", "rhs", "accumulator", "result"),
+        layout_roles(layout),
+        strict=True,
+    ):
+        role_lines = _fragment_role_initializer(layout, role)
+        lines.append(f"    .{field_name} = {role_lines[0]}")
+        lines.extend(f"    {line}" for line in role_lines[1:])
+    lines.append("},")
+    return lines
+
+
 def _emit_source(*, public_header: str) -> str:
     keys_by_semantic_tag = _matrix_descriptor_keys_by_semantic_tag()
     descriptor_shapes_by_key = _matrix_descriptor_shapes_by_key()
+    descriptor_immediates_by_key = _matrix_descriptor_immediates_by_key()
+    descriptor_keys = _contract_descriptor_keys(
+        keys_by_semantic_tag=keys_by_semantic_tag,
+        descriptor_shapes_by_key=descriptor_shapes_by_key,
+        descriptor_immediates_by_key=descriptor_immediates_by_key,
+    )
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -496,14 +849,26 @@ def _emit_source(*, public_header: str) -> str:
         "",
         f'#include "{public_header}"',
         "",
-        "const loom_amdgpu_matrix_contract_descriptor_t",
-        "    kLoomAmdgpuMatrixContractDescriptors[] = {",
+        "const loom_amdgpu_matrix_fragment_layout_t",
+        "    kLoomAmdgpuMatrixFragmentLayouts[",
+        "        LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT] = {",
     ]
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        lines.extend(_fragment_layout_initializer(layout))
+    lines.extend(
+        [
+            "};",
+            "",
+            "const loom_amdgpu_matrix_contract_descriptor_t",
+            "    kLoomAmdgpuMatrixContractDescriptors[] = {",
+        ]
+    )
     lines.extend(
         _contract_initializer(
             contract,
             keys_by_semantic_tag=keys_by_semantic_tag,
             descriptor_shapes_by_key=descriptor_shapes_by_key,
+            descriptor_immediates_by_key=descriptor_immediates_by_key,
         )
         for contract in AMDGPU_MATRIX_CONTRACTS
     )
@@ -513,8 +878,16 @@ def _emit_source(*, public_header: str) -> str:
             "",
             "const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount =",
             "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors);",
+            "",
+            "const uint16_t kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[] = {",
         ]
     )
+    for contract_ordinal in _contract_wait_state_ordinals_by_descriptor_ref(descriptor_keys):
+        if contract_ordinal is None:
+            lines.append("    UINT16_MAX,")
+        else:
+            lines.append(f"    UINT16_C({contract_ordinal}),")
+    lines.append("};")
     return "\n".join(lines) + "\n"
 
 

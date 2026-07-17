@@ -212,10 +212,9 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_scan_plan(
   if (mode_rule == NULL) {
     return iree_ok_status();
   }
+  uint32_t identity_bits = 0;
   if (loom_amdgpu_scan_mode_requires_identity(mode_rule)) {
-    uint32_t unused_identity_bits = 0;
-    if (!loom_amdgpu_collective_combine_identity_bits(kind,
-                                                      &unused_identity_bits)) {
+    if (!loom_amdgpu_collective_combine_identity_bits(kind, &identity_bits)) {
       return iree_ok_status();
     }
   }
@@ -228,10 +227,8 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_scan_plan(
   }
 
   uint32_t wavefront_size = 0;
-  bool full_wave_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_full_wave_direct_subgroup_width(
-      context, &wavefront_size, &full_wave_selected));
-  if (!full_wave_selected ||
+  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
+                                                          &wavefront_size) ||
       !loom_amdgpu_subgroup_full_wave_workgroups(
           module, loom_low_lower_context_source_function(context),
           loom_low_lower_context_bundle(context), wavefront_size)) {
@@ -267,9 +264,9 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_scan_plan(
   out_plan->result = loom_kernel_subgroup_scan_result(source_op);
   out_plan->payload_kind = payload_kind;
   out_plan->register_count = register_count;
-  out_plan->kind = kind;
   out_plan->mode = mode_rule->subgroup_mode;
   out_plan->direction = direction_rule->subgroup_direction;
+  out_plan->identity_bits = identity_bits;
   out_plan->wavefront_size = wavefront_size;
   out_plan->active_lane_count = wavefront_size;
   *out_selected = true;
@@ -309,10 +306,9 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_scan_plan(
   if (mode_rule == NULL) {
     return iree_ok_status();
   }
+  uint32_t identity_bits = 0;
   if (loom_amdgpu_scan_mode_requires_identity(mode_rule)) {
-    uint32_t unused_identity_bits = 0;
-    if (!loom_amdgpu_collective_combine_identity_bits(kind,
-                                                      &unused_identity_bits)) {
+    if (!loom_amdgpu_collective_combine_identity_bits(kind, &identity_bits)) {
       return iree_ok_status();
     }
   }
@@ -325,10 +321,7 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_scan_plan(
   }
 
   uint32_t wavefront_size = 0;
-  bool wavefront_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_subgroup_wavefront_size(
-      context, &wavefront_size, &wavefront_selected));
-  if (!wavefront_selected) {
+  if (!loom_amdgpu_select_subgroup_wavefront_size(context, &wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -371,10 +364,8 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_scan_plan(
     return iree_ok_status();
   }
 
-  if (loom_amdgpu_scan_mode_requires_identity(mode_rule) || is_multi_wave) {
-    uint32_t unused_identity_bits = 0;
-    if (!loom_amdgpu_collective_combine_identity_bits(kind,
-                                                      &unused_identity_bits)) {
+  if (is_multi_wave && !loom_amdgpu_scan_mode_requires_identity(mode_rule)) {
+    if (!loom_amdgpu_collective_combine_identity_bits(kind, &identity_bits)) {
       return iree_ok_status();
     }
   }
@@ -419,9 +410,9 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_scan_plan(
   out_plan->result = loom_kernel_workgroup_scan_result(source_op);
   out_plan->payload_kind = payload_kind;
   out_plan->register_count = register_count;
-  out_plan->kind = kind;
   out_plan->mode = mode_rule->subgroup_mode;
   out_plan->direction = direction_rule->subgroup_direction;
+  out_plan->identity_bits = identity_bits;
   out_plan->wavefront_size = wavefront_size;
   out_plan->flat_workgroup_size = shape.flat_workgroup_size;
   *out_selected = true;
@@ -657,14 +648,9 @@ static iree_status_t loom_amdgpu_emit_subgroup_scan_tree(
 
   loom_value_id_t exclusive_byte_offset = LOOM_VALUE_ID_INVALID;
   loom_value_id_t exclusive_guard = LOOM_VALUE_ID_INVALID;
-  uint32_t identity_bits = 0;
   const bool is_exclusive =
       plan->mode == LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE;
   if (is_exclusive) {
-    const bool has_identity = loom_amdgpu_collective_combine_identity_bits(
-        plan->kind, &identity_bits);
-    IREE_ASSERT(has_identity,
-                "AMDGPU exclusive subgroup scan requires identity bits");
     exclusive_byte_offset = source_byte_offsets[0];
     exclusive_guard = guards[0];
   } else if (plan->mode != LOOM_KERNEL_SUBGROUP_SCAN_MODE_INCLUSIVE) {
@@ -680,7 +666,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_scan_tree(
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
           context, source_op, &plan->bpermute_descriptor,
-          source_byte_offsets[step_index], accumulator, lane_type, &peer));
+          source_byte_offsets[step_index], /*static_byte_offset=*/0,
+          accumulator, lane_type, &peer));
       loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
@@ -695,17 +682,18 @@ static iree_status_t loom_amdgpu_emit_subgroup_scan_tree(
         loom_value_id_t identity = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-            identity_bits, lane_type, &identity));
+            plan->identity_bits, lane_type, &identity));
         accumulator = identity;
       } else {
         loom_value_id_t shifted = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
             context, source_op, &plan->bpermute_descriptor,
-            exclusive_byte_offset, accumulator, lane_type, &shifted));
+            exclusive_byte_offset, /*static_byte_offset=*/0, accumulator,
+            lane_type, &shifted));
         loom_value_id_t identity = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-            identity_bits, lane_type, &identity));
+            plan->identity_bits, lane_type, &identity));
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_scan_select(
             context, source_op, &plan->select_descriptor, identity, shifted,
             exclusive_guard, lane_type, &accumulator));
@@ -761,9 +749,9 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_scan(
       .result = plan->result,
       .payload_kind = plan->payload_kind,
       .register_count = plan->register_count,
-      .kind = plan->kind,
       .mode = plan->mode,
       .direction = plan->direction,
+      .identity_bits = plan->identity_bits,
       .wavefront_size = plan->wavefront_size,
       .active_lane_count = plan->flat_workgroup_size,
   };
@@ -864,9 +852,9 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_scan(
       .result = plan->result,
       .payload_kind = plan->payload_kind,
       .register_count = register_count,
-      .kind = plan->kind,
       .mode = plan->mode,
       .direction = plan->direction,
+      .identity_bits = plan->identity_bits,
       .wavefront_size = plan->wavefront_size,
       .active_lane_count = plan->wavefront_size,
   };
@@ -955,15 +943,10 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_scan(
           wavefront_size_value, mask_type, &prefix_wave_guard));
     }
 
-    uint32_t identity_bits = 0;
-    const bool has_identity = loom_amdgpu_collective_combine_identity_bits(
-        plan->kind, &identity_bits);
-    IREE_ASSERT(has_identity,
-                "AMDGPU workgroup scan prefix requires identity bits");
     loom_value_id_t identity = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, identity_bits,
-        lane_type, &identity));
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+        plan->identity_bits, lane_type, &identity));
 
     loom_value_id_t zero_byte_offset = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
@@ -1045,9 +1028,9 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_scan(
       .result = plan->result,
       .payload_kind = plan->payload_kind,
       .register_count = register_count,
-      .kind = plan->kind,
       .mode = LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE,
       .direction = plan->direction,
+      .identity_bits = plan->identity_bits,
       .wavefront_size = plan->wavefront_size,
       .active_lane_count = wave_count,
   };
@@ -1140,9 +1123,7 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_workgroup_scan(
                                            IREE_SV("workgroup_scan.direction"));
   }
 
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_wavefront_size(bundle, &wavefront_size));
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(bundle);
   if (!loom_amdgpu_wavefront_size_is_valid(wavefront_size)) {
     return loom_amdgpu_low_legality_reject(
         context, op, IREE_SV("workgroup_scan.wavefront_size"));
@@ -1267,9 +1248,7 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_scan(
                                            IREE_SV("subgroup_scan.direction"));
   }
 
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_wavefront_size(bundle, &wavefront_size));
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(bundle);
   if (!loom_amdgpu_wavefront_size_is_valid(wavefront_size)) {
     return loom_amdgpu_low_legality_reject(
         context, op, IREE_SV("subgroup_scan.wavefront_size"));

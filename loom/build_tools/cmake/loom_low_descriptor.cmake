@@ -119,6 +119,7 @@ function(loom_target_table_cc_library)
         "${_HEADER}"
     )
     iree_register_generated_compile_input("${_GEN_TARGET}")
+    iree_generated_output_add_consumer("${_HEADER}" "${_GEN_TARGET}")
     loom_cc_library(
       NAME
         ${_RULE_NAME}
@@ -170,7 +171,12 @@ function(loom_target_table_cc_library)
       "${_HEADER}"
       ${_GENERATED_HDRS}
   )
-  iree_register_generated_compile_input("${_GEN_TARGET}")
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS
+      "${_SOURCE}"
+      "${_HEADER}"
+      ${_GENERATED_HDRS}
+  )
 
   loom_cc_library(
     NAME

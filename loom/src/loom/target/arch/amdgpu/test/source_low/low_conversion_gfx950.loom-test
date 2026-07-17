@@ -1,0 +1,21 @@
+// RUN: emit amdgpu-assembly @gfx950_scalef32_packed8_conversions waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target(@target) @gfx950_scalef32_packed8_conversions(%fp8: reg<amdgpu.vgpr>, %bf8: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+  %f16_fp8 = v_cvt_scalef32_pk_f16_fp8 %fp8, %scale
+  %f16_bf8 = v_cvt_scalef32_pk_f16_bf8 %bf8, %scale
+  %bf16_fp8 = v_cvt_scalef32_pk_bf16_fp8 %fp8, %scale
+  %bf16_bf8 = v_cvt_scalef32_pk_bf16_bf8 %bf8, %scale
+  %f32_fp8 = v_cvt_scalef32_pk_f32_fp8 %fp8, %scale
+  %f32_bf8 = v_cvt_scalef32_pk_f32_bf8 %bf8, %scale
+  return
+}
+
+// ----
+  v_cvt_scalef32_pk_f16_fp8 v3, v0, v2
+  v_cvt_scalef32_pk_f16_bf8 v3, v1, v2
+  v_cvt_scalef32_pk_bf16_fp8 v3, v0, v2
+  v_cvt_scalef32_pk_f32_fp8 v[4:5], v0, v2
+  v_cvt_scalef32_pk_bf16_bf8 v0, v1, v2
+  v_cvt_scalef32_pk_f32_bf8 v[0:1], v1, v2
+  s_endpgm

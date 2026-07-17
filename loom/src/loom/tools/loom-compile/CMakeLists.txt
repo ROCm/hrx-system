@@ -60,9 +60,9 @@ loom_cc_binary(
     loom::ops::kernel
     loom::ops::op_defs
     loom::sanitizer::options
-    loom::target::artifact_manifest
     loom::target::entry_selection
     loom::target::low_descriptor_registry
+    loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
     loom::tooling::config
@@ -102,6 +102,13 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=::loom-compile"
   DATA
+    "report_carried_loop_memory_economics_amdgpu.loom"
+    "report_complex_loop_memory_economics_amdgpu.loom"
+    "report_dispatch_memory_economics_amdgpu.loom"
+    "report_loop_matrix_mix_amdgpu.loom"
+    "report_loop_memory_economics_amdgpu.loom"
+    "report_materialized_fragment_spills_amdgpu.loom"
+    "report_private_memory_mix_amdgpu.loom"
     "selected_root_amdgpu.loom"
   LABELS
     "hostonly"

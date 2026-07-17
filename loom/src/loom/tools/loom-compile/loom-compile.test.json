@@ -21,6 +21,19 @@
             "whole-module snapshots",
             ".entries.rows[]",
             "post-run slicing",
+            "target_capability_rows.rows[]",
+            "matrix_fp8_native_kind",
+            ".schedule_band_summary_rows.rows[]",
+            "dynamic_instruction_mix",
+            "max_band_node_count",
+            ".wait_reason_summary_rows.rows[]",
+            ".wait_action_rows.rows[]",
+            "group_by",
+            "full_drains",
+            "semantic_tag",
+            "Matrix-family schedule evidence",
+            "rounding=finite_only",
+            "fp8_packed_bf16_decode_repair_zero_subnormal",
             "jq -r"
           ]
         }
@@ -50,8 +63,7 @@
             "save": "{tmp}/compile_report.json",
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
@@ -104,8 +116,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
@@ -134,8 +145,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ],
             "not_contains": [
               "no_provider"
@@ -275,8 +285,7 @@
           "stdout": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           }
         }
@@ -309,10 +318,10 @@
           },
           "stdout": {
             "contains": [
-              "\"status\":\"FAILED_PRECONDITION\""
+              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
             ],
             "not_contains": [
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "stderr": {

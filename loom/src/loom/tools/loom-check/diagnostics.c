@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "loom/error/renderer.h"
-#include "loom/util/json.h"
 #include "loom/util/stream.h"
 
 //===----------------------------------------------------------------------===//
@@ -628,30 +627,6 @@ static loom_check_source_range_t loom_check_annotation_delete_range(
   return range;
 }
 
-static iree_status_t loom_check_append_annotation_edit_json(
-    loom_check_result_t* result, loom_check_update_edit_kind_t kind,
-    loom_check_source_range_t range, iree_host_size_t target_line,
-    iree_string_view_t text) {
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(&result->annotation_edits.json, &stream);
-  if (result->annotation_edits.count > 0) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\n"));
-  }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "\"kind\": "));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      &stream, loom_check_update_edit_kind_name(kind)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      ", \"range\": {\"start_byte\": %zu, \"end_byte\": %zu}, "
-      "\"target_line\": %zu, \"text\": ",
-      range.start_byte, range.end_byte, target_line));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(&stream, text));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}"));
-  ++result->annotation_edits.count;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_check_append_annotation_param_matches(
     const loom_check_annotation_t* annotation, iree_string_builder_t* builder) {
   if (annotation->param_match_count == 0) {
@@ -709,7 +684,7 @@ static iree_status_t loom_check_build_annotation_edits(
     const loom_check_annotation_t* annotation = &annotations[a];
     loom_check_source_range_t delete_range =
         loom_check_annotation_delete_range(test_case, annotation);
-    IREE_RETURN_IF_ERROR(loom_check_append_annotation_edit_json(
+    IREE_RETURN_IF_ERROR(loom_check_result_append_annotation_edit(
         result, LOOM_CHECK_UPDATE_EDIT_DELETE_DIAGNOSTIC_ANNOTATION,
         delete_range, annotation->target_line, iree_string_view_empty()));
   }
@@ -747,7 +722,7 @@ static iree_status_t loom_check_build_annotation_edits(
       --line_offset;
     }
     if (iree_status_is_ok(status)) {
-      status = loom_check_append_annotation_edit_json(
+      status = loom_check_result_append_annotation_edit(
           result, LOOM_CHECK_UPDATE_EDIT_INSERT_DIAGNOSTIC_ANNOTATIONS,
           insert_range, diagnostic->origin_line,
           iree_string_builder_view(&text));

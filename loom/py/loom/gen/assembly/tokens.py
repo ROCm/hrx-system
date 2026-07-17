@@ -73,6 +73,7 @@ KEYWORD_MAP: dict[str, str] = {
     "ordinal": "LOOM_KW_ORDINAL",
     "linkage": "LOOM_KW_LINKAGE",
     "workgroup_size": "LOOM_KW_WORKGROUP_SIZE",
+    "workgroup_count": "LOOM_KW_WORKGROUP_COUNT",
     "from": "LOOM_KW_FROM",
     "axes": "LOOM_KW_AXES",
     "config": "LOOM_KW_CONFIG",
@@ -85,6 +86,7 @@ KEYWORD_MAP: dict[str, str] = {
     "unroll": "LOOM_KW_UNROLL",
     "name": "LOOM_KW_NAME",
     "align": "LOOM_KW_ALIGN",
+    "blocks": "LOOM_KW_BLOCKS",
 }
 
 # Maps Region(..., syntax=...) names to C parser/printer selector IDs. The

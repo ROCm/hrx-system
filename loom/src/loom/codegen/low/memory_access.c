@@ -109,22 +109,21 @@ bool loom_low_memory_access_summaries_may_alias(
   return true;
 }
 
+bool loom_low_memory_access_write_subsumes_access(
+    const loom_low_memory_access_summary_t* write_summary,
+    const loom_low_memory_access_summary_t* access_summary) {
+  (void)write_summary;
+  (void)access_summary;
+  // Conservative access summaries prove aliasing, not full overwrite. Keeping
+  // earlier effects live is required for generated stack spill traffic where
+  // adjacent scratch stores may target unrelated slots but only carry
+  // descriptor-level stack-space precision.
+  return false;
+}
+
 bool loom_low_memory_access_write_subsumes_read(
     const loom_low_memory_access_summary_t* write_summary,
     const loom_low_memory_access_summary_t* read_summary) {
-  if (!loom_low_memory_access_summaries_may_alias(write_summary,
-                                                  read_summary)) {
-    return false;
-  }
-  const loom_low_memory_access_precision_flags_t identity_precision =
-      LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
-      LOOM_LOW_MEMORY_ACCESS_PRECISION_GROUP |
-      LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL |
-      LOOM_LOW_MEMORY_ACCESS_PRECISION_EXACT_LANES;
-  if (iree_any_bit_set(write_summary->precision_flags, identity_precision) ||
-      iree_any_bit_set(read_summary->precision_flags, identity_precision)) {
-    return false;
-  }
-  return write_summary->memory_space == LOOM_LOW_MEMORY_SPACE_GENERIC ||
-         write_summary->memory_space == read_summary->memory_space;
+  return loom_low_memory_access_write_subsumes_access(write_summary,
+                                                      read_summary);
 }

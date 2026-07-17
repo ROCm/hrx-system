@@ -106,6 +106,29 @@ TEST(VectorFragmentFactsTest, PayloadRoundTripsThroughValueFacts) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(VectorFragmentFactsTest, ShapeAccessorsDistinguishBlockedFragments) {
+  loom_vector_fragment_fact_t fact;
+  loom_vector_fragment_fact_initialize(&fact);
+  fact.role_flags = loom_vector_fragment_role_flag(LOOM_VECTOR_ROLE_LHS);
+  fact.shape_rank = 2;
+  fact.shape_value_ids[0] = 12;
+  fact.shape_value_ids[1] = 34;
+
+  EXPECT_TRUE(loom_vector_fragment_fact_has_matrix_shape(fact));
+  EXPECT_EQ(loom_vector_fragment_fact_block_value(fact), LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(loom_vector_fragment_fact_row_value(fact), 12u);
+  EXPECT_EQ(loom_vector_fragment_fact_column_value(fact), 34u);
+
+  fact.shape_rank = 3;
+  fact.shape_value_ids[0] = 4;
+  fact.shape_value_ids[1] = 16;
+  fact.shape_value_ids[2] = 8;
+  EXPECT_TRUE(loom_vector_fragment_fact_has_matrix_shape(fact));
+  EXPECT_EQ(loom_vector_fragment_fact_block_value(fact), 4u);
+  EXPECT_EQ(loom_vector_fragment_fact_row_value(fact), 16u);
+  EXPECT_EQ(loom_vector_fragment_fact_column_value(fact), 8u);
+}
+
 TEST_F(VectorFragmentTest, ParameterViewResolveMapsSchemaAndAuxiliaryKeys) {
   loom_value_id_t parameter_values[] = {12, 34, 56};
   loom_named_attr_t parameter_names[] = {

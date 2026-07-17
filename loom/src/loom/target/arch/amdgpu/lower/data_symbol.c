@@ -40,11 +40,7 @@ iree_status_t loom_amdgpu_build_data_symbol_address(
     loom_value_id_t* out_low_address) {
   IREE_ASSERT_ARGUMENT(out_low_address);
   *out_low_address = LOOM_VALUE_ID_INVALID;
-  if (target.byte_offset > INT64_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU data-symbol byte offset exceeds int64_t attribute range");
-  }
+  IREE_ASSERT_LE(target.byte_offset, INT64_MAX);
 
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(

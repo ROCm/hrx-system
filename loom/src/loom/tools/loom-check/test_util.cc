@@ -110,7 +110,9 @@ std::string LoomCheckHarness::DetailString(
 
 std::string LoomCheckHarness::DiagnosticJsonString(
     const loom_check_result_t& result) const {
-  return StringBuilderToString(result.diagnostic_json);
+  const iree_string_view_t json =
+      loom_json_value_list_body(&result.diagnostics);
+  return std::string(json.data, json.size);
 }
 
 }  // namespace loom::testing

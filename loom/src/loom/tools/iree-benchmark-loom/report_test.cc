@@ -48,6 +48,23 @@ static void ExpectObjectValueEquals(iree_string_view_t object,
   EXPECT_TRUE(iree_string_view_equal(LookupObject(object, key), expected));
 }
 
+static void ExpectStatusObject(iree_string_view_t status,
+                               iree_status_code_t expected_code,
+                               iree_string_view_t expected_message) {
+  std::string code = std::to_string(static_cast<uint32_t>(expected_code));
+  ExpectObjectValueEquals(status, IREE_SV("code"),
+                          iree_make_cstring_view(code.c_str()));
+  ExpectObjectValueEquals(
+      status, IREE_SV("name"),
+      iree_make_cstring_view(iree_status_code_string(expected_code)));
+  if (iree_string_view_is_empty(expected_message)) {
+    EXPECT_TRUE(
+        iree_string_view_is_empty(TryLookupObject(status, IREE_SV("message"))));
+  } else {
+    ExpectObjectValueEquals(status, IREE_SV("message"), expected_message);
+  }
+}
+
 static bool JsonArrayContainsString(iree_string_view_t array,
                                     iree_string_view_t expected) {
   iree_host_size_t count = 0;
@@ -68,24 +85,17 @@ TEST(BenchmarkReportTest, WritesStatusFieldJson) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
 
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "{"));
-  bool first_field = true;
+  loom_json_object_writer_t object;
+  IREE_ASSERT_OK(loom_json_object_begin(&stream, &object));
   IREE_ASSERT_OK(iree_benchmark_loom_write_status_field_json(
-      IREE_STATUS_UNAVAILABLE, IREE_SV("profile decode failed"), &stream,
-      &first_field));
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "}"));
+      IREE_STATUS_UNAVAILABLE, IREE_SV("profile decode failed"), &object));
+  IREE_ASSERT_OK(loom_json_object_end(&object));
 
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  std::string expected_code =
-      std::to_string(static_cast<uint32_t>(IREE_STATUS_UNAVAILABLE));
-  EXPECT_TRUE(
-      iree_string_view_equal(LookupObject(status, IREE_SV("code")),
-                             iree_make_cstring_view(expected_code.c_str())));
-  ExpectObjectValueEquals(status, IREE_SV("name"), IREE_SV("UNAVAILABLE"));
-  ExpectObjectValueEquals(status, IREE_SV("message"),
-                          IREE_SV("profile decode failed"));
+  ExpectStatusObject(status, IREE_STATUS_UNAVAILABLE,
+                     IREE_SV("profile decode failed"));
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -96,19 +106,16 @@ TEST(BenchmarkReportTest, OmitsEmptyStatusCodeMessage) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
 
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "{"));
-  bool first_field = true;
+  loom_json_object_writer_t object;
+  IREE_ASSERT_OK(loom_json_object_begin(&stream, &object));
   IREE_ASSERT_OK(iree_benchmark_loom_write_status_field_json(
-      IREE_STATUS_UNAVAILABLE, iree_string_view_empty(), &stream,
-      &first_field));
-  IREE_ASSERT_OK(loom_output_stream_write_cstring(&stream, "}"));
+      IREE_STATUS_UNAVAILABLE, iree_string_view_empty(), &object));
+  IREE_ASSERT_OK(loom_json_object_end(&object));
 
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  ExpectObjectValueEquals(status, IREE_SV("name"), IREE_SV("UNAVAILABLE"));
-  EXPECT_TRUE(
-      iree_string_view_is_empty(TryLookupObject(status, IREE_SV("message"))));
+  ExpectStatusObject(status, IREE_STATUS_UNAVAILABLE, iree_string_view_empty());
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -133,15 +140,8 @@ TEST(BenchmarkReportTest, WritesHalProfileErrorWithStatusCodeFields) {
   iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
   iree_string_view_t status = LookupObject(root, IREE_SV("status"));
-  std::string expected_code =
-      std::to_string(static_cast<uint32_t>(IREE_STATUS_RESOURCE_EXHAUSTED));
-  EXPECT_TRUE(
-      iree_string_view_equal(LookupObject(status, IREE_SV("code")),
-                             iree_make_cstring_view(expected_code.c_str())));
-  ExpectObjectValueEquals(status, IREE_SV("name"),
-                          IREE_SV("RESOURCE_EXHAUSTED"));
-  ExpectObjectValueEquals(status, IREE_SV("message"),
-                          IREE_SV("profile collection failed"));
+  ExpectStatusObject(status, IREE_STATUS_RESOURCE_EXHAUSTED,
+                     IREE_SV("profile collection failed"));
 
   iree_string_builder_deinitialize(&builder);
 }
@@ -162,6 +162,17 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   report->target_family_name = IREE_SV("amdgpu");
   report->target_key = IREE_SV("gfx1100");
   report->function_name = IREE_SV("candidate_kernel");
+  const loom_target_compile_report_target_capability_row_t capability_row = {
+      /*.function_name=*/report->function_name,
+      /*.target_family_name=*/report->target_family_name,
+      /*.namespace_name=*/IREE_SV("amdgpu"),
+      /*.key=*/IREE_SV("matrix_feature_profile"),
+      /*.value_kind=*/LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING,
+      /*.value_u64=*/0,
+      /*.value_string=*/IREE_SV("wmma-gfx11"),
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
+      report, &capability_row));
   loom_target_compile_report_record_status(report, IREE_STATUS_OK);
   loom_target_compile_report_record_schedule(
       report, /*node_count=*/31, /*scheduled_node_count=*/29,
@@ -179,6 +190,10 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       /*materialized_copy_count=*/3, /*storage_lease_count=*/11,
       /*storage_lease_instance_count=*/9,
       /*storage_release_action_count=*/4);
+  loom_target_compile_report_record_allocation_materialization(
+      report, /*spill_storage_count=*/4, /*spill_storage_bytes=*/40,
+      /*spill_store_count=*/5, /*spill_store_bytes=*/50, /*reload_count=*/6,
+      /*reload_bytes=*/60);
   loom_target_compile_report_record_emission(report, /*instruction_count=*/37,
                                              /*code_byte_count=*/148,
                                              /*code_storage_byte_count=*/160);
@@ -237,6 +252,8 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       LookupObject(root, IREE_SV("compile_report"));
   ExpectObjectValueEquals(compile_report, IREE_SV("artifact_kind"),
                           IREE_SV("vm-archive"));
+  ExpectStatusObject(LookupObject(compile_report, IREE_SV("status")),
+                     IREE_STATUS_OK, iree_string_view_empty());
   ExpectObjectValueEquals(compile_report, IREE_SV("backend"),
                           IREE_SV("amdgpu-hal"));
   ExpectObjectValueEquals(compile_report, IREE_SV("target_family"),
@@ -260,6 +277,18 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   iree_string_view_t allocation =
       LookupObject(compile_report, IREE_SV("allocation"));
   ExpectObjectValueEquals(allocation, IREE_SV("spill_count"), IREE_SV("2"));
+  ExpectObjectValueEquals(
+      allocation, IREE_SV("materialized_spill_storage_count"), IREE_SV("4"));
+  ExpectObjectValueEquals(
+      allocation, IREE_SV("materialized_spill_storage_bytes"), IREE_SV("40"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_spill_store_count"),
+                          IREE_SV("5"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_spill_store_bytes"),
+                          IREE_SV("50"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_reload_count"),
+                          IREE_SV("6"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_reload_bytes"),
+                          IREE_SV("60"));
   ExpectObjectValueEquals(allocation, IREE_SV("storage_lease_count"),
                           IREE_SV("11"));
   ExpectObjectValueEquals(allocation, IREE_SV("storage_release_action_count"),
@@ -268,7 +297,20 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       LookupObject(compile_report, IREE_SV("emission"));
   ExpectObjectValueEquals(emission, IREE_SV("code_byte_count"), IREE_SV("148"));
   iree_string_view_t memory = LookupObject(compile_report, IREE_SV("memory"));
+  ExpectObjectValueEquals(memory, IREE_SV("private_bytes"), IREE_SV("64"));
   ExpectObjectValueEquals(memory, IREE_SV("local_bytes"), IREE_SV("256"));
+  iree_string_view_t capability_rows =
+      LookupObject(compile_report, IREE_SV("target_capability_rows"));
+  ExpectObjectValueEquals(capability_rows, IREE_SV("count"), IREE_SV("1"));
+  iree_string_view_t rows = LookupObject(capability_rows, IREE_SV("rows"));
+  iree_string_view_t first_capability_row = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_array_get(rows, 0, &first_capability_row));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("namespace"),
+                          IREE_SV("amdgpu"));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("key"),
+                          IREE_SV("matrix_feature_profile"));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("value_string"),
+                          IREE_SV("wmma-gfx11"));
 
   iree_string_builder_deinitialize(&builder);
   loom_run_compile_report_capture_deinitialize(&capture);
@@ -305,6 +347,10 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
   result.hal_benchmark.timing.operation_timing =
       result.hal_benchmark.timing.batch_timing;
   result.data_cache.populated = true;
+  result.data_cache.correctness_materialization =
+      IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE;
+  result.data_cache.measurement_materialization =
+      IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL;
   result.data_cache.binding_count = 2;
   result.data_cache.binding_ring_count = 6;
   result.data_cache.command_buffer_ring_count = 1;
@@ -368,6 +414,13 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(root, IREE_SV("artifact_manifest_path")),
       result.artifact_manifest_path));
+  iree_string_view_t data_cache = LookupObject(root, IREE_SV("data_cache"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(data_cache, IREE_SV("correctness_materialization")),
+      IREE_SV("host_visible")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(data_cache, IREE_SV("measurement_materialization")),
+      IREE_SV("device_local")));
 
   iree_string_view_t timing_interpretation =
       LookupObject(measurement, IREE_SV("timing_interpretation"));

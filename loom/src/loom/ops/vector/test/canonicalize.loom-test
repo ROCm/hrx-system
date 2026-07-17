@@ -1,5 +1,91 @@
 // RUN: pass canonicalize
 
+// Extension chains collapse to the final width.
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  %f32 = vector.extf %bf16 : vector<4xbf16> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+// ----
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+
+// ====
+
+// Truncating an exact extension collapses to the direct resize.
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  %bf16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+// ----
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+
+// ====
+
+// Truncating an extension back to the original type returns the source.
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  %f32 = vector.extf %x : vector<4xf16> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  func.return %x : vector<4xf16>
+}
+
+// ====
+
+// Casting a splat casts the scalar once and then splats the result.
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %splat = vector.splat %x : vector<4xbf16>
+  %wide = vector.extf %splat : vector<4xbf16> to vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+// ----
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %4 = scalar.extf %x : bf16 to f32
+  %wide = vector.splat %4 : vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+
+// ====
+
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %splat = vector.splat %x : vector<4xf32>
+  %narrow = vector.fptrunc %splat : vector<4xf32> to vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+// ----
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %4 = scalar.fptrunc %x : f32 to bf16
+  %narrow = vector.splat %4 : vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+
+// ====
+
+// Floating-point truncation chains must not collapse: double rounding can be
+// observably different from one direct truncation.
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+
+// ====
+
 // Zero-lane construction produces the empty aggregate even when the source
 // scalar is poison: no vector lane observes the operand.
 func.def @empty_splat_ignores_poison() -> (vector<0xf32>) {
@@ -393,6 +479,52 @@ func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f3
 
 // ====
 
+// Contracted product-add spellings become an explicit fused multiply-add.
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Addition is commutative, so the product can appear on either side.
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %addend, %product : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Exact add keeps the separately rounded product and addition.
+func.def @exact_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A shared product remains explicit instead of duplicating the multiply.
+func.def @shared_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %product, %r : vector<4xf32>, vector<4xf32>
+}
+
+// ====
+
 // Dotting zero lanes observes no vector lanes and returns the explicit init.
 func.def @empty_dotf(%lhs: vector<0xf32>, %rhs: vector<0xf32>, %init: f32) -> (f32) {
   %r = vector.dotf %lhs, %rhs, %init : vector<0xf32>, vector<0xf32>, f32
@@ -467,6 +599,92 @@ func.def @empty_store(%buffer: buffer, %offset: offset) {
 // ----
 func.def @empty_store(%buffer: buffer, %offset: offset) {
   func.return
+}
+
+// ====
+
+// Zero-lane masked loads also have no footprint; their result is empty
+// regardless of inactive-lane passthrough.
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.empty : vector<0xi1>
+  %old = vector.empty : vector<0xf32>
+  %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<0xi1>, vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// Zero-lane scatters erase completely even though the address form carries
+// per-lane offsets.
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xf32>
+  vector.scatter %value, %view[0][%offsets] : vector<0xf32>, view<16xf32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane atomic RMWs produce the unique empty result and no memory update.
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+
+// ====
+
+// Zero-lane atomic reductions erase completely.
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane compare-exchange has no compare payload lanes and returns empty.
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %expected = vector.empty : vector<0xi32>
+  %replacement = vector.empty : vector<0xi32>
+  %r = vector.atomic.cmpxchg %expected, %replacement, %view[0][%offsets] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex> -> vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
 }
 
 // ====

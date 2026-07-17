@@ -84,71 +84,14 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
   return traits;
 }
 
-static bool loom_low_descriptor_result_has_unary_constraint(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t result_index,
-    loom_low_constraint_kind_t kind) {
-  if (result_index >= descriptor->result_count) return false;
-  for (uint16_t i = 0; i < descriptor->constraint_count; ++i) {
-    const loom_low_constraint_t* constraint =
-        &descriptor_set->constraints[descriptor->constraint_start + i];
-    if (constraint->kind == kind &&
-        constraint->lhs_operand_index == result_index &&
-        constraint->rhs_operand_index == LOOM_LOW_ID_NONE) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_low_descriptor_effects_allow_rematerialization(
-    const loom_low_descriptor_t* descriptor) {
-  if (iree_any_bit_set(descriptor->flags,
-                       LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
-                           LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING)) {
-    return false;
-  }
-  return descriptor->effect_count == 0;
-}
-
-static bool loom_low_descriptor_state_allows_rematerialization(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t result_index) {
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const uint32_t operand_index = descriptor->operand_start + i;
-    IREE_ASSERT(operand_index < descriptor_set->operand_count);
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[operand_index];
-    const loom_low_operand_flags_t state_flags =
-        operand->flags &
-        (LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE);
-    if (state_flags == 0) continue;
-    if (iree_all_bits_set(operand->flags,
-                          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE)) {
-      continue;
-    }
-    if (state_flags != LOOM_LOW_OPERAND_FLAG_STATE_WRITE) return false;
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_RESULT || i != result_index) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool loom_low_descriptor_result_can_rematerialize(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t result_index) {
-  if (descriptor_set == NULL || descriptor == NULL) return false;
-  if (!iree_all_bits_set(descriptor->flags,
-                         LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE)) {
-    return false;
-  }
-  if (!loom_low_descriptor_result_has_unary_constraint(
-          descriptor_set, descriptor, result_index,
-          LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE)) {
-    return false;
-  }
-  return loom_low_descriptor_effects_allow_rematerialization(descriptor) &&
-         loom_low_descriptor_state_allows_rematerialization(
-             descriptor_set, descriptor, result_index);
+  IREE_ASSERT_ARGUMENT(descriptor_set);
+  IREE_ASSERT_ARGUMENT(descriptor);
+  if (result_index >= descriptor->result_count) return false;
+  const uint32_t operand_index = descriptor->operand_start + result_index;
+  IREE_ASSERT(operand_index < descriptor_set->operand_count);
+  return iree_any_bit_set(descriptor_set->operands[operand_index].flags,
+                          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE);
 }

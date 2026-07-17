@@ -44,29 +44,20 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
             options->hal_context->execution.runtime.device);
     context->execution_options.materializer.buffer_params =
         loom_run_hal_testbench_host_visible_buffer_params();
-    const loom_run_hal_testbench_actual_sequence_options_t sequence_options = {
-        .context = &options->hal_context->execution,
-        .session = options->session,
-        .target_environment =
-            options->hal_context->configuration->target_environment,
-        .filename = options->filename,
-        .source = options->source,
-        .pipeline = options->benchmark_options->pipeline,
-        .sanitizer = options->benchmark_options->sanitizer,
-        .config_set = options->hal_context->config_set,
-        .test_module = options->module_plan->module,
-        .case_plan = case_plan,
-        .sample_constant_ordinal = compile_item->case_sample_ordinal,
-        .has_sample_constant_ordinal = compile_item->has_case_sample_ordinal,
-    };
-    status = loom_run_hal_testbench_actual_sequence_initialize(
-        &sequence_options, &context->hal_sequence);
+    status = iree_benchmark_loom_hal_actual_sequence_initialize(
+        options->hal_context, options->session, options->filename,
+        options->source, options->benchmark_options->pipeline,
+        options->benchmark_options->sanitizer, options->module_plan->module,
+        case_plan, compile_item->sample_compilation,
+        compile_item->case_sample_ordinal,
+        compile_item->has_case_sample_ordinal, options->compile_report_options,
+        options->artifact_manifest_options, &context->hal_sequence);
   }
   if (iree_status_is_ok(status)) {
     context->hal_sequence_initialized = true;
-    context->execution_options.invocation.invoke_actual =
-        (loom_testbench_invocation_callback_t){
-            .fn = loom_run_hal_testbench_actual_sequence_invoke,
+    context->execution_options.invocation.actual =
+        (loom_testbench_invocation_provider_t){
+            .invoke = iree_benchmark_loom_hal_actual_sequence_invoke,
             .user_data = &context->hal_sequence,
         };
     iree_benchmark_loom_configure_reference_oracles(
@@ -79,9 +70,32 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
     status =
         iree_benchmark_loom_hal_actual_sequence_compile(&context->hal_sequence);
   }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < context->hal_sequence.provider_count;
+       ++i) {
+    status = iree_benchmark_loom_write_compiled_artifacts(
+        options->run, &selection->identity, &context->hal_sequence.providers[i],
+        options->host_allocator);
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < context->hal_sequence.provider_count;
+       ++i) {
+    status = iree_benchmark_loom_write_compile_report_artifact(
+        options->run, &selection->identity, selection->benchmark_plan,
+        case_plan, &context->hal_sequence.providers[i],
+        options->host_allocator);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_event_sink_emit_device(
         options->event_sink, options->run, options->hal_context);
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < context->hal_sequence.provider_count;
+       ++i) {
+    status = iree_benchmark_loom_event_sink_emit_compile(
+        options->event_sink, options->run, &selection->identity,
+        selection->benchmark_plan, case_plan,
+        &context->hal_sequence.providers[i]);
   }
   if (iree_status_is_ok(status)) {
     context->rejected_sequence_provider =
@@ -126,8 +140,8 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
         options->hal_context, options->session, options->filename,
         options->source, options->benchmark_options->pipeline,
         options->benchmark_options->sanitizer, options->module_plan->module,
-        actual_invocation, compile_item->sample_compilation, case_plan,
-        compile_item->case_sample_ordinal,
+        actual_invocation, compile_item->sample_compilation,
+        iree_string_view_empty(), case_plan, compile_item->case_sample_ordinal,
         compile_item->has_case_sample_ordinal, options->compile_report_options,
         options->artifact_manifest_options, &context->hal_provider);
   }
@@ -140,9 +154,9 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
             options->hal_context->execution.runtime.device);
     context->execution_options.materializer.buffer_params =
         loom_run_hal_testbench_host_visible_buffer_params();
-    context->execution_options.invocation.invoke_actual =
-        (loom_testbench_invocation_callback_t){
-            .fn = loom_run_hal_testbench_actual_invoke,
+    context->execution_options.invocation.actual =
+        (loom_testbench_invocation_provider_t){
+            .invoke = loom_run_hal_testbench_actual_invoke,
             .user_data = &context->hal_provider.execution,
         };
     iree_benchmark_loom_configure_reference_oracles(
@@ -208,7 +222,8 @@ iree_status_t iree_benchmark_loom_dispatch_compile_context_initialize(
 void iree_benchmark_loom_dispatch_compile_context_deinitialize(
     iree_benchmark_loom_dispatch_compile_context_t* context) {
   if (context->hal_sequence_initialized) {
-    loom_run_hal_testbench_actual_sequence_deinitialize(&context->hal_sequence);
+    iree_benchmark_loom_hal_actual_sequence_deinitialize(
+        &context->hal_sequence);
   }
   if (context->hal_provider_initialized) {
     iree_benchmark_loom_hal_actual_provider_deinitialize(
@@ -247,12 +262,12 @@ iree_status_t iree_benchmark_loom_prepare_dispatch_work_item(
   }
 
   if (compile_context->uses_sequence) {
-    const loom_run_hal_testbench_actual_provider_t* rejected_provider =
+    const iree_benchmark_loom_hal_actual_provider_t* rejected_provider =
         compile_context->rejected_sequence_provider;
     if (rejected_provider != NULL) {
       iree_benchmark_loom_benchmark_result_t benchmark_result = {0};
-      iree_benchmark_loom_benchmark_result_set_sequence_compile_rejection(
-          rejected_provider, work_item->sample_compilation, &benchmark_result);
+      iree_benchmark_loom_benchmark_result_set_compile_rejection(
+          rejected_provider, &benchmark_result);
       benchmark_result.has_sample_ordinal = true;
       benchmark_result.sample_ordinal = work_item->case_sample_ordinal;
       benchmark_result.samples_per_iteration = 1;

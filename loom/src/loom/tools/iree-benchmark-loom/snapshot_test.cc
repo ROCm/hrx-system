@@ -423,6 +423,24 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
       &capture_options, allocator, &capture));
   capture.report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  capture.report.detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX;
+  capture.report.dynamic_instruction_mix.memory_read_byte_count = 12;
+  capture.report.dynamic_instruction_mix.memory_write_byte_count = 4;
+  capture.report.dynamic_instruction_mix.global_load_count = 3;
+  capture.report.dynamic_instruction_mix.global_store_count = 1;
+  capture.report.workload.flags =
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+  capture.report.workload.workgroup_size = {4, 1, 1};
+  capture.report.workload.workgroup_count = {2, 1, 1};
+  capture.report.workload.flat_workgroup_size = 4;
+  capture.report.workload.dispatch_workgroup_count = 2;
+  capture.report.workload.dispatch_workitem_count = 8;
 
   iree_benchmark_loom_run_identity_t run = {};
   run.run_id = IREE_SV("run");
@@ -477,6 +495,27 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   iree_string_view_t artifact_kind =
       LookupObject(compile_report, IREE_SV("artifact_kind"));
   EXPECT_TRUE(iree_string_view_equal(artifact_kind, IREE_SV("vm-archive")));
+  iree_string_view_t economics =
+      LookupObject(compile_report, IREE_SV("economics"));
+  iree_string_view_t memory = LookupObject(economics, IREE_SV("memory"));
+  iree_string_view_t per_workitem_issued =
+      LookupObject(memory, IREE_SV("per_workitem_issued"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(per_workitem_issued, IREE_SV("read_bytes")), IREE_SV("12")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(per_workitem_issued, IREE_SV("write_bytes")), IREE_SV("4")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(per_workitem_issued, IREE_SV("global_load_count")),
+      IREE_SV("3")));
+  iree_string_view_t dispatch_issued =
+      LookupObject(memory, IREE_SV("dispatch_issued"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(dispatch_issued, IREE_SV("read_bytes")), IREE_SV("96")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(dispatch_issued, IREE_SV("write_bytes")), IREE_SV("32")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(dispatch_issued, IREE_SV("global_store_count")),
+      IREE_SV("8")));
 
   iree_string_builder_deinitialize(&output);
   loom_run_compile_report_capture_deinitialize(&capture);

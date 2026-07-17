@@ -1,0 +1,36 @@
+// RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_fixed_trip_matrix_loop(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = scf.for %k_tile = [%zero to %two step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=9 emitted_ops=7 rows=9
+COMPILE-REPORT: source_low_selection[0] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 selected_ops=1 emitted_ops=1 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=3 dynamic_emitted_ops=3
+COMPILE-REPORT: source_low_selection[1] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 selected_ops=1 emitted_ops=2 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=4
+COMPILE-REPORT: source_low_selection[2] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 selected_ops=1 emitted_ops=1 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
+COMPILE-REPORT: source_low[1] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule rule_set=4 rule=56 descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 emitted_ops=1 execution_count=3
+COMPILE-REPORT: source_low[7] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2 execution_count=2
+COMPILE-REPORT: source_low[8] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule rule_set=3 rule=65 descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 emitted_ops=1 execution_count=2

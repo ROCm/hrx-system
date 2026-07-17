@@ -11,7 +11,6 @@
 #include "iree/base/internal/math.h"
 #include "iree/base/internal/prng.h"
 #include "iree/tooling/numpy_io.h"
-#include "loom/util/math.h"
 
 enum {
   LOOM_TESTBENCH_MAX_SHAPE_RANK = 15,
@@ -695,8 +694,8 @@ static bool loom_testbench_iota_i64_value(int64_t offset, int64_t step,
     return false;
   }
   int64_t scaled_index = 0;
-  return loom_checked_mul_i64((int64_t)index, step, &scaled_index) &&
-         loom_checked_add_i64(offset, scaled_index, out_value);
+  return iree_checked_mul_i64((int64_t)index, step, &scaled_index) &&
+         iree_checked_add_i64(offset, scaled_index, out_value);
 }
 
 #define LOOM_TESTBENCH_FILL_INT_TYPED(mapping, c_type, min_value, max_value, \

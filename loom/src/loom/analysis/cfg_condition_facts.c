@@ -77,16 +77,16 @@ static iree_host_size_t loom_cfg_condition_intersect_relations(
 }
 
 static bool loom_cfg_condition_try_map_branch_arg_to_block_arg(
-    const loom_block_t* block, loom_value_slice_t branch_args,
-    loom_value_id_t value_id, loom_value_id_t* out_block_arg,
-    bool* out_ambiguous) {
+    const loom_block_t* block, const loom_value_id_t* branch_args,
+    uint16_t branch_arg_count, loom_value_id_t value_id,
+    loom_value_id_t* out_block_arg, bool* out_ambiguous) {
   *out_block_arg = LOOM_VALUE_ID_INVALID;
   *out_ambiguous = false;
-  if (!block || branch_args.count != block->arg_count) return false;
+  if (!block || branch_arg_count != block->arg_count) return false;
 
   bool found_mapping = false;
-  for (uint16_t i = 0; i < branch_args.count; ++i) {
-    if (branch_args.values[i] != value_id) continue;
+  for (uint16_t i = 0; i < branch_arg_count; ++i) {
+    if (branch_args[i] != value_id) continue;
     if (found_mapping) {
       *out_ambiguous = true;
       *out_block_arg = LOOM_VALUE_ID_INVALID;
@@ -96,6 +96,23 @@ static bool loom_cfg_condition_try_map_branch_arg_to_block_arg(
     found_mapping = true;
   }
   return found_mapping;
+}
+
+static bool loom_cfg_condition_try_map_terminator_arg_to_block_arg(
+    const loom_block_t* block, const loom_op_t* predecessor_terminator,
+    loom_value_id_t value_id, loom_value_id_t* out_block_arg,
+    bool* out_ambiguous) {
+  const loom_value_id_t* payload_args = NULL;
+  uint16_t payload_arg_count = 0;
+  if (!loom_cfg_terminator_payload_for_successor(
+          predecessor_terminator, block, &payload_args, &payload_arg_count)) {
+    *out_block_arg = LOOM_VALUE_ID_INVALID;
+    *out_ambiguous = false;
+    return false;
+  }
+  return loom_cfg_condition_try_map_branch_arg_to_block_arg(
+      block, payload_args, payload_arg_count, value_id, out_block_arg,
+      out_ambiguous);
 }
 
 static bool loom_cfg_condition_value_available_at_block_entry(
@@ -119,18 +136,15 @@ static bool loom_cfg_condition_remap_operand_to_block_entry(
   *out_operand = operand;
   if (operand.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE) return true;
 
-  if (loom_cfg_br_isa(predecessor_terminator) &&
-      loom_cfg_br_dest(predecessor_terminator) == block) {
-    loom_value_id_t block_arg = LOOM_VALUE_ID_INVALID;
-    bool ambiguous_mapping = false;
-    bool found_mapping = loom_cfg_condition_try_map_branch_arg_to_block_arg(
-        block, loom_cfg_br_args(predecessor_terminator), operand.value_id,
-        &block_arg, &ambiguous_mapping);
-    if (ambiguous_mapping) return false;
-    if (found_mapping) {
-      *out_operand = loom_cfg_condition_value_operand(block_arg);
-      return true;
-    }
+  loom_value_id_t block_arg = LOOM_VALUE_ID_INVALID;
+  bool ambiguous_mapping = false;
+  bool found_mapping = loom_cfg_condition_try_map_terminator_arg_to_block_arg(
+      block, predecessor_terminator, operand.value_id, &block_arg,
+      &ambiguous_mapping);
+  if (ambiguous_mapping) return false;
+  if (found_mapping) {
+    *out_operand = loom_cfg_condition_value_operand(block_arg);
+    return true;
   }
 
   return loom_cfg_condition_value_available_at_block_entry(
@@ -142,18 +156,14 @@ static bool loom_cfg_condition_remap_value_to_block_entry(
     const loom_block_t* block, const loom_op_t* predecessor_terminator,
     loom_value_id_t value_id, loom_value_id_t* out_value_id) {
   *out_value_id = value_id;
-  if (loom_cfg_br_isa(predecessor_terminator) &&
-      loom_cfg_br_dest(predecessor_terminator) == block) {
-    loom_value_id_t block_arg = LOOM_VALUE_ID_INVALID;
-    bool ambiguous_mapping = false;
-    bool found_mapping = loom_cfg_condition_try_map_branch_arg_to_block_arg(
-        block, loom_cfg_br_args(predecessor_terminator), value_id, &block_arg,
-        &ambiguous_mapping);
-    if (ambiguous_mapping) return false;
-    if (found_mapping) {
-      *out_value_id = block_arg;
-      return true;
-    }
+  loom_value_id_t block_arg = LOOM_VALUE_ID_INVALID;
+  bool ambiguous_mapping = false;
+  bool found_mapping = loom_cfg_condition_try_map_terminator_arg_to_block_arg(
+      block, predecessor_terminator, value_id, &block_arg, &ambiguous_mapping);
+  if (ambiguous_mapping) return false;
+  if (found_mapping) {
+    *out_value_id = block_arg;
+    return true;
   }
   return loom_cfg_condition_value_available_at_block_entry(module, dominance,
                                                            value_id, block);

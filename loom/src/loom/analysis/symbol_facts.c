@@ -89,16 +89,14 @@ static iree_status_t loom_symbol_fact_validate_computed(
     const loom_symbol_facts_base_t* facts) {
   if (!facts) return iree_ok_status();
   if (facts->domain != domain) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "symbol fact domain produced mismatched payload "
-                            "domain");
+    IREE_ASSERT_UNREACHABLE(
+        "symbol fact domain produced mismatched payload domain");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (facts->symbol_kind != symbol->kind) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "symbol fact domain produced mismatched symbol "
-                            "kind %u, expected %u",
-                            (uint32_t)facts->symbol_kind,
-                            (uint32_t)symbol->kind);
+    IREE_ASSERT_UNREACHABLE(
+        "symbol fact domain produced mismatched symbol kind");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return iree_ok_status();
 }
@@ -143,8 +141,8 @@ iree_status_t loom_symbol_fact_table_lookup(
     return iree_ok_status();
   }
   if (!domain->compute) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "symbol fact domain has no compute callback");
+    IREE_ASSERT_UNREACHABLE("symbol fact domain has no compute callback");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   table->states[symbol_id] = LOOM_SYMBOL_FACT_STATE_COMPUTING;

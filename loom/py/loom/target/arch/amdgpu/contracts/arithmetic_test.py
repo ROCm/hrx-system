@@ -34,11 +34,14 @@ def _rules_for_source_op(
     compiled: CompiledLowerRuleSet,
     source_op: Op,
 ) -> tuple[LowerRule, ...]:
+    rules: list[LowerRule] = []
     for span in compiled.spans:
         if span.source_op is source_op:
             rule_end = span.rule_start + span.rule_count
-            return compiled.rules[span.rule_start : rule_end]
-    raise AssertionError(f"no lower-rule span for {source_op.name}")
+            rules.extend(compiled.rules[span.rule_start : rule_end])
+    if not rules:
+        raise AssertionError(f"no lower-rule span for {source_op.name}")
+    return tuple(rules)
 
 
 def _rule_descriptor_keys(
@@ -166,6 +169,25 @@ def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None
         assert positions[(packed_descriptor,)] == 0
 
 
+def test_packed_bf16_arithmetic_rules_publish_native_pk_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    add_positions = _descriptor_sequence_positions(compiled, vector.vector_addf)
+    assert (
+        add_positions[("amdgpu.v_pk_add_bf16",)] < add_positions[("amdgpu.v_add_f32",)]
+    )
+
+    mul_positions = _descriptor_sequence_positions(compiled, vector.vector_mulf)
+    assert (
+        mul_positions[("amdgpu.v_pk_mul_bf16",)] < mul_positions[("amdgpu.v_mul_f32",)]
+    )
+
+    fma_positions = _descriptor_sequence_positions(compiled, vector.vector_fmaf)
+    assert (
+        fma_positions[("amdgpu.v_pk_fma_bf16",)] < fma_positions[("amdgpu.v_fma_f32",)]
+    )
+
+
 def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
     compiled = _compiled_arithmetic_rules()
     rules = _rules_for_source_op(compiled, vector.vector_extract)
@@ -173,7 +195,7 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
         rule for rule in rules if rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
     )
 
-    assert len(contract_rules) == 12
+    assert len(contract_rules) == 14
     for rule in contract_rules:
         assert rule.emit_count == 0
         guard_kinds = tuple(
@@ -186,22 +208,29 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
         assert GuardKind.VECTOR_EXTRACT_SHAPE in guard_kinds
 
 
-def test_vector_16bit_float_conversion_rules_publish_contract_only_shape_rows() -> None:
+def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows() -> (
+    None
+):
     compiled = _compiled_arithmetic_rules()
 
-    for source_op in (vector.vector_extf, vector.vector_fptrunc):
+    expected_rule_counts = {
+        vector.vector_extf: 8,
+        vector.vector_fptrunc: 2,
+    }
+    for source_op, expected_rule_count in expected_rule_counts.items():
         rules = _rules_for_source_op(compiled, source_op)
         contract_rules = tuple(
             rule for rule in rules if rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
         )
 
-        assert len(contract_rules) == 2
-        assert contract_rules[0].emit_count == 0
-        guard_kinds = tuple(
-            compiled.guards[guard_index].kind
-            for guard_index in range(
-                contract_rules[0].guard_start,
-                contract_rules[0].guard_start + contract_rules[0].guard_count,
+        assert len(contract_rules) == expected_rule_count
+        for rule in contract_rules:
+            assert rule.emit_count == 0
+            guard_kinds = tuple(
+                compiled.guards[guard_index].kind
+                for guard_index in range(
+                    rule.guard_start,
+                    rule.guard_start + rule.guard_count,
+                )
             )
-        )
-        assert GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ in guard_kinds
+            assert GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ in guard_kinds

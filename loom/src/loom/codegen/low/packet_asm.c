@@ -273,11 +273,7 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
   const iree_host_size_t result_count = op->result_count;
   const iree_host_size_t operand_count = op->operand_count;
   loom_named_attr_slice_t attrs = loom_make_named_attr_slice(NULL, 0);
-  if (loom_low_op_isa(op)) {
-    attrs = loom_low_op_attrs(op);
-  } else if (loom_low_const_isa(op)) {
-    attrs = loom_low_const_attrs(op);
-  } else {
+  if (!loom_low_packet_try_op_attrs(op, &attrs, NULL)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low packet asm descriptor node is not low.op or "
                             "low.const");

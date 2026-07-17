@@ -79,7 +79,9 @@ bool loom_contract_view_payload_from_type(
     bool plain_integer_is_unsigned, loom_contract_view_payload_t* out_payload);
 
 typedef struct loom_contract_matrix_request_options_t {
-  // Exact matrix/vector contraction shape facts, with 0 for dynamic dimensions.
+  // Exact matrix/vector contraction shape facts, with 0 for dynamic
+  // dimensions. An absent block count and witness denotes one unblocked
+  // matrix.
   loom_contract_shape_t shape;
 
   // Optional SSA witnesses for dynamic shape and K-group dimensions.

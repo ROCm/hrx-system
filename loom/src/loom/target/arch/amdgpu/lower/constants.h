@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU lowering constant and immediate helpers.
+// AMDGPU constant analysis, planning, and lowering.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_CONSTANTS_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_CONSTANTS_H_
@@ -16,8 +16,18 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/target/arch/amdgpu/encoding/encoding.h"
+#include "loom/target/arch/amdgpu/lower/plan.h"
 
 typedef struct loom_value_fact_table_t loom_value_fact_table_t;
+
+enum {
+  // Maximum unsigned integer payload encodable by the AMDGPU source inline
+  // immediate form.
+  LOOM_AMDGPU_SOURCE_INLINE_U32_MAX = 64u,
+  // Number of lanes in one DPP row.
+  LOOM_AMDGPU_DPP_ROW_LANE_COUNT = 16u,
+};
 
 #ifdef __cplusplus
 extern "C" {
@@ -112,6 +122,41 @@ bool loom_amdgpu_value_as_f32_constant(loom_low_lower_context_t* context,
 bool loom_amdgpu_value_as_address_constant(loom_low_lower_context_t* context,
                                            loom_value_id_t value_id,
                                            int64_t* out_value);
+
+// Resolves a descriptor and interns its imm32 attribute name when present.
+iree_status_t loom_amdgpu_resolve_imm32_descriptor(
+    loom_low_lower_context_t* context,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    loom_low_lower_resolved_descriptor_t* out_descriptor,
+    loom_string_id_t* out_imm32_attr_name_id, bool* out_present);
+
+// Selects an AMDGPU constant materialization plan for index.constant.
+iree_status_t loom_amdgpu_select_index_constant_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
+
+// Selects an AMDGPU constant materialization plan for scalar.constant.
+iree_status_t loom_amdgpu_select_scalar_constant_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
+
+// Selects an AMDGPU constant materialization plan for vector.constant.
+iree_status_t loom_amdgpu_select_vector_constant_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_constant_plan_t* out_plan, bool* out_selected);
+
+// Emits and binds an ordered range of descriptor-backed u32 constants.
+iree_status_t loom_amdgpu_bind_register_u32_lane_constants(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_result,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_string_id_t imm32_attr_name_id, const uint32_t* lane_bit_patterns,
+    uint32_t lane_count);
+
+// Lowers an AMDGPU constant materialization plan.
+iree_status_t loom_amdgpu_lower_constant_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_constant_plan_t* plan);
 
 #ifdef __cplusplus
 }  // extern "C"

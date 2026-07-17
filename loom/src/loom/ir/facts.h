@@ -34,8 +34,8 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "loom/ir/ir.h"
-#include "loom/util/math.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,7 +48,8 @@ extern "C" {
 // Cached predicate flags derived from range, divisor, floating-point
 // predicates, or target-independent execution distribution. Range flags are
 // always consistent with the scalar range/divisor fields. Distribution flags
-// describe whether all lanes in an invocation group observe the same SSA value.
+// describe the widest execution scope over which invocations observe the same
+// SSA value.
 enum loom_value_fact_flag_bits_e {
   // The signed range lower bound is >= 0.
   LOOM_VALUE_FACT_NON_NEGATIVE = 1u << 0,
@@ -87,8 +88,12 @@ enum loom_value_fact_flag_bits_e {
   // The value cannot be NaN or infinity. This may come from an exact float
   // value or a checked predicate and implies NOT_NAN and NOT_INF.
   LOOM_VALUE_FACT_FINITE = 1u << 13,
-  // The value is known to be identical for every active lane observing it.
-  LOOM_VALUE_FACT_UNIFORM = 1u << 7,
+  // The value cannot be a positive or negative subnormal number. This may come
+  // from an exact float value or a storage contract that flushes subnormal
+  // payloads to zero; it is meaningful only for floating-point typed values.
+  LOOM_VALUE_FACT_NOT_SUBNORMAL = 1u << 23,
+  // The value is known to be identical for every active lane in a subgroup.
+  LOOM_VALUE_FACT_SUBGROUP_UNIFORM = 1u << 7,
   // The value may differ between active lanes observing it.
   LOOM_VALUE_FACT_LANE_VARYING = 1u << 8,
   // The i1 value is a lane mask/predicate rather than a scalar condition code.
@@ -117,11 +122,25 @@ enum loom_value_fact_flag_bits_e {
   LOOM_VALUE_FACT_NAN = 1u << 21,
   // The floating-point value is known to be positive or negative infinity.
   LOOM_VALUE_FACT_INF = 1u << 22,
+  // The value is known to be identical for every invocation in a workgroup.
+  // This implies SUBGROUP_UNIFORM and both bits are set together.
+  LOOM_VALUE_FACT_WORKGROUP_UNIFORM = 1u << 24,
 };
 typedef uint32_t loom_value_fact_flags_t;
 
+#define LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK \
+  (LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM)
+
 #define LOOM_VALUE_FACT_DISTRIBUTION_MASK \
-  (LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING)
+  (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING)
+
+// Execution scope over which a value is proven identical. Larger values are
+// stronger facts and satisfy queries for every smaller scope.
+typedef enum loom_value_fact_uniform_scope_e {
+  LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE = 0,
+  LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP = 1,
+  LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP = 2,
+} loom_value_fact_uniform_scope_t;
 
 #define LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK                                   \
   (LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X | LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Y | \
@@ -130,6 +149,13 @@ typedef uint32_t loom_value_fact_flags_t;
    LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y |                                      \
    LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z |                                      \
    LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE)
+
+// Floating-point semantic predicate facts. These may describe scalar values or
+// shaped floating values when the predicate is known for every lane.
+#define LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK                           \
+  (LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_INF | \
+   LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |                 \
+   LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_NOT_SUBNORMAL)
 
 // Context-local extension payload ID. Zero means the fact has no extension.
 typedef uint32_t loom_value_fact_extension_id_t;
@@ -154,6 +180,42 @@ typedef enum loom_value_fact_memory_space_e {
   // Target-generic device storage.
   LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC = 7,
 } loom_value_fact_memory_space_t;
+
+// Target-independent topology value family.
+typedef enum loom_value_fact_topology_value_kind_e {
+  // No topology value family is known.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE = 0,
+  // Per-workitem coordinate within the current workgroup.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID = 1,
+  // Per-workgroup coordinate within the current dispatch grid.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID = 2,
+  // Per-subgroup-lane coordinate within the current subgroup.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID = 3,
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_ = 4,
+} loom_value_fact_topology_value_kind_t;
+
+// Target-independent topology coordinate axis.
+typedef enum loom_value_fact_topology_axis_e {
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_X = 0,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y = 1,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z = 2,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE = 3,
+  LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_ = 4,
+} loom_value_fact_topology_axis_t;
+
+// Decoded topology fact domain.
+typedef struct loom_value_fact_topology_domain_t {
+  // Fact flag that uniquely identifies the topology domain.
+  loom_value_fact_flags_t fact_flag;
+  // Value family represented by the domain.
+  loom_value_fact_topology_value_kind_t value_kind;
+  // Coordinate axis represented by the domain.
+  loom_value_fact_topology_axis_t axis;
+  // Stable value-family spelling for structured diagnostics.
+  iree_string_view_t value_kind_name;
+  // Stable axis spelling for structured diagnostics.
+  iree_string_view_t axis_name;
+} loom_value_fact_topology_domain_t;
 
 //===----------------------------------------------------------------------===//
 // Struct
@@ -219,6 +281,26 @@ bool loom_value_facts_scalar_type_domain(loom_scalar_type_t scalar_type,
 // conservative fact set for the value.
 loom_value_facts_t loom_value_facts_clamp_domain(loom_value_facts_t facts,
                                                  int64_t lo, int64_t hi);
+
+// Returns the topology domain encoded by |flags|. Exactly one topology domain
+// bit must be present.
+const loom_value_fact_topology_domain_t*
+loom_value_fact_topology_domain_from_flags(loom_value_fact_flags_t flags);
+
+// Returns the topology domain encoded by |facts|, if any.
+const loom_value_fact_topology_domain_t* loom_value_facts_topology_domain(
+    loom_value_facts_t facts);
+
+// Returns the topology domain matching |value_kind| and |axis|, if any.
+const loom_value_fact_topology_domain_t* loom_value_fact_topology_domain_lookup(
+    loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis);
+
+// Marks |facts| with the topology domain matching |value_kind| and |axis|.
+// Returns false if the requested domain does not exist.
+bool loom_value_facts_mark_topology_domain(
+    loom_value_facts_t* facts, loom_value_fact_topology_value_kind_t value_kind,
+    loom_value_fact_topology_axis_t axis);
 
 // Tightens facts to the dynamic extent domain. Extents are non-negative
 // integer sizes; incompatible float or negative-only facts degrade to the
@@ -309,19 +391,49 @@ static inline bool loom_value_facts_is_inf(loom_value_facts_t facts) {
 }
 
 static inline bool loom_value_facts_is_not_nan(loom_value_facts_t facts) {
-  return (facts.flags & LOOM_VALUE_FACT_NOT_NAN) != 0;
+  return (facts.flags & (LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_FINITE)) !=
+         0;
 }
 
 static inline bool loom_value_facts_is_not_inf(loom_value_facts_t facts) {
-  return (facts.flags & LOOM_VALUE_FACT_NOT_INF) != 0;
+  return (facts.flags & (LOOM_VALUE_FACT_NOT_INF | LOOM_VALUE_FACT_FINITE)) !=
+         0;
 }
 
 static inline bool loom_value_facts_is_finite(loom_value_facts_t facts) {
   return (facts.flags & LOOM_VALUE_FACT_FINITE) != 0;
 }
 
-static inline bool loom_value_facts_is_uniform(loom_value_facts_t facts) {
-  return (facts.flags & LOOM_VALUE_FACT_UNIFORM) != 0;
+static inline bool loom_value_facts_is_not_subnormal(loom_value_facts_t facts) {
+  return (facts.flags & LOOM_VALUE_FACT_NOT_SUBNORMAL) != 0;
+}
+
+static inline loom_value_fact_uniform_scope_t loom_value_facts_uniform_scope(
+    loom_value_facts_t facts) {
+  if (iree_all_bits_set(facts.flags, LOOM_VALUE_FACT_WORKGROUP_UNIFORM)) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
+  }
+  if (iree_all_bits_set(facts.flags, LOOM_VALUE_FACT_SUBGROUP_UNIFORM)) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP;
+  }
+  return LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
+}
+
+static inline bool loom_value_facts_is_uniform_at_scope(
+    loom_value_facts_t facts, loom_value_fact_uniform_scope_t scope) {
+  return loom_value_facts_uniform_scope(facts) >= scope;
+}
+
+static inline bool loom_value_facts_is_subgroup_uniform(
+    loom_value_facts_t facts) {
+  return loom_value_facts_is_uniform_at_scope(
+      facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+}
+
+static inline bool loom_value_facts_is_workgroup_uniform(
+    loom_value_facts_t facts) {
+  return loom_value_facts_is_uniform_at_scope(
+      facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
 }
 
 static inline bool loom_value_facts_is_lane_varying(loom_value_facts_t facts) {
@@ -338,22 +450,41 @@ static inline bool loom_value_facts_is_subgroup_lane_mask(
   return (facts.flags & LOOM_VALUE_FACT_SUBGROUP_LANE_MASK) != 0;
 }
 
-static inline void loom_value_facts_mark_uniform(loom_value_facts_t* facts) {
+static inline void loom_value_facts_mark_uniform_at_scope(
+    loom_value_facts_t* facts, loom_value_fact_uniform_scope_t scope) {
   facts->flags &=
       ~(LOOM_VALUE_FACT_DISTRIBUTION_MASK | LOOM_VALUE_FACT_LANE_PREDICATE);
-  facts->flags |= LOOM_VALUE_FACT_UNIFORM;
+  if (scope >= LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP) {
+    facts->flags |= LOOM_VALUE_FACT_SUBGROUP_UNIFORM;
+  }
+  if (scope >= LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP) {
+    facts->flags |= LOOM_VALUE_FACT_WORKGROUP_UNIFORM;
+  }
+}
+
+static inline void loom_value_facts_mark_subgroup_uniform(
+    loom_value_facts_t* facts) {
+  loom_value_facts_mark_uniform_at_scope(
+      facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+}
+
+static inline void loom_value_facts_mark_workgroup_uniform(
+    loom_value_facts_t* facts) {
+  loom_value_facts_mark_uniform_at_scope(
+      facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
 }
 
 static inline void loom_value_facts_mark_lane_varying(
     loom_value_facts_t* facts) {
-  facts->flags &= ~(LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_PREDICATE);
+  facts->flags &=
+      ~(LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_PREDICATE);
   facts->flags |= LOOM_VALUE_FACT_LANE_VARYING;
 }
 
 static inline void loom_value_facts_mark_lane_predicate(
     loom_value_facts_t* facts) {
-  facts->flags &=
-      ~(LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+  facts->flags &= ~(LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK |
+                    LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
   facts->flags |= LOOM_VALUE_FACT_LANE_VARYING |
                   LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_BOOLEAN;
 }
@@ -365,8 +496,8 @@ static inline void loom_value_facts_mark_subgroup_lane_mask(
 }
 
 // Applies the conservative execution-distribution transfer for a unary op. An
-// exact result is uniform; otherwise lane-varying inputs produce lane-varying
-// results and uniform inputs produce uniform results.
+// exact result is workgroup-uniform; otherwise lane-varying inputs produce
+// lane-varying results and uniform inputs preserve their uniform scope.
 void loom_value_facts_propagate_unary_distribution(loom_value_facts_t input,
                                                    loom_value_facts_t* out);
 
@@ -486,7 +617,7 @@ static inline void loom_value_facts_meet(
                    (a->flags & b->flags &
                     (LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_INF |
                      LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
-                     LOOM_VALUE_FACT_FINITE));
+                     LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_NOT_SUBNORMAL));
       if (loom_value_facts_is_exact(*a) && loom_value_facts_is_exact(*b) &&
           a->range_lo == b->range_lo) {
         out->range_lo = a->range_lo;
@@ -494,12 +625,16 @@ static inline void loom_value_facts_meet(
         out->flags |= LOOM_VALUE_FACT_EXACT;
       }
     }
-    if (loom_value_facts_is_exact(*out) ||
-        (loom_value_facts_is_uniform(*a) && loom_value_facts_is_uniform(*b))) {
-      loom_value_facts_mark_uniform(out);
+    if (loom_value_facts_is_exact(*out)) {
+      loom_value_facts_mark_workgroup_uniform(out);
     } else if (loom_value_facts_is_lane_varying(*a) ||
                loom_value_facts_is_lane_varying(*b)) {
       loom_value_facts_mark_lane_varying(out);
+    } else {
+      const loom_value_fact_uniform_scope_t uniform_scope =
+          iree_min(loom_value_facts_uniform_scope(*a),
+                   loom_value_facts_uniform_scope(*b));
+      loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
     }
     return;
   }
@@ -514,7 +649,7 @@ static inline void loom_value_facts_meet(
   *out = loom_value_facts_make(
       a->range_lo < b->range_lo ? a->range_lo : b->range_lo,
       a->range_hi > b->range_hi ? a->range_hi : b->range_hi,
-      loom_gcd_i64(a->known_divisor, b->known_divisor));
+      iree_math_gcd_i64(a->known_divisor, b->known_divisor));
   if (preserves_subgroup_lane_mask) {
     loom_value_facts_mark_subgroup_lane_mask(out);
   }
@@ -524,9 +659,10 @@ static inline void loom_value_facts_meet(
   } else if (loom_value_facts_is_lane_varying(*a) ||
              loom_value_facts_is_lane_varying(*b)) {
     loom_value_facts_mark_lane_varying(out);
-  } else if (loom_value_facts_is_uniform(*a) &&
-             loom_value_facts_is_uniform(*b)) {
-    loom_value_facts_mark_uniform(out);
+  } else {
+    const loom_value_fact_uniform_scope_t uniform_scope = iree_min(
+        loom_value_facts_uniform_scope(*a), loom_value_facts_uniform_scope(*b));
+    loom_value_facts_mark_uniform_at_scope(out, uniform_scope);
   }
 }
 

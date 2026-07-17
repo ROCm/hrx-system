@@ -9,6 +9,17 @@
 
 iree_add_all_subdirs()
 
+loom_generated_textual_header(
+  NAME
+    scalarization_rows_gen
+  GENERATOR
+    loom::py::loom::gen::ops::c_vector_scalarization
+  OUTPUT
+    "scalarization_rows.inl"
+  OUTPUT_FLAG
+    "--rows"
+)
+
 loom_generated_cc_library(
   NAME
     vector
@@ -20,9 +31,12 @@ loom_generated_cc_library(
     "facts.c"
     "fragment.c"
     "memory.c"
+    "scalarization.c"
     "storage.c"
     "type_transfer.c"
     "verify.c"
+  TEXTUAL_HDRS
+    "scalarization_rows.inl"
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
@@ -62,12 +76,14 @@ loom_generated_cc_library(
     "fragment.h"
     "memory.h"
     "ops.h"
+    "scalarization.h"
     "storage.h"
     "tables.h"
   ARGS
     "--dialect=vector"
   DEPS
     iree::base
+    iree::base::internal
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -83,7 +99,7 @@ loom_generated_cc_library(
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
     loom::util::fact_table
-    loom::util::math
+    loom::util::numeric_format
     loom::util::stable_id
 )
 

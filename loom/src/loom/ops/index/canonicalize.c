@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -393,7 +393,7 @@ static bool loom_index_exact_positive_power_of_two_plus_one(
     int64_t mask, int64_t* out_radix) {
   if (mask <= 0 || mask == INT64_MAX) return false;
   int64_t radix = mask + 1;
-  if (!loom_is_power_of_two_i64(radix)) return false;
+  if (!iree_math_is_power_of_two_i64(radix)) return false;
   *out_radix = radix;
   return true;
 }
@@ -528,7 +528,7 @@ static bool loom_index_scaled_radix_terms_are_complementary(
     return false;
   }
   int64_t expected_quotient_scale = 0;
-  if (!loom_checked_mul_i64(remainder->scale, quotient->radix,
+  if (!iree_checked_mul_i64(remainder->scale, quotient->radix,
                             &expected_quotient_scale) ||
       quotient->scale != expected_quotient_scale) {
     return false;
@@ -607,7 +607,7 @@ static bool loom_index_match_scaled_radix_product(
   }
 
   int64_t combined_scale = 0;
-  if (!loom_checked_mul_i64(out_term->scale, scale_factor, &combined_scale)) {
+  if (!iree_checked_mul_i64(out_term->scale, scale_factor, &combined_scale)) {
     return false;
   }
   out_term->scale = combined_scale;
@@ -707,7 +707,7 @@ static bool loom_index_madd_match_nested_scaled_factor(
   }
 
   int64_t combined_factor = 0;
-  if (!loom_checked_mul_i64(nested_scaled.factor, outer_factor,
+  if (!iree_checked_mul_i64(nested_scaled.factor, outer_factor,
                             &combined_factor) ||
       combined_factor <= 0) {
     return false;
@@ -823,8 +823,8 @@ iree_status_t loom_index_mul_canonicalize(loom_op_t* op,
   loom_index_scaled_value_t scaled;
   if (loom_index_match_scaled_value_with_exact_positive_factor(rewriter, op,
                                                                &scaled) &&
-      scaled.factor > 1 && loom_is_power_of_two_i64(scaled.factor)) {
-    int64_t amount = loom_ilog2_i64(scaled.factor);
+      scaled.factor > 1 && iree_math_is_power_of_two_i64(scaled.factor)) {
+    int64_t amount = iree_math_floor_log2_u64(scaled.factor);
     if (loom_index_shift_amount_is_valid(result_type, amount)) {
       return loom_index_replace_single_result_with_binary_constant_op(
           op, rewriter, LOOM_OP_INDEX_SHLI, scaled.value, amount,
@@ -905,10 +905,11 @@ iree_status_t loom_index_div_canonicalize(loom_op_t* op,
           addend_value);
     }
   }
-  if (loom_is_power_of_two_i64(divisor) &&
+  if (iree_math_is_power_of_two_i64(divisor) &&
       loom_index_value_facts_are_non_negative(rewriter, lhs)) {
     return loom_index_replace_single_result_with_binary_constant_op(
-        op, rewriter, LOOM_OP_INDEX_SHRUI, lhs, loom_ilog2_i64(divisor), rhs);
+        op, rewriter, LOOM_OP_INDEX_SHRUI, lhs,
+        iree_math_floor_log2_u64(divisor), rhs);
   }
   return iree_ok_status();
 }
@@ -944,7 +945,7 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
                                                                 result_type, 0);
   }
   if (loom_index_query_exact_i64(rewriter, rhs, &divisor) &&
-      loom_is_power_of_two_i64(divisor) &&
+      iree_math_is_power_of_two_i64(divisor) &&
       loom_index_value_facts_are_non_negative(rewriter, lhs)) {
     return loom_index_replace_single_result_with_binary_constant_op(
         op, rewriter, LOOM_OP_INDEX_ANDI, lhs, divisor - 1, rhs);
@@ -1161,7 +1162,7 @@ static iree_status_t loom_index_shift_canonicalize(loom_op_t* op,
     return iree_ok_status();
   }
   int64_t combined_amount = 0;
-  if (!loom_checked_add_i64(inner_amount, amount, &combined_amount) ||
+  if (!iree_checked_add_i64(inner_amount, amount, &combined_amount) ||
       !loom_index_shift_amount_is_valid(result_type, combined_amount)) {
     return iree_ok_status();
   }

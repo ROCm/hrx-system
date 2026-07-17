@@ -18,6 +18,7 @@ from loom.target.contracts.rules import (
     ContractCase,
     DescriptorMatrixRule,
     DescriptorRule,
+    OrdinalValueAliasRule,
     RecipeRule,
     ValueAliasRule,
     ValueElideRule,
@@ -194,7 +195,7 @@ def _compile_case(
             system=ContractSystem.DESCRIPTOR_RULE,
             row_index=descriptor_rule_index,
         )
-    if isinstance(contract_case, ValueAliasRule):
+    if isinstance(contract_case, (ValueAliasRule, OrdinalValueAliasRule)):
         if lower_rule_index == CONTRACT_ROW_NONE:
             raise ValueError(
                 f"{contract_case.source_op.name}: value-alias case has no "

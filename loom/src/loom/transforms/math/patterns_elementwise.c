@@ -150,18 +150,16 @@ static iree_status_t loom_math_legalize_scalar_copysignf_build(
     loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t result_type, loom_location_id_t location,
     loom_op_t** out_op) {
-  (void)instance_flags;
-  return loom_scalar_copysignf_build(builder, lhs, rhs, result_type, location,
-                                     out_op);
+  return loom_scalar_copysignf_build(builder, instance_flags, lhs, rhs,
+                                     result_type, location, out_op);
 }
 
 static iree_status_t loom_math_legalize_vector_cmpf_build(
     loom_builder_t* builder, uint8_t instance_flags, uint8_t predicate,
     loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t operand_type,
     loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
-  (void)instance_flags;
-  return loom_vector_cmpf_build(builder, predicate, lhs, rhs, operand_type,
-                                result_type, location, out_op);
+  return loom_vector_cmpf_build(builder, instance_flags, predicate, lhs, rhs,
+                                operand_type, result_type, location, out_op);
 }
 
 static const loom_math_legalize_lane_builders_t kScalarLaneBuilders = {
@@ -222,14 +220,13 @@ static iree_status_t loom_math_legalize_source_initialize(
       lane_builders = &kVectorLaneBuilders;
       break;
     case LOOM_TARGET_MATH_LANE_DOMAIN_UNKNOWN:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "math recipe selected for unknown lane domain");
+      IREE_ASSERT_UNREACHABLE("math recipe selected unknown lane domain");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   if (op->operand_count < 1 || op->result_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "math recipe selected for op with unsupported operand/result shape");
+    IREE_ASSERT_UNREACHABLE("math recipe selected unsupported op shape");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   const loom_value_id_t* operands = loom_op_const_operands(op);
@@ -843,9 +840,8 @@ static iree_status_t loom_math_legalize_binary_source_initialize(
     default:
       break;
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "math recipe row referenced unsupported op kind %u",
-                          op->kind);
+  IREE_ASSERT_UNREACHABLE("math recipe selected unsupported binary op");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_math_legalize_build_widen_f32_round_bf16(
@@ -954,8 +950,8 @@ static iree_status_t loom_math_legalize_build_recipe(
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
       break;
   }
-  return iree_make_status(IREE_STATUS_INTERNAL, "unknown math recipe %u",
-                          context->decision.recipe);
+  IREE_ASSERT_UNREACHABLE("unknown math recipe");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_math_legalize_rewrite_math_op(

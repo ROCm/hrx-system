@@ -18,9 +18,6 @@ extern "C" {
 
 loom_type_t loom_vector_to_scalar_lane_type(loom_type_t vector_type);
 
-uint8_t loom_vector_to_scalar_project_instance_flags(
-    loom_vector_to_scalar_instance_flag_mode_t mode, uint8_t instance_flags);
-
 iree_status_t loom_vector_to_scalar_build_scalar_constant(
     loom_builder_t* builder, loom_type_t result_type,
     loom_location_id_t location, int64_t integer_value,
@@ -115,6 +112,13 @@ iree_status_t loom_vector_to_scalar_build_lane(
 iree_status_t loom_vector_to_scalar_materialize_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t value,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);
+
+// Returns true when |value| has a root producer that can materialize a lane for
+// |indices| without extracting |value| itself.
+bool loom_vector_to_scalar_can_materialize_def_lane(
+    const loom_module_t* module, loom_value_id_t value,
+    const loom_matrix_fragment_layout_t* matrix_fragment_layout,
+    loom_vector_to_scalar_index_list_t indices);
 
 iree_status_t loom_vector_to_scalar_materialize_linear_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t vector_value,

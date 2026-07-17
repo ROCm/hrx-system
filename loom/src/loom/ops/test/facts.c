@@ -164,12 +164,39 @@ iree_status_t loom_test_fact_power_of_two_facts(
   return iree_ok_status();
 }
 
-iree_status_t loom_test_fact_uniform_facts(
+iree_status_t loom_test_fact_finite_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
   result_facts[0] = loom_value_facts_exact_i64(
-      loom_value_facts_is_uniform(operand_facts[0]) ? 1 : 0);
+      loom_value_facts_is_finite(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_not_subnormal_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_not_subnormal(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_subgroup_uniform_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_subgroup_uniform(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_workgroup_uniform_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_workgroup_uniform(operand_facts[0]) ? 1 : 0);
   return iree_ok_status();
 }
 
@@ -299,6 +326,12 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
     value = (int64_t)encoded.codebook_policy;
   } else if (loom_test_string_id_equal(module, field, IREE_SV("sparsity"))) {
     value = (int64_t)encoded.sparsity_policy;
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("sparsity_group_elements"))) {
+    value = (int64_t)encoded.sparsity_group.element_count;
+  } else if (loom_test_string_id_equal(
+                 module, field, IREE_SV("sparsity_group_nonzero_elements"))) {
+    value = (int64_t)encoded.sparsity_group.nonzero_element_count;
   } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("payload_registers"))) {
     value = (int64_t)encoded.payload_register_count;

@@ -12,3 +12,17 @@ low.func.def target(@target) abi(hal_kernel) @workgroup_barrier() asm<amdgpu.rdn
   s_barrier
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @subgroup_shared_memory_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @subgroup_shared_memory_barrier() asm<amdgpu.rdna3.core> {
+  s_waitcnt {lgkmcnt = 0}
+  return
+}

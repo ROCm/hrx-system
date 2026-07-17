@@ -17,6 +17,7 @@
 #define LOOM_TARGET_ARCH_AMDGPU_MATRIX_CONTRACT_H_
 
 #include "loom/target/arch/amdgpu/matrix/types.h"
+#include "loom/util/numeric_format.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +35,10 @@ iree_string_view_t loom_amdgpu_matrix_numeric_type_name(
 iree_string_view_t loom_amdgpu_matrix_scale_kind_name(
     loom_amdgpu_matrix_scale_kind_t scale_kind);
 
+// Maps an encoded scale numeric format to the target selector value.
+bool loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
+    loom_value_fact_numeric_format_flags_t format, int64_t* out_value);
+
 // Returns a target-owned fragment layout by kind, or NULL when unknown.
 const loom_amdgpu_matrix_fragment_layout_t*
 loom_amdgpu_matrix_fragment_layout_for_kind(
@@ -45,24 +50,18 @@ const loom_amdgpu_matrix_fragment_layout_t*
 loom_amdgpu_matrix_contract_descriptor_fragment_layout(
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor);
 
-// Returns the role layout within |layout|, or NULL when the role is not
-// modeled.
-const loom_amdgpu_matrix_fragment_role_layout_t*
-loom_amdgpu_matrix_fragment_role_layout(
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role);
-
-// Maps a lane-local payload register element to a logical matrix coordinate.
-bool loom_amdgpu_matrix_fragment_coordinate(
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, uint16_t lane, uint16_t register_index,
-    uint16_t element_index,
-    loom_amdgpu_matrix_fragment_coordinate_t* out_coordinate);
-
 // Maps a matrix feature profile enum to matrix feature bits.
 bool loom_amdgpu_matrix_feature_bits_from_profile(
     loom_amdgpu_matrix_feature_profile_t profile,
     loom_amdgpu_matrix_feature_bits_t* out_feature_bits);
+
+// Returns the number of named matrix feature bits.
+iree_host_size_t loom_amdgpu_matrix_feature_info_count(void);
+
+// Returns a named matrix feature bit by ordinal, or NULL when |index| is out
+// of range.
+const loom_amdgpu_matrix_feature_info_t* loom_amdgpu_matrix_feature_info_at(
+    iree_host_size_t index);
 
 // Maps a processor name such as "gfx942" or "gfx1250" to matrix feature bits.
 iree_status_t loom_amdgpu_matrix_feature_bits_from_processor(
@@ -76,6 +75,13 @@ iree_host_size_t loom_amdgpu_matrix_contract_descriptor_count(void);
 // range.
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index);
+
+// Returns a built-in descriptor with the same wait-state behavior as
+// |low_descriptor_ref|, or NULL when the descriptor ref is not a matrix
+// contract.
+const loom_amdgpu_matrix_contract_descriptor_t*
+loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
+    loom_amdgpu_descriptor_ref_t low_descriptor_ref);
 
 // Returns whether a descriptor is legal for a processor feature set and wave
 // size. Pass wave_size=0 to ignore wave-size filtering.

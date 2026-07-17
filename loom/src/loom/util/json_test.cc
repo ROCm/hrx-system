@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/util/stream.h"
@@ -56,6 +57,64 @@ std::string EscapeQuoted(const char* input) {
     result.assign(view.data, view.size);
   }
   IREE_EXPECT_OK(status);
+  iree_string_builder_deinitialize(&builder);
+  return result;
+}
+
+std::string WriteStatusObject(iree_status_code_t code,
+                              iree_string_view_t message) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+
+  iree_status_t status = loom_json_write_status_object(&stream, code, message);
+  std::string result;
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t view = iree_string_builder_view(&builder);
+    result.assign(view.data, view.size);
+  }
+  IREE_EXPECT_OK(status);
+  iree_string_builder_deinitialize(&builder);
+  return result;
+}
+
+std::string WriteStructuredJson() {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+
+  loom_json_object_writer_t object;
+  IREE_EXPECT_OK(loom_json_object_begin(&stream, &object));
+  IREE_EXPECT_OK(loom_json_object_write_string_field(
+      &object, IREE_SV("required"), iree_string_view_empty()));
+  IREE_EXPECT_OK(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("omitted"), iree_string_view_empty()));
+  IREE_EXPECT_OK(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("present"), IREE_SV("value")));
+  IREE_EXPECT_OK(
+      loom_json_object_write_null_field(&object, IREE_SV("unknown")));
+  IREE_EXPECT_OK(
+      loom_json_object_write_uint32_field(&object, IREE_SV("answer"), 42));
+  IREE_EXPECT_OK(
+      loom_json_object_begin_field(&object, IREE_SV("escaped\"field")));
+  loom_json_array_writer_t array;
+  IREE_EXPECT_OK(loom_json_array_begin(object.stream, &array));
+  IREE_EXPECT_OK(loom_json_array_write_int64_element(&array, -7));
+  IREE_EXPECT_OK(loom_json_array_write_bool_element(&array, true));
+  IREE_EXPECT_OK(loom_json_array_write_null_element(&array));
+  IREE_EXPECT_OK(loom_json_array_begin_element(&array));
+  loom_json_object_writer_t nested_object;
+  IREE_EXPECT_OK(loom_json_object_begin(array.stream, &nested_object));
+  IREE_EXPECT_OK(loom_json_object_write_string_field(
+      &nested_object, IREE_SV("name"), IREE_SV("nested")));
+  IREE_EXPECT_OK(loom_json_object_end(&nested_object));
+  IREE_EXPECT_OK(loom_json_array_end(&array));
+  IREE_EXPECT_OK(loom_json_object_end(&object));
+
+  iree_string_view_t view = iree_string_builder_view(&builder);
+  std::string result(view.data, view.size);
   iree_string_builder_deinitialize(&builder);
   return result;
 }
@@ -215,6 +274,108 @@ TEST(JsonEscape, MixedContent) {
 
 TEST(JsonEscape, QuotedStringWithEscapes) {
   EXPECT_EQ(EscapeQuoted("line1\nline2"), "\"line1\\nline2\"");
+}
+
+//===----------------------------------------------------------------------===//
+// Streaming containers
+//===----------------------------------------------------------------------===//
+
+TEST(JsonWriter, WritesNestedContainersAndTypedValues) {
+  std::string json = WriteStructuredJson();
+  EXPECT_EQ(json,
+            "{\"required\":\"\",\"present\":\"value\",\"unknown\":null,"
+            "\"answer\":42,"
+            "\"escaped\\\"field\":[-7,true,null,{\"name\":\"nested\"}]}");
+
+  iree_string_view_t object = iree_make_string_view(json.data(), json.size());
+  iree_string_view_t value;
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(object, IREE_SV("required"), &value));
+  EXPECT_TRUE(iree_string_view_is_empty(value));
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(object, IREE_SV("unknown"), &value));
+  EXPECT_TRUE(iree_string_view_equal(value, IREE_SV("null")));
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(object, IREE_SV("answer"), &value));
+  uint64_t answer = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(value, &answer));
+  EXPECT_EQ(answer, 42u);
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(object, IREE_SV("present"), &value));
+  EXPECT_TRUE(iree_string_view_equal(value, IREE_SV("value")));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      iree_json_lookup_object_value(object, IREE_SV("omitted"), &value));
+}
+
+TEST(JsonWriter, WritesEmptyContainers) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+
+  loom_json_object_writer_t object;
+  IREE_ASSERT_OK(loom_json_object_begin(&stream, &object));
+  IREE_ASSERT_OK(loom_json_object_begin_field(&object, IREE_SV("object")));
+  loom_json_object_writer_t empty_object;
+  IREE_ASSERT_OK(loom_json_object_begin(object.stream, &empty_object));
+  IREE_ASSERT_OK(loom_json_object_end(&empty_object));
+  IREE_ASSERT_OK(loom_json_object_begin_field(&object, IREE_SV("array")));
+  loom_json_array_writer_t empty_array;
+  IREE_ASSERT_OK(loom_json_array_begin(object.stream, &empty_array));
+  IREE_ASSERT_OK(loom_json_array_end(&empty_array));
+  IREE_ASSERT_OK(loom_json_object_end(&object));
+
+  iree_string_view_t view = iree_string_builder_view(&builder);
+  EXPECT_EQ(std::string(view.data, view.size), "{\"object\":{},\"array\":[]}");
+  iree_string_builder_deinitialize(&builder);
+}
+
+TEST(JsonWriter, DefersValueListsForArrayEmbedding) {
+  loom_json_value_list_t values;
+  loom_json_value_list_initialize(iree_allocator_system(), &values);
+
+  loom_output_stream_t value_stream;
+  IREE_ASSERT_OK(loom_json_value_list_begin_value(&values, &value_stream));
+  loom_json_object_writer_t first;
+  IREE_ASSERT_OK(loom_json_object_begin(&value_stream, &first));
+  IREE_ASSERT_OK(
+      loom_json_object_write_uint32_field(&first, IREE_SV("index"), 1));
+  IREE_ASSERT_OK(loom_json_object_end(&first));
+  IREE_ASSERT_OK(loom_json_value_list_begin_value(&values, &value_stream));
+  loom_json_object_writer_t second;
+  IREE_ASSERT_OK(loom_json_object_begin(&value_stream, &second));
+  IREE_ASSERT_OK(
+      loom_json_object_write_uint32_field(&second, IREE_SV("index"), 2));
+  IREE_ASSERT_OK(loom_json_object_end(&second));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(loom_json_value_list_write_array(&values, &stream));
+  EXPECT_EQ(std::string(iree_string_builder_buffer(&builder),
+                        iree_string_builder_size(&builder)),
+            "[{\"index\":1},{\"index\":2}]");
+
+  iree_string_builder_deinitialize(&builder);
+  loom_json_value_list_deinitialize(&values);
+}
+
+//===----------------------------------------------------------------------===//
+// IREE status objects
+//===----------------------------------------------------------------------===//
+
+TEST(JsonStatus, WritesCanonicalObject) {
+  EXPECT_EQ(WriteStatusObject(IREE_STATUS_UNAVAILABLE,
+                              IREE_SV("profile \"decode\" failed")),
+            "{\"code\":14,\"name\":\"UNAVAILABLE\","
+            "\"message\":\"profile \\\"decode\\\" failed\"}");
+}
+
+TEST(JsonStatus, OmitsUnavailableMessage) {
+  EXPECT_EQ(WriteStatusObject(IREE_STATUS_OK, iree_string_view_empty()),
+            "{\"code\":0,\"name\":\"OK\"}");
 }
 
 //===----------------------------------------------------------------------===//

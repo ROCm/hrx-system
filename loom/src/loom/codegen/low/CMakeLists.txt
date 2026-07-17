@@ -27,6 +27,16 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    pressure
+  HDRS
+    "pressure.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     descriptor_traits
   HDRS
     "descriptor_traits.h"
@@ -129,6 +139,25 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::ops::low
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    function_model
+  HDRS
+    "function_model.h"
+  SRCS
+    "function_model.c"
+  DEPS
+    ::descriptors
+    ::function
+    ::target_binding
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::util::cfg_graph
   PUBLIC
 )
 
@@ -247,6 +276,7 @@ loom_cc_library(
     ::descriptors
     ::diagnostics
     ::function
+    ::function_model
     ::placement
     ::storage_lease
     ::target_binding
@@ -315,11 +345,32 @@ loom_cc_library(
     ::storage_layout
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::allocation::spill_plan
     loom::error::error_defs
     loom::ir
     loom::ops::low
     loom::ops::op_defs
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    allocation_materialization_test
+  SRCS
+    "allocation_materialization_test.cc"
+  DEPS
+    ::allocation_materialization
+    ::diagnostics
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -332,14 +383,42 @@ loom_cc_library(
   DEPS
     ::allocation
     ::descriptor_traits
+    ::diagnostics
     ::target_binding
     iree::base
     iree::base::internal::arena
+    loom::analysis::availability
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ops::op_defs
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    allocation_live_range_splitting
+  HDRS
+    "allocation_live_range_splitting.h"
+  SRCS
+    "allocation_live_range_splitting.c"
+  DEPS
+    ::allocation
+    ::diagnostics
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::storage
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::rewrite::rewriter
+    loom::target::registers
   PUBLIC
 )
 
@@ -377,6 +456,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::schedule
     loom::ir
+    loom::ops::low
   PUBLIC
 )
 
@@ -500,6 +580,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    planning_statistics
+  HDRS
+    "planning_statistics.h"
+  SRCS
+    "planning_statistics.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     frame
   HDRS
     "frame.h"
@@ -508,12 +601,15 @@ loom_cc_library(
   DEPS
     ::addressability
     ::allocation
+    ::allocation_live_range_splitting
     ::allocation_materialization
     ::allocation_rematerialization
     ::diagnostics
     ::function
+    ::function_model
     ::memory_access
     ::packet
+    ::planning_statistics
     ::storage_lease
     iree::base
     iree::base::internal::arena
@@ -559,6 +655,7 @@ loom_cc_library(
   DEPS
     ::memory_access
     iree::base
+    iree::base::internal
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::ir
@@ -568,7 +665,6 @@ loom_cc_library(
     loom::ops::vector
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -583,6 +679,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::view_regions
     loom::ir
     loom::ops::buffer
     loom::ops::cfg
@@ -637,6 +734,7 @@ loom_cc_library(
   SRCS
     "verify.c"
   DEPS
+    ::packet
     ::storage_layout
     ::target_binding
     iree::base
@@ -692,9 +790,11 @@ loom_cc_test(
   SRCS
     "packet_test.cc"
   DEPS
+    ::descriptors
     ::packet
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ops::low
 )
 
 loom_cc_test(
