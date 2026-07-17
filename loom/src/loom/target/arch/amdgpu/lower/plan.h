@@ -81,6 +81,10 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.
   loom_scalar_type_t source_element_type;
+  // Exact numeric format represented by the source payload.
+  loom_value_fact_numeric_format_flags_t source_format;
+  // Semantically equivalent source format accepted by native descriptors.
+  loom_value_fact_numeric_format_flags_t descriptor_source_format;
   // Result scalar element type.
   loom_scalar_type_t result_element_type;
   // Static vector lane count.
@@ -1234,6 +1238,10 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   uint16_t element_byte_count;
   // Element type stored in the source or destination view.
   loom_scalar_type_t view_element_type;
+  // Exact numeric format stored in the source or destination view payload.
+  loom_value_fact_numeric_format_flags_t view_element_format;
+  // Semantically equivalent source format accepted by native descriptors.
+  loom_value_fact_numeric_format_flags_t descriptor_source_format;
   // Compiled lane, register, and packed-element address coefficients.
   loom_amdgpu_fragment_memory_address_layout_t address_layout;
   // Direct memory packets emitted in increasing fragment-register order.

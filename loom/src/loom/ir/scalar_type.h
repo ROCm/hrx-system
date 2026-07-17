@@ -61,6 +61,8 @@ typedef enum loom_scalar_type_fp8_special_policy_e {
   LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE = 0,
   // Top exponent remains finite except for the all-ones mantissa NaN.
   LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN = 1,
+  // All payloads are finite except the negative-zero encoding, which is NaN.
+  LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO = 2,
 } loom_scalar_type_fp8_special_policy_t;
 
 // Compact set of scalar types.

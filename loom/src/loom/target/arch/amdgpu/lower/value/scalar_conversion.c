@@ -664,8 +664,10 @@ static iree_status_t loom_amdgpu_emit_scalar_fp8_to_bf16(
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
   const loom_amdgpu_fp8_decode_plan_t* decode_plan = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_get_fp8_decode_plan(context, source_type, &decode_plan));
+  const loom_value_fact_numeric_format_flags_t source_format =
+      loom_numeric_format_from_scalar_type(source_type);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_decode_plan(
+      context, source_format, source_format, &decode_plan));
 
   loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(

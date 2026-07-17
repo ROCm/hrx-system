@@ -52,12 +52,16 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     source = amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows()
 
     assert "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(" in source
-    assert "    0,\n    LOOM_SCALAR_TYPE_F8E4M3,\n    LOOM_SCALAR_TYPE_F32," in source
-    assert "LOOM_SCALAR_TYPE_F8E4M3" in source
+    assert "\n    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3,\n" not in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ" in source
     assert "LOOM_SCALAR_TYPE_F16" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F16_FP8" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_OCP" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_FNUZ" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F16_FP8_OCP" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8_FNUZ" in source
     assert "switch " not in source
     assert "\ncase " not in source
     assert "\nreturn " not in source
@@ -88,7 +92,9 @@ def test_fp8_encoded_operand_format_rows_emit_data_only() -> None:
     assert "LOOM_SCALAR_TYPE_F8E5M2" in source
     assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3" in source
     assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ" in source
     assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ" in source
     assert "typedef " not in source
     assert "struct " not in source
     assert "#include" not in source
@@ -101,13 +107,14 @@ def test_fp8_scaled_descriptor_refs_emit_data_only() -> None:
     source = amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows()
 
     assert "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(" in source
-    assert "    0,\n    LOOM_SCALAR_TYPE_F8E4M3,\n    LOOM_SCALAR_TYPE_F16," in source
-    assert "LOOM_SCALAR_TYPE_F8E4M3" in source
+    assert "\n    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3,\n" not in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN" in source
+    assert "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2" in source
     assert "LOOM_SCALAR_TYPE_BF16" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_BF16_FP8" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_F32_BF8" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_BF16_FP8" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_F32_BF8" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_BF16_FP8_OCP" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_F32_BF8_OCP" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_BF16_FP8_OCP" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_F32_BF8_OCP" in source
     assert "switch " not in source
     assert "\ncase " not in source
     assert "\nreturn " not in source
@@ -120,6 +127,7 @@ def test_fp8_subnormal_table_rows_emit_data_only() -> None:
     assert "LOOM_SCALAR_TYPE_F8E4M3" in source
     assert "LOOM_SCALAR_TYPE_F8E5M2" in source
     assert "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN" in source
+    assert "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO" in source
     assert "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE" in source
     assert "UINT32_C(0xC0800000)" in source
     assert "UINT32_C(0x3C3C3C3C)" in source
@@ -247,19 +255,19 @@ def test_fp8_subnormal_table_rows_reject_missing_dense_format_row() -> None:
     with pytest.raises(
         ValueError,
         match=(
-            r"AMDGPU FP8 subnormal table must cover dense FP8/BF8 rows in "
-            r"order: expected F8E4M3, F8E5M2; got F8E4M3"
+            r"AMDGPU FP8 subnormal table must cover dense FP8 format bits in "
+            r"order"
         ),
     ):
         amdgpu_narrow_float_tables._emit_fp8_subnormal_table_rows(
             rows=(
                 _Fp8FormatRow(
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.F8E4M3,
                     exponent_bits=4,
                     mantissa_bits=3,
                     exponent_bias=7,
                     special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
-                    encoded_operand_formats=("LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",),
                 ),
             ),
         )
@@ -306,13 +314,13 @@ def test_fp8_native_descriptor_refs_reject_missing_descriptor_ref() -> None:
         amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows(
             rows=(
                 _Fp8NativeDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.F32,
                     "amdgpu.missing",
-                    "amdgpu.v_cvt_pk_f32_fp8",
+                    "amdgpu.v_cvt_pk_f32_fp8.ocp",
                 ),
             ),
-            descriptor_ref_key_set={"amdgpu.v_cvt_pk_f32_fp8"},
+            descriptor_ref_key_set={"amdgpu.v_cvt_pk_f32_fp8.ocp"},
         )
 
 
@@ -321,22 +329,22 @@ def test_fp8_native_descriptor_refs_reject_duplicate_type_pair() -> None:
         ValueError,
         match=(
             r"AMDGPU FP8 native conversion descriptor table contains duplicate "
-            r"source/result rows: F8E4M3->F32"
+            r"source/result rows: LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3->F32"
         ),
     ):
         amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows(
             rows=(
                 _Fp8NativeDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.F32,
-                    "amdgpu.v_cvt_f32_fp8",
-                    "amdgpu.v_cvt_pk_f32_fp8",
+                    "amdgpu.v_cvt_f32_fp8.ocp",
+                    "amdgpu.v_cvt_pk_f32_fp8.ocp",
                 ),
                 _Fp8NativeDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.F32,
-                    "amdgpu.v_cvt_f32_fp8",
-                    "amdgpu.v_cvt_pk_f32_fp8",
+                    "amdgpu.v_cvt_f32_fp8.ocp",
+                    "amdgpu.v_cvt_pk_f32_fp8.ocp",
                 ),
             ),
         )
@@ -353,13 +361,13 @@ def test_fp8_scaled_descriptor_refs_reject_missing_descriptor_ref() -> None:
         amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows(
             rows=(
                 _Fp8ScaledDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.BF16,
                     "amdgpu.missing",
-                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8.ocp",
                 ),
             ),
-            descriptor_ref_key_set={"amdgpu.v_cvt_scale_pk8_bf16_fp8"},
+            descriptor_ref_key_set={"amdgpu.v_cvt_scale_pk8_bf16_fp8.ocp"},
         )
 
 
@@ -368,22 +376,22 @@ def test_fp8_scaled_descriptor_refs_reject_duplicate_type_pair() -> None:
         ValueError,
         match=(
             r"AMDGPU FP8 scaled conversion descriptor table contains duplicate "
-            r"source/result rows: F8E4M3->BF16"
+            r"source/result rows: LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3->BF16"
         ),
     ):
         amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows(
             rows=(
                 _Fp8ScaledDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.BF16,
-                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
-                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8.ocp",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8.ocp",
                 ),
                 _Fp8ScaledDescriptorRefRow(
-                    ScalarTypeKind.F8E4M3,
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
                     ScalarTypeKind.BF16,
-                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
-                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8.ocp",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8.ocp",
                 ),
             ),
         )

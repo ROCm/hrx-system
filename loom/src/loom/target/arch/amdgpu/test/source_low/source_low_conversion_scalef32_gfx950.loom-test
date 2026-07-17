@@ -2,11 +2,11 @@
 
 amdgpu.target<gfx950> @target
 
-func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3_to_f16(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf16>) {
+func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f16(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf16>) {
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf16>
   func.return %decoded : vector<2xf16>
 }
@@ -20,11 +20,11 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_f16(%input: bu
   func.return %decoded : vector<2xf16>
 }
 
-func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3_to_bf16(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xbf16>) {
+func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_bf16(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xbf16>) {
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
   func.return %decoded : vector<2xbf16>
 }
@@ -38,11 +38,11 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_bf16(%input: b
   func.return %decoded : vector<2xbf16>
 }
 
-func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3_to_f32(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
+func.def target(@target) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f32(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
   %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
-  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
@@ -56,99 +56,163 @@ func.def target(@target) @gfx950_vector_decode_scalef32_f8e5m2_to_f32(%input: bu
   func.return %decoded : vector<2xf32>
 }
 
+func.def target(@target) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(%input: buffer, %base: offset, %scale: f32) -> (vector<2xbf16>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf8E4M3, %layout>
+  %payload = vector.load %input_view[0] : view<2xf8E4M3, %layout> -> vector<2xf8E4M3>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=2, payload_packing=dense_lanes, payload_registers=0> : encoding<schema>
+  %wide = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
+  %scale_vector = vector.splat %scale : vector<2xf32>
+  %scaled = vector.mulf %wide, %scale_vector : vector<2xf32>
+  %rounded = vector.fptrunc %scaled : vector<2xf32> to vector<2xbf16>
+  func.return %rounded : vector<2xbf16>
+}
+
 // ----
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %58 = v_mov_b32 0
-  %59 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %60 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %61 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %62 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %63 = s_add_u32 %59, %61
-  %64 = s_addc_u32 %60, %62
-  %65 = concat(%63, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %66 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %58, %65, %66
+  %70 = v_mov_b32 0
+  %71 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %72 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %73 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %74 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %75 = s_add_u32 %71, %73
+  %76 = s_addc_u32 %72, %74
+  %77 = concat(%75, %76) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %78 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %70, %77, %78
   %decoded = v_cvt_scalef32_pk_f16_fp8 %payload, %scale
   return %decoded
 }
 
 low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %73 = v_mov_b32 0
-  %74 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %75 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %76 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %77 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %78 = s_add_u32 %74, %76
-  %79 = s_addc_u32 %75, %77
-  %80 = concat(%78, %79) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %81 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %73, %80, %81
+  %85 = v_mov_b32 0
+  %86 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %88 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %90 = s_add_u32 %86, %88
+  %91 = s_addc_u32 %87, %89
+  %92 = concat(%90, %91) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %93 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %85, %92, %93
   %decoded = v_cvt_scalef32_pk_f16_bf8 %payload, %scale
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %88 = v_mov_b32 0
-  %89 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %90 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %91 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %92 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %93 = s_add_u32 %89, %91
-  %94 = s_addc_u32 %90, %92
-  %95 = concat(%93, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %96 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %88, %95, %96
+  %100 = v_mov_b32 0
+  %101 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %102 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %103 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %104 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %105 = s_add_u32 %101, %103
+  %106 = s_addc_u32 %102, %104
+  %107 = concat(%105, %106) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %108 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %100, %107, %108
   %decoded = v_cvt_scalef32_pk_bf16_fp8 %payload, %scale
   return %decoded
 }
 
 low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %103 = v_mov_b32 0
-  %104 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %106 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %107 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %108 = s_add_u32 %104, %106
-  %109 = s_addc_u32 %105, %107
-  %110 = concat(%108, %109) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %111 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %103, %110, %111
+  %115 = v_mov_b32 0
+  %116 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %117 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %118 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %119 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %120 = s_add_u32 %116, %118
+  %121 = s_addc_u32 %117, %119
+  %122 = concat(%120, %121) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %123 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %115, %122, %123
   %decoded = v_cvt_scalef32_pk_bf16_bf8 %payload, %scale
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %118 = v_mov_b32 0
-  %119 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %120 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %121 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %122 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %123 = s_add_u32 %119, %121
-  %124 = s_addc_u32 %120, %122
-  %125 = concat(%123, %124) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %126 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %118, %125, %126
+  %130 = v_mov_b32 0
+  %131 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %132 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %133 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %134 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %135 = s_add_u32 %131, %133
+  %136 = s_addc_u32 %132, %134
+  %137 = concat(%135, %136) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %138 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %130, %137, %138
   %decoded = v_cvt_scalef32_pk_f32_fp8 %payload, %scale
   return %decoded
 }
 
 low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %133 = v_mov_b32 0
-  %134 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %135 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %136 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %137 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %138 = s_add_u32 %134, %136
-  %139 = s_addc_u32 %135, %137
-  %140 = concat(%138, %139) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %141 = s_mov_b32_m0_imm 0
-  %payload = global_load_ushort_saddr %133, %140, %141
+  %145 = v_mov_b32 0
+  %146 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %147 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %148 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %149 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %150 = s_add_u32 %146, %148
+  %151 = s_addc_u32 %147, %149
+  %152 = concat(%150, %151) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %153 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %145, %152, %153
   %decoded = v_cvt_scalef32_pk_f32_bf8 %payload, %scale
   return %decoded
+}
+
+low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %160 = v_mov_b32 0
+  %161 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %162 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %163 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %164 = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %165 = s_add_u32 %161, %163
+  %166 = s_addc_u32 %162, %164
+  %167 = concat(%165, %166) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %168 = s_mov_b32_m0_imm 0
+  %payload = global_load_ushort_saddr %160, %167, %168
+  %170 = v_and_b32_lit %payload, 128
+  %171 = v_lshlrev_b32_src0_inline %170, 8
+  %172 = v_and_b32_lit %payload, 127
+  %173 = v_mov_b32 15232
+  %174 = v_lshl_add_u32_shift_imm %172, %173, 4
+  %175 = s_mov_b32 1073774592
+  %176 = s_mov_b32 3770720384
+  %177 = v_perm_b32 %176, %175, %172
+  %178 = s_mov_b32 993737216
+  %179 = s_mov_b32 993737531
+  %180 = v_perm_b32 %179, %178, %172
+  %181 = v_lshl_add_u32_shift_imm %180, %177, 8
+  %182 = v_cmp_lt_u32_src1_inline %172 {rhs = 8}
+  %183 = v_cndmask_b32 %174, %181, %182
+  %184 = v_or_b32 %171, %183
+  %185 = v_mov_b32 32704
+  %186 = v_mov_b32 128
+  %187 = v_cmp_eq_i32 %payload, %186
+  %188 = v_cndmask_b32 %184, %185, %187
+  %189 = v_lshlrev_b32_src0_inline %188, 16
+  %190 = v_lshrrev_b32_src0_inline %payload, 8
+  %191 = v_and_b32_lit %190, 128
+  %192 = v_lshlrev_b32_src0_inline %191, 8
+  %193 = v_and_b32_lit %190, 127
+  %195 = v_lshl_add_u32_shift_imm %193, %173, 4
+  %198 = v_perm_b32 %176, %175, %193
+  %201 = v_perm_b32 %179, %178, %193
+  %202 = v_lshl_add_u32_shift_imm %201, %198, 8
+  %203 = v_cmp_lt_u32_src1_inline %193 {rhs = 8}
+  %204 = v_cndmask_b32 %195, %202, %203
+  %205 = v_or_b32 %192, %204
+  %208 = v_cmp_eq_i32 %190, %186
+  %209 = v_cndmask_b32 %205, %185, %208
+  %210 = v_lshlrev_b32_src0_inline %209, 16
+  %215 = v_mul_f32 %189, %scale
+  %218 = v_mul_f32 %210, %scale
+  %rounded = v_cvt_pk_bf16_f32 %215, %218
+  return %rounded
 }

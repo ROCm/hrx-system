@@ -66,13 +66,28 @@ static bool loom_amdgpu_type_is_extf_packed_float_vector(
   return true;
 }
 
+static loom_value_fact_numeric_format_flags_t
+loom_amdgpu_vector_storage_numeric_format(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t source,
+    loom_value_fact_numeric_format_flags_t fallback_format) {
+  loom_value_fact_encoding_summary_t summary = {0};
+  if (loom_value_facts_query_encoding_summary(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table, source), &summary) &&
+      summary.storage_schema.encoded_operand.element_format !=
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return summary.storage_schema.encoded_operand.element_format;
+  }
+  return fallback_format;
+}
+
 static bool loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t source_element_type,
+    loom_value_fact_numeric_format_flags_t source_format,
     loom_scalar_type_t result_element_type) {
   loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   return loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(
-             source_element_type, result_element_type, &descriptor_ref) &&
+             source_format, result_element_type, &descriptor_ref) &&
          loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
 }
 
@@ -262,7 +277,12 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
                  summary.storage_schema.encoded_operand, source_element_type,
                  source_lane_count,
                  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32);
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0:
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0: {
+      const loom_value_fact_numeric_format_flags_t descriptor_source_format =
+          loom_amdgpu_fp8_descriptor_source_format(
+              summary.storage_schema.encoded_operand.element_format,
+              loom_value_fact_table_lookup(
+                  fact_table, loom_op_const_results(source_op)[0]));
       return loom_amdgpu_vector_decode_scale_source(
                  module, source_op, LOOM_SCALAR_TYPE_I32, &scale_source) &&
              loom_amdgpu_fp8_encoded_operand_schema_matches(
@@ -270,10 +290,12 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
                  source_lane_count,
                  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0) &&
              loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
-                 descriptor_set, source_element_type, result_element_type) &&
+                 descriptor_set, descriptor_source_format,
+                 result_element_type) &&
              loom_amdgpu_direct_fp8_e8m0_pk8_storage_matches(
                  module, fact_table, source, source_element_type,
                  source_lane_count);
+    }
     default:
       return false;
   }
@@ -344,6 +366,10 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
   const loom_type_t source_type = loom_module_value_type(module, source);
   const loom_type_t result_type = loom_module_value_type(module, result);
   loom_scalar_type_t source_element_type = loom_type_element_type(source_type);
+  loom_value_fact_numeric_format_flags_t source_format =
+      loom_amdgpu_vector_storage_numeric_format(
+          fact_table, source,
+          loom_numeric_format_from_scalar_type(source_element_type));
   const loom_scalar_type_t result_element_type =
       loom_type_element_type(result_type);
   uint32_t source_lane_count = 0;
@@ -362,22 +388,18 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
   uint32_t result_register_count = 0;
   if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF ||
       kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE) {
-    IREE_ASSERT_TRUE(
-        kind != LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE ||
-        loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
-            module, fact_table, loom_low_lower_context_descriptor_set(context),
-            source_op));
     if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE) {
       loom_value_fact_encoding_summary_t summary = {0};
-      if (loom_value_facts_query_encoding_summary(
-              &fact_table->context,
-              loom_value_fact_table_lookup(
-                  fact_table, loom_vector_decode_schema(source_op)),
-              &summary)) {
-        scale_format = summary.storage_schema.encoded_operand.scale_format;
-        scale_group_element_count =
-            summary.storage_schema.encoded_operand.scale_group_element_count;
-      }
+      const bool has_summary = loom_value_facts_query_encoding_summary(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table,
+                                       loom_vector_decode_schema(source_op)),
+          &summary);
+      IREE_ASSERT(has_summary);
+      source_format = summary.storage_schema.encoded_operand.element_format;
+      scale_format = summary.storage_schema.encoded_operand.scale_format;
+      scale_group_element_count =
+          summary.storage_schema.encoded_operand.scale_group_element_count;
       loom_scalar_type_t scale_element_type = 0;
       if (loom_amdgpu_vector_decode_scale_element_type(scale_format,
                                                        &scale_element_type) &&
@@ -458,6 +480,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
           origin_lane_count == source_lane_count &&
           origin_register_count == result_register_count) {
         source_element_type = origin_element_type;
+        source_format =
+            loom_numeric_format_from_scalar_type(origin_element_type);
         storage_source = lane_origin.source_value_id;
         content_fact_source = storage_source;
         storage_lane_offset = lane_origin.source_lane_offset;
@@ -491,9 +515,12 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
             origin_element_type == LOOM_SCALAR_TYPE_F8E5M2;
         const loom_low_lower_resolved_descriptor_t* scale_descriptor = NULL;
         if (is_origin_fp8) {
+          const loom_value_fact_numeric_format_flags_t origin_format =
+              loom_amdgpu_vector_storage_numeric_format(
+                  fact_table, lane_origin.source_value_id,
+                  loom_numeric_format_from_scalar_type(origin_element_type));
           IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_scalef32_descriptor(
-              context, origin_element_type, result_element_type,
-              &scale_descriptor));
+              context, origin_format, result_element_type, &scale_descriptor));
         }
         if (scale_descriptor != NULL &&
             loom_amdgpu_type_is_extf_packed_float_vector(
@@ -501,6 +528,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
                 &origin_register_count) &&
             last_storage_lane < origin_lane_count) {
           source_element_type = origin_element_type;
+          source_format =
+              loom_numeric_format_from_scalar_type(origin_element_type);
           storage_source = lane_origin.source_value_id;
           content_fact_source = storage_source;
           scale_source = scale_origin.scale_value_id;
@@ -522,6 +551,16 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
   IREE_ASSERT_NE(storage_lane_stride, 0u);
   IREE_ASSERT_NE(result_register_count, 0u);
 
+  if (source_element_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+      source_element_type == LOOM_SCALAR_TYPE_F8E5M2) {
+    source_format = loom_amdgpu_vector_storage_numeric_format(
+        fact_table, storage_source, source_format);
+  }
+  const loom_value_facts_t content_facts =
+      loom_value_fact_table_lookup(fact_table, content_fact_source);
+  const loom_value_fact_numeric_format_flags_t descriptor_source_format =
+      loom_amdgpu_fp8_descriptor_source_format(source_format, content_facts);
+
   *out_plan = (loom_amdgpu_vector_16bit_float_conversion_plan_t){
       .kind = kind,
       .source = source,
@@ -532,6 +571,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       .scale_format = scale_format,
       .scale_group_element_count = scale_group_element_count,
       .source_element_type = source_element_type,
+      .source_format = source_format,
+      .descriptor_source_format = descriptor_source_format,
       .result_element_type = result_element_type,
       .lane_count = source_lane_count,
       .source_register_count = source_register_count,

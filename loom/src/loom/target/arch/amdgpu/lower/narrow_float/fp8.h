@@ -88,6 +88,13 @@ typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
 loom_amdgpu_fp8_decode_value_flags_t
 loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts);
 
+// Returns the source format accepted by native conversion descriptors for an
+// exact FP8 payload and its proven content facts. NONE requires exact software
+// conversion on targets whose native instruction has different semantics.
+loom_value_fact_numeric_format_flags_t loom_amdgpu_fp8_descriptor_source_format(
+    loom_value_fact_numeric_format_flags_t exact_source_format,
+    loom_value_facts_t content_facts);
+
 typedef enum loom_amdgpu_fp8_encoded_operand_schema_kind_e {
   LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED = 0,
   LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32,
@@ -244,64 +251,81 @@ typedef struct loom_amdgpu_fp8_packed_u16_pair_source_t {
   uint32_t live_lane_count;
 } loom_amdgpu_fp8_packed_u16_pair_source_t;
 
-// Returns the native unscaled FP8/BF8 conversion descriptor refs for the source
-// and result element type pair.
+// Maps one supported FP8 numeric-format bit to its compact table index.
+bool loom_amdgpu_fp8_source_format_index(
+    loom_value_fact_numeric_format_flags_t source_format,
+    uint32_t* out_format_index);
+
+// Returns the native unscaled FP8/BF8 conversion descriptor refs for the
+// descriptor-compatible source format and result element type pair.
 bool loom_amdgpu_fp8_native_descriptor_refs(
-    loom_scalar_type_t source_element_type,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     loom_amdgpu_fp8_native_descriptor_refs_t* out_refs);
 
-// Returns native unscaled FP8/BF8 conversion descriptors for the source and
-// result element type pair. The descriptor pointer remains valid until the
-// current loom_low_lower_function call returns.
+// Returns native unscaled FP8/BF8 conversion descriptors for the
+// descriptor-compatible source format and result element type pair. The
+// descriptor pointer remains valid until the current loom_low_lower_function
+// call returns.
 iree_status_t loom_amdgpu_get_fp8_native_descriptors(
-    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     const loom_amdgpu_fp8_native_descriptors_t** out_descriptors);
 
-// Returns the native scaled FP8/BF8 conversion descriptor ref for the source
-// and result element type pair.
+// Returns the native scaled FP8/BF8 conversion descriptor ref for the
+// descriptor-compatible source format and result element type pair.
 bool loom_amdgpu_fp8_scalef32_descriptor_ref(
-    loom_scalar_type_t source_element_type,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     loom_amdgpu_descriptor_ref_t* out_ref);
 
-// Returns the native scaled FP8/BF8 conversion descriptor for the source and
-// result element type pair, when the active target exposes one. The descriptor
-// pointer remains valid until the current loom_low_lower_function call returns.
+// Returns the native scaled FP8/BF8 conversion descriptor for the
+// descriptor-compatible source format and result element type pair, when the
+// active target exposes one. The descriptor pointer remains valid until the
+// current loom_low_lower_function call returns.
 iree_status_t loom_amdgpu_get_fp8_scalef32_descriptor(
-    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     const loom_low_lower_resolved_descriptor_t** out_descriptor);
 
-// Returns the native scaled FP8/BF8 conversion descriptor ref for source/result
-// pairs using E8M0 scale packets that convert eight packed source elements.
+// Returns the native scaled FP8/BF8 conversion descriptor ref for
+// descriptor-compatible source format/result type pairs using E8M0 scale
+// packets.
 bool loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(
-    loom_scalar_type_t source_element_type,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     loom_amdgpu_descriptor_ref_t* out_ref);
 
 // Returns the native E8M0 scale-pk8 FP8/BF8 conversion descriptor for the
-// source and result element type pair, when the active target exposes one. The
-// descriptor pointer remains valid until the current loom_low_lower_function
-// call returns.
+// descriptor-compatible source format and result element type pair, when
+// available. The descriptor pointer remains valid until the current
+// loom_low_lower_function call returns.
 iree_status_t loom_amdgpu_get_fp8_e8m0_pk8_descriptor(
-    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_scalar_type_t result_element_type,
     const loom_low_lower_resolved_descriptor_t** out_descriptor);
 
-// Returns descriptor helpers and format tables for |element_type|. The plan is
-// function-local target lowering state and remains valid until the current
-// loom_low_lower_function call returns.
+// Returns descriptor helpers and exact format tables for |source_format|.
+// |descriptor_source_format| is the semantically compatible format used only
+// for native descriptor availability. The plan is function-local target
+// lowering state and remains valid until the current loom_low_lower_function
+// call returns.
 iree_status_t loom_amdgpu_get_fp8_decode_plan(
-    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t source_format,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     const loom_amdgpu_fp8_decode_plan_t** out_plan);
 
-// Initializes descriptor-availability flags and format tables for
-// |element_type| without resolving low descriptors for emission.
+// Initializes descriptor-availability flags and exact format tables without
+// resolving low descriptors for emission.
 void loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* out_plan);
+    loom_value_fact_numeric_format_flags_t source_format,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
+    loom_amdgpu_fp8_decode_plan_t* out_plan);
 
 // Returns the target packet and value-fact requirements missing from the
 // packed FP8-to-BF16 pair decode path.

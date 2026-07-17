@@ -702,18 +702,19 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
   loom_amdgpu_fragment_memory_address_t address;
   const loom_amdgpu_fp8_decode_plan_t* decode_plan = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_decode_plan(
-      context, plan->view_element_type, &decode_plan));
+      context, plan->view_element_format, plan->descriptor_source_format,
+      &decode_plan));
   const loom_scalar_type_t result_element_type =
       loom_amdgpu_fragment_memory_load_fp8_result_element_type(
           plan->payload_form);
   const bool result_is_f16 = result_element_type == LOOM_SCALAR_TYPE_F16;
   const loom_low_lower_resolved_descriptor_t* scalef32_descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_scalef32_descriptor(
-      context, plan->view_element_type, result_element_type,
+      context, plan->descriptor_source_format, result_element_type,
       &scalef32_descriptor));
   const loom_low_lower_resolved_descriptor_t* e8m0_pk8_descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_e8m0_pk8_descriptor(
-      context, plan->view_element_type, result_element_type,
+      context, plan->descriptor_source_format, result_element_type,
       &e8m0_pk8_descriptor));
   const loom_amdgpu_fragment_memory_packet_flags_t e8m0_pk8_flag =
       result_is_f16
@@ -732,7 +733,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
   const loom_amdgpu_fp8_native_descriptors_t* native_f16_descriptors = NULL;
   if (result_is_f16) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_native_descriptors(
-        context, plan->view_element_type, LOOM_SCALAR_TYPE_F16,
+        context, plan->descriptor_source_format, LOOM_SCALAR_TYPE_F16,
         &native_f16_descriptors));
   }
   const bool has_native_f16_pair =
@@ -742,7 +743,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
   const loom_amdgpu_fp8_native_descriptors_t* native_f32_descriptors = NULL;
   if (!result_is_f16) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_native_descriptors(
-        context, plan->view_element_type, LOOM_SCALAR_TYPE_F32,
+        context, plan->descriptor_source_format, LOOM_SCALAR_TYPE_F32,
         &native_f32_descriptors));
   }
   const bool has_native_f32_pair =

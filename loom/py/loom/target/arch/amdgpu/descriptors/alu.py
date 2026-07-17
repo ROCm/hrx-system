@@ -4524,13 +4524,15 @@ def _v_cvt_f16_f32_overlay() -> AmdgpuDescriptorOverlay:
 _PACKED8_SOURCE_SIZE_REASON = "packed8-conversion-reads-byte-lanes-of-b32-source"
 
 
-def _v_cvt_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+def _v_cvt_f32_packed8_overlay(
+    source_type: str, source_semantics: str
+) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.v_cvt_f32_{source_type}",
+        descriptor_key=f"amdgpu.v_cvt_f32_{source_type}.{source_semantics}",
         instruction_name=f"V_CVT_F32_{source_type.upper()}",
         mnemonic=f"v_cvt_f32_{source_type}",
         encoding_name="ENC_VOP1",
-        semantic_tag=f"convert.float.{source_type}.f32",
+        semantic_tag=f"convert.float.{source_type}.{source_semantics}.f32",
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
@@ -4544,13 +4546,15 @@ def _v_cvt_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
     )
 
 
-def _v_cvt_pk_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+def _v_cvt_pk_f32_packed8_overlay(
+    source_type: str, source_semantics: str
+) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.v_cvt_pk_f32_{source_type}",
+        descriptor_key=f"amdgpu.v_cvt_pk_f32_{source_type}.{source_semantics}",
         instruction_name=f"V_CVT_PK_F32_{source_type.upper()}",
         mnemonic=f"v_cvt_pk_f32_{source_type}",
         encoding_name="ENC_VOP1",
-        semantic_tag=f"convert.float.{source_type}x2.f32x2",
+        semantic_tag=(f"convert.float.{source_type}.{source_semantics}x2.f32x2"),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=2)),
@@ -4564,13 +4568,15 @@ def _v_cvt_pk_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
     )
 
 
-def _v_cvt_pk_f16_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+def _v_cvt_pk_f16_packed8_overlay(
+    source_type: str, source_semantics: str
+) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.v_cvt_pk_f16_{source_type}",
+        descriptor_key=f"amdgpu.v_cvt_pk_f16_{source_type}.{source_semantics}",
         instruction_name=f"V_CVT_PK_F16_{source_type.upper()}",
         mnemonic=f"v_cvt_pk_f16_{source_type}",
         encoding_name="ENC_VOP1",
-        semantic_tag=f"convert.float.{source_type}x2.f16x2",
+        semantic_tag=(f"convert.float.{source_type}.{source_semantics}x2.f16x2"),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
@@ -4617,13 +4623,13 @@ def _v_cvt_scalef32_pk_packed8_overlay(
     source_type: str, target_type: str, result_units: int
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}",
+        descriptor_key=(f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}.ocp"),
         instruction_name=(
             f"V_CVT_SCALEF32_PK_{target_type.upper()}_{source_type.upper()}"
         ),
         mnemonic=f"v_cvt_scalef32_pk_{target_type}_{source_type}",
         encoding_name="ENC_VOP3",
-        semantic_tag=f"convert.scale.float.{source_type}x2.{target_type}x2",
+        semantic_tag=(f"convert.scale.float.{source_type}.ocpx2.{target_type}x2"),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
@@ -4645,11 +4651,11 @@ def _v_cvt_scale_pk8_overlay(
     result_units: int,
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.v_cvt_scale_pk8_{target_type}_{source_type}",
+        descriptor_key=f"amdgpu.v_cvt_scale_pk8_{target_type}_{source_type}.ocp",
         instruction_name=f"V_CVT_SCALE_PK8_{target_type.upper()}_{source_type.upper()}",
         mnemonic=f"v_cvt_scale_pk8_{target_type}_{source_type}",
         encoding_name="ENC_VOP3",
-        semantic_tag=f"convert.scale.e8m0.{source_type}x8.{target_type}x8",
+        semantic_tag=f"convert.scale.e8m0.{source_type}.ocpx8.{target_type}x8",
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
@@ -4677,19 +4683,23 @@ def _v_cvt_scale_pk8_overlay(
     )
 
 
-def _v_cvt_f32_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _v_cvt_f32_packed8_overlays(
+    source_semantics: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
-        _v_cvt_f32_packed8_overlay("fp8"),
-        _v_cvt_f32_packed8_overlay("bf8"),
-        _v_cvt_pk_f32_packed8_overlay("fp8"),
-        _v_cvt_pk_f32_packed8_overlay("bf8"),
+        _v_cvt_f32_packed8_overlay("fp8", source_semantics),
+        _v_cvt_f32_packed8_overlay("bf8", source_semantics),
+        _v_cvt_pk_f32_packed8_overlay("fp8", source_semantics),
+        _v_cvt_pk_f32_packed8_overlay("bf8", source_semantics),
     )
 
 
-def _v_cvt_pk_f16_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _v_cvt_pk_f16_packed8_overlays(
+    source_semantics: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
-        _v_cvt_pk_f16_packed8_overlay("fp8"),
-        _v_cvt_pk_f16_packed8_overlay("bf8"),
+        _v_cvt_pk_f16_packed8_overlay("fp8", source_semantics),
+        _v_cvt_pk_f16_packed8_overlay("bf8", source_semantics),
     )
 
 

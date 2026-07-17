@@ -265,6 +265,7 @@ def _rdna_scalar_domain_fma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 def _cdna_core_overlays(
     *,
+    packed8_source_semantics: str,
     global_load_lds_variants: tuple[tuple[str, str, str, int, int], ...],
     buffer_load_lds_variants: tuple[
         tuple[str, str, str, int, int, AmdgpuImplicitOperandOverlay], ...
@@ -355,7 +356,7 @@ def _cdna_core_overlays(
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(),
         _v_cvt_f16_f32_overlay(),
-        *_v_cvt_f32_packed8_overlays(),
+        *_v_cvt_f32_packed8_overlays(packed8_source_semantics),
         *(
             _v_cvt_scalef32_pk_packed8_overlays()
             if include_v_cvt_scalef32_pk_packed8
@@ -831,6 +832,7 @@ def _cdna_core_overlays(
 
 def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
+        packed8_source_semantics="fnuz",
         global_load_lds_variants=_GLOBAL_LOAD_LDS_CDNA3_VARIANTS,
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_CDNA3_VARIANTS,
         include_v_dot2_f32_bf16=False,
@@ -843,6 +845,7 @@ def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
+        packed8_source_semantics="ocp",
         global_load_lds_variants=_GLOBAL_LOAD_LDS_GFX950_VARIANTS,
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_GFX950_VARIANTS,
         include_v_dot2_f32_bf16=True,
@@ -1482,7 +1485,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
-        *_v_cvt_f32_packed8_overlays(),
+        *_v_cvt_f32_packed8_overlays("ocp"),
         _v_cvt_pk_u16_u32_overlay(),
         _v_cvt_pk_u16_u32_dpp16_overlay(),
         _v_cvt_f32_i32_overlay(),
@@ -1800,7 +1803,7 @@ def _gfx12_core_overlay_descriptors(
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
-        *_v_cvt_pk_f16_packed8_overlays(),
+        *_v_cvt_pk_f16_packed8_overlays("ocp"),
         *_v_cvt_scale_pk8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
         _v_cvt_pk_bf16_f32_dpp16_overlay(),

@@ -41,6 +41,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_finite_bits,
     loom_value_id_t low_sign_bits, loom_value_id_t low_source_no_sign,
+    loom_value_id_t low_source_byte,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, uint32_t quiet_nan_bits,
     uint32_t infinity_magnitude_bits, loom_type_t vgpr_type,
     loom_type_t mask_type, loom_value_id_t* out_lane) {
@@ -53,6 +54,27 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
   if (value_not_nan && value_not_inf) {
     *out_lane = low_finite_bits;
     return iree_ok_status();
+  }
+
+  if (format->special_policy ==
+      LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO) {
+    if (value_not_nan) {
+      *out_lane = low_finite_bits;
+      return iree_ok_status();
+    }
+
+    loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+        quiet_nan_bits, vgpr_type, &low_quiet_nan));
+    loom_value_id_t low_is_nan = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_compare_immediate(
+        context, source_op, &plan->compare_eq_i32_src1_inline_descriptor,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32, low_source_byte,
+        UINT32_C(0x80), vgpr_type, mask_type, &low_is_nan));
+    return loom_amdgpu_emit_vgpr_select(context, source_op, low_finite_bits,
+                                        low_quiet_nan, low_is_nan, vgpr_type,
+                                        out_lane);
   }
 
   if (format->special_policy ==
@@ -530,8 +552,9 @@ static iree_status_t loom_amdgpu_emit_fp8_signed_lane_payload(
       &low_finite_bits));
   return loom_amdgpu_emit_fp8_apply_special_values(
       context, source_op, plan, low_finite_bits, lane_bits->low_sign_bits,
-      lane_bits->low_source_no_sign, value_flags, result_format->quiet_nan_bits,
-      result_format->infinity_magnitude_bits, vgpr_type, mask_type, out_lane);
+      lane_bits->low_source_no_sign, low_byte, value_flags,
+      result_format->quiet_nan_bits, result_format->infinity_magnitude_bits,
+      vgpr_type, mask_type, out_lane);
 }
 
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(

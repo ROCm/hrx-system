@@ -122,6 +122,15 @@ typedef struct loom_amdgpu_fragment_memory_narrowed_result_sources_t {
   uint16_t packed_register_count;
 } loom_amdgpu_fragment_memory_narrowed_result_sources_t;
 
+typedef struct loom_amdgpu_fragment_memory_view_numeric_t {
+  // Exact numeric format declared by the source view storage.
+  loom_value_fact_numeric_format_flags_t exact_format;
+  // Format accepted by native descriptors after applying proven value facts.
+  loom_value_fact_numeric_format_flags_t descriptor_format;
+  // Numeric facts published by the source view storage schema.
+  loom_value_facts_t content_facts;
+} loom_amdgpu_fragment_memory_view_numeric_t;
+
 static bool loom_amdgpu_fragment_memory_reject(
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic,
     iree_string_view_t constraint_key) {
@@ -189,14 +198,14 @@ static bool loom_amdgpu_fragment_memory_role_is_matrix_input(
 
 static bool loom_amdgpu_fragment_memory_descriptor_set_has_fp8_to_16bit_native(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t source_element_type,
+    loom_value_fact_numeric_format_flags_t source_format,
     loom_scalar_type_t result_element_type) {
   if (descriptor_set == NULL) {
     return false;
   }
   loom_amdgpu_fp8_native_descriptor_refs_t native_refs = {0};
-  if (loom_amdgpu_fp8_native_descriptor_refs(
-          source_element_type, result_element_type, &native_refs) &&
+  if (loom_amdgpu_fp8_native_descriptor_refs(source_format, result_element_type,
+                                             &native_refs) &&
       native_refs.pair != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set, native_refs.pair)) {
     return true;
@@ -204,24 +213,41 @@ static bool loom_amdgpu_fragment_memory_descriptor_set_has_fp8_to_16bit_native(
   loom_amdgpu_descriptor_ref_t scale_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   if (loom_amdgpu_fp8_scalef32_descriptor_ref(
-          source_element_type, result_element_type, &scale_descriptor_ref) &&
+          source_format, result_element_type, &scale_descriptor_ref) &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
                                          scale_descriptor_ref)) {
     return true;
   }
   return loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(
-             source_element_type, result_element_type, &scale_descriptor_ref) &&
+             source_format, result_element_type, &scale_descriptor_ref) &&
          loom_amdgpu_descriptor_set_has_ref(descriptor_set,
                                             scale_descriptor_ref);
 }
 
-static bool loom_amdgpu_fragment_memory_schema_proves_fp8_finite(
+static loom_amdgpu_fragment_memory_view_numeric_t
+loom_amdgpu_fragment_memory_view_numeric(
     const loom_value_fact_storage_schema_t* view_storage_schema,
     loom_scalar_type_t view_element_type) {
-  loom_value_facts_t content_facts = loom_value_facts_unknown();
-  return loom_encoding_query_storage_schema_content_facts(
-             view_storage_schema, view_element_type, &content_facts) &&
-         loom_value_facts_is_finite(content_facts);
+  const loom_value_fact_numeric_format_flags_t exact_format =
+      view_storage_schema != NULL &&
+              view_storage_schema->encoded_operand.element_format !=
+                  LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE
+          ? view_storage_schema->encoded_operand.element_format
+          : loom_numeric_format_from_scalar_type(view_element_type);
+  loom_amdgpu_fragment_memory_view_numeric_t numeric = {
+      .exact_format = exact_format,
+      .descriptor_format = exact_format,
+      .content_facts = loom_value_facts_unknown(),
+  };
+  loom_scalar_type_fp8_format_t unused_format = {0};
+  if (!loom_scalar_type_fp8_format(view_element_type, &unused_format)) {
+    return numeric;
+  }
+  loom_encoding_query_storage_schema_content_facts(
+      view_storage_schema, view_element_type, &numeric.content_facts);
+  numeric.descriptor_format = loom_amdgpu_fp8_descriptor_source_format(
+      numeric.exact_format, numeric.content_facts);
+  return numeric;
 }
 
 static bool loom_amdgpu_fragment_memory_can_load_fp8_to_16bit(
@@ -230,7 +256,7 @@ static bool loom_amdgpu_fragment_memory_can_load_fp8_to_16bit(
     loom_contract_operand_role_t role, loom_scalar_type_t expected_element_type,
     loom_scalar_type_t payload_element_type,
     loom_scalar_type_t view_element_type,
-    const loom_value_fact_storage_schema_t* view_storage_schema,
+    const loom_amdgpu_fragment_memory_view_numeric_t* view_numeric,
     loom_amdgpu_fragment_memory_payload_form_t* out_payload_form) {
   *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   loom_scalar_type_fp8_format_t unused_format = {0};
@@ -245,16 +271,17 @@ static bool loom_amdgpu_fragment_memory_can_load_fp8_to_16bit(
       *out_payload_form =
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16;
       return true;
-    case LOOM_SCALAR_TYPE_F16:
+    case LOOM_SCALAR_TYPE_F16: {
       if (!loom_amdgpu_fragment_memory_descriptor_set_has_fp8_to_16bit_native(
-              descriptor_set, view_element_type, expected_element_type) &&
-          !loom_amdgpu_fragment_memory_schema_proves_fp8_finite(
-              view_storage_schema, view_element_type)) {
+              descriptor_set, view_numeric->descriptor_format,
+              expected_element_type) &&
+          !loom_value_facts_is_finite(view_numeric->content_facts)) {
         return false;
       }
       *out_payload_form =
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_F16;
       return true;
+    }
     default:
       return false;
   }
@@ -279,7 +306,7 @@ static bool loom_amdgpu_fragment_memory_payload_form_select(
     loom_contract_operand_role_t role, loom_scalar_type_t expected_element_type,
     loom_scalar_type_t payload_element_type,
     loom_scalar_type_t view_element_type,
-    const loom_value_fact_storage_schema_t* view_storage_schema,
+    const loom_amdgpu_fragment_memory_view_numeric_t* view_numeric,
     loom_amdgpu_fragment_memory_payload_form_t* out_payload_form) {
   *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   if (payload_element_type == expected_element_type &&
@@ -295,7 +322,7 @@ static bool loom_amdgpu_fragment_memory_payload_form_select(
   }
   if (loom_amdgpu_fragment_memory_can_load_fp8_to_16bit(
           descriptor_set, operation_kind, role, expected_element_type,
-          payload_element_type, view_element_type, view_storage_schema,
+          payload_element_type, view_element_type, view_numeric,
           out_payload_form)) {
     return true;
   }
@@ -763,6 +790,7 @@ loom_amdgpu_fragment_memory_payload_element_match(
     loom_contract_operand_role_t role, loom_type_t payload_type,
     loom_type_t view_type,
     const loom_value_fact_storage_schema_t* view_storage_schema,
+    const loom_amdgpu_fragment_memory_view_numeric_t* view_numeric,
     loom_scalar_type_t expected_element_type,
     const loom_matrix_fragment_role_layout_t* role_layout,
     loom_amdgpu_fragment_memory_payload_form_t* out_payload_form) {
@@ -786,7 +814,7 @@ loom_amdgpu_fragment_memory_payload_element_match(
       loom_type_element_type(view_type);
   if (!loom_amdgpu_fragment_memory_payload_form_select(
           descriptor_set, operation_kind, role, expected_element_type,
-          payload_element_type, view_element_type, view_storage_schema,
+          payload_element_type, view_element_type, view_numeric,
           out_payload_form)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE;
   }
@@ -802,6 +830,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     loom_type_t payload_type, loom_type_t view_type, loom_value_id_t blocks,
     loom_value_id_t rows, loom_value_id_t columns,
     const loom_value_fact_storage_schema_t* view_storage_schema,
+    const loom_amdgpu_fragment_memory_view_numeric_t* view_numeric,
     const loom_amdgpu_matrix_fragment_layout_t** out_layout,
     loom_scalar_type_t* out_expected_element_type,
     loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
@@ -889,8 +918,8 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     const loom_amdgpu_fragment_memory_element_match_t match =
         loom_amdgpu_fragment_memory_payload_element_match(
             environment->descriptor_set, operation_kind, role, payload_type,
-            view_type, view_storage_schema, expected_element_type, role_layout,
-            &payload_form);
+            view_type, view_storage_schema, view_numeric, expected_element_type,
+            role_layout, &payload_form);
     const loom_amdgpu_fragment_memory_layout_match_t layout_match =
         loom_amdgpu_fragment_memory_layout_match_rank(
             environment, payload, role_layout, match, payload_form);
@@ -1471,6 +1500,12 @@ static bool loom_amdgpu_fragment_memory_analyze(
           fact_context, environment->module, view_type, &view_storage_schema) &&
       !loom_value_fact_encoded_operand_schema_is_unknown(
           view_storage_schema.encoded_operand);
+  const loom_scalar_type_t view_element_type =
+      loom_type_element_type(view_type);
+  const loom_amdgpu_fragment_memory_view_numeric_t view_numeric =
+      loom_amdgpu_fragment_memory_view_numeric(
+          has_view_storage_schema ? &view_storage_schema : NULL,
+          view_element_type);
   const loom_amdgpu_matrix_fragment_layout_t* layout = NULL;
   loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
   loom_amdgpu_fragment_memory_payload_form_t payload_form =
@@ -1478,8 +1513,8 @@ static bool loom_amdgpu_fragment_memory_analyze(
   if (!loom_amdgpu_fragment_memory_target_layout(
           environment, role, operation_kind, source->payload, payload_type,
           view_type, source->blocks, source->rows, source->columns,
-          has_view_storage_schema ? &view_storage_schema : NULL, &layout,
-          &expected_element_type, &payload_form, diagnostic)) {
+          has_view_storage_schema ? &view_storage_schema : NULL, &view_numeric,
+          &layout, &expected_element_type, &payload_form, diagnostic)) {
     return false;
   }
 
@@ -1623,7 +1658,9 @@ static bool loom_amdgpu_fragment_memory_analyze(
         .register_count = role_layout->register_count,
         .payload_register_count = payload_register_count,
         .element_byte_count = (uint16_t)source_access.element_byte_count,
-        .view_element_type = loom_type_element_type(view_type),
+        .view_element_type = view_element_type,
+        .view_element_format = view_numeric.exact_format,
+        .descriptor_source_format = view_numeric.descriptor_format,
         .address_layout = address_layout,
         .payload_form = payload_form,
         .narrowed_result_round_source = narrowed_result_sources.round_source,

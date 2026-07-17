@@ -80,16 +80,22 @@ low.func.def target(@target) abi(hal_kernel) @vector_decode_splat_f8_scale(%base
   %51 = v_bfi_b32_src0_lit %30, %38, 2147516416
   %52 = s_mov_b32 4294967295
   %53 = s_mov_b32 983055
-  %54 = v_mov_b32 2143322048
-  %55 = v_xor_b32_lit %29, 8323199
-  %56 = v_pk_add_u16 %55, %52
-  %57 = v_pk_ashrrev_i16 %53, %56
-  %58 = v_bfi_b32 %57, %54, %51
-  %59 = v_lshlrev_b32_src0_inline %58, 16
-  %60 = v_and_b32_lit %58, 4294901760
-  %61 = v_mul_f32 %59, %scale
-  %62 = v_mul_f32 %60, %scale
-  %decoded = concat(%61, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %54 = v_mov_b32 2139127680
+  %55 = v_bfi_b32_src0_lit %30, %54, 2147516416
+  %56 = v_xor_b32_lit %29, 7864440
+  %57 = v_pk_add_u16 %56, %52
+  %58 = v_pk_ashrrev_i16 %53, %57
+  %59 = v_bfi_b32 %58, %55, %51
+  %60 = s_mov_b32 2139586439
+  %62 = v_mov_b32 2143322048
+  %63 = v_pk_add_u16 %29, %60
+  %64 = v_pk_ashrrev_i16 %53, %63
+  %65 = v_bfi_b32 %64, %62, %59
+  %66 = v_lshlrev_b32_src0_inline %65, 16
+  %67 = v_and_b32_lit %65, 4294901760
+  %68 = v_mul_f32 %66, %scale
+  %69 = v_mul_f32 %67, %scale
+  %decoded = concat(%68, %69) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %decoded
 }
 

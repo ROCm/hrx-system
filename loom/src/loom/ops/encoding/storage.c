@@ -708,23 +708,20 @@ bool loom_encoding_query_storage_schema_content_facts(
   if (!loom_scalar_type_is_float(element_type)) {
     return false;
   }
-  loom_scalar_type_fp8_format_t fp8_format = {0};
-  if (loom_scalar_type_fp8_format(element_type, &fp8_format) &&
-      fp8_format.special_policy ==
-          LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN) {
-    out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
-  }
-  if (!storage_schema) {
-    return out_facts->flags != 0;
-  }
-  if (iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
+  const loom_value_fact_numeric_format_flags_t element_format =
+      storage_schema != NULL &&
+              storage_schema->encoded_operand.element_format !=
+                  LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE
+          ? storage_schema->encoded_operand.element_format
+          : loom_numeric_format_from_scalar_type(element_type);
+  if (storage_schema != NULL &&
+      iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                         LOOM_VALUE_FACT_FINITE;
   }
   const loom_numeric_format_info_t* element_format_info = NULL;
-  if (loom_numeric_format_info(storage_schema->encoded_operand.element_format,
-                               &element_format_info) &&
+  if (loom_numeric_format_info(element_format, &element_format_info) &&
       element_format_info->kind == LOOM_NUMERIC_FORMAT_KIND_FLOAT) {
     if (!iree_any_bit_set(element_format_info->flags,
                           LOOM_NUMERIC_FORMAT_FLAG_HAS_NAN)) {
@@ -739,7 +736,8 @@ bool loom_encoding_query_storage_schema_content_facts(
       out_facts->flags |= LOOM_VALUE_FACT_FINITE;
     }
   }
-  if (iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
+  if (storage_schema != NULL &&
+      iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
   }

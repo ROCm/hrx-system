@@ -975,14 +975,15 @@ void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
   const bool result_is_f16 = result_element_type == LOOM_SCALAR_TYPE_F16;
   loom_amdgpu_fp8_decode_plan_t decode_plan = {0};
   loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
-      descriptor_set, plan->view_element_type, &decode_plan);
+      descriptor_set, plan->view_element_format, plan->descriptor_source_format,
+      &decode_plan);
   loom_amdgpu_descriptor_ref_t scalef32_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   loom_amdgpu_fp8_16bit_capabilities_t capabilities =
       LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NONE;
   const bool has_identity_scalef32_descriptor =
       descriptor_set != NULL &&
-      loom_amdgpu_fp8_scalef32_descriptor_ref(plan->view_element_type,
+      loom_amdgpu_fp8_scalef32_descriptor_ref(plan->descriptor_source_format,
                                               result_element_type,
                                               &scalef32_descriptor_ref) &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
@@ -998,7 +999,7 @@ void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
   const bool has_identity_e8m0_pk8_descriptor =
       descriptor_set != NULL &&
       loom_amdgpu_fragment_memory_packets_support_fp8_e8m0_pk8(plan) &&
-      loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(plan->view_element_type,
+      loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(plan->descriptor_source_format,
                                               result_element_type,
                                               &e8m0_pk8_descriptor_ref) &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
@@ -1012,8 +1013,9 @@ void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
   if (result_is_f16) {
     loom_amdgpu_fp8_native_descriptor_refs_t native_refs = {0};
     if (descriptor_set != NULL &&
-        loom_amdgpu_fp8_native_descriptor_refs(
-            plan->view_element_type, LOOM_SCALAR_TYPE_F16, &native_refs) &&
+        loom_amdgpu_fp8_native_descriptor_refs(plan->descriptor_source_format,
+                                               LOOM_SCALAR_TYPE_F16,
+                                               &native_refs) &&
         native_refs.pair != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
         loom_amdgpu_descriptor_set_has_ref(descriptor_set, native_refs.pair)) {
       capabilities |= LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NATIVE_F16_PAIR;

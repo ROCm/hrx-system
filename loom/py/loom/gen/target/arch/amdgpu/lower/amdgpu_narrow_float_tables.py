@@ -43,7 +43,7 @@ class _Fp8DecodePlanDescriptorRow:
 
 @dataclass(frozen=True)
 class _Fp8NativeDescriptorRefRow:
-    source_type: ScalarTypeKind
+    source_format: str
     result_type: ScalarTypeKind
     lane_descriptor_key: str | None
     pair_descriptor_key: str
@@ -51,7 +51,7 @@ class _Fp8NativeDescriptorRefRow:
 
 @dataclass(frozen=True)
 class _Fp8ScaledDescriptorRefRow:
-    source_type: ScalarTypeKind
+    source_format: str
     result_type: ScalarTypeKind
     scalef32_pair_descriptor_key: str
     e8m0_pk8_descriptor_key: str
@@ -59,12 +59,12 @@ class _Fp8ScaledDescriptorRefRow:
 
 @dataclass(frozen=True)
 class _Fp8FormatRow:
+    source_format: str
     source_type: ScalarTypeKind
     exponent_bits: int
     mantissa_bits: int
     exponent_bias: int
     special_policy: str
-    encoded_operand_formats: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -110,25 +110,48 @@ _FP8_PACKED_REPAIR_BITS = (
 
 _FP8_FORMAT_ROWS = (
     _Fp8FormatRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
         ScalarTypeKind.F8E4M3,
         exponent_bits=4,
         mantissa_bits=3,
         exponent_bias=7,
-        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
-        encoded_operand_formats=(
-            "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
-            "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
-        ),
+        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
     ),
     _Fp8FormatRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.F8E5M2,
         exponent_bits=5,
         mantissa_bits=2,
         exponent_bias=15,
         special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
-        encoded_operand_formats=("LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",),
+    ),
+    _Fp8FormatRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
+        ScalarTypeKind.F8E4M3,
+        exponent_bits=4,
+        mantissa_bits=3,
+        exponent_bias=7,
+        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+    ),
+    _Fp8FormatRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
+        ScalarTypeKind.F8E4M3,
+        exponent_bits=4,
+        mantissa_bits=3,
+        exponent_bias=8,
+        special_policy=("LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO"),
+    ),
+    _Fp8FormatRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
+        ScalarTypeKind.F8E5M2,
+        exponent_bits=5,
+        mantissa_bits=2,
+        exponent_bias=16,
+        special_policy=("LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN_UNSIGNED_ZERO"),
     ),
 )
+
+_FP8_FORMAT_INDEX_BY_NAME = {row.source_format: index for index, row in enumerate(_FP8_FORMAT_ROWS)}
 
 
 _FP8_ENCODED_OPERAND_SCHEMA_REQUIREMENT_ROWS = (
@@ -299,67 +322,79 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
 
 _FP8_NATIVE_DESCRIPTOR_REF_ROWS = (
     _Fp8NativeDescriptorRefRow(
-        ScalarTypeKind.F8E4M3,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.F32,
-        "amdgpu.v_cvt_f32_fp8",
-        "amdgpu.v_cvt_pk_f32_fp8",
+        "amdgpu.v_cvt_f32_bf8.ocp",
+        "amdgpu.v_cvt_pk_f32_bf8.ocp",
     ),
     _Fp8NativeDescriptorRefRow(
-        ScalarTypeKind.F8E5M2,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.F32,
-        "amdgpu.v_cvt_f32_bf8",
-        "amdgpu.v_cvt_pk_f32_bf8",
+        "amdgpu.v_cvt_f32_fp8.ocp",
+        "amdgpu.v_cvt_pk_f32_fp8.ocp",
     ),
     _Fp8NativeDescriptorRefRow(
-        ScalarTypeKind.F8E4M3,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
+        ScalarTypeKind.F32,
+        "amdgpu.v_cvt_f32_fp8.fnuz",
+        "amdgpu.v_cvt_pk_f32_fp8.fnuz",
+    ),
+    _Fp8NativeDescriptorRefRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
+        ScalarTypeKind.F32,
+        "amdgpu.v_cvt_f32_bf8.fnuz",
+        "amdgpu.v_cvt_pk_f32_bf8.fnuz",
+    ),
+    _Fp8NativeDescriptorRefRow(
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.F16,
         None,
-        "amdgpu.v_cvt_pk_f16_fp8",
+        "amdgpu.v_cvt_pk_f16_bf8.ocp",
     ),
     _Fp8NativeDescriptorRefRow(
-        ScalarTypeKind.F8E5M2,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.F16,
         None,
-        "amdgpu.v_cvt_pk_f16_bf8",
+        "amdgpu.v_cvt_pk_f16_fp8.ocp",
     ),
 )
 
 _FP8_SCALED_DESCRIPTOR_REF_ROWS = (
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E4M3,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.F16,
-        "amdgpu.v_cvt_scalef32_pk_f16_fp8",
-        "amdgpu.v_cvt_scale_pk8_f16_fp8",
+        "amdgpu.v_cvt_scalef32_pk_f16_bf8.ocp",
+        "amdgpu.v_cvt_scale_pk8_f16_bf8.ocp",
     ),
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E5M2,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.F16,
-        "amdgpu.v_cvt_scalef32_pk_f16_bf8",
-        "amdgpu.v_cvt_scale_pk8_f16_bf8",
+        "amdgpu.v_cvt_scalef32_pk_f16_fp8.ocp",
+        "amdgpu.v_cvt_scale_pk8_f16_fp8.ocp",
     ),
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E4M3,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.BF16,
-        "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
-        "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+        "amdgpu.v_cvt_scalef32_pk_bf16_bf8.ocp",
+        "amdgpu.v_cvt_scale_pk8_bf16_bf8.ocp",
     ),
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E5M2,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.BF16,
-        "amdgpu.v_cvt_scalef32_pk_bf16_bf8",
-        "amdgpu.v_cvt_scale_pk8_bf16_bf8",
+        "amdgpu.v_cvt_scalef32_pk_bf16_fp8.ocp",
+        "amdgpu.v_cvt_scale_pk8_bf16_fp8.ocp",
     ),
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E4M3,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
         ScalarTypeKind.F32,
-        "amdgpu.v_cvt_scalef32_pk_f32_fp8",
-        "amdgpu.v_cvt_scale_pk8_f32_fp8",
+        "amdgpu.v_cvt_scalef32_pk_f32_bf8.ocp",
+        "amdgpu.v_cvt_scale_pk8_f32_bf8.ocp",
     ),
     _Fp8ScaledDescriptorRefRow(
-        ScalarTypeKind.F8E5M2,
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.F32,
-        "amdgpu.v_cvt_scalef32_pk_f32_bf8",
-        "amdgpu.v_cvt_scale_pk8_f32_bf8",
+        "amdgpu.v_cvt_scalef32_pk_f32_fp8.ocp",
+        "amdgpu.v_cvt_scale_pk8_f32_fp8.ocp",
     ),
 )
 
@@ -385,12 +420,14 @@ def _validate_unique_source_result_rows(
     table_name: str,
     rows: Sequence[_Fp8NativeDescriptorRefRow | _Fp8ScaledDescriptorRefRow],
 ) -> None:
-    seen: set[tuple[ScalarTypeKind, ScalarTypeKind]] = set()
+    seen: set[tuple[str, ScalarTypeKind]] = set()
     duplicates: list[str] = []
     for row in rows:
-        key = (row.source_type, row.result_type)
+        if row.source_format not in _FP8_FORMAT_INDEX_BY_NAME:
+            raise ValueError(f"{table_name} contains unsupported source format: {row.source_format}")
+        key = (row.source_format, row.result_type)
         if key in seen:
-            duplicates.append(f"{row.source_type.name}->{row.result_type.name}")
+            duplicates.append(f"{row.source_format}->{row.result_type.name}")
         seen.add(key)
     if duplicates:
         raise ValueError(f"{table_name} contains duplicate source/result rows: " + ", ".join(sorted(duplicates)))
@@ -436,26 +473,29 @@ def _validate_fp8_format_rows(rows: Sequence[_Fp8FormatRow]) -> None:
     table_name = "AMDGPU FP8 subnormal table"
     _validate_unique_strings(
         table_name,
-        "source types",
-        [row.source_type.name for row in rows],
+        "source formats",
+        [row.source_format for row in rows],
     )
-    expected_types = (ScalarTypeKind.F8E4M3, ScalarTypeKind.F8E5M2)
-    if tuple(row.source_type for row in rows) != expected_types:
-        names = ", ".join(row.source_type.name for row in rows)
-        expected_names = ", ".join(scalar_type.name for scalar_type in expected_types)
-        raise ValueError(f"{table_name} must cover dense FP8/BF8 rows in order: expected {expected_names}; got {names}")
+    expected_formats = (
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ",
+        "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ",
+    )
+    if tuple(row.source_format for row in rows) != expected_formats:
+        names = ", ".join(row.source_format for row in rows)
+        raise ValueError(f"{table_name} must cover dense FP8 format bits in order: expected " + ", ".join(expected_formats) + f"; got {names}")
     for row in rows:
         if row.exponent_bits + row.mantissa_bits != 7:
-            raise ValueError(f"{table_name} row {row.source_type.name} must describe a signless 7-bit FP8 payload")
+            raise ValueError(f"{table_name} row {row.source_format} must describe a signless 7-bit FP8 payload")
         if row.mantissa_bits not in (2, 3):
-            raise ValueError(f"{table_name} row {row.source_type.name} has unsupported mantissa bits: {row.mantissa_bits}")
-        if not row.encoded_operand_formats:
-            raise ValueError(f"{table_name} row {row.source_type.name} must list accepted encoded operand formats")
-        _validate_unique_strings(
-            table_name,
-            f"{row.source_type.name} encoded operand formats",
-            list(row.encoded_operand_formats),
-        )
+            raise ValueError(f"{table_name} row {row.source_format} has unsupported mantissa bits: {row.mantissa_bits}")
+        if row.source_type not in (
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+        ):
+            raise ValueError(f"{table_name} row {row.source_format} has unsupported storage type: {row.source_type.name}")
 
 
 def _validate_fp8_encoded_operand_schema_requirement_rows(
@@ -536,7 +576,8 @@ def _fp8_native_descriptor_ref_initializer(
         [
             "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(",
             f"    {row_index},",
-            f"    {_scalar_type_constant_name(row.source_type)},",
+            f"    {_FP8_FORMAT_INDEX_BY_NAME[row.source_format]},",
+            f"    {row.source_format},",
             f"    {_scalar_type_constant_name(row.result_type)},",
             f"    {lane_descriptor_ref}, {pair_descriptor_ref}),",
         ]
@@ -562,7 +603,8 @@ def _fp8_scaled_descriptor_ref_initializer(
         [
             "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(",
             f"    {row_index},",
-            f"    {_scalar_type_constant_name(row.source_type)},",
+            f"    {_FP8_FORMAT_INDEX_BY_NAME[row.source_format]},",
+            f"    {row.source_format},",
             f"    {_scalar_type_constant_name(row.result_type)},",
             f"    {scalef32_pair_descriptor_ref},",
             f"    {e8m0_pk8_descriptor_ref}),",
@@ -631,6 +673,7 @@ def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
     return "\n".join(
         [
             "LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(",
+            f"    {row.source_format},",
             f"    {_scalar_type_constant_name(row.source_type)},",
             f"    {row.exponent_bits}, {row.mantissa_bits}, {row.exponent_bias},",
             f"    {row.special_policy},",
@@ -648,12 +691,12 @@ def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
     )
 
 
-def _fp8_encoded_operand_format_initializer(row: _Fp8FormatRow) -> str:
+def _fp8_encoded_operand_format_initializer(source_type: ScalarTypeKind, formats: Sequence[str]) -> str:
     return "\n".join(
         [
             "LOOM_AMDGPU_FP8_ENCODED_OPERAND_FORMAT_ROW(",
-            f"    {_scalar_type_constant_name(row.source_type)},",
-            f"    {_fp8_numeric_format_flags_expr(row.encoded_operand_formats)}),",
+            f"    {_scalar_type_constant_name(source_type)},",
+            f"    {_fp8_numeric_format_flags_expr(formats)}),",
         ]
     )
 
@@ -745,11 +788,18 @@ def _emit_fp8_encoded_operand_format_rows(
     rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
 ) -> str:
     _validate_fp8_format_rows(rows)
+    source_types = (ScalarTypeKind.F8E4M3, ScalarTypeKind.F8E5M2)
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *(_fp8_encoded_operand_format_initializer(row) for row in rows),
+                *(
+                    _fp8_encoded_operand_format_initializer(
+                        source_type,
+                        tuple(row.source_format for row in rows if row.source_type == source_type),
+                    )
+                    for source_type in source_types
+                ),
             ]
         )
         + "\n"

@@ -93,6 +93,22 @@ loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts) {
   return flags;
 }
 
+loom_value_fact_numeric_format_flags_t loom_amdgpu_fp8_descriptor_source_format(
+    loom_value_fact_numeric_format_flags_t exact_source_format,
+    loom_value_facts_t content_facts) {
+  if (exact_source_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3) {
+    return loom_value_facts_is_not_nan(content_facts) &&
+                   loom_value_facts_is_not_inf(content_facts)
+               ? LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN
+               : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+  }
+  uint32_t unused_format_index = 0;
+  return loom_amdgpu_fp8_source_format_index(exact_source_format,
+                                             &unused_format_index)
+             ? exact_source_format
+             : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+}
+
 typedef enum loom_amdgpu_fp8_scale_group_mode_e {
   LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_NONE = 0,
   LOOM_AMDGPU_FP8_SCALE_GROUP_MODE_ALL_LANES,

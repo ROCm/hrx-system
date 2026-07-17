@@ -11,6 +11,8 @@
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 
 typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
+  // Exact FP8 numeric format owning this decode table row.
+  loom_value_fact_numeric_format_flags_t source_format;
   // Scalar type owning this FP8/BF8 decode table row.
   loom_scalar_type_t element_type;
   // Encoded FP8 source format used by the decode plan.
@@ -30,11 +32,12 @@ typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
 static const loom_amdgpu_fp8_subnormal_table_row_t
     kLoomAmdgpuFp8SubnormalTableRows[] = {
 #define LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(                                   \
-    row_element_type, row_exponent_bits, row_mantissa_bits, row_exponent_bias, \
-    row_special_policy, bf16_table_0, bf16_table_1, bf16_byte_0_0,             \
-    bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0, f16_byte_0_1,   \
-    f16_byte_1_0, f16_byte_1_1)                                                \
-  [row_element_type - LOOM_SCALAR_TYPE_F8E4M3] = {                             \
+    row_source_format, row_element_type, row_exponent_bits, row_mantissa_bits, \
+    row_exponent_bias, row_special_policy, bf16_table_0, bf16_table_1,         \
+    bf16_byte_0_0, bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0,  \
+    f16_byte_0_1, f16_byte_1_0, f16_byte_1_1)                                  \
+  {                                                                            \
+      .source_format = row_source_format,                                      \
       .element_type = row_element_type,                                        \
       .format =                                                                \
           {                                                                    \
@@ -59,34 +62,30 @@ static const loom_amdgpu_fp8_subnormal_table_row_t
 #undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 };
 
-static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) ==
-                  LOOM_SCALAR_TYPE_F8E5M2 - LOOM_SCALAR_TYPE_F8E4M3 + 1,
-              "FP8 decode tables cover the dense FP8/BF8 scalar range");
-static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) <= 32,
-              "FP8 decode plan cache stores table rows in one u32 bitset");
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) + 1u <= 32,
+              "FP8 decode plan cache stores exact rows and one compatibility "
+              "variant in one u32 bitset");
 
 static bool loom_amdgpu_fp8_subnormal_table_row_index(
-    loom_scalar_type_t element_type, uint32_t* out_row_index) {
-  if (element_type < LOOM_SCALAR_TYPE_F8E4M3 ||
-      element_type > LOOM_SCALAR_TYPE_F8E5M2) {
-    return false;
-  }
-  *out_row_index = element_type - LOOM_SCALAR_TYPE_F8E4M3;
-  return true;
+    loom_value_fact_numeric_format_flags_t source_format,
+    uint32_t* out_row_index) {
+  return loom_amdgpu_fp8_source_format_index(source_format, out_row_index);
 }
 
 static const loom_amdgpu_fp8_subnormal_table_row_t*
-loom_amdgpu_find_fp8_subnormal_table_row(loom_scalar_type_t element_type,
-                                         uint32_t* out_row_index) {
+loom_amdgpu_find_fp8_subnormal_table_row(
+    loom_value_fact_numeric_format_flags_t source_format,
+    uint32_t* out_row_index) {
   *out_row_index = 0;
-  if (!loom_amdgpu_fp8_subnormal_table_row_index(element_type, out_row_index)) {
+  if (!loom_amdgpu_fp8_subnormal_table_row_index(source_format,
+                                                 out_row_index)) {
     return NULL;
   }
   IREE_ASSERT_LT(*out_row_index,
                  IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows));
   const loom_amdgpu_fp8_subnormal_table_row_t* row =
       &kLoomAmdgpuFp8SubnormalTableRows[*out_row_index];
-  IREE_ASSERT_EQ(row->element_type, element_type);
+  IREE_ASSERT_EQ(row->source_format, source_format);
   return row;
 }
 
@@ -133,11 +132,12 @@ static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
 
 static void loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* plan) {
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
+    loom_amdgpu_fp8_decode_plan_t* plan) {
   loom_amdgpu_fp8_native_descriptor_refs_t native_refs = {0};
   if (descriptor_set == NULL ||
       !loom_amdgpu_fp8_native_descriptor_refs(
-          element_type, LOOM_SCALAR_TYPE_F32, &native_refs) ||
+          descriptor_source_format, LOOM_SCALAR_TYPE_F32, &native_refs) ||
       native_refs.pair == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
       !loom_amdgpu_descriptor_set_has_ref(descriptor_set, native_refs.pair)) {
     return;
@@ -158,14 +158,15 @@ static void loom_amdgpu_mark_fp8_decode_plan_descriptor_flag(
 
 static void loom_amdgpu_mark_fp8_decode_plan_descriptor_flags(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* plan) {
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
+    loom_amdgpu_fp8_decode_plan_t* plan) {
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomAmdgpuFp8DecodePlanDescriptorRows); ++i) {
     loom_amdgpu_mark_fp8_decode_plan_descriptor_flag(
         descriptor_set, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan);
   }
-  loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(descriptor_set,
-                                                        element_type, plan);
+  loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
+      descriptor_set, descriptor_source_format, plan);
 }
 
 static bool loom_amdgpu_fp8_decode_format_has_packed_exact_repair(
@@ -322,13 +323,16 @@ static void loom_amdgpu_initialize_fp8_decode_plan_capabilities(
 
 void loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* out_plan) {
+    loom_value_fact_numeric_format_flags_t source_format,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
+    loom_amdgpu_fp8_decode_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
   uint32_t unused_row_index = 0;
   const loom_amdgpu_fp8_subnormal_table_row_t* row =
-      loom_amdgpu_find_fp8_subnormal_table_row(element_type, &unused_row_index);
-  loom_amdgpu_mark_fp8_decode_plan_descriptor_flags(descriptor_set,
-                                                    element_type, out_plan);
+      loom_amdgpu_find_fp8_subnormal_table_row(source_format,
+                                               &unused_row_index);
+  loom_amdgpu_mark_fp8_decode_plan_descriptor_flags(
+      descriptor_set, descriptor_source_format, out_plan);
   loom_amdgpu_initialize_fp8_decode_format_from_row(row, out_plan);
   loom_amdgpu_initialize_fp8_decode_plan_capabilities(out_plan);
 }
@@ -351,7 +355,8 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptor(
 }
 
 static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
-    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     loom_amdgpu_fp8_decode_plan_t* plan) {
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomAmdgpuFp8DecodePlanDescriptorRows); ++i) {
@@ -359,18 +364,20 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
         context, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan));
   }
   loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
-      loom_low_lower_context_descriptor_set(context), element_type, plan);
+      loom_low_lower_context_descriptor_set(context), descriptor_source_format,
+      plan);
 
   return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_initialize_fp8_decode_plan(
-    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     const loom_amdgpu_fp8_subnormal_table_row_t* row,
     loom_amdgpu_fp8_decode_plan_t* plan) {
   memset(plan, 0, sizeof(*plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptors(
-      context, element_type, plan));
+      context, descriptor_source_format, plan));
 
   loom_amdgpu_initialize_fp8_decode_format_from_row(row, plan);
   loom_amdgpu_initialize_fp8_decode_plan_capabilities(plan);
@@ -378,37 +385,48 @@ static iree_status_t loom_amdgpu_initialize_fp8_decode_plan(
 }
 
 typedef struct loom_amdgpu_fp8_decode_plan_cache_t {
-  // Generated-row bits whose plan entries have been initialized.
-  uint32_t initialized_row_bits;
-  // Function-local decode plans keyed by generated subnormal table row.
+  // Plan-variant bits whose entries have been initialized.
+  uint32_t initialized_plan_bits;
+  // Function-local exact-format plans plus one finite IEEE E4M3 variant.
   loom_amdgpu_fp8_decode_plan_t
-      plans[IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows)];
+      plans[IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) + 1u];
 } loom_amdgpu_fp8_decode_plan_cache_t;
 
 static int loom_amdgpu_fp8_decode_plan_cache_state_key;
 
 iree_status_t loom_amdgpu_get_fp8_decode_plan(
-    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_low_lower_context_t* context,
+    loom_value_fact_numeric_format_flags_t source_format,
+    loom_value_fact_numeric_format_flags_t descriptor_source_format,
     const loom_amdgpu_fp8_decode_plan_t** out_plan) {
   *out_plan = NULL;
   uint32_t row_index = 0;
   const loom_amdgpu_fp8_subnormal_table_row_t* row =
-      loom_amdgpu_find_fp8_subnormal_table_row(element_type, &row_index);
+      loom_amdgpu_find_fp8_subnormal_table_row(source_format, &row_index);
   if (row == NULL) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 decode");
     IREE_BUILTIN_UNREACHABLE();
+  }
+
+  uint32_t plan_index = row_index;
+  if (descriptor_source_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE &&
+      descriptor_source_format != source_format) {
+    IREE_ASSERT_EQ(source_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3);
+    IREE_ASSERT_EQ(descriptor_source_format,
+                   LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN);
+    plan_index = IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows);
   }
 
   loom_amdgpu_fp8_decode_plan_cache_t* cache = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
       context, &loom_amdgpu_fp8_decode_plan_cache_state_key, sizeof(*cache),
       (void**)&cache));
-  const uint32_t row_bit = UINT32_C(1) << row_index;
-  if ((cache->initialized_row_bits & row_bit) == 0) {
+  const uint32_t plan_bit = UINT32_C(1) << plan_index;
+  if ((cache->initialized_plan_bits & plan_bit) == 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp8_decode_plan(
-        context, element_type, row, &cache->plans[row_index]));
-    cache->initialized_row_bits |= row_bit;
+        context, descriptor_source_format, row, &cache->plans[plan_index]));
+    cache->initialized_plan_bits |= plan_bit;
   }
-  *out_plan = &cache->plans[row_index];
+  *out_plan = &cache->plans[plan_index];
   return iree_ok_status();
 }

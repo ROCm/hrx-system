@@ -32,8 +32,16 @@ TEST(NumericFormatTest, DescribesFp8AndBf8Semantics) {
   EXPECT_EQ(fp8->exponent_bit_count, 4);
   EXPECT_EQ(fp8->mantissa_bit_count, 3);
   EXPECT_TRUE(
-      iree_any_bit_set(fp8->flags, LOOM_NUMERIC_FORMAT_FLAG_FINITE_ONLY));
+      iree_any_bit_set(fp8->flags, LOOM_NUMERIC_FORMAT_FLAG_HAS_INFINITY));
   EXPECT_TRUE(loom_numeric_format_needs_encoded_payload_selector(fp8->format));
+
+  const loom_numeric_format_info_t* fp8_fn = nullptr;
+  ASSERT_TRUE(loom_numeric_format_info(LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN,
+                                       &fp8_fn));
+  EXPECT_TRUE(
+      iree_any_bit_set(fp8_fn->flags, LOOM_NUMERIC_FORMAT_FLAG_FINITE_ONLY));
+  EXPECT_FALSE(
+      iree_any_bit_set(fp8_fn->flags, LOOM_NUMERIC_FORMAT_FLAG_HAS_INFINITY));
 
   const loom_numeric_format_info_t* bf8 = nullptr;
   ASSERT_TRUE(
@@ -113,7 +121,7 @@ TEST(NumericFormatTest, MapsDirectScalarTypesToNumericFormats) {
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I32),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_I32);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F8E4M3),
-            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3);
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F8E5M2),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_F16),
