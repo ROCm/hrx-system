@@ -430,7 +430,10 @@ static inline uint32_t iree_math_truncate_f32_to_bits_rounding_to_nearest_even(
       // by right-shifting the subnormal mantissa.
       int shift_amount = f32_mantissa_bits - dst_mantissa_bits -
                          arithmetic_exp + dst_arithmetic_exp;
-      if (shift_amount < 0 || shift_amount > f32_mantissa_bits) {
+      // The effective f32 mantissa includes the implied leading bit. Shifting
+      // all 24 bits still spans the midpoint to the minimum subnormal and must
+      // be rounded; only larger shifts are unconditionally zero.
+      if (shift_amount < 0 || shift_amount > f32_mantissa_bits + 1) {
         dst_mantissa = 0;
       } else {
         // Source f32 value is normal so has an implied 1... leading bit.

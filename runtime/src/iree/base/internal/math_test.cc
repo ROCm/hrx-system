@@ -7,6 +7,7 @@
 #include "iree/base/internal/math.h"
 
 #include <cfloat>
+#include <cmath>
 
 #include "iree/testing/gtest.h"
 
@@ -214,29 +215,73 @@ static void CheckDenormals(
     float value = std::ldexp(m, 1 - small_exp_bias - small_mantissa_bits);
     EXPECT_EQ(value, convert_small_to_f32(m));
     EXPECT_EQ(m, convert_f32_to_small(value));
-    const float half = std::ldexp(0.5f, -small_exp_bias - mantissa_bits);
-    const UintType denormal_plus_half = convert_f32_to_small(value + half);
+    const float half = std::ldexp(1.0f, -small_exp_bias - mantissa_bits);
     // m + 1 is the next representable value after the denormal, even if m was
     // the largest denormal, as in that case the mantissa overflows into the
     // exponent, resulting in the smallest normal value.
-    // Tolerate both m and m + 1 here, meaning that we tolerate any tie-break
-    // behavior for conversions of f32 to denormal small floats.
-    EXPECT_TRUE(denormal_plus_half == m || denormal_plus_half == m + 1);
+    const UintType rounded_midpoint = (m & 1) ? m + 1 : m;
+    EXPECT_EQ(rounded_midpoint, convert_f32_to_small(value + half));
     if (m != 0 || have_neg_zero) {
       // Test negative values, similar to the above code for positive values.
       EXPECT_EQ(-value, convert_small_to_f32(m | small_sign_mask));
       EXPECT_EQ(m | small_sign_mask, convert_f32_to_small(-value));
-      const UintType negative_denormal_minus_half =
-          convert_f32_to_small(-value - half);
-      EXPECT_TRUE(negative_denormal_minus_half == (m | small_sign_mask) ||
-                  negative_denormal_minus_half == ((m + 1) | small_sign_mask));
+      EXPECT_EQ(rounded_midpoint | small_sign_mask,
+                convert_f32_to_small(-value - half));
     }
+  }
+}
+
+static float DecodePositiveFinite(uint32_t bits, int exp_bits,
+                                  int mantissa_bits, int bias_tweak) {
+  const uint32_t mantissa_mask = (1u << mantissa_bits) - 1;
+  const uint32_t encoded_exp = (bits >> mantissa_bits) & ((1u << exp_bits) - 1);
+  const uint32_t mantissa = bits & mantissa_mask;
+  const int exp_bias = bias_tweak + (1 << (exp_bits - 1)) - 1;
+  const uint32_t significand =
+      encoded_exp == 0 ? mantissa : (1u << mantissa_bits) | mantissa;
+  const int arithmetic_exp =
+      (encoded_exp == 0 ? 1 : static_cast<int>(encoded_exp)) - exp_bias -
+      mantissa_bits;
+  return std::ldexp(static_cast<float>(significand), arithmetic_exp);
+}
+
+template <typename UintType>
+static void CheckFiniteRoundingBoundaries(
+    int exp_bits, int mantissa_bits, int bias_tweak, UintType max_finite,
+    std::function<UintType(float)> convert_f32_to_small) {
+  const UintType sign_mask = UintType{1} << (exp_bits + mantissa_bits);
+  for (UintType lower = 0; lower < max_finite; ++lower) {
+    SCOPED_TRACE(::testing::Message() << "lower payload " << +lower);
+    const UintType upper = lower + 1;
+    const float lower_value =
+        DecodePositiveFinite(lower, exp_bits, mantissa_bits, bias_tweak);
+    const float upper_value =
+        DecodePositiveFinite(upper, exp_bits, mantissa_bits, bias_tweak);
+    const float midpoint = lower_value + (upper_value - lower_value) * 0.5f;
+    const float below_midpoint = std::nextafter(midpoint, lower_value);
+    const float above_midpoint = std::nextafter(midpoint, upper_value);
+    const UintType rounded_midpoint = (lower & 1) ? upper : lower;
+
+    EXPECT_EQ(lower, convert_f32_to_small(lower_value));
+    EXPECT_EQ(lower, convert_f32_to_small(below_midpoint));
+    EXPECT_EQ(rounded_midpoint, convert_f32_to_small(midpoint));
+    EXPECT_EQ(upper, convert_f32_to_small(above_midpoint));
+
+    EXPECT_EQ(sign_mask | lower, convert_f32_to_small(-lower_value));
+    EXPECT_EQ(sign_mask | lower, convert_f32_to_small(-below_midpoint));
+    EXPECT_EQ(sign_mask | rounded_midpoint, convert_f32_to_small(-midpoint));
+    EXPECT_EQ(sign_mask | upper, convert_f32_to_small(-above_midpoint));
   }
 }
 
 TEST(F16ConversionTest, Denormals) {
   CheckDenormals<uint16_t>(5, 10, /*bias_tweak=*/0, /*have_neg_zero=*/true,
                            iree_math_f32_to_f16, iree_math_f16_to_f32);
+}
+
+TEST(F16ConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint16_t>(
+      5, 10, /*bias_tweak=*/0, /*max_finite=*/0x7BFF, iree_math_f32_to_f16);
 }
 
 TEST(F16ConversionTest, F32ToF16ToF32) {
@@ -430,6 +475,11 @@ TEST(F8E5M2ConversionTest, Denormals) {
                           iree_math_f32_to_f8e5m2, iree_math_f8e5m2_to_f32);
 }
 
+TEST(F8E5M2ConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint8_t>(
+      5, 2, /*bias_tweak=*/0, /*max_finite=*/0x7B, iree_math_f32_to_f8e5m2);
+}
+
 TEST(F8E5M2ConversionTest, F32ToF8E5M2ToF32) {
   // See https://arxiv.org/pdf/2209.05433.pdf, Table 1.
   constexpr float kF8E5M2Max = 57344.f;
@@ -552,6 +602,11 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FN) {
 TEST(F8E4M3FNConversionTest, Denormals) {
   CheckDenormals<uint8_t>(4, 3, /*bias_tweak=*/0, /*have_neg_zero=*/true,
                           iree_math_f32_to_f8e4m3fn, iree_math_f8e4m3fn_to_f32);
+}
+
+TEST(F8E4M3FNConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint8_t>(
+      4, 3, /*bias_tweak=*/0, /*max_finite=*/0x7E, iree_math_f32_to_f8e4m3fn);
 }
 
 TEST(F8E4M3FNConversionTest, F32ToF8E4M3FNToF32) {
