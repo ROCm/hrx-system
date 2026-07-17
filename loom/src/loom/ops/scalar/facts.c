@@ -104,10 +104,8 @@ static float rsqrt_f32(float x) { return 1.0f / sqrtf(x); }
 static double rsqrt_f64(double x) { return 1.0 / sqrt(x); }
 static float roundeven_f32(float x) { return nearbyintf(x); }
 static double roundeven_f64(double x) { return nearbyint(x); }
-static float logistic_f32(float x) { return 1.0f / (1.0f + expf(-x)); }
-static double logistic_f64(double x) { return 1.0 / (1.0 + exp(-x)); }
-static float silu_f32(float x) { return x * logistic_f32(x); }
-static double silu_f64(double x) { return x * logistic_f64(x); }
+static float silu_f32(float x) { return x * loom_float_logistic_f32(x); }
+static double silu_f64(double x) { return x * loom_float_logistic_f64(x); }
 static float softplus_f32(float x) {
   return log1pf(expf(-fabsf(x))) + fmaxf(x, 0.0f);
 }
@@ -132,10 +130,10 @@ static double gelu_tanh_f64(double x) {
   return 0.5 * x * (1.0 + tanh(sqrt_2_over_pi * (x + 0.044715 * x * x * x)));
 }
 static float gelu_logistic_f32(float x, float scale) {
-  return x * logistic_f32(scale * x);
+  return x * loom_float_logistic_f32(scale * x);
 }
 static double gelu_logistic_f64(double x, double scale) {
-  return x * logistic_f64(scale * x);
+  return x * loom_float_logistic_f64(scale * x);
 }
 
 //===----------------------------------------------------------------------===//
@@ -327,7 +325,8 @@ FLOAT_UNARY_FACTS(loom_scalar_acoshf_facts, acoshf, acosh)
 FLOAT_UNARY_FACTS(loom_scalar_atanhf_facts, atanhf, atanh)
 FLOAT_UNARY_FACTS(loom_scalar_erff_facts, erff, erf)
 FLOAT_UNARY_FACTS(loom_scalar_erfcf_facts, erfcf, erfc)
-FLOAT_UNARY_FACTS(loom_scalar_logisticf_facts, logistic_f32, logistic_f64)
+FLOAT_UNARY_FACTS(loom_scalar_logisticf_facts, loom_float_logistic_f32,
+                  loom_float_logistic_f64)
 FLOAT_UNARY_FACTS(loom_scalar_siluf_facts, silu_f32, silu_f64)
 FLOAT_UNARY_FACTS(loom_scalar_softplusf_facts, softplus_f32, softplus_f64)
 

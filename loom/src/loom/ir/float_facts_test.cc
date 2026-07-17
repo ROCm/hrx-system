@@ -134,6 +134,52 @@ TEST(FloatFacts, PreservesF64InstructionPrecision) {
   EXPECT_DOUBLE_EQ(ExactFloatValue(LOOM_SCALAR_TYPE_F64, result), 1.0);
 }
 
+TEST(FloatFacts, LogisticPreservesSelectedWidthNegativeTails) {
+  const float f32_result = loom_float_logistic_f32(-100.0f);
+  EXPECT_GT(f32_result, 0.0f);
+  EXPECT_EQ(std::fpclassify(f32_result), FP_SUBNORMAL);
+
+  const double f64_result = loom_float_logistic_f64(-710.0);
+  EXPECT_GT(f64_result, 0.0);
+  EXPECT_EQ(std::fpclassify(f64_result), FP_SUBNORMAL);
+}
+
+TEST(FloatFacts, LogisticHandlesFiniteAndExceptionalValues) {
+  const float f32_negative_infinity =
+      loom_float_logistic_f32(-std::numeric_limits<float>::infinity());
+  EXPECT_EQ(f32_negative_infinity, 0.0f);
+  EXPECT_FALSE(std::signbit(f32_negative_infinity));
+  EXPECT_EQ(loom_float_logistic_f32(-0.0f), 0.5f);
+  EXPECT_EQ(loom_float_logistic_f32(0.0f), 0.5f);
+  EXPECT_EQ(loom_float_logistic_f32(std::numeric_limits<float>::infinity()),
+            1.0f);
+  EXPECT_TRUE(std::isnan(
+      loom_float_logistic_f32(std::numeric_limits<float>::quiet_NaN())));
+  const float f32_negative = loom_float_logistic_f32(-1.0f);
+  EXPECT_GT(f32_negative, 0.0f);
+  EXPECT_LT(f32_negative, 1.0f);
+  const float f32_positive = loom_float_logistic_f32(1.0f);
+  EXPECT_GT(f32_positive, 0.0f);
+  EXPECT_LT(f32_positive, 1.0f);
+
+  const double f64_negative_infinity =
+      loom_float_logistic_f64(-std::numeric_limits<double>::infinity());
+  EXPECT_EQ(f64_negative_infinity, 0.0);
+  EXPECT_FALSE(std::signbit(f64_negative_infinity));
+  EXPECT_EQ(loom_float_logistic_f64(-0.0), 0.5);
+  EXPECT_EQ(loom_float_logistic_f64(0.0), 0.5);
+  EXPECT_EQ(loom_float_logistic_f64(std::numeric_limits<double>::infinity()),
+            1.0);
+  EXPECT_TRUE(std::isnan(
+      loom_float_logistic_f64(std::numeric_limits<double>::quiet_NaN())));
+  const double f64_negative = loom_float_logistic_f64(-1.0);
+  EXPECT_GT(f64_negative, 0.0);
+  EXPECT_LT(f64_negative, 1.0);
+  const double f64_positive = loom_float_logistic_f64(1.0);
+  EXPECT_GT(f64_positive, 0.0);
+  EXPECT_LT(f64_positive, 1.0);
+}
+
 TEST(FloatFacts, TurnsPreserveCardinalsAtEveryDeclaredWidth) {
   constexpr loom_scalar_type_t kScalarTypes[] = {
       LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,

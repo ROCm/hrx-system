@@ -523,6 +523,47 @@ func.def @activation_uniform_exact_zero() -> (f32, f32, f32, f32) {
 
 // ====
 
+// Uniform vector activation facts retain the selected-width negative tail for
+// every operation derived from logistic.
+func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
+  %f32_input = vector.constant -100.0 : vector<4xf32>
+  %f32_logistic = vector.logisticf %f32_input : vector<4xf32>
+  %f32_silu = vector.siluf %f32_input : vector<4xf32>
+  %f32_gelu = vector.geluf<logistic> %f32_input {scale = 1.0} : vector<4xf32>
+  %f32_logistic_lane = vector.extract %f32_logistic[0] : vector<4xf32> -> f32
+  %f32_silu_lane = vector.extract %f32_silu[1] : vector<4xf32> -> f32
+  %f32_gelu_lane = vector.extract %f32_gelu[2] : vector<4xf32> -> f32
+  %f32_zero = scalar.constant 0.0 : f32
+  %f32_logistic_positive = scalar.cmpf ogt, %f32_logistic_lane, %f32_zero : f32
+  %f32_silu_negative = scalar.cmpf olt, %f32_silu_lane, %f32_zero : f32
+  %f32_gelu_negative = scalar.cmpf olt, %f32_gelu_lane, %f32_zero : f32
+
+  %f64_input = vector.constant -710.0 : vector<4xf64>
+  %f64_logistic = vector.logisticf %f64_input : vector<4xf64>
+  %f64_silu = vector.siluf %f64_input : vector<4xf64>
+  %f64_gelu = vector.geluf<logistic> %f64_input {scale = 1.0} : vector<4xf64>
+  %f64_logistic_lane = vector.extract %f64_logistic[0] : vector<4xf64> -> f64
+  %f64_silu_lane = vector.extract %f64_silu[1] : vector<4xf64> -> f64
+  %f64_gelu_lane = vector.extract %f64_gelu[2] : vector<4xf64> -> f64
+  %f64_zero = scalar.constant 0.0 : f64
+  %f64_logistic_positive = scalar.cmpf ogt, %f64_logistic_lane, %f64_zero : f64
+  %f64_silu_negative = scalar.cmpf olt, %f64_silu_lane, %f64_zero : f64
+  %f64_gelu_negative = scalar.cmpf olt, %f64_gelu_lane, %f64_zero : f64
+  func.return %f32_logistic_positive, %f32_silu_negative, %f32_gelu_negative, %f64_logistic_positive, %f64_silu_negative, %f64_gelu_negative : i1, i1, i1, i1, i1, i1
+}
+// ----
+func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
+  %f32_logistic_positive = scalar.constant true : i1
+  %f32_silu_negative = scalar.constant true : i1
+  %f32_gelu_negative = scalar.constant true : i1
+  %f64_logistic_positive = scalar.constant true : i1
+  %f64_silu_negative = scalar.constant true : i1
+  %f64_gelu_negative = scalar.constant true : i1
+  func.return %f32_logistic_positive, %f32_silu_negative, %f32_gelu_negative, %f64_logistic_positive, %f64_silu_negative, %f64_gelu_negative : i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
 // Turn-domain trig facts preserve exact lane values and uniform summaries.
 func.def @turn_trig_uniform_exact_quadrants() -> (f32, f32, f32, f32) {
   %zero = vector.constant 0.0 : vector<4xf32>

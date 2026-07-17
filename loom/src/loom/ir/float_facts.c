@@ -96,6 +96,24 @@ bool loom_value_facts_as_exact_float(loom_scalar_type_t scalar_type,
   return true;
 }
 
+float loom_float_logistic_f32(float input) {
+  if (input >= 0.0f) {
+    const float exponent = expf(-input);
+    return 1.0f / (1.0f + exponent);
+  }
+  const float exponent = expf(input);
+  return exponent / (1.0f + exponent);
+}
+
+double loom_float_logistic_f64(double input) {
+  if (input >= 0.0) {
+    const double exponent = exp(-input);
+    return 1.0 / (1.0 + exponent);
+  }
+  const double exponent = exp(input);
+  return exponent / (1.0 + exponent);
+}
+
 void loom_value_facts_eval_float_unary(loom_scalar_type_t scalar_type,
                                        const loom_value_facts_t* input,
                                        loom_float_unary_f32_fn_t f32_fn,

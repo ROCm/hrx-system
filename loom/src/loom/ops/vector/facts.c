@@ -1561,18 +1561,11 @@ static double loom_vector_roundeven_f64(double input) {
   return nearbyint(input);
 }
 
-static float loom_vector_logistic_f32(float input) {
-  return 1.0f / (1.0f + expf(-input));
-}
-static double loom_vector_logistic_f64(double input) {
-  return 1.0 / (1.0 + exp(-input));
-}
-
 static float loom_vector_silu_f32(float input) {
-  return input * loom_vector_logistic_f32(input);
+  return input * loom_float_logistic_f32(input);
 }
 static double loom_vector_silu_f64(double input) {
-  return input * loom_vector_logistic_f64(input);
+  return input * loom_float_logistic_f64(input);
 }
 
 static float loom_vector_softplus_f32(float input) {
@@ -1605,10 +1598,10 @@ static double loom_vector_gelu_tanh_f64(double input) {
 }
 
 static float loom_vector_gelu_logistic_f32(float input, float scale) {
-  return input * loom_vector_logistic_f32(scale * input);
+  return input * loom_float_logistic_f32(scale * input);
 }
 static double loom_vector_gelu_logistic_f64(double input, double scale) {
-  return input * loom_vector_logistic_f64(scale * input);
+  return input * loom_float_logistic_f64(scale * input);
 }
 
 static void loom_vector_float_negate_transfer(loom_scalar_type_t scalar_type,
@@ -3216,8 +3209,7 @@ LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_atanhf_facts, atanhf, atanh)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_erff_facts, erff, erf)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_erfcf_facts, erfcf, erfc)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_logisticf_facts,
-                              loom_vector_logistic_f32,
-                              loom_vector_logistic_f64)
+                              loom_float_logistic_f32, loom_float_logistic_f64)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_siluf_facts, loom_vector_silu_f32,
                               loom_vector_silu_f64)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_softplusf_facts,

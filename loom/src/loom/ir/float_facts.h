@@ -67,6 +67,12 @@ bool loom_value_facts_as_exact_float(loom_scalar_type_t scalar_type,
                                      loom_value_facts_t facts,
                                      double* out_value);
 
+// Evaluates logistic using selected-width arithmetic and a sign-split formula
+// that preserves representable negative tails. Exact logistic, SiLU, and
+// logistic GELU fact transfers share these helpers so their semantics agree.
+float loom_float_logistic_f32(float input);
+double loom_float_logistic_f64(double input);
+
 // Applies a width-specific operation and rounds once to |scalar_type|.
 void loom_value_facts_eval_float_unary(loom_scalar_type_t scalar_type,
                                        const loom_value_facts_t* input,
