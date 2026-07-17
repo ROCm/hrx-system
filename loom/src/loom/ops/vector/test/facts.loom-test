@@ -110,6 +110,25 @@ func.def @reduce_uniform_float_math() -> (f32) {
 
 // ====
 
+// Reductions round after every addf rather than carrying host-double precision
+// through the full reduction.
+func.def @reduce_f32_rounds_each_step() -> (f32) {
+  %large = scalar.constant 16777216.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %negative_large = scalar.constant -16777216.0 : f32
+  %v = vector.from_elements %large, %one, %negative_large : vector<3xf32>
+  %zero = scalar.constant 0.0 : f32
+  %result = vector.reduce<addf> %v, %zero : vector<3xf32>, f32
+  func.return %result : f32
+}
+// ----
+func.def @reduce_f32_rounds_each_step() -> (f32) {
+  %result = scalar.constant 0.0 : f32
+  func.return %result : f32
+}
+
+// ====
+
 // Small per-lane float facts compose through new lanewise unary and binary ops.
 func.def @small_static_float_math_extract() -> (f32) {
   %one = scalar.constant 1.0 : f32
@@ -497,7 +516,7 @@ func.def @activation_uniform_exact_zero() -> (f32, f32, f32, f32) {
 func.def @activation_uniform_exact_zero() -> (f32, f32, f32, f32) {
   %r0 = scalar.constant 0.5 : f32
   %r1 = scalar.constant 0.0 : f32
-  %r2 = scalar.constant 0.69314718055994529 : f32
+  %r2 = scalar.constant 0.69314718246459961 : f32
   %r3 = scalar.constant 0.0 : f32
   func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
 }
@@ -523,7 +542,7 @@ func.def @turn_trig_uniform_exact_quadrants() -> (f32, f32, f32, f32) {
   %r0 = scalar.constant 0.0 : f32
   %r1 = scalar.constant 1.0 : f32
   %r2 = scalar.constant 1.0 : f32
-  %r3 = scalar.constant 6.123233995736766e-17 : f32
+  %r3 = scalar.constant -4.3711388286737929e-08 : f32
   func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
 }
 
@@ -768,6 +787,51 @@ func.def @transform_jl_dense_small_static_lanes() -> (f32, f32, f32) {
   %r1 = scalar.constant 3.0 : f32
   %r2 = scalar.constant 5.0 : f32
   func.return %r0, %r1, %r2 : f32, f32, f32
+}
+
+// ====
+
+// Transform facts mirror the staged f32 additions emitted by reference
+// scalarization instead of summing a lane in host-double precision.
+func.def @transform_hadamard_rounds_each_step() -> (f32) {
+  %large = scalar.constant 16777216.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %negative_large = scalar.constant -16777216.0 : f32
+  %zero = scalar.constant 0.0 : f32
+  %v = vector.from_elements %large, %one, %negative_large, %zero : vector<4xf32>
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=4, output_elems=4> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<4xf32>, encoding<transform> -> vector<4xf32>
+  %r0 = vector.extract %r[0] : vector<4xf32> -> f32
+  func.return %r0 : f32
+}
+// ----
+func.def @transform_hadamard_rounds_each_step() -> (f32) {
+  %r0 = scalar.constant 0.0 : f32
+  func.return %r0 : f32
+}
+
+// ====
+
+// Dense projection facts mirror the scalarized mulf/addf program and round
+// each intermediate f32 value.
+func.def @transform_jl_dense_rounds_each_step() -> (f32) {
+  %large = scalar.constant 16777216.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %negative_large = scalar.constant -16777216.0 : f32
+  %v = vector.from_elements %large, %one, %negative_large : vector<3xf32>
+  %m0 = scalar.constant 1.0 : f32
+  %m1 = scalar.constant 1.0 : f32
+  %m2 = scalar.constant 1.0 : f32
+  %matrix = vector.from_elements %m0, %m1, %m2 : vector<1x3xf32>
+  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=3, output_elems=1> {matrix = %matrix : vector<1x3xf32>} : encoding<transform>
+  %r = vector.transform %v, %xf : vector<3xf32>, encoding<transform> -> vector<1xf32>
+  %r0 = vector.extract %r[0] : vector<1xf32> -> f32
+  func.return %r0 : f32
+}
+// ----
+func.def @transform_jl_dense_rounds_each_step() -> (f32) {
+  %r0 = scalar.constant 0.0 : f32
+  func.return %r0 : f32
 }
 
 // ====

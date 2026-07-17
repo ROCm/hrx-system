@@ -11,6 +11,7 @@
 #include "iree/tooling/device_util.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/facts.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
@@ -371,13 +372,16 @@ static bool loom_run_hal_testbench_find_case_constant_value_for_name(
 }
 
 static bool loom_run_hal_testbench_value_facts_from_constant_attr(
-    loom_attribute_t attr, loom_value_facts_t* out_facts) {
+    loom_attribute_t attr, loom_scalar_type_t scalar_type,
+    loom_value_facts_t* out_facts) {
   switch (attr.kind) {
     case LOOM_ATTR_I64:
       *out_facts = loom_value_facts_exact_i64(loom_attr_as_i64(attr));
       return true;
     case LOOM_ATTR_F64:
-      *out_facts = loom_value_facts_exact_f64(loom_attr_as_f64(attr));
+      if (!loom_scalar_type_is_float(scalar_type)) return false;
+      *out_facts =
+          loom_value_facts_exact_float(scalar_type, loom_attr_as_f64(attr));
       return true;
     case LOOM_ATTR_BOOL:
       *out_facts = loom_value_facts_exact_i64(loom_attr_as_bool(attr) ? 1 : 0);
@@ -396,7 +400,8 @@ typedef enum loom_run_hal_testbench_case_constant_kind_e {
 
 static iree_status_t loom_run_hal_testbench_resolve_case_constant_facts(
     const loom_run_hal_testbench_actual_provider_t* provider,
-    loom_value_id_t value_id, loom_value_facts_t* out_facts,
+    loom_value_id_t value_id, loom_scalar_type_t scalar_type,
+    loom_value_facts_t* out_facts,
     loom_run_hal_testbench_case_constant_kind_t* out_kind) {
   *out_facts = loom_value_facts_unknown();
   *out_kind = LOOM_RUN_HAL_TESTBENCH_CASE_CONSTANT_NONE;
@@ -416,8 +421,8 @@ static iree_status_t loom_run_hal_testbench_resolve_case_constant_facts(
     loom_attribute_t sample_value = loom_attr_absent();
     IREE_RETURN_IF_ERROR(loom_testbench_parameter_sample_value(
         parameter, parameter_sample_ordinal, &sample_value));
-    if (loom_run_hal_testbench_value_facts_from_constant_attr(sample_value,
-                                                              out_facts)) {
+    if (loom_run_hal_testbench_value_facts_from_constant_attr(
+            sample_value, scalar_type, out_facts)) {
       *out_kind = LOOM_RUN_HAL_TESTBENCH_CASE_CONSTANT_SAMPLE_PARAMETER;
     }
     return iree_ok_status();
@@ -430,7 +435,7 @@ static iree_status_t loom_run_hal_testbench_resolve_case_constant_facts(
       continue;
     }
     if (loom_run_hal_testbench_value_facts_from_constant_attr(
-            source->literal.value, out_facts)) {
+            source->literal.value, scalar_type, out_facts)) {
       *out_kind = LOOM_RUN_HAL_TESTBENCH_CASE_CONSTANT_LITERAL;
     }
     return iree_ok_status();
@@ -453,16 +458,18 @@ loom_run_hal_testbench_apply_case_constant_to_func_region_argument(
   }
   const loom_value_id_t argument_id =
       loom_block_arg_id(entry_block, argument_index);
+  loom_module_t* module = provider->compile_module.module;
+  const loom_type_t argument_type = loom_module_value_type(module, argument_id);
+  if (!loom_type_is_scalar(argument_type)) return iree_ok_status();
   loom_value_facts_t facts = loom_value_facts_unknown();
   loom_run_hal_testbench_case_constant_kind_t constant_kind =
       LOOM_RUN_HAL_TESTBENCH_CASE_CONSTANT_NONE;
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_case_constant_facts(
-      provider, case_value_id, &facts, &constant_kind));
+      provider, case_value_id, loom_type_element_type(argument_type), &facts,
+      &constant_kind));
   if (constant_kind == LOOM_RUN_HAL_TESTBENCH_CASE_CONSTANT_NONE) {
     return iree_ok_status();
   }
-  loom_module_t* module = provider->compile_module.module;
-  const loom_type_t argument_type = loom_module_value_type(module, argument_id);
   if (!loom_value_facts_can_materialize_constant(facts, argument_type)) {
     return iree_ok_status();
   }

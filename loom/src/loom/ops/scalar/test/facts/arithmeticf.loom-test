@@ -34,19 +34,18 @@ func.def @maximumf_propagates_nan() -> (i1) {
 
 // ====
 
-// minnumf intentionally has C fmin-style NaN-skipping behavior.
-func.def @minnumf_skips_nan() -> (i1) {
+// minnumf selects the numeric operand when exactly one operand is NaN.
+func.def @minnumf_skips_nan() -> (f32) {
   %neg = scalar.constant -1.0 : f32
   %nan = scalar.logf %neg : f32
   %three = scalar.constant 3.0 : f32
   %min = scalar.minnumf %nan, %three : f32
-  %r = scalar.isnanf %min : f32
-  func.return %r : i1
+  func.return %min : f32
 }
 // ----
-func.def @minnumf_skips_nan() -> (i1) {
-  %r = scalar.constant false : i1
-  func.return %r : i1
+func.def @minnumf_skips_nan() -> (f32) {
+  %min = scalar.constant 3.0 : f32
+  func.return %min : f32
 }
 
 // ====
@@ -72,4 +71,45 @@ func.def @clampf_modes_name_nan_semantics() -> (i1, i1, i1) {
   %number_is_nan = scalar.constant false : i1
   %ieee_is_nan = scalar.constant true : i1
   func.return %ordered_is_nan, %number_is_nan, %ieee_is_nan : i1, i1, i1
+}
+
+// ====
+
+// Every declared-width instruction rounds independently. The f32 addition
+// loses the unit before the subtraction while f64 retains it.
+func.def @rounds_each_instruction() -> (f32, f64) {
+  %large_f32 = scalar.constant 16777216.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %sum_f32 = scalar.addf %large_f32, %one_f32 : f32
+  %result_f32 = scalar.subf %sum_f32, %large_f32 : f32
+  %large_f64 = scalar.constant 16777216.0 : f64
+  %one_f64 = scalar.constant 1.0 : f64
+  %sum_f64 = scalar.addf %large_f64, %one_f64 : f64
+  %result_f64 = scalar.subf %sum_f64, %large_f64 : f64
+  func.return %result_f32, %result_f64 : f32, f64
+}
+// ----
+func.def @rounds_each_instruction() -> (f32, f64) {
+  %result_f32 = scalar.constant 0.0 : f32
+  %result_f64 = scalar.constant 1.0 : f64
+  func.return %result_f32, %result_f64 : f32, f64
+}
+
+// ====
+
+// IEEE minimum and maximum choose opposite signed zeros.
+func.def @minmax_preserve_signed_zero_semantics() -> (i32, i32) {
+  %positive_zero = scalar.constant 0.0 : f32
+  %negative_zero = scalar.constant -0.0 : f32
+  %minimum = scalar.minimumf %positive_zero, %negative_zero : f32
+  %maximum = scalar.maximumf %positive_zero, %negative_zero : f32
+  %minimum_bits = scalar.bitcast %minimum : f32 to i32
+  %maximum_bits = scalar.bitcast %maximum : f32 to i32
+  func.return %minimum_bits, %maximum_bits : i32, i32
+}
+// ----
+func.def @minmax_preserve_signed_zero_semantics() -> (i32, i32) {
+  %minimum_bits = scalar.constant -2147483648 : i32
+  %maximum_bits = scalar.constant 0 : i32
+  func.return %minimum_bits, %maximum_bits : i32, i32
 }

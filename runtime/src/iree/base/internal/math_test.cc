@@ -7,7 +7,12 @@
 #include "iree/base/internal/math.h"
 
 #include <cfloat>
+#include <cmath>
+#include <cstring>
+#include <functional>
+#include <vector>
 
+#include "iree/base/internal/fpu_state.h"
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -214,29 +219,260 @@ static void CheckDenormals(
     float value = std::ldexp(m, 1 - small_exp_bias - small_mantissa_bits);
     EXPECT_EQ(value, convert_small_to_f32(m));
     EXPECT_EQ(m, convert_f32_to_small(value));
-    const float half = std::ldexp(0.5f, -small_exp_bias - mantissa_bits);
-    const UintType denormal_plus_half = convert_f32_to_small(value + half);
+    const float half = std::ldexp(1.0f, -small_exp_bias - mantissa_bits);
     // m + 1 is the next representable value after the denormal, even if m was
     // the largest denormal, as in that case the mantissa overflows into the
     // exponent, resulting in the smallest normal value.
-    // Tolerate both m and m + 1 here, meaning that we tolerate any tie-break
-    // behavior for conversions of f32 to denormal small floats.
-    EXPECT_TRUE(denormal_plus_half == m || denormal_plus_half == m + 1);
+    const UintType rounded_midpoint = (m & 1) ? m + 1 : m;
+    EXPECT_EQ(rounded_midpoint, convert_f32_to_small(value + half));
     if (m != 0 || have_neg_zero) {
       // Test negative values, similar to the above code for positive values.
       EXPECT_EQ(-value, convert_small_to_f32(m | small_sign_mask));
       EXPECT_EQ(m | small_sign_mask, convert_f32_to_small(-value));
-      const UintType negative_denormal_minus_half =
-          convert_f32_to_small(-value - half);
-      EXPECT_TRUE(negative_denormal_minus_half == (m | small_sign_mask) ||
-                  negative_denormal_minus_half == ((m + 1) | small_sign_mask));
+      EXPECT_EQ(rounded_midpoint | small_sign_mask,
+                convert_f32_to_small(-value - half));
     }
   }
+}
+
+static float DecodePositiveFinite(uint32_t bits, int exp_bits,
+                                  int mantissa_bits, int bias_tweak) {
+  const uint32_t mantissa_mask = (1u << mantissa_bits) - 1;
+  const uint32_t encoded_exp = (bits >> mantissa_bits) & ((1u << exp_bits) - 1);
+  const uint32_t mantissa = bits & mantissa_mask;
+  const int exp_bias = bias_tweak + (1 << (exp_bits - 1)) - 1;
+  const uint32_t significand =
+      encoded_exp == 0 ? mantissa : (1u << mantissa_bits) | mantissa;
+  const int arithmetic_exp =
+      (encoded_exp == 0 ? 1 : static_cast<int>(encoded_exp)) - exp_bias -
+      mantissa_bits;
+  return std::ldexp(static_cast<float>(significand), arithmetic_exp);
+}
+
+template <typename UintType>
+static void CheckFiniteRoundingBoundaries(
+    int exp_bits, int mantissa_bits, int bias_tweak, UintType max_finite,
+    std::function<UintType(float)> convert_f32_to_small) {
+  const UintType sign_mask = UintType{1} << (exp_bits + mantissa_bits);
+  for (UintType lower = 0; lower < max_finite; ++lower) {
+    SCOPED_TRACE(::testing::Message() << "lower payload " << +lower);
+    const UintType upper = lower + 1;
+    const float lower_value =
+        DecodePositiveFinite(lower, exp_bits, mantissa_bits, bias_tweak);
+    const float upper_value =
+        DecodePositiveFinite(upper, exp_bits, mantissa_bits, bias_tweak);
+    const float midpoint = lower_value + (upper_value - lower_value) * 0.5f;
+    const float below_midpoint = std::nextafter(midpoint, lower_value);
+    const float above_midpoint = std::nextafter(midpoint, upper_value);
+    const UintType rounded_midpoint = (lower & 1) ? upper : lower;
+
+    EXPECT_EQ(lower, convert_f32_to_small(lower_value));
+    EXPECT_EQ(lower, convert_f32_to_small(below_midpoint));
+    EXPECT_EQ(rounded_midpoint, convert_f32_to_small(midpoint));
+    EXPECT_EQ(upper, convert_f32_to_small(above_midpoint));
+
+    EXPECT_EQ(sign_mask | lower, convert_f32_to_small(-lower_value));
+    EXPECT_EQ(sign_mask | lower, convert_f32_to_small(-below_midpoint));
+    EXPECT_EQ(sign_mask | rounded_midpoint, convert_f32_to_small(-midpoint));
+    EXPECT_EQ(sign_mask | upper, convert_f32_to_small(-above_midpoint));
+  }
+}
+
+enum class WideningExpectationKind {
+  kExactBits,
+  kQuietNaN,
+};
+
+struct WideningExpectation {
+  // Expected result classification.
+  WideningExpectationKind kind;
+  // Exact f32 payload when |kind| is |kExactBits|.
+  uint32_t f32_bits;
+  // Exact f64 payload when |kind| is |kExactBits|.
+  uint64_t f64_bits;
+};
+
+enum NarrowFloatFormatFlagBits : uint32_t {
+  kNarrowFloatHasInfinity = 1u << 0,
+  kNarrowFloatHasNaN = 1u << 1,
+  kNarrowFloatNaNAsNegativeZero = 1u << 2,
+};
+using NarrowFloatFormatFlags = uint32_t;
+
+struct NarrowFloatFormat {
+  // Name included in per-payload failure traces.
+  const char* name;
+  // Number of encoded exponent bits.
+  int exponent_bits;
+  // Number of encoded mantissa bits.
+  int mantissa_bits;
+  // Adjustment to the conventional exponent bias.
+  int bias_tweak;
+  // Special encoding policies for the format.
+  NarrowFloatFormatFlags flags;
+};
+
+static WideningExpectation ExactWideningExpectation(uint32_t f32_bits) {
+  float f32_value = 0.0f;
+  std::memcpy(&f32_value, &f32_bits, sizeof(f32_value));
+  const double f64_value = static_cast<double>(f32_value);
+  uint64_t f64_bits = 0;
+  std::memcpy(&f64_bits, &f64_value, sizeof(f64_bits));
+  return {WideningExpectationKind::kExactBits, f32_bits, f64_bits};
+}
+
+static std::vector<WideningExpectation> BuildWideningExpectations(
+    NarrowFloatFormat format) {
+  const uint32_t sign_mask = 1u
+                             << (format.exponent_bits + format.mantissa_bits);
+  const uint32_t mantissa_mask = (1u << format.mantissa_bits) - 1;
+  const uint32_t exponent_mask = ((1u << format.exponent_bits) - 1)
+                                 << format.mantissa_bits;
+  std::vector<WideningExpectation> expectations(sign_mask << 1);
+  for (uint32_t source = 0; source < expectations.size(); ++source) {
+    const uint32_t exponent = source & exponent_mask;
+    const uint32_t mantissa = source & mantissa_mask;
+    bool is_nan = false;
+    bool is_infinity = false;
+    if (exponent == exponent_mask) {
+      if (format.flags & kNarrowFloatHasInfinity) {
+        is_nan = (format.flags & kNarrowFloatHasNaN) && mantissa != 0;
+        is_infinity = !is_nan;
+      } else if ((format.flags & kNarrowFloatHasNaN) &&
+                 !(format.flags & kNarrowFloatNaNAsNegativeZero)) {
+        is_nan = mantissa == mantissa_mask;
+      }
+    }
+    if ((format.flags & kNarrowFloatNaNAsNegativeZero) && source == sign_mask) {
+      is_nan = true;
+    }
+
+    WideningExpectation& expectation = expectations[source];
+    if (is_nan) {
+      expectation.kind = WideningExpectationKind::kQuietNaN;
+    } else {
+      uint32_t f32_bits = 0;
+      if (is_infinity) {
+        f32_bits = UINT32_C(0x7F800000);
+      } else {
+        const float value =
+            DecodePositiveFinite(source & (sign_mask - 1), format.exponent_bits,
+                                 format.mantissa_bits, format.bias_tweak);
+        std::memcpy(&f32_bits, &value, sizeof(f32_bits));
+      }
+      if (source & sign_mask) f32_bits |= UINT32_C(0x80000000);
+      expectation = ExactWideningExpectation(f32_bits);
+    }
+  }
+  return expectations;
+}
+
+template <typename UintType>
+static void CheckWideningExpectations(
+    const char* format_name,
+    const std::vector<WideningExpectation>& expectations,
+    std::function<float(UintType)> convert_small_to_f32,
+    std::function<double(UintType)> convert_small_to_f64) {
+  const auto check_expectations = [&]() {
+    for (uint32_t source = 0; source < expectations.size(); ++source) {
+      SCOPED_TRACE(::testing::Message()
+                   << format_name << " source payload " << source);
+      const float f32_value =
+          convert_small_to_f32(static_cast<UintType>(source));
+      uint32_t actual_f32_bits = 0;
+      std::memcpy(&actual_f32_bits, &f32_value, sizeof(actual_f32_bits));
+      const double f64_value =
+          convert_small_to_f64(static_cast<UintType>(source));
+      uint64_t actual_f64_bits = 0;
+      std::memcpy(&actual_f64_bits, &f64_value, sizeof(actual_f64_bits));
+      const WideningExpectation& expectation = expectations[source];
+      if (expectation.kind == WideningExpectationKind::kQuietNaN) {
+        ASSERT_EQ(UINT32_C(0x7F800000), actual_f32_bits & UINT32_C(0x7F800000));
+        ASSERT_NE(0u, actual_f32_bits & UINT32_C(0x007FFFFF));
+        ASSERT_NE(0u, actual_f32_bits & UINT32_C(0x00400000));
+        ASSERT_EQ(UINT64_C(0x7FF0000000000000),
+                  actual_f64_bits & UINT64_C(0x7FF0000000000000));
+        ASSERT_NE(UINT64_C(0), actual_f64_bits & UINT64_C(0x000FFFFFFFFFFFFF));
+        ASSERT_NE(UINT64_C(0), actual_f64_bits & UINT64_C(0x0008000000000000));
+      } else {
+        ASSERT_EQ(expectation.f32_bits, actual_f32_bits);
+        ASSERT_EQ(expectation.f64_bits, actual_f64_bits);
+      }
+    }
+  };
+
+  check_expectations();
+  const iree_fpu_state_t fpu_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  check_expectations();
+  iree_fpu_state_pop(fpu_state);
+}
+
+template <typename UintType>
+static void CheckWideningPayloads(
+    NarrowFloatFormat format,
+    std::function<float(UintType)> convert_small_to_f32,
+    std::function<double(UintType)> convert_small_to_f64) {
+  CheckWideningExpectations(format.name, BuildWideningExpectations(format),
+                            convert_small_to_f32, convert_small_to_f64);
+}
+
+TEST(FloatWideningTest, EveryPayloadIsExactUnderFlushToZero) {
+  CheckWideningPayloads<uint16_t>(
+      {"f16", 5, 10, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_f16_to_f32, iree_math_f16_to_f64);
+  CheckWideningPayloads<uint16_t>(
+      {"bf16", 8, 7, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_bf16_to_f32, iree_math_bf16_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e5m2", 5, 2, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_f8e5m2_to_f32, iree_math_f8e5m2_to_f64);
+  CheckWideningPayloads<uint8_t>({"f8e4m3fn", 4, 3, 0, kNarrowFloatHasNaN},
+                                 iree_math_f8e4m3fn_to_f32,
+                                 iree_math_f8e4m3fn_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e5m2fnuz", 5, 2, 1,
+       kNarrowFloatHasNaN | kNarrowFloatNaNAsNegativeZero},
+      iree_math_f8e5m2fnuz_to_f32, iree_math_f8e5m2fnuz_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e4m3fnuz", 4, 3, 1,
+       kNarrowFloatHasNaN | kNarrowFloatNaNAsNegativeZero},
+      iree_math_f8e4m3fnuz_to_f32, iree_math_f8e4m3fnuz_to_f64);
+  CheckWideningPayloads<uint8_t>({"f6e3m2fn", 3, 2, 0, 0},
+                                 iree_math_f6e3m2fn_to_f32,
+                                 iree_math_f6e3m2fn_to_f64);
+  CheckWideningPayloads<uint8_t>({"f6e2m3fn", 2, 3, 0, 0},
+                                 iree_math_f6e2m3fn_to_f32,
+                                 iree_math_f6e2m3fn_to_f64);
+  CheckWideningPayloads<uint8_t>({"f4e2m1fn", 2, 1, 0, 0},
+                                 iree_math_f4e2m1fn_to_f32,
+                                 iree_math_f4e2m1fn_to_f64);
+}
+
+TEST(FloatWideningTest, EveryE8M0PayloadIsExactUnderFlushToZero) {
+  std::vector<WideningExpectation> expectations(256);
+  for (uint32_t source = 0; source < expectations.size(); ++source) {
+    if (source == 0xFF) {
+      expectations[source].kind = WideningExpectationKind::kQuietNaN;
+    } else {
+      const uint32_t f32_bits =
+          source == 0 ? UINT32_C(0x00400000) : source << 23;
+      expectations[source] = ExactWideningExpectation(f32_bits);
+    }
+  }
+  CheckWideningExpectations<uint8_t>("f8e8m0fnu", expectations,
+                                     iree_math_f8e8m0fnu_to_f32,
+                                     iree_math_f8e8m0fnu_to_f64);
 }
 
 TEST(F16ConversionTest, Denormals) {
   CheckDenormals<uint16_t>(5, 10, /*bias_tweak=*/0, /*have_neg_zero=*/true,
                            iree_math_f32_to_f16, iree_math_f16_to_f32);
+}
+
+TEST(F16ConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint16_t>(
+      5, 10, /*bias_tweak=*/0, /*max_finite=*/0x7BFF, iree_math_f32_to_f16);
 }
 
 TEST(F16ConversionTest, F32ToF16ToF32) {
@@ -430,6 +666,11 @@ TEST(F8E5M2ConversionTest, Denormals) {
                           iree_math_f32_to_f8e5m2, iree_math_f8e5m2_to_f32);
 }
 
+TEST(F8E5M2ConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint8_t>(
+      5, 2, /*bias_tweak=*/0, /*max_finite=*/0x7B, iree_math_f32_to_f8e5m2);
+}
+
 TEST(F8E5M2ConversionTest, F32ToF8E5M2ToF32) {
   // See https://arxiv.org/pdf/2209.05433.pdf, Table 1.
   constexpr float kF8E5M2Max = 57344.f;
@@ -504,12 +745,6 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FN) {
   // Min normal values.
   EXPECT_EQ(0x08, iree_math_f32_to_f8e4m3fn(kF8E4M3FNMin));
   EXPECT_EQ(0x88, iree_math_f32_to_f8e4m3fn(-kF8E4M3FNMin));
-  // Infinity
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(INFINITY));
-  EXPECT_EQ(0xfF, iree_math_f32_to_f8e4m3fn(-INFINITY));
-  // Overflow
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(FLT_MAX));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-FLT_MAX));
   // Test some round-to-nearest-even behavior.
   EXPECT_EQ(0x70, iree_math_f32_to_f8e4m3fn(136.0f));
   EXPECT_EQ(0x72, iree_math_f32_to_f8e4m3fn(152.0f));
@@ -534,24 +769,54 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FN) {
   EXPECT_EQ(0x82, iree_math_f32_to_f8e4m3fn(-2.5f / 512.f));
   EXPECT_EQ(0x83, iree_math_f32_to_f8e4m3fn(-3.f / 512.f));
   EXPECT_EQ(0x84, iree_math_f32_to_f8e4m3fn(-3.5f / 512.f));
-
-  // Important case to test: overflow due to rounding to nearest-even of 465
-  // to 512, while 464 gets rounded to nearest-even 448, not overflowing.
-  EXPECT_EQ(0x7E, iree_math_f32_to_f8e4m3fn(464.f));
-  EXPECT_EQ(0xFE, iree_math_f32_to_f8e4m3fn(-464.f));
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(465.f));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-465.f));
-  // Largest float value in the same exponent bucket, a tricky case.
-  EXPECT_EQ(0x7F, iree_math_f32_to_f8e4m3fn(511.f));
-  EXPECT_EQ(0xFF, iree_math_f32_to_f8e4m3fn(-511.f));
   // Underflow
   EXPECT_EQ(0, iree_math_f32_to_f8e4m3fn(FLT_MIN));
   EXPECT_EQ(0x80, iree_math_f32_to_f8e4m3fn(-FLT_MIN));
 }
 
+TEST(F8E4M3FNConversionTest, SaturatesOverflowAndPreservesNan) {
+  constexpr float kMaxFinite = 448.0f;
+  constexpr float kOverflowMidpoint = 464.0f;
+  const float just_above_max = std::nextafter(kMaxFinite, INFINITY);
+  const float below_midpoint = std::nextafter(kOverflowMidpoint, kMaxFinite);
+  const float above_midpoint = std::nextafter(kOverflowMidpoint, INFINITY);
+  auto expect_saturated = [](float value) {
+    EXPECT_EQ(0x7E, iree_math_f32_to_f8e4m3fn(value));
+    EXPECT_EQ(0xFE, iree_math_f32_to_f8e4m3fn(-value));
+  };
+
+  expect_saturated(just_above_max);
+  expect_saturated(below_midpoint);
+  expect_saturated(kOverflowMidpoint);
+  expect_saturated(above_midpoint);
+  expect_saturated(465.0f);
+  expect_saturated(511.0f);
+  expect_saturated(FLT_MAX);
+  expect_saturated(INFINITY);
+
+  auto f32_from_bits = [](uint32_t bits) {
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+  };
+  EXPECT_EQ(0x7F,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0x7FC00000))));
+  EXPECT_EQ(0x7F,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0x7F800001))));
+  EXPECT_EQ(0xFF,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0xFFC00000))));
+  EXPECT_EQ(0xFF,
+            iree_math_f32_to_f8e4m3fn(f32_from_bits(UINT32_C(0xFF800001))));
+}
+
 TEST(F8E4M3FNConversionTest, Denormals) {
   CheckDenormals<uint8_t>(4, 3, /*bias_tweak=*/0, /*have_neg_zero=*/true,
                           iree_math_f32_to_f8e4m3fn, iree_math_f8e4m3fn_to_f32);
+}
+
+TEST(F8E4M3FNConversionTest, FiniteRoundingBoundaries) {
+  CheckFiniteRoundingBoundaries<uint8_t>(
+      4, 3, /*bias_tweak=*/0, /*max_finite=*/0x7E, iree_math_f32_to_f8e4m3fn);
 }
 
 TEST(F8E4M3FNConversionTest, F32ToF8E4M3FNToF32) {
@@ -587,25 +852,21 @@ TEST(F8E4M3FNConversionTest, F32ToF8E4M3FNToF32) {
   EXPECT_EQ(256.f, iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(256.f)));
   EXPECT_EQ(-256.f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-256.f)));
-  // Overflow
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MAX))));
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MAX))));
-  EXPECT_GT(
-      kF8E4M3FNMax + 1.f,
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(kF8E4M3FNMax + 1.f)));
+  // Overflow saturates to signed maximum finite.
+  EXPECT_EQ(kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MAX)));
+  EXPECT_EQ(-kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MAX)));
   // Underflow
   EXPECT_EQ(0.0f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(FLT_MIN)));
   EXPECT_EQ(0.0f,
             iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-FLT_MIN)));
-  // Inf and Nan
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(INFINITY))));
-  EXPECT_TRUE(std::isnan(
-      iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-INFINITY))));
-  // Check that the result is a Nan with nan != nan.
+  // Infinities saturate while NaNs remain NaN.
+  EXPECT_EQ(kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(INFINITY)));
+  EXPECT_EQ(-kF8E4M3FNMax,
+            iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(-INFINITY)));
   float nan = iree_math_f8e4m3fn_to_f32(iree_math_f32_to_f8e4m3fn(NAN));
   EXPECT_NE(nan, nan);
 }

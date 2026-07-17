@@ -2092,6 +2092,8 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
   uint8_t source_last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
   uint8_t result_last_axis = (uint8_t)(loom_type_rank(result_type) - 1);
   if (matrix_rank == 2 &&
+      loom_type_element_type(matrix_type) ==
+          loom_type_element_type(source_type) &&
       loom_vector_dim_equals(matrix_type, 0, result_type, result_last_axis) &&
       loom_vector_dim_equals(matrix_type, 1, source_type, source_last_axis)) {
     return iree_ok_status();
@@ -2099,7 +2101,8 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
   return loom_vector_emit_encoding_dynamic_type_error(
       module, emitter, define_op, encoding_name,
       loom_vector_transform_matrix_param_name(), matrix_value,
-      IREE_SV("rank-2 floating-point matrix matching output x input extents"));
+      IREE_SV("rank-2 source-element-type matrix matching output x input "
+              "extents"));
 }
 
 static iree_status_t loom_vector_transform_verify_family(

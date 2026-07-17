@@ -894,13 +894,13 @@ func.def target(@target) @vector_cos_general_turns(%radians: vector<4xf32>) -> (
 // ----
 low.func.def target(@target) abi(hal_kernel) @vector_cos_general_turns(%radians: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
   %8 = slice %radians[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %9 = v_mul_f32_lit %8, 1042479491
+  %9 = v_mul_f32_src0_inline %8, 1042479491
   %10 = slice %radians[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %11 = v_mul_f32_lit %10, 1042479491
+  %11 = v_mul_f32_src0_inline %10, 1042479491
   %12 = slice %radians[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %13 = v_mul_f32_lit %12, 1042479491
+  %13 = v_mul_f32_src0_inline %12, 1042479491
   %14 = slice %radians[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %15 = v_mul_f32_lit %14, 1042479491
+  %15 = v_mul_f32_src0_inline %14, 1042479491
   %18 = v_cos_f32 %9
   %20 = v_cos_f32 %11
   %22 = v_cos_f32 %13

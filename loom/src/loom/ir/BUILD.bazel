@@ -14,20 +14,31 @@ package(
 
 loom_cc_library(
     name = "facts",
-    srcs = ["facts.c"],
-    hdrs = ["facts.h"],
+    srcs = [
+        "facts.c",
+        "float_facts.c",
+    ],
+    hdrs = [
+        "facts.h",
+        "float_facts.h",
+    ],
     deps = [
         ":ir",
         "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
 loom_cc_test(
     name = "facts_test",
-    srcs = ["facts_test.cc"],
+    srcs = [
+        "facts_test.cc",
+        "float_facts_test.cc",
+    ],
     deps = [
         ":facts",
+        "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

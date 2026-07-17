@@ -8,6 +8,7 @@
 
 #include "loom/ir/facts.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/config/ops.h"
 
@@ -52,7 +53,8 @@ static bool loom_config_scalar_value_facts(loom_type_t type,
     return true;
   }
   if (loom_scalar_type_is_float(scalar_type)) {
-    *out_facts = loom_value_facts_exact_f64(loom_attr_as_f64(value));
+    *out_facts =
+        loom_value_facts_exact_float(scalar_type, loom_attr_as_f64(value));
     return true;
   }
   return false;

@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/facts.h"
+#include "loom/ir/float_facts.h"
 
 namespace loom {
 namespace {
@@ -102,10 +103,10 @@ TEST_F(LoopDomainTest, RangeFactsDoNotProveEquality) {
 }
 
 TEST_F(LoopDomainTest, FloatFactsDoNotProveEquality) {
-  DefineFacts(1, loom_value_facts_exact_f64(0.0));
+  DefineFacts(1, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 0.0));
   DefineFacts(2, loom_value_facts_exact_i64(16));
   DefineFacts(3, loom_value_facts_exact_i64(1));
-  DefineFacts(4, loom_value_facts_exact_f64(0.0));
+  DefineFacts(4, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 0.0));
 
   loom_loop_domain_t lhs = {
       /*.lower_bound=*/1,

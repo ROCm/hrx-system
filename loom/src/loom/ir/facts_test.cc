@@ -12,6 +12,7 @@
 #include <limits>
 
 #include "iree/testing/gtest.h"
+#include "loom/ir/float_facts.h"
 
 namespace loom {
 namespace {
@@ -113,44 +114,54 @@ TEST(FactsExactI64, Int64Max) {
 }
 
 TEST(FactsExactF64, Pi) {
-  loom_value_facts_t f = loom_value_facts_exact_f64(3.14159265358979);
+  loom_value_facts_t f =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 3.14159265358979);
   EXPECT_TRUE(loom_value_facts_is_exact(f));
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
-  EXPECT_DOUBLE_EQ(loom_value_facts_as_f64(f), 3.14159265358979);
+  double value = 0.0;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
+  EXPECT_DOUBLE_EQ(value, 3.14159265358979);
 }
 
 TEST(FactsExactF64, Zero) {
-  loom_value_facts_t f = loom_value_facts_exact_f64(0.0);
+  loom_value_facts_t f =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 0.0);
   EXPECT_TRUE(loom_value_facts_is_exact(f));
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
-  EXPECT_DOUBLE_EQ(loom_value_facts_as_f64(f), 0.0);
+  double value = 1.0;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
+  EXPECT_DOUBLE_EQ(value, 0.0);
 }
 
 TEST(FactsExactF64, NaN) {
-  loom_value_facts_t f =
-      loom_value_facts_exact_f64(std::numeric_limits<double>::quiet_NaN());
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::quiet_NaN());
   EXPECT_TRUE(loom_value_facts_is_exact(f));
   EXPECT_TRUE(loom_value_facts_is_float(f));
+  EXPECT_TRUE(loom_value_facts_is_nan(f));
   EXPECT_FALSE(loom_value_facts_is_not_nan(f));
   EXPECT_FALSE(loom_value_facts_is_finite(f));
 }
 
 TEST(FactsExactF64, Infinity) {
-  loom_value_facts_t f =
-      loom_value_facts_exact_f64(std::numeric_limits<double>::infinity());
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::infinity());
   EXPECT_TRUE(loom_value_facts_is_exact(f));
   EXPECT_TRUE(loom_value_facts_is_float(f));
+  EXPECT_TRUE(loom_value_facts_is_inf(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_FALSE(loom_value_facts_is_finite(f));
 }
 
 TEST(FactsExactF64, NegativeZeroDiffersFromPositive) {
-  loom_value_facts_t pos = loom_value_facts_exact_f64(0.0);
-  loom_value_facts_t neg = loom_value_facts_exact_f64(-0.0);
+  loom_value_facts_t pos =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 0.0);
+  loom_value_facts_t neg =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, -0.0);
   // IEEE 754: +0.0 and -0.0 have different bit patterns.
   EXPECT_FALSE(loom_value_facts_equal(pos, neg));
 }
@@ -202,7 +213,8 @@ TEST(FactsPredicates, NonExactTruthiness) {
 
 TEST(FactsPredicates, FloatFactsAreNotIntegerTruthiness) {
   bool value = true;
-  loom_value_facts_t zero = loom_value_facts_exact_f64(0.0);
+  loom_value_facts_t zero =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 0.0);
   EXPECT_FALSE(loom_value_facts_is_zero(zero));
   EXPECT_FALSE(loom_value_facts_is_false(zero));
   EXPECT_FALSE(loom_value_facts_is_true(zero));
@@ -475,23 +487,23 @@ TEST(FactsPredicateConflict, PowerOfTwoRejectsExactNonPower) {
 }
 
 TEST(FactsPredicateConflict, NotNanRejectsExactNan) {
-  loom_value_facts_t f =
-      loom_value_facts_exact_f64(std::numeric_limits<double>::quiet_NaN());
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::quiet_NaN());
   loom_predicate_t pred = make_predicate_not_nan();
   loom_value_fact_predicate_conflict_t conflict = {};
   ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
-  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS);
   EXPECT_EQ(conflict.known_float_class,
             LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN);
 }
 
 TEST(FactsPredicateConflict, NotInfRejectsExactInfinity) {
-  loom_value_facts_t f =
-      loom_value_facts_exact_f64(std::numeric_limits<double>::infinity());
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::infinity());
   loom_predicate_t pred = make_predicate_not_inf();
   loom_value_fact_predicate_conflict_t conflict = {};
   ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
-  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS);
   EXPECT_EQ(conflict.known_float_class,
             LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY);
 }
@@ -501,24 +513,27 @@ TEST(FactsPredicateConflict, FiniteRejectsExactNanAndInfinity) {
 
   loom_value_fact_predicate_conflict_t nan_conflict = {};
   ASSERT_TRUE(loom_value_facts_predicate_conflict(
-      loom_value_facts_exact_f64(std::numeric_limits<double>::quiet_NaN()),
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64,
+                                   std::numeric_limits<double>::quiet_NaN()),
       &pred, &nan_conflict));
-  EXPECT_EQ(nan_conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(nan_conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS);
   EXPECT_EQ(nan_conflict.known_float_class,
             LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN);
 
   loom_value_fact_predicate_conflict_t infinity_conflict = {};
   ASSERT_TRUE(loom_value_facts_predicate_conflict(
-      loom_value_facts_exact_f64(-std::numeric_limits<double>::infinity()),
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64,
+                                   -std::numeric_limits<double>::infinity()),
       &pred, &infinity_conflict));
   EXPECT_EQ(infinity_conflict.kind,
-            LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS);
   EXPECT_EQ(infinity_conflict.known_float_class,
             LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY);
 }
 
 TEST(FactsPredicateConflict, FiniteAcceptsExactFiniteFloat) {
-  loom_value_facts_t f = loom_value_facts_exact_f64(1.5);
+  loom_value_facts_t f =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 1.5);
   loom_predicate_t pred = make_predicate_finite();
   EXPECT_FALSE(loom_value_facts_predicate_conflict(f, &pred, NULL));
 }

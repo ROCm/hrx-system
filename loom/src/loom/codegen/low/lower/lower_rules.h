@@ -233,12 +233,12 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   // Emits an exact signed i32 source value fact as a zero-extended u32 packet
   // attribute bit pattern.
   LOOM_LOW_LOWER_ATTR_COPY_VALUE_I32_AS_U32_BITS = 10,
-  // Emits an exact f64 source value fact as a rounded f32 packet attribute bit
+  // Emits an exact float source value fact as a rounded f32 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F32_BITS = 11,
+  // Emits an exact float source value fact as an f64 packet attribute bit
   // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F32_BITS = 11,
-  // Emits an exact f64 source value fact as an f64 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F64_BITS = 12,
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F64_BITS = 12,
   // Expands one i64_array lane ordinal into one byte-lane immediate:
   // source_attr[source_element_index] * source_element_count + literal_i64.
   LOOM_LOW_LOWER_ATTR_COPY_I64_ARRAY_LANE_BYTE = 13,
@@ -247,12 +247,12 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   // Emits one selected source-memory dynamic term byte stride as an i64
   // attribute.
   LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE = 15,
-  // Emits an exact f64 source value fact as a rounded f16 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F16_BITS = 16,
-  // Emits an exact f64 source value fact as a rounded bf16 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_BF16_BITS = 17,
+  // Emits an exact float source value fact as a rounded f16 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F16_BITS = 16,
+  // Emits an exact float source value fact as a rounded bf16 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_BF16_BITS = 17,
   // Emits a source enum attribute ordinal as an i64 packet attribute.
   LOOM_LOW_LOWER_ATTR_COPY_ENUM_ORDINAL = 18,
   // Emits the source op instance flag bitmask as an i64 packet attribute.
@@ -501,7 +501,7 @@ typedef enum loom_low_lower_guard_kind_e {
   // division recipe uses the add adjustment indicated by u64.
   LOOM_LOW_LOWER_GUARD_VALUE_U32_DIVISOR_MAGIC_IS_ADD = 17,
   // Source value facts must be an exact floating-point value.
-  LOOM_LOW_LOWER_GUARD_VALUE_EXACT_F64 = 18,
+  LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT = 18,
   // Source value facts must prove every non-floating integer element is
   // contained in [minimum_i64, maximum_i64].
   LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE = 19,
@@ -510,9 +510,9 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_OPERAND_SEGMENT_COUNT_EQ = 20,
   // Source op instance flags must contain every bit in u64.
   LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL = 21,
-  // Source value facts must prove an exact float equal to the f64 bit-pattern
-  // in u64.
-  LOOM_LOW_LOWER_GUARD_VALUE_F64_EQUALS = 22,
+  // Source value facts must prove an exact float equal to the declared-width
+  // rounding of the f64 literal bit pattern in u64.
+  LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EQUALS = 22,
   // Source value facts must prove every integer element is <= every integer
   // element in the other source value facts.
   LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE_LE = 23,

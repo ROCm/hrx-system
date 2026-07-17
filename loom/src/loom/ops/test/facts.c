@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/storage_facts.h"
@@ -47,8 +48,10 @@ iree_status_t loom_test_constant_facts(loom_fact_context_t* context,
   loom_attribute_t attr = loom_op_attrs(op)[0];
   loom_value_id_t result_id = loom_test_constant_result(op);
   loom_type_t result_type = loom_module_value_type(module, result_id);
-  if (loom_scalar_type_is_float(loom_type_element_type(result_type))) {
-    result_facts[0] = loom_value_facts_exact_f64(loom_attr_as_f64(attr));
+  loom_scalar_type_t result_element_type = loom_type_element_type(result_type);
+  if (loom_scalar_type_is_float(result_element_type)) {
+    result_facts[0] = loom_value_facts_exact_float(result_element_type,
+                                                   loom_attr_as_f64(attr));
   } else {
     result_facts[0] = loom_value_facts_exact_i64(loom_attr_as_i64(attr));
   }

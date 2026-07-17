@@ -168,7 +168,7 @@ typedef enum loom_scalar_cmpi_predicate_e {
   LOOM_SCALAR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_scalar_cmpi_predicate_t;
 
-// Floating-point comparison predicates (IEEE 754 total order).
+// IEEE 754 ordered and unordered floating-point predicates.
 typedef enum loom_scalar_cmpf_predicate_e {
   LOOM_SCALAR_CMPF_PREDICATE_OEQ = 0,
   LOOM_SCALAR_CMPF_PREDICATE_OGT = 1,

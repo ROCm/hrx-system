@@ -226,7 +226,7 @@ typedef enum loom_vector_cmpi_predicate_e {
   LOOM_VECTOR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_vector_cmpi_predicate_t;
 
-// Floating-point comparison predicates (IEEE 754 total order).
+// IEEE 754 ordered and unordered floating-point predicates.
 typedef enum loom_vector_cmpf_predicate_e {
   LOOM_VECTOR_CMPF_PREDICATE_OEQ = 0,
   LOOM_VECTOR_CMPF_PREDICATE_OGT = 1,

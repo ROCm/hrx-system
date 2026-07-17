@@ -210,7 +210,7 @@ def _f32_add_assumed_zero_rule() -> DescriptorRule:
         extra_guards=(
             Guard.instance_flags_has_all("fastmath", "nnan"),
             Guard.instance_flags_has_all("fastmath", "nsz"),
-            Guard.value_f64_equals("init", 0.0),
+            Guard.value_float_equals("init", 0.0),
         ),
     )
 
@@ -227,7 +227,7 @@ def _f32_add_reassociated_zero_rule() -> DescriptorRule:
             Guard.instance_flags_has_all("fastmath", "reassoc"),
             Guard.instance_flags_has_all("fastmath", "nnan"),
             Guard.instance_flags_has_all("fastmath", "nsz"),
-            Guard.value_f64_equals("init", 0.0),
+            Guard.value_float_equals("init", 0.0),
         ),
     )
 
@@ -273,7 +273,7 @@ def _f32_literal_seed_rule(
             Guard.value_type("result", _F32),
             Guard.low_value_register_class("input", "amdgpu.vgpr"),
             Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "init",
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -287,7 +287,7 @@ def _f32_literal_seed_rule(
                 operands={"rhs": ValueRef.operand("input")},
                 results={"dst": ValueRef.temporary("seed")},
                 result_types={"dst": ValueRef.operand("init")},
-                immediates={"imm32": ValueProject.f64_as_f32_bits("init")},
+                immediates={"imm32": ValueProject.float_as_f32_bits("init")},
                 form=DescriptorEmitForm.FIRST_LANE,
             ),
             EmitDescriptorOp(

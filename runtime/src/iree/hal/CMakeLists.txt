@@ -151,6 +151,7 @@ iree_cc_test(
   DEPS
     ::hal
     iree::base
+    iree::base::internal::fpu_state
     iree::base::internal::span
     iree::testing::gtest
     iree::testing::gtest_main

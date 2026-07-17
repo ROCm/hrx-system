@@ -98,10 +98,10 @@ class LowerAttrCopyKind(Enum):
     VALUE_U32_DIVISOR_MAGIC_MULTIPLIER = "value_u32_divisor_magic_multiplier"
     VALUE_U32_DIVISOR_MAGIC_SHIFT = "value_u32_divisor_magic_shift"
     VALUE_I32_AS_U32_BITS = "value_i32_as_u32_bits"
-    VALUE_F64_AS_F16_BITS = "value_f64_as_f16_bits"
-    VALUE_F64_AS_BF16_BITS = "value_f64_as_bf16_bits"
-    VALUE_F64_AS_F32_BITS = "value_f64_as_f32_bits"
-    VALUE_F64_AS_F64_BITS = "value_f64_as_f64_bits"
+    VALUE_FLOAT_AS_F16_BITS = "value_float_as_f16_bits"
+    VALUE_FLOAT_AS_BF16_BITS = "value_float_as_bf16_bits"
+    VALUE_FLOAT_AS_F32_BITS = "value_float_as_f32_bits"
+    VALUE_FLOAT_AS_F64_BITS = "value_float_as_f64_bits"
     I64_ARRAY_LANE_BYTE = "i64_array_lane_byte"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET = "source_memory_static_byte_offset"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT = (
@@ -736,11 +736,11 @@ class _LowerRuleSetCompiler:
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
             GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-            GuardKind.VALUE_EXACT_F64,
+            GuardKind.VALUE_EXACT_FLOAT,
             GuardKind.VALUE_I64_RANGE,
             GuardKind.VALUE_I64_RANGE_LE,
             GuardKind.VALUE_I64_RANGE_GE,
-            GuardKind.VALUE_F64_EQUALS,
+            GuardKind.VALUE_FLOAT_EQUALS,
             GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
@@ -1020,7 +1020,7 @@ class _LowerRuleSetCompiler:
                 )
             )
             return
-        if guard.kind == GuardKind.VALUE_EXACT_F64:
+        if guard.kind == GuardKind.VALUE_EXACT_FLOAT:
             self._guards.append(
                 LowerGuard(
                     kind=guard.kind,
@@ -1103,7 +1103,7 @@ class _LowerRuleSetCompiler:
                 )
             )
             return
-        if guard.kind == GuardKind.VALUE_F64_EQUALS:
+        if guard.kind == GuardKind.VALUE_FLOAT_EQUALS:
             if guard.f64_value is None:
                 raise ValueError(f"{source_op.name}: f64-equals guard needs a value")
             self._guards.append(
@@ -1665,14 +1665,14 @@ class _LowerRuleSetCompiler:
             kind = LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT
         elif project.kind == ValueProjectKind.I32_AS_U32_BITS:
             kind = LowerAttrCopyKind.VALUE_I32_AS_U32_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F16_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F16_BITS
-        elif project.kind == ValueProjectKind.F64_AS_BF16_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_BF16_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F32_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F32_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F64_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F64_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F16_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F16_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_BF16_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F32_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F64_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS
         else:
             raise ValueError(
                 f"{source_op.name}: immediate projection '{project.kind.value}' is "
@@ -2185,7 +2185,7 @@ def _u32_divisor_magic_is_add_diagnostic(field: str, *, is_add: bool) -> Diagnos
 
 
 def _exact_float_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value_fact", field, "exact_f64")
+    return _named_constraint_diagnostic("value_fact", field, "exact_float")
 
 
 def _integer_range_diagnostic(
@@ -2213,7 +2213,7 @@ def _integer_range_relation_diagnostic(
 
 def _float_equals_diagnostic(field: str, value: float) -> DiagnosticRef:
     return _named_constraint_diagnostic(
-        "value_fact", field, f"f64_equals.0x{_f64_bits(value):016x}"
+        "value_fact", field, f"float_equals.0x{_f64_bits(value):016x}"
     )
 
 
