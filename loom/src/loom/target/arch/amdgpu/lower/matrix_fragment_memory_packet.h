@@ -25,7 +25,7 @@ loom_scalar_type_t loom_amdgpu_fragment_memory_load_fp8_result_element_type(
 
 // Returns true when the target packet table covers the requested access.
 bool loom_amdgpu_fragment_memory_space_supports_access(
-    loom_amdgpu_memory_operation_kind_t operation_kind,
+    loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_fact_memory_space_t memory_space,
     const loom_matrix_fragment_role_layout_t* role_layout,
     loom_amdgpu_fragment_memory_payload_form_t payload_form);

@@ -129,8 +129,8 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   }
   for (uint32_t i = 0; i < plan.packet_count; ++i) {
     const loom_amdgpu_memory_access_t* access = &plan.packets[i].access;
-    const loom_amdgpu_memory_operation_kind_t kind =
-        loom_amdgpu_memory_operation_kind_from_source(&access->source);
+    const loom_low_source_memory_operation_kind_t kind =
+        access->source.operation_kind;
     IREE_RETURN_IF_ERROR(loom_amdgpu_record_memory_cache_policy_diagnostic(
         context, op, descriptor_set, access, kind));
     IREE_RETURN_IF_ERROR(loom_amdgpu_record_memory_access_diagnostic(

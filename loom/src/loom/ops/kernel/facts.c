@@ -17,15 +17,19 @@
 
 #define LOOM_KERNEL_DEFAULT_MAX_SUBGROUP_SIZE 128u
 
-static_assert((int)LOOM_KERNEL_DIMENSION_X ==
-                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
-              "kernel x dimension must match the topology fact x axis");
-static_assert((int)LOOM_KERNEL_DIMENSION_Y ==
-                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
-              "kernel y dimension must match the topology fact y axis");
-static_assert((int)LOOM_KERNEL_DIMENSION_Z ==
-                  (int)LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
-              "kernel z dimension must match the topology fact z axis");
+static const loom_value_fact_topology_axis_t
+    kKernelDimensionTopologyAxes[LOOM_KERNEL_DIMENSION_COUNT_] = {
+        [LOOM_KERNEL_DIMENSION_X] = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+        [LOOM_KERNEL_DIMENSION_Y] = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+        [LOOM_KERNEL_DIMENSION_Z] = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+};
+
+static loom_value_fact_topology_axis_t loom_kernel_dimension_topology_axis(
+    loom_kernel_dimension_t dimension) {
+  IREE_ASSERT_LT((uint32_t)dimension,
+                 IREE_ARRAYSIZE(kKernelDimensionTopologyAxes));
+  return kKernelDimensionTopologyAxes[dimension];
+}
 
 static loom_value_facts_t loom_kernel_hal_coordinate_facts(void) {
   return loom_value_facts_make(0, (int64_t)UINT32_MAX, 1);
@@ -206,14 +210,14 @@ static void loom_kernel_mark_workitem_topology_domain(
     loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
   loom_value_facts_mark_topology_domain(
       facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID,
-      (loom_value_fact_topology_axis_t)dimension);
+      loom_kernel_dimension_topology_axis(dimension));
 }
 
 static void loom_kernel_mark_workgroup_topology_domain(
     loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
   loom_value_facts_mark_topology_domain(
       facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
-      (loom_value_fact_topology_axis_t)dimension);
+      loom_kernel_dimension_topology_axis(dimension));
 }
 
 static bool loom_kernel_launch_config_operand_facts(

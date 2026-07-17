@@ -1010,12 +1010,6 @@ typedef enum loom_amdgpu_memory_dynamic_index_kind_e {
   LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET = 2,
 } loom_amdgpu_memory_dynamic_index_kind_t;
 
-typedef enum loom_amdgpu_memory_operation_kind_e {
-  LOOM_AMDGPU_MEMORY_OPERATION_LOAD = 0,
-  LOOM_AMDGPU_MEMORY_OPERATION_STORE = 1,
-  LOOM_AMDGPU_MEMORY_OPERATION_COUNT_,
-} loom_amdgpu_memory_operation_kind_t;
-
 typedef enum loom_amdgpu_memory_payload_register_class_e {
   LOOM_AMDGPU_MEMORY_PAYLOAD_REGISTER_CLASS_VGPR = 0,
   LOOM_AMDGPU_MEMORY_PAYLOAD_REGISTER_CLASS_SGPR = 1,
@@ -1217,7 +1211,7 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
-  loom_amdgpu_memory_operation_kind_t operation_kind;
+  loom_low_source_memory_operation_kind_t operation_kind;
   // Contract operand role selected from source IR.
   loom_contract_operand_role_t role;
   // Target-owned lane/register layout selected for the fragment payload.

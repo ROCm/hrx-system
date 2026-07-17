@@ -582,8 +582,8 @@ class AmdgpuMemoryDescriptorDomain(CEnum):
 
 
 class AmdgpuMemoryOperationKind(CEnum):
-    LOAD = "LOOM_AMDGPU_MEMORY_OPERATION_LOAD"
-    STORE = "LOOM_AMDGPU_MEMORY_OPERATION_STORE"
+    LOAD = "LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD"
+    STORE = "LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE"
 
 
 class AmdgpuMemoryPayloadRegisterClass(CEnum):

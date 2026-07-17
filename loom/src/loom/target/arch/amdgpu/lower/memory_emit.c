@@ -289,8 +289,8 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
                                                 packet->access.descriptor);
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
       descriptor_set, packet->access.descriptor->key_string_offset);
-  const loom_amdgpu_memory_operation_kind_t operation_kind =
-      loom_amdgpu_memory_operation_kind_from_source(source);
+  const loom_low_source_memory_operation_kind_t operation_kind =
+      source->operation_kind;
   const bool is_workgroup_memory =
       source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
   loom_amdgpu_memory_bank_conflict_summary_t bank_summary = {0};

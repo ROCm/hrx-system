@@ -127,11 +127,6 @@ typedef struct loom_amdgpu_memory_cache_policy_attrs_t {
   int64_t nt;
 } loom_amdgpu_memory_cache_policy_attrs_t;
 
-// Returns the target memory operation represented by a source access plan.
-loom_amdgpu_memory_operation_kind_t
-loom_amdgpu_memory_operation_kind_from_source(
-    const loom_low_source_memory_access_plan_t* source);
-
 // Reads common offset-immediate limits from a descriptor.
 bool loom_amdgpu_descriptor_offset_immediate_info(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -268,7 +263,7 @@ iree_string_view_t loom_amdgpu_memory_space_name(
 
 // Returns the stable report/diagnostic name for a memory operation kind.
 iree_string_view_t loom_amdgpu_memory_operation_name(
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Returns the stable report/diagnostic name for a memory address form.
 iree_string_view_t loom_amdgpu_memory_address_form_name(
@@ -285,7 +280,7 @@ iree_string_view_t loom_amdgpu_memory_ds_addtid_reason_key(
     const loom_module_t* module, loom_func_like_t source_function,
     const loom_target_bundle_t* bundle,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Returns the stable diagnostic name for a cache scope.
 iree_string_view_t loom_amdgpu_cache_scope_name(uint8_t scope);
@@ -331,14 +326,14 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Records optional cache-policy diagnostics for a selected memory access plan.
 iree_status_t loom_amdgpu_record_memory_cache_policy_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Records optional cache-policy diagnostics for a rejected memory access plan.
 iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(

@@ -1192,7 +1192,7 @@ static iree_status_t loom_amdgpu_vector_packet_erase_dead_sources(
 
 static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
     const loom_amdgpu_fragment_memory_plan_t* plan) {
-  if (plan->operation_kind != LOOM_AMDGPU_MEMORY_OPERATION_STORE ||
+  if (plan->operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE ||
       plan->role != LOOM_CONTRACT_OPERAND_ROLE_RESULT ||
       plan->register_count <= 1 || plan->packet_count == 0) {
     return false;
@@ -1436,7 +1436,7 @@ static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->view_regions,
       context->bundle, context->descriptor_set, context->target_ref,
-      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE,
+      context->function, op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
       &candidate_plan, &selected));
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
@@ -1602,7 +1602,7 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->view_regions,
       context->bundle, context->descriptor_set, context->target_ref,
-      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE, &plan,
+      context->function, op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &plan,
       &selected));
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(&plan) ||
