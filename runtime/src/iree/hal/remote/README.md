@@ -155,6 +155,19 @@ The client then opens logical names through
 open happen on the server, and failures are reported through the affected queue
 signal semaphores.
 
+## Protocol Compatibility
+
+The protocol is experimental and does not yet provide backward compatibility
+between runtime revisions. Session bootstrap rejects mismatched protocol
+versions, and the remote HAL device-catalog parser rejects unsupported catalog
+versions instead of interpreting them as an older layout.
+
+Wire fields are defined as little-endian fixed-width values. The current
+implementation accesses naturally aligned wire structs in host representation,
+so remote HAL builds require little-endian hosts. Cross-endian communication
+requires explicit field encoding and decoding at every protocol boundary; the
+build fails rather than producing a peer that silently misinterprets traffic.
+
 ## Lifecycle
 
 The client-side lifecycle starts with a remote HAL driver and device:

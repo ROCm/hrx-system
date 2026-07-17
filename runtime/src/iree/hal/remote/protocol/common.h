@@ -31,6 +31,10 @@
 
 #include "iree/base/api.h"
 
+#if !defined(IREE_ENDIANNESS_LITTLE) || !IREE_ENDIANNESS_LITTLE
+#error "The remote HAL protocol currently requires a little-endian host"
+#endif  // !IREE_ENDIANNESS_LITTLE
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
