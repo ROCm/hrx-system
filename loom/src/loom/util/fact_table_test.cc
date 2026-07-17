@@ -190,6 +190,33 @@ TEST_F(FactTableTest, DefineAndLookup) {
   EXPECT_EQ(result.range_hi, 42);
 }
 
+TEST_F(FactTableTest, DefineAndLookupPreservesIndependentFlagBits) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 5));
+
+  constexpr loom_value_fact_flags_t kFlags[] = {
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NAN,
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_INF,
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_SUBNORMAL,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM |
+          LOOM_VALUE_FACT_CLUSTER_UNIFORM,
+  };
+  for (loom_value_id_t value_id = 0; value_id < IREE_ARRAYSIZE(kFlags);
+       ++value_id) {
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    facts.flags = kFlags[value_id];
+    IREE_ASSERT_OK(loom_value_fact_table_define(&table, value_id, facts));
+  }
+
+  for (loom_value_id_t value_id = 0; value_id < IREE_ARRAYSIZE(kFlags);
+       ++value_id) {
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(&table, value_id);
+    EXPECT_EQ(facts.flags, kFlags[value_id]);
+  }
+}
+
 TEST_F(FactTableTest, UndefinedEntriesAreUnknown) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 100));
