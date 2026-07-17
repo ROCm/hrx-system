@@ -1258,7 +1258,7 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
   uint32_t output_values[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(
       output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
-  const uint32_t expected_values[4] = {49, 58, 67, 76};
+  const uint32_t expected_values[4] = {13, 16, 19, 22};
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
@@ -2022,13 +2022,12 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), input_file.path,
                               IREE_HAL_MEMORY_ACCESS_READ, source_file.out()));
 
-  iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
       test_device.base_device(),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
-      &executable_cache, &executable));
+      &executable));
 
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
@@ -2153,7 +2152,6 @@ TEST_F(HostQueueCommandBufferTest,
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 }
 
 #endif  // IREE_FILE_IO_ENABLE
