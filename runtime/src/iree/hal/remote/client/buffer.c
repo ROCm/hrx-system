@@ -841,10 +841,9 @@ bool iree_hal_remote_client_buffer_is_deallocated(
   return iree_atomic_load(&buffer->deallocated, iree_memory_order_acquire) != 0;
 }
 
-iree_status_t iree_hal_remote_client_buffer_resolve_ref(
+iree_status_t iree_hal_remote_client_buffer_resolve_wire_ref(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
-    iree_hal_remote_resource_id_t* out_resource_id,
-    iree_device_size_t* out_byte_offset) {
+    iree_hal_remote_resource_id_t* out_resource_id, uint64_t* out_byte_offset) {
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_ASSERT_ARGUMENT(out_resource_id);
   IREE_ASSERT_ARGUMENT(out_byte_offset);
@@ -863,15 +862,16 @@ iree_status_t iree_hal_remote_client_buffer_resolve_ref(
         "queue_alloca signal before using it");
   }
   *out_resource_id = remote_buffer->resource_id;
-  *out_byte_offset = iree_hal_buffer_byte_offset(buffer) + byte_offset;
+  *out_byte_offset =
+      (uint64_t)(iree_hal_buffer_byte_offset(buffer) + byte_offset);
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_remote_client_buffer_resolve_range(
+iree_status_t iree_hal_remote_client_buffer_resolve_wire_range(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length,
-    iree_hal_remote_resource_id_t* out_resource_id,
-    iree_device_size_t* out_byte_offset, iree_device_size_t* out_byte_length) {
+    iree_hal_remote_resource_id_t* out_resource_id, uint64_t* out_byte_offset,
+    uint64_t* out_byte_length) {
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_ASSERT_ARGUMENT(out_resource_id);
   IREE_ASSERT_ARGUMENT(out_byte_offset);
@@ -898,7 +898,8 @@ iree_status_t iree_hal_remote_client_buffer_resolve_range(
         "queue_alloca signal before using it");
   }
   *out_resource_id = remote_buffer->resource_id;
-  *out_byte_offset = iree_hal_buffer_byte_offset(buffer) + relative_offset;
-  *out_byte_length = relative_length;
+  *out_byte_offset =
+      (uint64_t)(iree_hal_buffer_byte_offset(buffer) + relative_offset);
+  *out_byte_length = (uint64_t)relative_length;
   return iree_ok_status();
 }

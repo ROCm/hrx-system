@@ -77,7 +77,7 @@ static iree_status_t iree_hal_remote_server_profile_string_length(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "profile %s length %" PRIhsz
                             " exceeds wire limit %u",
-                            field_name, value.size, UINT16_MAX);
+                            field_name, value.size, (unsigned)UINT16_MAX);
   }
   if (value.size > 0 && !value.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

@@ -914,7 +914,7 @@ static iree_status_t iree_hal_remote_write_execute_payload(
     const iree_hal_buffer_binding_t* binding =
         &payload->binding_table.bindings[i];
     if (binding->buffer) {
-      status = iree_hal_remote_client_buffer_resolve_range(
+      status = iree_hal_remote_client_buffer_resolve_wire_range(
           binding->buffer, binding->offset, binding->length,
           &wire_bindings[i].buffer_id, &wire_bindings[i].offset,
           &wire_bindings[i].length);
@@ -951,8 +951,8 @@ static iree_status_t iree_hal_remote_prepare_execute_payload(
   if (binding_table.count > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "command buffer execute binding count %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              binding_table.count, UINT16_MAX);
+                              " exceeds wire limit %u",
+                              binding_table.count, (unsigned)UINT16_MAX);
   }
 
   iree_host_size_t payload_length = 0;
@@ -1036,7 +1036,7 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
   const iree_hal_buffer_ref_t workgroup_count_ref =
       payload->config.workgroup_count_ref;
   if (workgroup_count_ref.buffer) {
-    status = iree_hal_remote_client_buffer_resolve_range(
+    status = iree_hal_remote_client_buffer_resolve_wire_range(
         workgroup_count_ref.buffer, workgroup_count_ref.offset,
         workgroup_count_ref.length, &op->config.workgroup_count_buffer_id,
         &op->config.workgroup_count_offset, &op->config.workgroup_count_length);
@@ -1057,7 +1057,7 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
        ++i) {
     const iree_hal_buffer_ref_t* ref = &payload->bindings.values[i];
     if (ref->buffer) {
-      status = iree_hal_remote_client_buffer_resolve_range(
+      status = iree_hal_remote_client_buffer_resolve_wire_range(
           ref->buffer, ref->offset, ref->length, &wire_bindings[i].buffer_id,
           &wire_bindings[i].offset, &wire_bindings[i].length);
     } else {
@@ -1094,14 +1094,14 @@ static iree_status_t iree_hal_remote_prepare_dispatch_payload(
       constants.data_length / sizeof(uint32_t) > UINT16_MAX) {
     status = iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "dispatch constant count %" PRIhsz " exceeds wire limit %" PRIu16,
-        constants.data_length / sizeof(uint32_t), UINT16_MAX);
+        "dispatch constant count %" PRIhsz " exceeds wire limit %u",
+        constants.data_length / sizeof(uint32_t), (unsigned)UINT16_MAX);
   }
   if (iree_status_is_ok(status) && bindings.count > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "dispatch binding count %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              bindings.count, UINT16_MAX);
+                              " exceeds wire limit %u",
+                              bindings.count, (unsigned)UINT16_MAX);
   }
 
   if (iree_status_is_ok(status)) {
@@ -1716,9 +1716,9 @@ iree_status_t iree_hal_remote_client_device_queue_dealloca(
         IREE_ARRAYSIZE(resources), resources, &dealloca_epoch);
   } else {
     op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_DEALLOCA;
-    iree_device_size_t buffer_offset = 0;
-    status = iree_hal_remote_client_buffer_resolve_ref(buffer, 0, &op.buffer_id,
-                                                       &buffer_offset);
+    uint64_t buffer_offset = 0;
+    status = iree_hal_remote_client_buffer_resolve_wire_ref(
+        buffer, 0, &op.buffer_id, &buffer_offset);
     op.dealloca_flags = flags;
 
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
@@ -1763,7 +1763,7 @@ iree_status_t iree_hal_remote_client_device_queue_fill(
   iree_hal_remote_buffer_fill_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_FILL;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_wire_range(
       target_buffer, target_offset, length, &op.target_buffer_id,
       &op.target_offset, &op.length);
   op.pattern_length = (uint8_t)pattern_length;
@@ -1804,7 +1804,7 @@ iree_status_t iree_hal_remote_client_device_queue_update(
   iree_hal_remote_buffer_update_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_UPDATE;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_wire_range(
       target_buffer, target_offset, length, &op.target_buffer_id,
       &op.target_offset, &op.length);
   op.update_flags = flags;
@@ -1850,13 +1850,13 @@ iree_status_t iree_hal_remote_client_device_queue_copy(
   iree_hal_remote_buffer_copy_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_COPY;
-  iree_device_size_t source_length = 0;
-  iree_device_size_t target_length = 0;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+  uint64_t source_length = 0;
+  uint64_t target_length = 0;
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_wire_range(
       source_buffer, source_offset, length, &op.source_buffer_id,
       &op.source_offset, &source_length);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_buffer_resolve_range(
+    status = iree_hal_remote_client_buffer_resolve_wire_range(
         target_buffer, target_offset, length, &op.target_buffer_id,
         &op.target_offset, &target_length);
   }
@@ -1921,7 +1921,7 @@ static iree_status_t iree_hal_remote_client_device_queue_read_client_file_now(
   iree_hal_remote_client_file_read_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_READ;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_wire_range(
       target_buffer, target_offset, length, &op.target_buffer_id,
       &op.target_offset, &op.length);
 
@@ -2249,7 +2249,7 @@ iree_status_t iree_hal_remote_client_device_queue_read(
             op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_READ;
             op.source_file_id = source_file_view.remote_file_id;
             op.source_offset = source_offset;
-            status = iree_hal_remote_client_buffer_resolve_range(
+            status = iree_hal_remote_client_buffer_resolve_wire_range(
                 target_buffer, target_offset, length, &op.target_buffer_id,
                 &op.target_offset, &op.length);
             op.read_flags = flags;
@@ -2322,7 +2322,7 @@ iree_status_t iree_hal_remote_client_device_queue_write(
           iree_hal_remote_client_file_write_op_t op;
           memset(&op, 0, sizeof(op));
           op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_WRITE;
-          status = iree_hal_remote_client_buffer_resolve_range(
+          status = iree_hal_remote_client_buffer_resolve_wire_range(
               source_buffer, source_offset, length, &op.source_buffer_id,
               &op.source_offset, &op.length);
           uint64_t transfer_id = 0;
@@ -2361,7 +2361,7 @@ iree_status_t iree_hal_remote_client_device_queue_write(
             iree_hal_remote_file_write_op_t op;
             memset(&op, 0, sizeof(op));
             op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE;
-            status = iree_hal_remote_client_buffer_resolve_range(
+            status = iree_hal_remote_client_buffer_resolve_wire_range(
                 source_buffer, source_offset, length, &op.source_buffer_id,
                 &op.source_offset, &op.length);
             op.target_file_id = target_file_view.remote_file_id;

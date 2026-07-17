@@ -119,18 +119,17 @@ void iree_hal_remote_client_buffer_mark_deallocated(iree_hal_buffer_t* buffer);
 // Returns true if the logical queue allocation has been deallocated.
 bool iree_hal_remote_client_buffer_is_deallocated(iree_hal_buffer_t* buffer);
 
-// Resolves a buffer reference to a remote root resource and absolute offset.
-iree_status_t iree_hal_remote_client_buffer_resolve_ref(
+// Resolves a buffer reference to wire resource and absolute offset values.
+iree_status_t iree_hal_remote_client_buffer_resolve_wire_ref(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
-    iree_hal_remote_resource_id_t* out_resource_id,
-    iree_device_size_t* out_byte_offset);
+    iree_hal_remote_resource_id_t* out_resource_id, uint64_t* out_byte_offset);
 
-// Resolves a buffer range to a remote root resource and absolute offset/length.
-iree_status_t iree_hal_remote_client_buffer_resolve_range(
+// Resolves a buffer range to wire resource, offset, and length values.
+iree_status_t iree_hal_remote_client_buffer_resolve_wire_range(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length,
-    iree_hal_remote_resource_id_t* out_resource_id,
-    iree_device_size_t* out_byte_offset, iree_device_size_t* out_byte_length);
+    iree_hal_remote_resource_id_t* out_resource_id, uint64_t* out_byte_offset,
+    uint64_t* out_byte_length);
 
 // Returns the resource_id from a remote client buffer proxy.
 // Handles subspan buffers by traversing to the root allocation.

@@ -177,8 +177,8 @@ static iree_status_t iree_hal_remote_client_executable_query_parameters(
   if (capacity > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "function parameter count %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              capacity, UINT16_MAX);
+                              " exceeds wire limit %u",
+                              capacity, (unsigned)UINT16_MAX);
   }
 
   struct {
@@ -581,10 +581,10 @@ static iree_status_t iree_hal_remote_client_executable_query_global_by_name(
 
   iree_status_t status = iree_ok_status();
   if (name.size > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "global name length %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              name.size, UINT16_MAX);
+    status =
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "global name length %" PRIhsz " exceeds wire limit %u",
+                         name.size, (unsigned)UINT16_MAX);
   }
 
   iree_host_size_t message_length = 0;
@@ -683,10 +683,10 @@ static iree_status_t iree_hal_remote_client_executable_query_global_buffer(
 
   iree_status_t status = iree_ok_status();
   if (name.size > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "global name length %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              name.size, UINT16_MAX);
+    status =
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "global name length %" PRIhsz " exceeds wire limit %u",
+                         name.size, (unsigned)UINT16_MAX);
   }
 
   const iree_host_size_t header_size =
@@ -1034,10 +1034,10 @@ iree_status_t iree_hal_remote_client_executable_load(
         "remote executable target must be borrowed from the device spec");
   }
   if (iree_status_is_ok(status) && load_params->constant_count > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "executable constant count %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              load_params->constant_count, UINT16_MAX);
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "executable constant count %" PRIhsz " exceeds wire limit %u",
+        load_params->constant_count, (unsigned)UINT16_MAX);
   }
 
   const iree_host_size_t header_size =

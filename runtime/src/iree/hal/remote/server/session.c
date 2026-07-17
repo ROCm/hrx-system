@@ -3919,8 +3919,8 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_function(
   if (iree_status_is_ok(status) && info.name.size > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "function name length %" PRIhsz
-                              " exceeds wire limit %" PRIu16,
-                              info.name.size, UINT16_MAX);
+                              " exceeds wire limit %u",
+                              info.name.size, (unsigned)UINT16_MAX);
   }
   if (!iree_status_is_ok(status)) {
     return iree_hal_remote_server_send_error_response(
@@ -4019,8 +4019,8 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
     } else if (parameters[i].name.size > UINT16_MAX) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "parameter name length %" PRIhsz
-                                " exceeds wire limit %" PRIu16,
-                                parameters[i].name.size, UINT16_MAX);
+                                " exceeds wire limit %u",
+                                parameters[i].name.size, (unsigned)UINT16_MAX);
     } else if (!iree_host_size_checked_add(name_data_length,
                                            parameters[i].name.size,
                                            &name_data_length)) {
