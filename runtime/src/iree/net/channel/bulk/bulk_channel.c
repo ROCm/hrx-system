@@ -11,8 +11,8 @@
 
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/internal/atomics.h"
-#include "iree/base/threading/processor.h"
 #include "iree/net/channel/util/frame_sender.h"
+#include "iree/net/channel/util/send_gate.h"
 
 // Flags that require payload transforms not implemented by the bulk channel.
 #define IREE_NET_BULK_CHANNEL_UNSUPPORTED_TRANSFORM_FLAGS \
@@ -117,12 +117,8 @@ struct iree_net_bulk_channel_t {
   // Borrowed view into the transport. Valid until detach zeroes it.
   iree_net_message_endpoint_t endpoint;
 
-  // Set to 1 by detach. submit_send checks this after incrementing
-  // sends_in_flight.
-  iree_atomic_int32_t detached;
-
-  // Count of in-flight submit_send operations.
-  iree_atomic_int32_t sends_in_flight;
+  // Gates endpoint access and signals exact send quiescence during detach.
+  iree_net_channel_send_gate_t send_gate;
 
   // Owned fallback header pool for unusually large scatter-gather sends.
   iree_async_buffer_pool_t* header_pool;
@@ -349,12 +345,7 @@ static iree_status_t iree_net_bulk_channel_submit_send(
     void* user_data, iree_async_span_list_t data, uint64_t send_user_data) {
   iree_net_bulk_channel_t* channel = (iree_net_bulk_channel_t*)user_data;
 
-  iree_atomic_fetch_add(&channel->sends_in_flight, 1,
-                        iree_memory_order_acq_rel);
-
-  if (iree_atomic_load(&channel->detached, iree_memory_order_acquire)) {
-    iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
-                          iree_memory_order_release);
+  if (!iree_net_channel_send_gate_try_enter(&channel->send_gate)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "bulk channel endpoint detached");
   }
@@ -372,8 +363,7 @@ static iree_status_t iree_net_bulk_channel_submit_send(
     iree_net_bulk_channel_release(channel);
   }
 
-  iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
-                        iree_memory_order_release);
+  iree_net_channel_send_gate_leave(&channel->send_gate);
   return status;
 }
 
@@ -596,8 +586,7 @@ iree_status_t iree_net_bulk_channel_create(
     iree_atomic_ref_count_init(&channel->ref_count);
     channel->host_allocator = host_allocator;
     channel->endpoint = endpoint;
-    iree_atomic_store(&channel->detached, 0, iree_memory_order_relaxed);
-    iree_atomic_store(&channel->sends_in_flight, 0, iree_memory_order_relaxed);
+    iree_net_channel_send_gate_initialize(&channel->send_gate);
     channel->header_pool = header_pool;
     channel->callbacks = callbacks;
     channel->remote_chunk_credit_capacity =
@@ -638,6 +627,7 @@ iree_status_t iree_net_bulk_channel_create(
     *out_channel = channel;
   } else {
     if (channel) {
+      iree_net_channel_send_gate_deinitialize(&channel->send_gate);
       iree_net_bulk_send_context_pool_deinitialize(&channel->send_context_pool);
       iree_allocator_free(host_allocator, channel);
     }
@@ -664,20 +654,20 @@ void iree_net_bulk_channel_release(iree_net_bulk_channel_t* channel) {
 void iree_net_bulk_channel_detach(iree_net_bulk_channel_t* channel) {
   if (!channel) return;
 
-  iree_atomic_store(&channel->detached, 1, iree_memory_order_release);
-  while (iree_atomic_load(&channel->sends_in_flight,
-                          iree_memory_order_acquire) > 0) {
-    iree_processor_yield();
+  if (iree_net_channel_send_gate_begin_close(&channel->send_gate)) {
+    iree_net_channel_send_gate_await_quiescence(&channel->send_gate);
+    if (channel->endpoint.self) {
+      iree_net_message_endpoint_callbacks_t empty_callbacks;
+      memset(&empty_callbacks, 0, sizeof(empty_callbacks));
+      iree_net_message_endpoint_set_callbacks(channel->endpoint,
+                                              empty_callbacks);
+      memset(&channel->endpoint, 0, sizeof(channel->endpoint));
+    }
+    iree_net_bulk_channel_set_state(channel, IREE_NET_BULK_CHANNEL_STATE_ERROR);
+    iree_net_channel_send_gate_finish_close(&channel->send_gate);
+  } else {
+    iree_net_channel_send_gate_await_closed(&channel->send_gate);
   }
-
-  if (channel->endpoint.self) {
-    iree_net_message_endpoint_callbacks_t empty_callbacks;
-    memset(&empty_callbacks, 0, sizeof(empty_callbacks));
-    iree_net_message_endpoint_set_callbacks(channel->endpoint, empty_callbacks);
-    memset(&channel->endpoint, 0, sizeof(channel->endpoint));
-  }
-
-  iree_net_bulk_channel_set_state(channel, IREE_NET_BULK_CHANNEL_STATE_ERROR);
 }
 
 static void iree_net_bulk_channel_destroy(iree_net_bulk_channel_t* channel) {
@@ -690,6 +680,7 @@ static void iree_net_bulk_channel_destroy(iree_net_bulk_channel_t* channel) {
   }
 
   iree_net_frame_sender_deinitialize(&channel->sender);
+  iree_net_channel_send_gate_deinitialize(&channel->send_gate);
   iree_net_bulk_send_context_pool_deinitialize(&channel->send_context_pool);
   iree_async_buffer_pool_release(channel->header_pool);
 
@@ -744,8 +735,7 @@ bool iree_net_bulk_channel_has_pending_sends(
     const iree_net_bulk_channel_t* channel) {
   IREE_ASSERT_ARGUMENT(channel);
   return iree_net_frame_sender_has_pending(&channel->sender) ||
-         iree_atomic_load(&((iree_net_bulk_channel_t*)channel)->sends_in_flight,
-                          iree_memory_order_acquire) > 0;
+         iree_net_channel_send_gate_pending_count(&channel->send_gate) > 0;
 }
 
 iree_net_carrier_send_budget_t iree_net_bulk_channel_query_send_budget(

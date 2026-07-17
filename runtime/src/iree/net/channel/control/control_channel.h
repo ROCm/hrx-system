@@ -233,9 +233,11 @@ typedef struct iree_net_control_channel_t iree_net_control_channel_t;
 // before the data reaches the carrier.
 //
 // The caller must ensure the underlying transport object (framing_adapter,
-// stream_mux slot, etc.) outlives the channel. The channel does NOT activate
-// the endpoint at creation; call iree_net_control_channel_activate() when
-// ready to begin receiving.
+// stream_mux slot, etc.) outlives the channel. The endpoint owner is
+// responsible for endpoint deactivation and transport draining before the
+// final channel reference is released. The channel does NOT activate the
+// endpoint at creation; call iree_net_control_channel_activate() when ready to
+// begin receiving.
 //
 // The |header_pool| provides buffers for copying frame headers and batching
 // small control messages. Pool buffers must be at least 256 bytes. The pool
@@ -266,7 +268,8 @@ iree_status_t iree_net_control_channel_create(
 void iree_net_control_channel_retain(iree_net_control_channel_t* channel);
 
 // Releases a reference. Destroys the channel when the last reference is
-// released. NULL-safe (no-op on NULL).
+// released. The borrowed endpoint must still be valid and, if activated,
+// already drained. NULL-safe (no-op on NULL).
 void iree_net_control_channel_release(iree_net_control_channel_t* channel);
 
 // Activates the channel, enabling message receipt.

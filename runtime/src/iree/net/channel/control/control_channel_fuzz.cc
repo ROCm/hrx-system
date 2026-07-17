@@ -9,8 +9,9 @@
 //
 // The fuzzer exercises both the receive path (injecting arbitrary bytes as
 // messages) and the send path (interleaving send operations with receives to
-// explore state machine transitions). All statuses are silently ignored; the
-// goal is no crash, no leak, no UB on arbitrary input.
+// explore state machine transitions). Operation statuses are consumed because
+// arbitrary failure is expected; lifecycle failures remain fatal invariants.
+// The goal is no crash, no leak, no UB on arbitrary input.
 //
 // See https://iree.dev/developers/debugging/fuzzing/ for build and run info.
 
@@ -57,7 +58,17 @@ static iree_status_t fuzz_endpoint_activate(void* self) {
 static iree_status_t fuzz_endpoint_deactivate(
     void* self, iree_net_message_endpoint_deactivate_fn_t callback,
     void* user_data) {
+  fuzz_endpoint_t* endpoint = (fuzz_endpoint_t*)self;
+  endpoint->activated = false;
+  if (callback) callback(user_data);
   return iree_ok_status();
+}
+
+static void fuzz_endpoint_deactivate_and_wait(
+    iree_net_message_endpoint_t endpoint) {
+  iree_status_t status = iree_net_message_endpoint_deactivate(
+      endpoint, /*callback=*/NULL, /*user_data=*/NULL);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
 }
 
 static iree_status_t fuzz_endpoint_send(
@@ -464,6 +475,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   if (!operation_mode) {
     fuzz_inject_message(&mock_endpoint, stream, remaining);
+    fuzz_endpoint_deactivate_and_wait(endpoint);
     iree_net_control_channel_release(channel);
     iree_async_buffer_pool_release(header_pool);
     return 0;
@@ -602,6 +614,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
   }
 
+  fuzz_endpoint_deactivate_and_wait(endpoint);
   iree_net_control_channel_release(channel);
   iree_async_buffer_pool_release(header_pool);
   return 0;

@@ -34,6 +34,7 @@ iree_cc_library(
     iree::base::internal::atomic_slist
     iree::base::threading
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::send_gate
     iree::net::message_endpoint
   PUBLIC
 )

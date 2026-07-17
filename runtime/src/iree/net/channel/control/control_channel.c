@@ -498,17 +498,11 @@ static void iree_net_control_channel_destroy(
     iree_net_control_channel_t* channel) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Clear endpoint callbacks to stop message delivery.
+  // Clear callbacks from the borrowed endpoint. The endpoint owner must have
+  // already drained it before releasing the final channel reference.
   iree_net_message_endpoint_callbacks_t empty_callbacks;
   memset(&empty_callbacks, 0, sizeof(empty_callbacks));
   iree_net_message_endpoint_set_callbacks(channel->endpoint, empty_callbacks);
-
-  iree_net_control_channel_state_t state =
-      iree_net_control_channel_load_state(channel);
-  if (state != IREE_NET_CONTROL_CHANNEL_STATE_CREATED) {
-    iree_status_ignore(iree_net_message_endpoint_deactivate(
-        channel->endpoint, /*callback=*/NULL, /*user_data=*/NULL));
-  }
 
   // Deinitialize the frame sender. Asserts no sends in flight.
   iree_net_frame_sender_deinitialize(&channel->sender);

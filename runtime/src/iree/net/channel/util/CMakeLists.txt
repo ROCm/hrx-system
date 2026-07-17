@@ -107,6 +107,32 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    send_gate
+  HDRS
+    "send_gate.h"
+  SRCS
+    "send_gate.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    send_gate_test
+  SRCS
+    "send_gate_test.cc"
+  DEPS
+    ::send_gate
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     sequence_window
   HDRS
     "sequence_window.h"

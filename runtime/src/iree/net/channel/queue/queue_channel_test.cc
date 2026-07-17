@@ -207,9 +207,17 @@ const iree_net_carrier_vtable_t MockCarrier::kVtable = {
 //===----------------------------------------------------------------------===//
 
 struct MockEndpoint {
+  // Installed endpoint callbacks.
   iree_net_message_endpoint_callbacks_t callbacks = {};
+
+  // Carrier used for send forwarding.
   MockCarrier* carrier = nullptr;
+
+  // Whether the endpoint has been activated.
   bool activated = false;
+
+  // Number of endpoint deactivation requests.
+  iree_host_size_t deactivate_count = 0;
 
   static void SetCallbacks(void* self,
                            iree_net_message_endpoint_callbacks_t callbacks) {
@@ -222,7 +230,9 @@ struct MockEndpoint {
   static iree_status_t Deactivate(
       void* self, iree_net_message_endpoint_deactivate_fn_t callback,
       void* user_data) {
-    static_cast<MockEndpoint*>(self)->activated = false;
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    mock->activated = false;
+    ++mock->deactivate_count;
     if (callback) callback(user_data);
     return iree_ok_status();
   }
@@ -417,6 +427,12 @@ class QueueChannelTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_net_queue_channel_detach(channel_);
+    if (channel_ && endpoint_.activated) {
+      IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+          endpoint_.as_endpoint(), /*callback=*/nullptr,
+          /*user_data=*/nullptr));
+    }
     iree_net_queue_channel_release(channel_);
     channel_ = nullptr;
   }
@@ -462,6 +478,18 @@ TEST_F(QueueChannelTest, ActivateTransitionsToOperational) {
   EXPECT_EQ(iree_net_queue_channel_state(channel_),
             IREE_NET_QUEUE_CHANNEL_STATE_OPERATIONAL);
   EXPECT_TRUE(endpoint_.activated);
+}
+
+TEST_F(QueueChannelTest, DetachDoesNotDeactivateBorrowedEndpoint) {
+  CreateAndActivate();
+
+  iree_net_queue_channel_detach(channel_);
+
+  EXPECT_EQ(iree_net_queue_channel_state(channel_),
+            IREE_NET_QUEUE_CHANNEL_STATE_ERROR);
+  EXPECT_TRUE(endpoint_.activated);
+  EXPECT_EQ(endpoint_.deactivate_count, 0u);
+  EXPECT_EQ(endpoint_.callbacks.on_message, nullptr);
 }
 
 TEST_F(QueueChannelTest, DoubleActivateFails) {
@@ -859,7 +887,7 @@ TEST_F(QueueChannelTest, SendBeforeActivateFails) {
       endpoint_.as_endpoint(), 8, CreatePool(), context_.MakeCallbacks(),
       iree_allocator_system(), &channel));
 
-  iree_async_span_list_t empty_payload = {nullptr, 0};
+  iree_async_span_list_t empty_payload = iree_async_span_list_empty();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_net_queue_channel_send_command(
                             channel, 0, NULL, NULL, empty_payload, 0));
@@ -872,7 +900,7 @@ TEST_F(QueueChannelTest, SendAfterErrorFails) {
   endpoint_.InjectError(
       iree_make_status(IREE_STATUS_UNAVAILABLE, "transport down"));
 
-  iree_async_span_list_t empty_payload = {nullptr, 0};
+  iree_async_span_list_t empty_payload = iree_async_span_list_empty();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_net_queue_channel_send_command(
                             channel_, 0, NULL, NULL, empty_payload, 0));

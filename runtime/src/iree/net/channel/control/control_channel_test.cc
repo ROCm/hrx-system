@@ -209,9 +209,19 @@ const iree_net_carrier_vtable_t MockCarrier::kVtable = {
 // Mock message endpoint that stores callbacks for receive injection and
 // forwards send operations to the carrier via the frame_sender dispatch path.
 struct MockEndpoint {
+  // Installed endpoint callbacks.
   iree_net_message_endpoint_callbacks_t callbacks = {};
-  MockCarrier* carrier = nullptr;  // For send forwarding.
+
+  // Carrier used for send forwarding.
+  MockCarrier* carrier = nullptr;
+
+  // Whether the endpoint has been activated.
   bool activated = false;
+
+  // Number of endpoint deactivation requests.
+  iree_host_size_t deactivate_count = 0;
+
+  // Optional status for the next activation.
   iree_status_code_t next_activate_error = IREE_STATUS_OK;
 
   static void SetCallbacks(void* self,
@@ -233,7 +243,9 @@ struct MockEndpoint {
   static iree_status_t Deactivate(
       void* self, iree_net_message_endpoint_deactivate_fn_t callback,
       void* user_data) {
-    static_cast<MockEndpoint*>(self)->activated = false;
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    mock->activated = false;
+    ++mock->deactivate_count;
     if (callback) callback(user_data);
     return iree_ok_status();
   }
@@ -532,6 +544,11 @@ class ControlChannelTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (channel_ && mock_endpoint_->activated) {
+      IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+          mock_endpoint_->as_endpoint(), /*callback=*/nullptr,
+          /*user_data=*/nullptr));
+    }
     iree_net_control_channel_release(channel_);
     channel_ = nullptr;
   }
@@ -587,6 +604,22 @@ TEST_F(ControlChannelTest, ActivateTransitionsToOperational) {
   EXPECT_EQ(iree_net_control_channel_state(channel_),
             IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL);
   EXPECT_TRUE(mock_endpoint_->activated);
+}
+
+TEST_F(ControlChannelTest, ReleaseDoesNotDeactivateBorrowedEndpoint) {
+  CreateAndActivate();
+
+  IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+      mock_endpoint_->as_endpoint(), /*callback=*/nullptr,
+      /*user_data=*/nullptr));
+  EXPECT_EQ(mock_endpoint_->deactivate_count, 1u);
+
+  iree_net_control_channel_release(channel_);
+  channel_ = nullptr;
+
+  EXPECT_FALSE(mock_endpoint_->activated);
+  EXPECT_EQ(mock_endpoint_->deactivate_count, 1u);
+  EXPECT_EQ(mock_endpoint_->callbacks.on_message, nullptr);
 }
 
 TEST_F(ControlChannelTest, DoubleActivateFails) {

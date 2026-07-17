@@ -230,6 +230,9 @@ struct MockEndpoint {
   // Whether the endpoint has been activated.
   bool activated = false;
 
+  // Number of endpoint deactivation requests.
+  iree_host_size_t deactivate_count = 0;
+
   // Optional status for the next activation.
   iree_status_code_t next_activate_error = IREE_STATUS_OK;
 
@@ -255,7 +258,9 @@ struct MockEndpoint {
   static iree_status_t Deactivate(
       void* self, iree_net_message_endpoint_deactivate_fn_t callback,
       void* user_data) {
-    static_cast<MockEndpoint*>(self)->activated = false;
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    mock->activated = false;
+    ++mock->deactivate_count;
     if (callback) callback(user_data);
     return iree_ok_status();
   }
@@ -518,6 +523,12 @@ class BulkChannelTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_net_bulk_channel_detach(channel_);
+    if (channel_ && endpoint_.activated) {
+      IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+          endpoint_.as_endpoint(), /*callback=*/nullptr,
+          /*user_data=*/nullptr));
+    }
     iree_net_bulk_channel_release(channel_);
     channel_ = nullptr;
   }
@@ -566,6 +577,18 @@ TEST_F(BulkChannelTest, ActivateTransitionsToOperational) {
   EXPECT_EQ(iree_net_bulk_channel_state(channel_),
             IREE_NET_BULK_CHANNEL_STATE_OPERATIONAL);
   EXPECT_TRUE(endpoint_.activated);
+}
+
+TEST_F(BulkChannelTest, DetachDoesNotDeactivateBorrowedEndpoint) {
+  CreateAndActivate();
+
+  iree_net_bulk_channel_detach(channel_);
+
+  EXPECT_EQ(iree_net_bulk_channel_state(channel_),
+            IREE_NET_BULK_CHANNEL_STATE_ERROR);
+  EXPECT_TRUE(endpoint_.activated);
+  EXPECT_EQ(endpoint_.deactivate_count, 0u);
+  EXPECT_EQ(endpoint_.callbacks.on_message, nullptr);
 }
 
 TEST_F(BulkChannelTest, MissingCallbacksRejects) {

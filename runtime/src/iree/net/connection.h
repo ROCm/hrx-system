@@ -49,8 +49,8 @@ extern "C" {
 //
 // On success, |status| is OK and |endpoint| is a valid borrowed view into the
 // connection's transport stack. The endpoint is valid only while the connection
-// is alive. Callers must deactivate the endpoint before releasing the
-// connection.
+// is alive. Connection deactivation drains every endpoint before the
+// connection can be released.
 //
 // On failure, |status| contains the error and |endpoint| has self=NULL.
 typedef void (*iree_net_endpoint_ready_fn_t)(

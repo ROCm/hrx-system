@@ -37,8 +37,10 @@
 //
 // ## Threading
 //
-// All operations happen on the proactor thread. No internal synchronization
-// beyond the atomic reference count and state field.
+// Receive callbacks and activation run on the proactor thread. Send operations
+// may be submitted concurrently from application threads. Detach closes send
+// admission and waits for every admitted endpoint call before removing the
+// proactor-thread callbacks.
 
 #ifndef IREE_NET_CHANNEL_QUEUE_QUEUE_CHANNEL_H_
 #define IREE_NET_CHANNEL_QUEUE_QUEUE_CHANNEL_H_
@@ -216,14 +218,16 @@ void iree_net_queue_channel_release(iree_net_queue_channel_t* channel);
 iree_status_t iree_net_queue_channel_activate(
     iree_net_queue_channel_t* channel);
 
-// Detaches the channel from its underlying endpoint. Clears endpoint callbacks
-// and zeroes the endpoint reference so that subsequent destroy does not
-// attempt to operate on a freed endpoint.
+// Detaches the channel from its underlying endpoint. Closes send admission,
+// waits for admitted endpoint calls to return, clears endpoint callbacks, and
+// zeroes the borrowed endpoint reference. The endpoint owner remains
+// responsible for endpoint deactivation and transport draining.
 //
-// Must be called while the endpoint is still valid (before the session or
-// connection that owns it is released). After detach, the channel cannot send
-// or receive, but may still be retained (e.g., by barrier completions) and
-// later released safely.
+// Must be called on the proactor thread while the endpoint is still valid
+// (before the session or connection that owns it is released). Endpoint
+// deactivation may happen before or after detach. After detach, the channel
+// cannot send or receive, but may still be retained (e.g., by barrier
+// completions) and later released safely.
 //
 // Transitions to ERROR state. No-op if already detached or never activated.
 void iree_net_queue_channel_detach(iree_net_queue_channel_t* channel);

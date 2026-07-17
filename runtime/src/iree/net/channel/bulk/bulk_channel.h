@@ -11,6 +11,11 @@
 // DATA chunks can be delivered in any order. The channel validates wire
 // framing, enforces fixed send-context capacity, and dispatches transfer
 // lifecycle callbacks to the embedding transfer engine.
+//
+// Receive callbacks and activation run on the proactor thread. Send operations
+// may be submitted concurrently from application and async I/O threads. Detach
+// closes send admission and waits for every admitted endpoint call before
+// removing the proactor-thread callbacks.
 
 #ifndef IREE_NET_CHANNEL_BULK_BULK_CHANNEL_H_
 #define IREE_NET_CHANNEL_BULK_BULK_CHANNEL_H_
@@ -199,10 +204,15 @@ void iree_net_bulk_channel_release(iree_net_bulk_channel_t* channel);
 // Must be called from the proactor thread. Transitions CREATED -> OPERATIONAL.
 iree_status_t iree_net_bulk_channel_activate(iree_net_bulk_channel_t* channel);
 
-// Detaches the channel from its underlying endpoint.
+// Detaches the channel from its underlying endpoint. Closes send admission,
+// waits for admitted endpoint calls to return, clears endpoint callbacks, and
+// zeroes the borrowed endpoint reference. The endpoint owner remains
+// responsible for endpoint deactivation and transport draining.
 //
-// After detach, the channel cannot send or receive, but may still be retained
-// by in-flight send completions and later released safely.
+// Must be called on the proactor thread while the endpoint is still valid.
+// Endpoint deactivation may happen before or after detach. After detach, the
+// channel cannot send or receive, but may still be retained by in-flight send
+// completions and later released safely.
 void iree_net_bulk_channel_detach(iree_net_bulk_channel_t* channel);
 
 // Returns the current channel state.

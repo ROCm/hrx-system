@@ -98,6 +98,28 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "send_gate",
+    srcs = ["send_gate.c"],
+    hdrs = ["send_gate.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "send_gate_test",
+    srcs = ["send_gate_test.cc"],
+    deps = [
+        ":send_gate",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "sequence_window",
     srcs = ["sequence_window.c"],
     hdrs = ["sequence_window.h"],
