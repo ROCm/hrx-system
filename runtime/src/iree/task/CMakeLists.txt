@@ -85,6 +85,7 @@ iree_cc_test(
   DEPS
     ::task
     iree::base
+    iree::base::threading
     iree::testing::gtest
     iree::testing::gtest_main
 )

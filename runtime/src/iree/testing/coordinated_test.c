@@ -324,7 +324,7 @@ static bool iree_coordinated_test_process_wait(iree_test_process_t* process,
 static void iree_coordinated_test_process_kill(iree_test_process_t* process) {
 #if defined(IREE_PLATFORM_WINDOWS)
   TerminateProcess(process->handle, 1);
-  WaitForSingleObject(process->handle, 5000);
+  WaitForSingleObject(process->handle, INFINITE);
 #else
   kill(process->pid, SIGKILL);
   int status = 0;
