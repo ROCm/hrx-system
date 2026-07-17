@@ -34,6 +34,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    buffer_lease
+  HDRS
+    "buffer_lease.h"
+  SRCS
+    "buffer_lease.c"
+  DEPS
+    iree::async
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     message_endpoint
   HDRS
     "message_endpoint.h"
@@ -138,6 +151,17 @@ iree_cc_library(
     iree::base
     iree::base::threading
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    buffer_lease_test
+  SRCS
+    "buffer_lease_test.cc"
+  DEPS
+    ::buffer_lease
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

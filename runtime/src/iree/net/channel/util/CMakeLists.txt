@@ -55,6 +55,7 @@ iree_cc_library(
     ::frame_accumulator
     iree::async
     iree::base
+    iree::net::buffer_lease
     iree::net::carrier
     iree::net::endpoint_lifecycle
     iree::net::message_endpoint

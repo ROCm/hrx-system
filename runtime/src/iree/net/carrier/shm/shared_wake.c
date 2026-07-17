@@ -54,7 +54,12 @@ static void iree_net_shm_shared_wake_scan(void* user_data,
   (void)flags;
   iree_net_shm_shared_wake_t* shared_wake =
       (iree_net_shm_shared_wake_t*)user_data;
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+
+  // Keep the shared wake live across carrier callbacks. Retiring the final
+  // sleeping carrier may invoke a deactivation callback that releases both the
+  // carrier and its shared-wake reference while this scan still owns the list.
+  iree_net_shm_shared_wake_retain(shared_wake);
   shared_wake->wait_posted = false;
 
   // Capture the notification epoch before iterating. If a carrier's drain
@@ -92,10 +97,9 @@ static void iree_net_shm_shared_wake_scan(void* user_data,
     iree_status_t wait_status =
         iree_net_shm_shared_wake_ensure_wait_posted(shared_wake);
     if (IREE_UNLIKELY(!iree_status_is_ok(wait_status))) {
-      iree_status_ignore(wait_status);
-      // Cannot re-post — all sleeping carriers are orphaned. This is a
-      // catastrophic failure (fd/proactor exhaustion). Each carrier's
-      // deactivation will eventually time out or be forced externally.
+      // Without the wait there is no primitive capable of waking or retiring
+      // the sleeping carrier set. Continuing would orphan every carrier.
+      iree_status_abort(wait_status);
     }
 
     // Detect lost wakeup: if a carrier's drain signaled this shared_wake's
@@ -110,6 +114,8 @@ static void iree_net_shm_shared_wake_scan(void* user_data,
       iree_async_notification_signal(shared_wake->notification, 1);
     }
   }
+
+  iree_net_shm_shared_wake_release(shared_wake);
 }
 
 //===----------------------------------------------------------------------===//

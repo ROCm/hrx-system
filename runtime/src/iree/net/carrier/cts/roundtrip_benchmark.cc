@@ -63,13 +63,13 @@ static void BM_Roundtrip(::benchmark::State& state,
     iree_status_t status = iree_net_carrier_send(ctx->client, &params);
     if (!iree_status_is_ok(status)) {
       state.SkipWithError("Send failed");
-      iree_status_ignore(status);
+      iree_status_free(status);
       break;
     }
 
     // Wait for recv completion.
-    if (!ctx->SpinPollUntilComplete(0, 1)) {
-      state.SkipWithError("Poll timeout");
+    if (!ctx->PollUntilComplete(0, 1)) {
+      state.SkipWithError("Proactor failed before receive completed");
       break;
     }
 

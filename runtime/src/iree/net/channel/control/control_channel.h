@@ -84,8 +84,8 @@ typedef enum iree_net_control_channel_state_e {
 // channel passes them through without interpretation).
 // |payload| is the DATA payload with the 8-byte header already stripped.
 // |lease| references the backing buffer. The lease is valid for the duration of
-// the callback. To keep payload data valid beyond the callback, retain the
-// lease via iree_async_buffer_lease_retain().
+// the callback. To keep payload data valid beyond the callback, move the lease
+// by copying it and clearing the callback's lease value.
 //
 // Return iree_ok_status() to continue receiving. Returning an error propagates
 // to the endpoint and may cause deactivation.

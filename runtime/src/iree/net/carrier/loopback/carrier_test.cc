@@ -53,16 +53,30 @@ class LoopbackCarrierTest : public ::testing::Test {
   void DeactivateAndDrain(iree_net_carrier_t* carrier) {
     iree_net_carrier_state_t state = iree_net_carrier_state(carrier);
     if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
-    if (state == IREE_NET_CARRIER_STATE_CREATED ||
-        state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      IREE_ASSERT_OK(iree_net_carrier_deactivate(carrier, nullptr, nullptr));
+    if (state != IREE_NET_CARRIER_STATE_CREATED &&
+        state != IREE_NET_CARRIER_STATE_ACTIVE) {
+      iree_status_abort(iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "an existing carrier deactivation must be joined through its "
+          "original callback"));
     }
-    while (iree_net_carrier_state(carrier) !=
-           IREE_NET_CARRIER_STATE_DEACTIVATED) {
+    std::atomic<bool> deactivated{false};
+    iree_status_t status = iree_net_carrier_deactivate(
+        carrier,
+        [](void* user_data) {
+          static_cast<std::atomic<bool>*>(user_data)->store(
+              true, std::memory_order_release);
+        },
+        &deactivated);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    while (!deactivated.load(std::memory_order_acquire)) {
       iree_host_size_t completed = 0;
-      IREE_ASSERT_OK(iree_async_proactor_poll(
-          proactor_, iree_infinite_timeout(), &completed));
+      status = iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                        &completed);
+      if (!iree_status_is_ok(status)) iree_status_abort(status);
     }
+    EXPECT_EQ(IREE_NET_CARRIER_STATE_DEACTIVATED,
+              iree_net_carrier_state(carrier));
   }
 
   void PollUntil(std::function<bool()> condition) {

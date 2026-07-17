@@ -36,6 +36,7 @@
 #ifndef IREE_NET_CARRIER_CTS_UTIL_REGISTRY_H_
 #define IREE_NET_CARRIER_CTS_UTIL_REGISTRY_H_
 
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -299,41 +300,41 @@ inline iree_status_t PollProactorOnce(
 }
 
 // Deactivates a carrier and polls the proactor until draining completes.
-// Safe to call on carriers in any state:
-//   CREATED/DEACTIVATED: returns immediately.
-//   ACTIVE: initiates deactivation, then polls until complete.
-//   DRAINING: deactivation already in progress; polls until complete.
+// Safe to call on carriers in CREATED, ACTIVE, or DEACTIVATED state. A
+// DRAINING carrier must be joined through the callback supplied by the code
+// that initiated deactivation; carrier state alone is not a release boundary.
 //
 // IMPORTANT: Must be called from the proactor's poll owner thread since this
 // function calls iree_async_proactor_poll() internally.
 inline void DeactivateAndDrain(iree_net_carrier_t* carrier,
                                iree_async_proactor_t* proactor) {
   iree_net_carrier_state_t state = iree_net_carrier_state(carrier);
-  if (state == IREE_NET_CARRIER_STATE_CREATED ||
-      state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
-    return;
+  if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
+  if (state != IREE_NET_CARRIER_STATE_CREATED &&
+      state != IREE_NET_CARRIER_STATE_ACTIVE) {
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "an existing carrier deactivation must be joined through its "
+        "original callback"));
   }
 
-  bool deactivated = false;
+  std::atomic<bool> deactivated{false};
+  iree_status_t status = iree_net_carrier_deactivate(
+      carrier,
+      [](void* user_data) {
+        static_cast<std::atomic<bool>*>(user_data)->store(
+            true, std::memory_order_release);
+      },
+      &deactivated);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
 
-  // Only initiate deactivation from ACTIVE state. If already DRAINING (a
-  // previous deactivate call is in progress), its original callback owns the
-  // completion edge and the state transition below is our join point.
-  if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree::Status status(iree_net_carrier_deactivate(
-        carrier, [](void* user_data) { *static_cast<bool*>(user_data) = true; },
-        &deactivated));
-    ASSERT_TRUE(status.ok()) << status.ToString();
-  }
-
-  // Poll until the carrier reports that every operation has drained. The
-  // outer test harness diagnoses a broken lifecycle as a hang; a local
-  // deadline would turn slow but valid work into a flaky teardown.
-  while (!deactivated && iree_net_carrier_state(carrier) !=
-                             IREE_NET_CARRIER_STATE_DEACTIVATED) {
+  // The callback is the ownership boundary. Some carriers publish
+  // DEACTIVATED before deferring the callback out of an operation completion
+  // stack, so observing state is not sufficient to release callback storage.
+  while (!deactivated.load(std::memory_order_acquire)) {
     iree_host_size_t completed = 0;
-    iree::Status status(PollProactorOnce(proactor, &completed));
-    ASSERT_TRUE(status.ok()) << status.ToString();
+    status = PollProactorOnce(proactor, &completed);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
   }
   EXPECT_EQ(iree_net_carrier_state(carrier),
             IREE_NET_CARRIER_STATE_DEACTIVATED);

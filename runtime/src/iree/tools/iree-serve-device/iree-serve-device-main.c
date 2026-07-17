@@ -521,12 +521,7 @@ static iree_status_t iree_serve_device_run(void) {
     status = iree_serve_device_wait_for_shutdown_signal(&state);
   }
 
-  iree_status_t teardown_status = iree_serve_device_teardown(&state);
-  if (iree_status_is_ok(status)) {
-    status = teardown_status;
-  } else {
-    iree_status_free(teardown_status);
-  }
+  status = iree_status_join(status, iree_serve_device_teardown(&state));
 
   IREE_TRACE_ZONE_END(z0);
   return status;

@@ -227,28 +227,30 @@ struct XProcContext {
   void DeactivateAndDrain() {
     if (!carrier) return;
     iree_net_carrier_state_t state = iree_net_carrier_state(carrier);
-    if (state == IREE_NET_CARRIER_STATE_CREATED ||
-        state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      return;
+    if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
+    if (state != IREE_NET_CARRIER_STATE_CREATED &&
+        state != IREE_NET_CARRIER_STATE_ACTIVE) {
+      iree_status_abort(iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "an existing carrier deactivation must be joined through its "
+          "original callback"));
     }
-    bool deactivated = false;
-    if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      iree_status_t status = iree_net_carrier_deactivate(
-          carrier,
-          [](void* user_data) { *static_cast<bool*>(user_data) = true; },
-          &deactivated);
-      if (!iree_status_is_ok(status)) iree_status_abort(status);
-    }
-    while (!deactivated && iree_net_carrier_state(carrier) !=
-                               IREE_NET_CARRIER_STATE_DEACTIVATED) {
+    std::atomic<bool> deactivated{false};
+    iree_status_t status = iree_net_carrier_deactivate(
+        carrier,
+        [](void* user_data) {
+          static_cast<std::atomic<bool>*>(user_data)->store(
+              true, std::memory_order_release);
+        },
+        &deactivated);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    while (!deactivated.load(std::memory_order_acquire)) {
       iree_host_size_t completed = 0;
-      iree_status_t status = PollProactorOnce(proactor, &completed);
+      status = PollProactorOnce(proactor, &completed);
       if (!iree_status_is_ok(status)) iree_status_abort(status);
     }
   }
 };
-
-#if !defined(IREE_PLATFORM_WINDOWS)
 
 struct EndpointReadyState {
   bool fired = false;
@@ -261,7 +263,7 @@ struct EndpointReadyState {
     state->fired = true;
     state->status_code = iree_status_code(status);
     state->endpoint = endpoint;
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 };
 
@@ -286,7 +288,7 @@ struct FactoryXProcContext {
       if (iree_status_is_ok(status)) {
         PollUntil([&] { return stopped; });
       } else {
-        iree_status_ignore(status);
+        iree_status_abort(status);
       }
       iree_net_listener_free(listener);
     }
@@ -347,7 +349,7 @@ struct FactoryXProcContext {
     context->connection_ready = true;
     context->connection_status_code = iree_status_code(status);
     context->connection = connection;
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   static void ConnectCallback(void* user_data, iree_status_t status,
@@ -367,7 +369,7 @@ struct FactoryXProcContext {
   static void EndpointError(void* user_data, iree_status_t status) {
     auto* status_code = static_cast<iree_status_code_t*>(user_data);
     *status_code = iree_status_code(status);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   iree_status_t OpenActivateAndDeactivateEndpoints(uint16_t endpoint_count) {
@@ -382,8 +384,9 @@ struct FactoryXProcContext {
           }
           return true;
         })) {
-      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                              "endpoint ready callbacks did not fire");
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "proactor failed before endpoint ready callbacks fired");
     }
 
     std::vector<iree_status_code_t> endpoint_errors(endpoint_count,
@@ -417,8 +420,9 @@ struct FactoryXProcContext {
           }
           return true;
         })) {
-      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                              "endpoint deactivate callbacks did not fire");
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "proactor failed before endpoint deactivate callbacks fired");
     }
     for (uint16_t i = 0; i < endpoint_count; ++i) {
       if (endpoint_errors[i] != IREE_STATUS_OK) {
@@ -429,8 +433,6 @@ struct FactoryXProcContext {
     return iree_ok_status();
   }
 };
-
-#endif  // !IREE_PLATFORM_WINDOWS
 
 //===----------------------------------------------------------------------===//
 // Channel and handshake helpers
@@ -490,7 +492,7 @@ static iree_status_t ServerBind(const char* address, XProcContext* context) {
                        1,     // Single instance (one client per test scenario).
                        4096,  // Output buffer size.
                        4096,  // Input buffer size.
-                       5000,  // Default timeout (milliseconds).
+                       0,  // Default timeout (unused by this byte-mode pipe).
                        NULL);  // Default security.
   if (pipe == INVALID_HANDLE_VALUE) {
     return iree_make_status(IREE_STATUS_INTERNAL,
@@ -816,7 +818,7 @@ static int sendrecv_server_role(int argc, char** argv,
   XPROC_CHECK(context.PollUntil([&] {
     return context.recv_total_bytes.load() >= strlen(kClientMessage);
   }),
-              "timed out waiting for client message");
+              "client message did not arrive");
 
   XPROC_CHECK(context.recv_buffer.size() == strlen(kClientMessage),
               "expected %zu bytes, got %zu", strlen(kClientMessage),
@@ -853,7 +855,7 @@ static int sendrecv_client_role(int argc, char** argv,
   XPROC_CHECK(context.PollUntil([&] {
     return context.recv_total_bytes.load() >= strlen(kServerMessage);
   }),
-              "timed out waiting for server response");
+              "server response did not arrive");
 
   XPROC_CHECK(context.recv_buffer.size() == strlen(kServerMessage),
               "expected %zu bytes, got %zu", strlen(kServerMessage),
@@ -903,7 +905,7 @@ static int dwrite_server_role(int argc, char** argv,
 
   XPROC_CHECK(
       context.PollUntil([&] { return context.signal_count.load() >= 1; }),
-      "timed out waiting for direct_write signal");
+      "direct_write signal did not arrive");
   XPROC_CHECK(context.signal_immediate.load() == 0xABCD1234u,
               "direct_write signal immediate mismatch");
 
@@ -951,7 +953,7 @@ static int dwrite_client_role(int argc, char** argv,
   // Wait for the send completion.
   XPROC_CHECK(
       context.PollUntil([&] { return context.completion_count.load() >= 1; }),
-      "timed out waiting for direct_write completion");
+      "direct_write did not complete");
 
   return 0;
 }
@@ -1144,7 +1146,7 @@ static int file_transfer_server_role(int argc, char** argv,
   XPROC_CHECK(context.PollUntil([&] {
     return context.recv_total_bytes.load() >= strlen(kFileTransferAck);
   }),
-              "timed out waiting for file transfer ack");
+              "file transfer acknowledgement did not arrive");
 
   return 0;
 }
@@ -1164,7 +1166,7 @@ static int file_transfer_client_role(int argc, char** argv,
 
   XPROC_CHECK(
       context.PollUntil([&] { return context.recv_total_bytes.load() > 0; }),
-      "timed out waiting for file transfer payload");
+      "file transfer payload did not arrive");
 
   iree_io_file_handle_t* file_handle = nullptr;
   XPROC_CHECK_OK(iree_net_carrier_import_file_handle(
@@ -1193,14 +1195,20 @@ static int file_transfer_client_role(int argc, char** argv,
 // Test 5: Factory multi-endpoint connection
 //===----------------------------------------------------------------------===//
 
-#if !defined(IREE_PLATFORM_WINDOWS)
-
 static constexpr uint16_t kFactoryEndpointCount = 3;
 
 static std::string MakeFactoryAddressString(const char* temp_directory) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const char* basename = temp_directory;
+  for (const char* p = temp_directory; *p; ++p) {
+    if (*p == '/' || *p == '\\') basename = p + 1;
+  }
+  return std::string("pipe:") + basename;
+#else
   char address[256];
   MakeAddress(temp_directory, address, sizeof(address));
   return std::string("unix:") + address;
+#endif  // IREE_PLATFORM_WINDOWS
 }
 
 static int factory_multi_endpoint_server_role(int argc, char** argv,
@@ -1217,7 +1225,7 @@ static int factory_multi_endpoint_server_role(int argc, char** argv,
   iree_coordinated_test_signal_ready(temp_directory);
 
   XPROC_CHECK(context.PollUntil([&] { return context.connection_ready; }),
-              "timed out waiting for factory accept");
+              "factory accept did not complete");
   XPROC_CHECK(context.connection_status_code == IREE_STATUS_OK,
               "factory accept failed with status %d",
               (int)context.connection_status_code);
@@ -1243,7 +1251,7 @@ static int factory_multi_endpoint_client_role(int argc, char** argv,
       &context));
 
   XPROC_CHECK(context.PollUntil([&] { return context.connection_ready; }),
-              "timed out waiting for factory connect");
+              "factory connect did not complete");
   XPROC_CHECK(context.connection_status_code == IREE_STATUS_OK,
               "factory connect failed with status %d",
               (int)context.connection_status_code);
@@ -1257,10 +1265,134 @@ static int factory_multi_endpoint_client_role(int argc, char** argv,
   return 0;
 }
 
-#endif  // !IREE_PLATFORM_WINDOWS
+//===----------------------------------------------------------------------===//
+// Test 6: Listener stop cancels a stalled bootstrap
+//===----------------------------------------------------------------------===//
+
+// Opens the factory's platform channel without running the handshake. The
+// caller owns the returned primitive.
+static iree_status_t OpenRawFactoryChannel(
+    const char* temp_directory, iree_async_primitive_t* out_channel) {
+  char address[256];
+  MakeAddress(temp_directory, address, sizeof(address));
+#if defined(IREE_PLATFORM_WINDOWS)
+  WCHAR wide_path[MAX_PATH + 1];
+  IREE_RETURN_IF_ERROR(NarrowToWide(address, wide_path, MAX_PATH + 1));
+  HANDLE pipe = CreateFileW(wide_path, GENERIC_READ | GENERIC_WRITE,
+                            /*dwShareMode=*/0, /*lpSecurityAttributes=*/NULL,
+                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED,
+                            /*hTemplateFile=*/NULL);
+  if (pipe == INVALID_HANDLE_VALUE) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "CreateFileW failed for raw factory channel");
+  }
+  *out_channel = iree_async_primitive_from_win32_handle((uintptr_t)pipe);
+#else
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "socket(AF_UNIX) failed for raw factory channel");
+  }
+  struct sockaddr_un socket_address;
+  memset(&socket_address, 0, sizeof(socket_address));
+  socket_address.sun_family = AF_UNIX;
+  iree_host_size_t address_length = strlen(address);
+  if (address_length >= sizeof(socket_address.sun_path)) {
+    close(fd);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "raw factory socket path is too long");
+  }
+  memcpy(socket_address.sun_path, address, address_length + 1);
+  if (connect(fd, (struct sockaddr*)&socket_address, sizeof(socket_address)) !=
+      0) {
+    iree_status_t status =
+        iree_make_status(iree_status_code_from_errno(errno),
+                         "connect failed for raw factory channel");
+    close(fd);
+    return status;
+  }
+  *out_channel = iree_async_primitive_from_fd(fd);
+#endif  // IREE_PLATFORM_WINDOWS
+  return iree_ok_status();
+}
+
+static int factory_stalled_bootstrap_server_role(int argc, char** argv,
+                                                 const char* temp_directory) {
+  FactoryXProcContext context;
+  XPROC_CHECK_OK(context.Initialize(/*endpoint_count=*/1));
+
+  std::string address = MakeFactoryAddressString(temp_directory);
+  XPROC_CHECK_OK(iree_net_transport_factory_create_listener(
+      context.factory, iree_make_cstring_view(address.c_str()),
+      context.proactor, context.recv_pool, FactoryXProcContext::AcceptCallback,
+      &context, iree_allocator_system(), &context.listener));
+  iree_coordinated_test_signal_ready(temp_directory);
+
+  // The raw peer connects but never sends ACCEPT. Once a user operation
+  // completes, the listener callback has inserted and launched the pending
+  // bootstrap worker. Empty proactor wakes do not establish that state.
+  iree_host_size_t completed_count = 0;
+  while (completed_count == 0) {
+    XPROC_CHECK_OK(PollProactorOnce(context.proactor, &completed_count));
+  }
+  XPROC_CHECK(!context.connection_ready,
+              "stalled bootstrap unexpectedly delivered a connection");
+
+  bool stopped = false;
+  XPROC_CHECK_OK(iree_net_listener_stop(
+      context.listener,
+      {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+       &stopped}));
+  XPROC_CHECK(context.PollUntil([&] { return stopped; }),
+              "listener stop did not complete");
+  iree_net_listener_free(context.listener);
+  context.listener = nullptr;
+
+  XPROC_CHECK(!context.connection_ready,
+              "cancelled bootstrap invoked the accept callback");
+  XPROC_CHECK(context.connection == nullptr,
+              "cancelled bootstrap produced a connection");
+  return 0;
+}
+
+static int factory_stalled_bootstrap_client_role(int argc, char** argv,
+                                                 const char* temp_directory) {
+  iree_async_primitive_t channel = iree_async_primitive_none();
+  XPROC_CHECK_OK(OpenRawFactoryChannel(temp_directory, &channel));
+
+  iree_net_shm_handshake_header_t header;
+  iree_net_shm_handshake_handles_t handles;
+  memset(&handles, 0, sizeof(handles));
+  handles.shm_region = IREE_SHM_HANDLE_INVALID;
+  handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
+  iree_status_t status = iree_net_shm_handshake_recv(
+      channel, /*cancellation=*/NULL, &header, &handles);
+  if (iree_status_is_ok(status)) {
+    bool valid_offer = header.magic == IREE_NET_SHM_HANDSHAKE_MAGIC &&
+                       header.version == IREE_NET_SHM_HANDSHAKE_VERSION &&
+                       header.type == IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER;
+    iree_net_shm_handshake_handles_close(&handles);
+    XPROC_CHECK(valid_offer, "raw factory peer received a malformed OFFER");
+
+    memset(&handles, 0, sizeof(handles));
+    handles.shm_region = IREE_SHM_HANDLE_INVALID;
+    handles.wake_epoch_shm = IREE_SHM_HANDLE_INVALID;
+    status = iree_net_shm_handshake_recv(channel, /*cancellation=*/NULL,
+                                         &header, &handles);
+  }
+  iree_net_shm_handshake_handles_close(&handles);
+  iree_async_primitive_close(&channel);
+
+  iree_status_code_t status_code = iree_status_code(status);
+  iree_status_free(status);
+  XPROC_CHECK(status_code == IREE_STATUS_UNAVAILABLE,
+              "stalled peer expected channel closure, got status %d",
+              (int)status_code);
+  return 0;
+}
 
 //===----------------------------------------------------------------------===//
-// Test 6: Direct read across processes
+// Test 7: Direct read across processes
 //===----------------------------------------------------------------------===//
 
 // The server writes data at this offset; the client reads it.
@@ -1307,7 +1439,7 @@ static int dread_server_role(int argc, char** argv,
   XPROC_CHECK(context.PollUntil([&] {
     return context.recv_total_bytes.load() >= strlen(kDataReadyAck);
   }),
-              "timed out waiting for client ack");
+              "client acknowledgement did not arrive");
 
   return 0;
 }
@@ -1329,7 +1461,7 @@ static int dread_client_role(int argc, char** argv,
   XPROC_CHECK(context.PollUntil([&] {
     return context.recv_total_bytes.load() >= strlen(kDataReadyMarker);
   }),
-              "timed out waiting for data-ready marker");
+              "data-ready marker did not arrive");
 
   // Direct read from the agreed offset. The client's region 0 is its mapping
   // of the same SHM object the server created.
@@ -1366,7 +1498,6 @@ static const iree_test_role_t kHandshakeRoles[] = {
 static const iree_coordinated_test_config_t kHandshakeConfig = {
     /*.roles=*/kHandshakeRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
 
 static const iree_test_role_t kSendRecvRoles[] = {
@@ -1376,7 +1507,6 @@ static const iree_test_role_t kSendRecvRoles[] = {
 static const iree_coordinated_test_config_t kSendRecvConfig = {
     /*.roles=*/kSendRecvRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
 
 static const iree_test_role_t kDirectWriteRoles[] = {
@@ -1386,7 +1516,6 @@ static const iree_test_role_t kDirectWriteRoles[] = {
 static const iree_coordinated_test_config_t kDirectWriteConfig = {
     /*.roles=*/kDirectWriteRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
 
 #if IREE_FILE_IO_ENABLE
@@ -1399,11 +1528,9 @@ static const iree_test_role_t kFileTransferRoles[] = {
 static const iree_coordinated_test_config_t kFileTransferConfig = {
     /*.roles=*/kFileTransferRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
 #endif  // IREE_FILE_IO_ENABLE
 
-#if !defined(IREE_PLATFORM_WINDOWS)
 static const iree_test_role_t kFactoryMultiEndpointRoles[] = {
     {"factory_multi_endpoint_server", factory_multi_endpoint_server_role,
      /*signals_ready=*/true},
@@ -1413,9 +1540,18 @@ static const iree_test_role_t kFactoryMultiEndpointRoles[] = {
 static const iree_coordinated_test_config_t kFactoryMultiEndpointConfig = {
     /*.roles=*/kFactoryMultiEndpointRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
-#endif  // !IREE_PLATFORM_WINDOWS
+
+static const iree_test_role_t kFactoryStalledBootstrapRoles[] = {
+    {"factory_stalled_bootstrap_server", factory_stalled_bootstrap_server_role,
+     /*signals_ready=*/true},
+    {"factory_stalled_bootstrap_client", factory_stalled_bootstrap_client_role,
+     /*signals_ready=*/false},
+};
+static const iree_coordinated_test_config_t kFactoryStalledBootstrapConfig = {
+    /*.roles=*/kFactoryStalledBootstrapRoles,
+    /*.role_count=*/2,
+};
 
 static const iree_test_role_t kDirectReadRoles[] = {
     {"dread_server", dread_server_role, /*signals_ready=*/true},
@@ -1424,7 +1560,6 @@ static const iree_test_role_t kDirectReadRoles[] = {
 static const iree_coordinated_test_config_t kDirectReadConfig = {
     /*.roles=*/kDirectReadRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/30000,
 };
 
 // Combined config with all roles for child dispatch. The coordinated_test_main
@@ -1442,19 +1577,20 @@ static const iree_test_role_t kAllRoles[] = {
     {"file_transfer_client", file_transfer_client_role,
      /*signals_ready=*/false},
 #endif  // IREE_FILE_IO_ENABLE
-#if !defined(IREE_PLATFORM_WINDOWS)
     {"factory_multi_endpoint_server", factory_multi_endpoint_server_role,
      /*signals_ready=*/true},
     {"factory_multi_endpoint_client", factory_multi_endpoint_client_role,
      /*signals_ready=*/false},
-#endif  // !IREE_PLATFORM_WINDOWS
+    {"factory_stalled_bootstrap_server", factory_stalled_bootstrap_server_role,
+     /*signals_ready=*/true},
+    {"factory_stalled_bootstrap_client", factory_stalled_bootstrap_client_role,
+     /*signals_ready=*/false},
     {"dread_server", dread_server_role, /*signals_ready=*/true},
     {"dread_client", dread_client_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kAllRolesConfig = {
     /*.roles=*/kAllRoles,
     /*.role_count=*/sizeof(kAllRoles) / sizeof(kAllRoles[0]),
-    /*.timeout_ms=*/30000,
 };
 IREE_COORDINATED_TEST_REGISTER(kAllRolesConfig);
 
@@ -1471,11 +1607,11 @@ static bool ProactorAvailable() {
       iree_async_proactor_create_platform(iree_async_proactor_options_default(),
                                           iree_allocator_system(), &proactor);
   if (iree_status_is_unavailable(status)) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     return false;
   }
   if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     return false;
   }
   iree_async_proactor_release(proactor);
@@ -1516,14 +1652,19 @@ TEST(XProcCarrier, FileTransferSideband) {
 }
 #endif  // IREE_FILE_IO_ENABLE
 
-#if !defined(IREE_PLATFORM_WINDOWS)
 TEST(XProcCarrier, FactoryMultiEndpointConnection) {
   if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";
   ASSERT_EQ(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
                                          iree_coordinated_test_argv(),
                                          &kFactoryMultiEndpointConfig));
 }
-#endif  // !IREE_PLATFORM_WINDOWS
+
+TEST(XProcCarrier, FactoryStopCancelsStalledBootstrap) {
+  if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";
+  ASSERT_EQ(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
+                                         iree_coordinated_test_argv(),
+                                         &kFactoryStalledBootstrapConfig));
+}
 
 TEST(XProcCarrier, DirectReadAcrossProcesses) {
   if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";

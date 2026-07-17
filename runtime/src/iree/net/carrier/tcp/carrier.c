@@ -221,8 +221,8 @@ static void iree_net_tcp_carrier_set_failure_status(
   if (!iree_atomic_compare_exchange_strong(&carrier->failure_status, &expected,
                                            desired, iree_memory_order_release,
                                            iree_memory_order_relaxed)) {
-    // Another error was already captured. Ignore this one.
-    iree_status_ignore(status);
+    // Another error was already captured.
+    iree_status_free(status);
   }
 }
 
@@ -245,8 +245,23 @@ static void iree_net_tcp_carrier_consume_failure_status(
   intptr_t stored = iree_atomic_exchange(&carrier->failure_status, 0,
                                          iree_memory_order_acq_rel);
   if (stored != 0) {
-    iree_status_ignore((iree_status_t)stored);
+    iree_status_free((iree_status_t)stored);
   }
+}
+
+// Requests cancellation of a submitted operation. NOT_FOUND means its
+// completion won the race and owns terminal retirement. Any other failure
+// would leave the carrier unable to prove that deactivation can complete.
+static void iree_net_tcp_carrier_cancel_operation(
+    iree_net_tcp_carrier_t* carrier, iree_async_operation_t* operation) {
+  iree_status_t status =
+      iree_async_proactor_cancel(carrier->proactor, operation);
+  if (iree_status_is_ok(status)) return;
+  if (iree_status_is_not_found(status)) {
+    iree_status_free(status);
+    return;
+  }
+  iree_status_abort(status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -256,26 +271,33 @@ static void iree_net_tcp_carrier_consume_failure_status(
 // Checks if deactivation has completed and invokes callback if so.
 static void iree_net_tcp_carrier_maybe_complete_deactivation(
     iree_net_tcp_carrier_t* carrier) {
-  // Check state is DRAINING.
-  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
-  if (state != IREE_NET_CARRIER_STATE_DRAINING) {
-    return;
-  }
-
   // Check all pending operations have completed.
   int32_t pending = iree_atomic_load(&carrier->base.pending_operations,
                                      iree_memory_order_acquire);
-  if (pending > 0) {
+  if (pending > 0) return;
+
+  // Several operation callbacks may observe zero pending work concurrently.
+  // Only the state-transition winner owns terminal callback delivery.
+  if (!iree_net_carrier_try_transition_state(
+          &carrier->base, IREE_NET_CARRIER_STATE_DRAINING,
+          IREE_NET_CARRIER_STATE_DEACTIVATED)) {
     return;
   }
 
-  // All operations drained - transition to DEACTIVATED.
-  iree_net_carrier_set_state(&carrier->base,
-                             IREE_NET_CARRIER_STATE_DEACTIVATED);
+  iree_net_carrier_deactivate_callback_fn_t callback =
+      carrier->deactivate_callback.fn;
+  void* callback_user_data = carrier->deactivate_callback.user_data;
+  carrier->deactivate_callback.fn = NULL;
+  carrier->deactivate_callback.user_data = NULL;
+  if (callback) callback(callback_user_data);
+}
 
-  // Invoke deactivate callback if set.
-  if (carrier->deactivate_callback.fn) {
-    carrier->deactivate_callback.fn(carrier->deactivate_callback.user_data);
+// Retires one operation and attempts terminal callback delivery only when this
+// caller owned the final count. No carrier access is permitted after this call.
+static void iree_net_tcp_carrier_retire_pending_operation(
+    iree_net_tcp_carrier_t* carrier) {
+  if (iree_net_carrier_retire_pending_operation(&carrier->base)) {
+    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
   }
 }
 
@@ -310,18 +332,19 @@ static void iree_net_tcp_carrier_terminate_single_shot_recv(
 
   int32_t old_live_count = iree_atomic_fetch_sub(
       &carrier->recv.single_shot.live_count, 1, iree_memory_order_release);
-  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                        iree_memory_order_release);
 
   if (old_live_count == 1) {
     iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
     if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      iree_status_ignore(iree_async_socket_shutdown(
-          carrier->socket, IREE_ASYNC_SOCKET_SHUTDOWN_READ));
+      iree_status_t status = iree_async_socket_shutdown(
+          carrier->socket, IREE_ASYNC_SOCKET_SHUTDOWN_READ);
+      if (!iree_status_is_ok(status)) {
+        iree_net_tcp_carrier_set_failure_status(carrier, status);
+      }
     }
   }
 
-  iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+  iree_net_tcp_carrier_retire_pending_operation(carrier);
 }
 
 static void iree_net_tcp_carrier_pause_single_shot_recv(
@@ -379,12 +402,13 @@ static void iree_net_tcp_carrier_recv_lease_release(void* user_data,
   }
 }
 
-static void iree_net_tcp_carrier_prepare_recv_lease(
-    iree_net_tcp_carrier_t* carrier, iree_async_buffer_lease_t* lease) {
-  if (!lease || !lease->release.fn) return;
+static iree_net_tcp_recv_lease_context_t*
+iree_net_tcp_carrier_prepare_recv_lease(iree_net_tcp_carrier_t* carrier,
+                                        iree_async_buffer_lease_t* lease) {
+  if (!lease || !lease->release.fn) return NULL;
   if (IREE_UNLIKELY(lease->buffer_index >= carrier->recv_lease_context_count)) {
     IREE_ASSERT(false, "recv lease buffer index out of range");
-    return;
+    return NULL;
   }
 
   iree_net_tcp_recv_lease_context_t* context =
@@ -395,17 +419,13 @@ static void iree_net_tcp_carrier_prepare_recv_lease(
                     iree_memory_order_release);
   lease->release.fn = iree_net_tcp_carrier_recv_lease_release;
   lease->release.user_data = context;
+  return context;
 }
 
 static void iree_net_tcp_carrier_maybe_retain_stolen_recv_lease(
-    iree_net_tcp_carrier_t* carrier, iree_async_buffer_lease_t* lease) {
-  if (!lease || lease->release.fn) return;
-  if (IREE_UNLIKELY(lease->buffer_index >= carrier->recv_lease_context_count)) {
-    return;
-  }
-
-  iree_net_tcp_recv_lease_context_t* context =
-      &carrier->recv_lease_contexts[lease->buffer_index];
+    iree_net_tcp_carrier_t* carrier, iree_net_tcp_recv_lease_context_t* context,
+    iree_async_buffer_lease_t* lease) {
+  if (!context || !lease || lease->release.fn) return;
   int32_t expected = IREE_NET_TCP_RECV_LEASE_PENDING;
   iree_net_carrier_retain(&carrier->base);
   if (iree_atomic_compare_exchange_strong(
@@ -433,9 +453,7 @@ static void iree_net_tcp_carrier_resume_one_paused_recv(
         carrier, &carrier->recv.multishot.operation);
     if (!iree_status_is_ok(status)) {
       iree_net_tcp_carrier_set_failure_status(carrier, status);
-      iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+      iree_net_tcp_carrier_retire_pending_operation(carrier);
     }
     return;
   }
@@ -458,7 +476,7 @@ static void iree_net_tcp_carrier_resume_one_paused_recv(
       iree_atomic_fetch_sub(&carrier->recv.single_shot.paused_count, 1,
                             iree_memory_order_release);
     } else if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       iree_atomic_store(&slot->state, IREE_NET_TCP_RECV_SLOT_PAUSED,
                         iree_memory_order_release);
     } else {
@@ -506,10 +524,12 @@ static bool iree_net_tcp_carrier_process_recv(
   // Invoke the recv handler.
   iree_status_t handler_status = iree_ok_status();
   if (carrier->base.recv_handler.fn) {
-    iree_net_tcp_carrier_prepare_recv_lease(carrier, lease);
+    iree_net_tcp_recv_lease_context_t* lease_context =
+        iree_net_tcp_carrier_prepare_recv_lease(carrier, lease);
     handler_status = carrier->base.recv_handler.fn(
         carrier->base.recv_handler.user_data, data, lease);
-    iree_net_tcp_carrier_maybe_retain_stolen_recv_lease(carrier, lease);
+    iree_net_tcp_carrier_maybe_retain_stolen_recv_lease(carrier, lease_context,
+                                                        lease);
   }
 
   // Capture handler errors as sticky failure status.
@@ -535,7 +555,8 @@ static iree_status_t iree_net_tcp_carrier_submit_multishot_recv(
   memset(recv_op, 0, sizeof(*recv_op));
   iree_async_operation_initialize(
       &recv_op->base, IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL,
-      IREE_ASYNC_OPERATION_FLAG_MULTISHOT,
+      IREE_ASYNC_OPERATION_FLAG_MULTISHOT |
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
       iree_net_tcp_carrier_recv_completion_multishot, carrier);
   recv_op->socket = carrier->socket;
   recv_op->pool = carrier->recv_pool;
@@ -550,6 +571,13 @@ static void iree_net_tcp_carrier_recv_completion_multishot(
       (iree_async_socket_recv_pool_operation_t*)operation;
 
   bool is_final = !iree_all_bits_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
+  if (iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED)) {
+    IREE_ASSERT(is_final, "cancelled multishot receive must be terminal");
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    iree_async_buffer_lease_release(&recv_op->lease);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
+    return;
+  }
 
   // Terminal resource exhaustion means the provided buffer ring was empty when
   // data arrived. Leave the logical receive pending and resume it when an
@@ -561,14 +589,12 @@ static void iree_net_tcp_carrier_recv_completion_multishot(
   if (should_pause) {
     int32_t returned_buffer_epoch = iree_atomic_load(
         &carrier->recv.returned_buffer_epoch, iree_memory_order_acquire);
-    iree_status_ignore(status);
+    iree_status_free(status);
     iree_net_tcp_carrier_pause_multishot_recv(carrier, returned_buffer_epoch);
     return;
   } else if (is_final && status_code == IREE_STATUS_RESOURCE_EXHAUSTED) {
-    iree_status_ignore(status);
-    iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_status_free(status);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return;
   }
 
@@ -579,14 +605,12 @@ static void iree_net_tcp_carrier_recv_completion_multishot(
       is_final && status_code == IREE_STATUS_DEFERRED &&
       iree_net_carrier_state(&carrier->base) == IREE_NET_CARRIER_STATE_ACTIVE;
   if (should_rearm) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     iree_status_t rearm_status =
         iree_net_tcp_carrier_submit_multishot_recv(carrier, recv_op);
     if (!iree_status_is_ok(rearm_status)) {
       iree_net_tcp_carrier_set_failure_status(carrier, rearm_status);
-      iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+      iree_net_tcp_carrier_retire_pending_operation(carrier);
     }
     return;
   }
@@ -613,15 +637,12 @@ static void iree_net_tcp_carrier_recv_completion_multishot(
 
   if (is_final) {
     // Permanent termination (connection reset, EOF, cancelled, etc.).
-    iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
   } else if (!continue_recv) {
-    // Handler signaled stop (error or application request) but multishot is
-    // still armed. Shut down socket read side to cancel the multishot operation
-    // and trigger the final completion with an error.
-    iree_status_ignore(iree_async_socket_shutdown(
-        carrier->socket, IREE_ASYNC_SOCKET_SHUTDOWN_READ));
+    // Handler signaled stop (error or application request) while the multishot
+    // operation is still armed. Its terminal cancellation completion owns the
+    // pending-operation retirement.
+    iree_net_tcp_carrier_cancel_operation(carrier, &recv_op->base);
   }
 }
 
@@ -630,11 +651,17 @@ static void iree_net_tcp_carrier_recv_completion_multishot(
 static void iree_net_tcp_carrier_recv_completion_single_shot(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
-  (void)flags;  // Single-shot never has MORE flag.
   iree_net_tcp_carrier_t* carrier = (iree_net_tcp_carrier_t*)user_data;
   iree_net_tcp_recv_slot_t* slot = (iree_net_tcp_recv_slot_t*)operation;
   iree_async_socket_recv_pool_operation_t* recv_op =
       (iree_async_socket_recv_pool_operation_t*)operation;
+
+  if (iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED)) {
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    iree_async_buffer_lease_release(&recv_op->lease);
+    iree_net_tcp_carrier_terminate_single_shot_recv(carrier, slot);
+    return;
+  }
 
   // Pool exhaustion is receive-side backpressure, not a stream failure. Leave
   // this logical receive pending and resume it when a lease returns a buffer.
@@ -645,12 +672,12 @@ static void iree_net_tcp_carrier_recv_completion_single_shot(
   if (should_pause) {
     int32_t returned_buffer_epoch = iree_atomic_load(
         &carrier->recv.returned_buffer_epoch, iree_memory_order_acquire);
-    iree_status_ignore(status);
+    iree_status_free(status);
     iree_net_tcp_carrier_pause_single_shot_recv(carrier, slot,
                                                 returned_buffer_epoch);
     return;
   } else if (status_code == IREE_STATUS_RESOURCE_EXHAUSTED) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     iree_net_tcp_carrier_terminate_single_shot_recv(carrier, slot);
     return;
   }
@@ -683,7 +710,7 @@ static void iree_net_tcp_carrier_recv_completion_single_shot(
         iree_net_tcp_carrier_submit_single_shot_recv(carrier, slot);
     if (!iree_status_is_ok(submit_status)) {
       if (iree_status_code(submit_status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
-        iree_status_ignore(submit_status);
+        iree_status_free(submit_status);
         iree_net_tcp_carrier_pause_single_shot_recv(carrier, slot,
                                                     returned_buffer_epoch);
       } else {
@@ -706,7 +733,7 @@ static iree_status_t iree_net_tcp_carrier_submit_single_shot_recv(
   memset(recv_op, 0, sizeof(*recv_op));
   iree_async_operation_initialize(
       &recv_op->base, IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL,
-      IREE_ASYNC_OPERATION_FLAG_NONE,
+      IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
       iree_net_tcp_carrier_recv_completion_single_shot, carrier);
   recv_op->socket = carrier->socket;
   recv_op->pool = carrier->recv_pool;
@@ -759,7 +786,7 @@ static void iree_net_tcp_carrier_complete_send_slot(
                               status, bytes_sent, NULL);
   } else {
     // No callback or begin_send operation - we must consume the status.
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
   slot->user_data = 0;
   slot->pending_next = NULL;
@@ -772,12 +799,7 @@ static void iree_net_tcp_carrier_complete_send_slot(
   iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                        iree_memory_order_release);
 
-  // Decrement pending operations.
-  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                        iree_memory_order_release);
-
-  // Check for deactivation completion.
-  iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+  iree_net_tcp_carrier_retire_pending_operation(carrier);
 }
 
 static iree_status_t iree_net_tcp_carrier_submit_send_slot(
@@ -827,7 +849,7 @@ static iree_status_t iree_net_tcp_carrier_enqueue_or_submit_send_slot(
       ++carrier->send.submitted_count;
     } else if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED &&
                carrier->send.submitted_count > 0) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       iree_net_tcp_carrier_enqueue_send_slot_locked(carrier, slot);
       status = iree_ok_status();
     }
@@ -856,7 +878,7 @@ static void iree_net_tcp_carrier_flush_pending_send_slots(
       if (carrier->send.submitted_count > 0) {
         // Submission capacity is still exhausted. The head slot remains queued
         // and another send completion will retry it.
-        iree_status_ignore(status);
+        iree_status_free(status);
         iree_slim_mutex_unlock(&carrier->send.pending_mutex);
         return;
       }
@@ -957,8 +979,9 @@ static void iree_net_tcp_carrier_destroy(iree_net_carrier_t* base_carrier) {
     // Clear recv handler to prevent delivery of stale data during drain.
     base_carrier->recv_handler.fn = NULL;
     base_carrier->recv_handler.user_data = NULL;
-    iree_status_ignore(iree_net_tcp_carrier_deactivate(
-        base_carrier, iree_net_tcp_carrier_deferred_destroy, carrier));
+    iree_status_t status = iree_net_tcp_carrier_deactivate(
+        base_carrier, iree_net_tcp_carrier_deferred_destroy, carrier);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
     return;
   }
 
@@ -1059,8 +1082,9 @@ static iree_status_t iree_net_tcp_carrier_activate(
       // Set sticky failure status so subsequent send() calls fail fast.
       iree_net_tcp_carrier_set_failure_status(carrier,
                                               iree_status_clone(status));
-      iree_status_ignore(iree_async_socket_shutdown(
-          carrier->socket, IREE_ASYNC_SOCKET_SHUTDOWN_READ));
+      status = iree_status_join(
+          status, iree_async_socket_shutdown(carrier->socket,
+                                             IREE_ASYNC_SOCKET_SHUTDOWN_READ));
     } else {
       // No operations were submitted - safe to reset to CREATED.
       iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_CREATED);
@@ -1102,26 +1126,17 @@ static iree_status_t iree_net_tcp_carrier_deactivate(
     return iree_ok_status();
   }
 
+  // Keep one pending count owned by this call until state publication and
+  // cancellation submission are complete. The final retirement is then the
+  // only path allowed to deliver the terminal callback.
+  iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
+                        iree_memory_order_acq_rel);
+
   // Transition to DRAINING.
   iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
 
-  // Cancel recv operations by shutting down the socket read side and explicitly
-  // cancelling pending recv operations.
-  //
-  // On POSIX, shutdown(SHUT_RD) causes pending recv operations to complete with
-  // 0 bytes (EOF). On Windows, shutdown(SD_RECEIVE) does NOT cancel pending
-  // overlapped WSARecv operations — they remain pending until CancelIoEx() or
-  // closesocket(). The explicit cancel calls below dispatch to CancelIoEx() on
-  // IOCP, ensuring recv operations complete on all platforms.
-  //
-  // We keep the shutdown call as well: on POSIX it provides the primary
-  // cancellation signal, and on Windows it prevents new data from arriving
-  // (which could otherwise wake a recv that was just being cancelled).
-  iree_status_ignore(iree_async_socket_shutdown(
-      carrier->socket, IREE_ASYNC_SOCKET_SHUTDOWN_READ));
-
-  // Explicitly cancel pending recv operations. Safe to call on operations that
-  // already completed (returns NOT_FOUND, which we ignore).
+  // Explicitly cancel pending receive operations. Their terminal callbacks own
+  // pending-operation retirement; NOT_FOUND means a completion won the race.
   if (carrier->recv.multishot_enabled) {
     int32_t expected = 1;
     bool was_paused = iree_atomic_compare_exchange_strong(
@@ -1131,8 +1146,8 @@ static iree_status_t iree_net_tcp_carrier_deactivate(
       iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
                             iree_memory_order_release);
     } else {
-      iree_status_ignore(iree_async_proactor_cancel(
-          carrier->proactor, &carrier->recv.multishot.operation.base));
+      iree_net_tcp_carrier_cancel_operation(
+          carrier, &carrier->recv.multishot.operation.base);
     }
   } else {
     uint32_t slot_count = carrier->recv.single_shot.slot_count;
@@ -1151,16 +1166,13 @@ static iree_status_t iree_net_tcp_carrier_deactivate(
                               iree_memory_order_release);
       } else if (iree_atomic_load(&slot->state, iree_memory_order_acquire) ==
                  IREE_NET_TCP_RECV_SLOT_SUBMITTED) {
-        iree_status_ignore(iree_async_proactor_cancel(carrier->proactor,
-                                                      &slot->operation.base));
+        iree_net_tcp_carrier_cancel_operation(carrier, &slot->operation.base);
       }
     }
   }
 
-  // Check if we can complete immediately (no pending operations).
-  iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
-
   IREE_TRACE_ZONE_END(z0);
+  iree_net_tcp_carrier_retire_pending_operation(carrier);
   return iree_ok_status();
 }
 
@@ -1211,9 +1223,7 @@ static iree_status_t iree_net_tcp_carrier_send(
   // Now verify state is ACTIVE. If not, rollback and return error.
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state to send");
   }
@@ -1221,9 +1231,7 @@ static iree_status_t iree_net_tcp_carrier_send(
   // Check for sticky failure status.
   iree_status_t failure = iree_net_tcp_carrier_get_failure_status(carrier);
   if (!iree_status_is_ok(failure)) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return failure;
   }
 
@@ -1235,9 +1243,7 @@ static iree_status_t iree_net_tcp_carrier_send(
   for (;;) {
     if (bitmap == 0) {
       // No free slots available.
-      iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+      iree_net_tcp_carrier_retire_pending_operation(carrier);
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "no send slots available");
     }
@@ -1306,12 +1312,9 @@ static iree_status_t iree_net_tcp_carrier_send(
 
   if (!iree_status_is_ok(status)) {
     // Rollback: release slot back to free bitmap.
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
     iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                          iree_memory_order_release);
-    // Check if deactivation was waiting for this operation.
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return status;
   }
 
@@ -1335,9 +1338,7 @@ static iree_status_t iree_net_tcp_carrier_begin_send(
   // Verify state is ACTIVE. If not, rollback and return error.
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state to send");
   }
@@ -1345,9 +1346,7 @@ static iree_status_t iree_net_tcp_carrier_begin_send(
   // Check for sticky failure status.
   iree_status_t failure = iree_net_tcp_carrier_get_failure_status(carrier);
   if (!iree_status_is_ok(failure)) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return failure;
   }
 
@@ -1357,9 +1356,7 @@ static iree_status_t iree_net_tcp_carrier_begin_send(
       iree_atomic_load(&carrier->send.free_bitmap, iree_memory_order_acquire);
   for (;;) {
     if (bitmap == 0) {
-      iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+      iree_net_tcp_carrier_retire_pending_operation(carrier);
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "no send slots available");
     }
@@ -1383,9 +1380,7 @@ static iree_status_t iree_net_tcp_carrier_begin_send(
     // Rollback: release slot back to free bitmap.
     iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                          iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return status;
   }
 
@@ -1433,9 +1428,7 @@ static iree_status_t iree_net_tcp_carrier_commit_send(
     slot->begin_send_buffer = NULL;
     iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                          iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+    iree_net_tcp_carrier_retire_pending_operation(carrier);
     return status;
   }
 
@@ -1459,12 +1452,7 @@ static void iree_net_tcp_carrier_abort_send(
   iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                        iree_memory_order_release);
 
-  // Decrement pending operations.
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-
-  // Check for deactivation completion.
-  iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+  iree_net_tcp_carrier_retire_pending_operation(carrier);
 }
 
 static iree_status_t iree_net_tcp_carrier_shutdown(

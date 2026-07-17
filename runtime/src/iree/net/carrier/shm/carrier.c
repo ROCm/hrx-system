@@ -74,6 +74,10 @@ typedef struct iree_net_shm_carrier_t {
     // NOTIFICATION_WAIT posted). False when in sleep mode.
     bool active;
 
+    // True when removal retires the poll-mode pending operation instead of
+    // transferring it to the shared-wake sleeping list.
+    bool retire_on_remove;
+
     // Consecutive poll iterations with no data. Reset to 0 on any progress.
     // When this exceeds IREE_NET_SHM_IDLE_SPIN_THRESHOLD, the carrier
     // transitions back to notification-based sleep mode.
@@ -145,15 +149,29 @@ static void iree_net_shm_signal_peer(iree_net_shm_carrier_t* carrier) {
 
 static void iree_net_shm_carrier_maybe_complete_deactivation(
     iree_net_shm_carrier_t* carrier) {
-  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
-  if (state != IREE_NET_CARRIER_STATE_DRAINING) return;
   int32_t pending = iree_atomic_load(&carrier->base.pending_operations,
                                      iree_memory_order_acquire);
   if (pending > 0) return;
-  iree_net_carrier_set_state(&carrier->base,
-                             IREE_NET_CARRIER_STATE_DEACTIVATED);
-  if (carrier->deactivate_callback.fn) {
-    carrier->deactivate_callback.fn(carrier->deactivate_callback.user_data);
+  if (!iree_net_carrier_try_transition_state(
+          &carrier->base, IREE_NET_CARRIER_STATE_DRAINING,
+          IREE_NET_CARRIER_STATE_DEACTIVATED)) {
+    return;
+  }
+
+  iree_net_carrier_deactivate_callback_fn_t callback =
+      carrier->deactivate_callback.fn;
+  void* callback_user_data = carrier->deactivate_callback.user_data;
+  carrier->deactivate_callback.fn = NULL;
+  carrier->deactivate_callback.user_data = NULL;
+  if (callback) callback(callback_user_data);
+}
+
+// Retires one operation and attempts terminal callback delivery only when this
+// caller owned the final count. No carrier access is permitted after this call.
+static void iree_net_shm_carrier_retire_pending_operation(
+    iree_net_shm_carrier_t* carrier) {
+  if (iree_net_carrier_retire_pending_operation(&carrier->base)) {
+    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
   }
 }
 
@@ -174,7 +192,7 @@ static void iree_net_shm_carrier_set_failure_status(
   if (!iree_atomic_compare_exchange_strong(&carrier->failure_status, &expected,
                                            desired, iree_memory_order_release,
                                            iree_memory_order_relaxed)) {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 }
 
@@ -182,7 +200,7 @@ static void iree_net_shm_carrier_drop_failure_status(
     iree_net_shm_carrier_t* carrier) {
   iree_status_t status = (iree_status_t)iree_atomic_exchange(
       &carrier->failure_status, 0, iree_memory_order_acq_rel);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 static void iree_net_shm_carrier_notify_error(iree_net_shm_carrier_t* carrier,
@@ -350,9 +368,7 @@ static iree_net_shm_drain_rx_result_t iree_net_shm_carrier_drain_rx(
 // state). The caller is responsible for ensuring the carrier is removed from
 // the shared_wake sleeping list (drain_from_wake returns false).
 static void iree_net_shm_carrier_drain_stop(iree_net_shm_carrier_t* carrier) {
-  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                        iree_memory_order_release);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 }
 
 //===----------------------------------------------------------------------===//
@@ -376,20 +392,19 @@ static void iree_net_shm_carrier_drain_stop(iree_net_shm_carrier_t* carrier) {
 // the deactivate callback to release/free the carrier.
 static void iree_net_shm_carrier_progress_removed(void* user_data) {
   iree_net_shm_carrier_t* carrier = (iree_net_shm_carrier_t*)user_data;
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  if (!carrier->polling.retire_on_remove) return;
+  carrier->polling.retire_on_remove = false;
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 }
 
-// Stops the progress callback and releases the pending_operations slot.
-// Analogous to drain_stop but for poll mode. Does NOT call
-// maybe_complete_deactivation — that is deferred to on_remove (called by
-// run_progress after unlinking the entry) to avoid use-after-free if the
-// deactivation callback frees the carrier.
+// Stops the progress callback. Its pending operation remains live until
+// on_remove runs after the proactor has unlinked the entry; that is the first
+// point where terminal callback delivery may safely free the carrier.
 static void iree_net_shm_carrier_progress_stop(
     iree_net_shm_carrier_t* carrier) {
   carrier->polling.active = false;
+  carrier->polling.retire_on_remove = true;
   carrier->polling.entry.remove_requested = true;
-  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                        iree_memory_order_release);
 }
 
 static iree_host_size_t iree_net_shm_carrier_progress(void* user_data) {
@@ -481,12 +496,13 @@ static iree_host_size_t iree_net_shm_carrier_progress(void* user_data) {
   if (IREE_UNLIKELY(!iree_status_is_ok(register_status))) {
     // Cannot register for wake — stay in poll mode. This keeps the carrier
     // functional (progress callback continues firing) at the cost of spinning.
-    iree_status_ignore(register_status);
+    iree_status_free(register_status);
     iree_atomic_store(carrier->our_armed, 0, iree_memory_order_release);
     carrier->polling.idle_spin_count = 0;
     return 0;
   }
   carrier->polling.active = false;
+  carrier->polling.retire_on_remove = false;
   carrier->polling.entry.remove_requested = true;
   carrier->polling.window = IREE_NET_SHM_POLL_WINDOW_DEFAULT;
 
@@ -519,9 +535,7 @@ bool iree_net_shm_carrier_drain_from_wake(iree_net_shm_carrier_t* carrier) {
   iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE &&
       state != IREE_NET_CARRIER_STATE_DRAINING) {
-    iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return false;  // Remove from sleeping list.
   }
 
@@ -646,8 +660,9 @@ static void iree_net_shm_carrier_destroy(iree_net_carrier_t* base_carrier) {
     base_carrier->recv_handler.user_data = NULL;
     base_carrier->signal_handler.fn = NULL;
     base_carrier->signal_handler.user_data = NULL;
-    iree_status_ignore(iree_net_shm_carrier_deactivate(
-        base_carrier, iree_net_shm_carrier_deferred_destroy, carrier));
+    iree_status_t status = iree_net_shm_carrier_deactivate(
+        base_carrier, iree_net_shm_carrier_deferred_destroy, carrier);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
     return;
   }
 
@@ -679,7 +694,7 @@ static void iree_net_shm_carrier_activate_on_poll(
   (void)operation;
   (void)flags;
   iree_net_shm_carrier_t* carrier = (iree_net_shm_carrier_t*)user_data;
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
 
   iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
@@ -700,11 +715,7 @@ static void iree_net_shm_carrier_activate_on_poll(
     // deactivation so subsequent operations fail visibly rather than hanging.
     // This is a catastrophic failure (proactor cannot submit NOTIFICATION_WAIT
     // despite having just completed a NOP on the same proactor).
-    iree_status_ignore(register_status);
-    iree_atomic_store(carrier->our_armed, 0, iree_memory_order_release);
-    iree_net_carrier_set_state(&carrier->base, IREE_NET_CARRIER_STATE_DRAINING);
-    iree_net_shm_carrier_drain_stop(carrier);
-    return;
+    iree_status_abort(register_status);
   }
 
   // Self-signal to catch data that arrived between activate() setting armed=1
@@ -785,15 +796,22 @@ static iree_status_t iree_net_shm_carrier_deactivate(
     return iree_ok_status();
   }
 
+  // Keep one pending count owned by this call until state publication and wake
+  // submission are complete. This prevents an operation callback from
+  // delivering the terminal callback while deactivate still accesses carrier
+  // state, and makes the final retirement the lifetime boundary.
+  iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
+                        iree_memory_order_acq_rel);
+
   // Publish DRAINING and wake the poll thread. In sleep mode the shared-wake
   // scan removes the carrier; in poll mode the progress callback observes the
   // state on its next iteration. Signaling unconditionally avoids reading the
   // proactor-owned polling mode from an arbitrary deactivation caller thread.
   iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
   iree_async_notification_signal(carrier->shared_wake->notification, 1);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
 
   IREE_TRACE_ZONE_END(z0);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
   return iree_ok_status();
 }
 
@@ -883,18 +901,14 @@ static iree_status_t iree_net_shm_carrier_send(
 
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state to send");
   }
 
   if (iree_atomic_load(&carrier->shutdown_initiated,
                        iree_memory_order_seq_cst)) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier has been shut down for sending");
   }
@@ -903,9 +917,7 @@ static iree_status_t iree_net_shm_carrier_send(
   uint8_t* payload = (uint8_t*)iree_mpsc_queue_begin_write(
       &carrier->tx_queue, ring_entry_size, &reservation);
   if (!payload) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "TX ring buffer full");
   }
@@ -919,9 +931,7 @@ static iree_status_t iree_net_shm_carrier_send(
                                      iree_memory_order_seq_cst))) {
     iree_mpsc_queue_cancel_write(&carrier->tx_queue, reservation);
     iree_net_shm_signal_peer(carrier);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier has been shut down for sending");
   }
@@ -952,9 +962,7 @@ static iree_status_t iree_net_shm_carrier_send(
         params->user_data, iree_ok_status(), total_size, NULL);
   }
 
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 
   return iree_ok_status();
 }
@@ -981,18 +989,14 @@ static iree_status_t iree_net_shm_carrier_begin_send(
 
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state to send");
   }
 
   if (iree_atomic_load(&carrier->shutdown_initiated,
                        iree_memory_order_seq_cst)) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier has been shut down for sending");
   }
@@ -1001,9 +1005,7 @@ static iree_status_t iree_net_shm_carrier_begin_send(
   uint8_t* payload = (uint8_t*)iree_mpsc_queue_begin_write(
       &carrier->tx_queue, ring_entry_size, &reservation);
   if (!payload) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "TX ring buffer full");
   }
@@ -1013,9 +1015,7 @@ static iree_status_t iree_net_shm_carrier_begin_send(
                                      iree_memory_order_seq_cst))) {
     iree_mpsc_queue_cancel_write(&carrier->tx_queue, reservation);
     iree_net_shm_signal_peer(carrier);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier has been shut down for sending");
   }
@@ -1052,9 +1052,7 @@ static iree_status_t iree_net_shm_carrier_commit_send(
   iree_atomic_fetch_add(&base_carrier->bytes_sent, (int64_t)data_size,
                         iree_memory_order_relaxed);
 
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 
   return iree_ok_status();
 }
@@ -1072,9 +1070,7 @@ static void iree_net_shm_carrier_abort_send(
   // Wake the consumer past the canceled entry to prevent head-of-line blocking.
   iree_net_shm_signal_peer(carrier);
 
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 }
 
 static iree_status_t iree_net_shm_carrier_shutdown(
@@ -1228,9 +1224,7 @@ static iree_status_t iree_net_shm_carrier_direct_write(
 
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state for "
                             "signaling direct_write");
@@ -1240,9 +1234,7 @@ static iree_status_t iree_net_shm_carrier_direct_write(
   uint8_t* payload = (uint8_t*)iree_mpsc_queue_begin_write(
       &carrier->tx_queue, ring_entry_size, &reservation);
   if (!payload) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+    iree_net_shm_carrier_retire_pending_operation(carrier);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "TX ring buffer full");
   }
@@ -1274,9 +1266,7 @@ static iree_status_t iree_net_shm_carrier_direct_write(
                               params->local.length, NULL);
   }
 
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-  iree_net_shm_carrier_maybe_complete_deactivation(carrier);
+  iree_net_shm_carrier_retire_pending_operation(carrier);
 
   return iree_ok_status();
 }
@@ -1443,6 +1433,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_carrier_create(
   carrier->polling.entry.remove_requested = false;
   carrier->polling.entry.on_remove = iree_net_shm_carrier_progress_removed;
   carrier->polling.active = false;
+  carrier->polling.retire_on_remove = false;
   carrier->polling.idle_spin_count = 0;
   carrier->polling.window = IREE_NET_SHM_POLL_WINDOW_DEFAULT;
   carrier->polling.previous_was_full = false;

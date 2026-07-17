@@ -242,13 +242,15 @@ TEST_P(LifecycleTest, RapidProactorReuseCycles) {
     DeactivateAndDrain(pair.server, shared_proactor);
     ASSERT_EQ(iree_net_carrier_state(pair.client),
               IREE_NET_CARRIER_STATE_DEACTIVATED)
-        << "Client drain timed out on iteration " << iteration << " (pending="
+        << "Client drain did not complete on iteration " << iteration
+        << " (pending="
         << iree_atomic_load(&pair.client->pending_operations,
                             iree_memory_order_acquire)
         << ")";
     ASSERT_EQ(iree_net_carrier_state(pair.server),
               IREE_NET_CARRIER_STATE_DEACTIVATED)
-        << "Server drain timed out on iteration " << iteration << " (pending="
+        << "Server drain did not complete on iteration " << iteration
+        << " (pending="
         << iree_atomic_load(&pair.server->pending_operations,
                             iree_memory_order_acquire)
         << ")";

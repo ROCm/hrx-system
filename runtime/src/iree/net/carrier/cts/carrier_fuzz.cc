@@ -129,6 +129,25 @@ static void PollOnce(iree_async_proactor_t* proactor) {
   }
 }
 
+static void JoinDeactivation(iree_net_carrier_t* carrier,
+                             iree_async_proactor_t* proactor,
+                             bool deactivation_requested,
+                             std::atomic<bool>* deactivation_completed) {
+  if (!deactivation_requested) {
+    DeactivateAndDrain(carrier, proactor);
+    return;
+  }
+  while (!deactivation_completed->load(std::memory_order_acquire)) {
+    iree_status_t status = PollProactorOnce(proactor);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+  }
+  if (iree_net_carrier_state(carrier) != IREE_NET_CARRIER_STATE_DEACTIVATED) {
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "carrier deactivation callback fired before DEACTIVATED state"));
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Fuzz scenario
 //===----------------------------------------------------------------------===//
@@ -251,8 +270,11 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
           };
           iree_status_t deactivate_status = iree_net_carrier_deactivate(
               pair.client, callback, &client_deactivate_done);
-          iree_status_ignore(deactivate_status);
-          client_deactivated = true;
+          if (iree_status_is_ok(deactivate_status)) {
+            client_deactivated = true;
+          } else {
+            iree_status_free(deactivate_status);
+          }
           if (!concurrent) PollOnce(pair.proactor);
         }
         break;
@@ -265,8 +287,11 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
           };
           iree_status_t deactivate_status = iree_net_carrier_deactivate(
               pair.server, callback, &server_deactivate_done);
-          iree_status_ignore(deactivate_status);
-          server_deactivated = true;
+          if (iree_status_is_ok(deactivate_status)) {
+            server_deactivated = true;
+          } else {
+            iree_status_free(deactivate_status);
+          }
           if (!concurrent) PollOnce(pair.proactor);
         }
         break;
@@ -297,8 +322,10 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
   iree_net_carrier_set_recv_handler(pair.server, MakeNullRecvHandler());
 
   // 4. Deactivate and drain both carriers.
-  DeactivateAndDrain(pair.client, pair.proactor);
-  DeactivateAndDrain(pair.server, pair.proactor);
+  JoinDeactivation(pair.client, pair.proactor, client_deactivated,
+                   &client_deactivate_done);
+  JoinDeactivation(pair.server, pair.proactor, server_deactivated,
+                   &server_deactivate_done);
 }
 
 }  // namespace

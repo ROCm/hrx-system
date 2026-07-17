@@ -320,9 +320,10 @@ typedef struct iree_net_carrier_send_budget_t {
 //
 // |lease| may be NULL for carriers that don't use buffer pools (e.g., loopback
 // where data comes from the sender's buffer). When non-NULL, the carrier
-// releases the lease after this callback returns - handlers that need to retain
-// the buffer must copy the data. Call iree_async_buffer_lease_release() to
-// release early and return buffers to the pool sooner.
+// releases the lease after this callback returns. A handler may take ownership
+// by copying the lease and clearing the callback's lease value, or may copy the
+// data when holding a receive buffer would impede progress. Call
+// iree_async_buffer_lease_release() to return a buffer early.
 //
 // Return iree_ok_status() to indicate successful processing. Returning an
 // error causes the carrier to report the error and may trigger deactivation.
@@ -599,6 +600,29 @@ static inline iree_net_carrier_state_t iree_net_carrier_state(
 static inline void iree_net_carrier_set_state(iree_net_carrier_t* carrier,
                                               iree_net_carrier_state_t state) {
   iree_atomic_store(&carrier->state, state, iree_memory_order_release);
+}
+
+// Atomically transitions |carrier| from |expected_state| to |new_state|.
+// Returns true only to the caller that owns the transition.
+static inline bool iree_net_carrier_try_transition_state(
+    iree_net_carrier_t* carrier, iree_net_carrier_state_t expected_state,
+    iree_net_carrier_state_t new_state) {
+  int32_t expected_value = (int32_t)expected_state;
+  return iree_atomic_compare_exchange_strong(
+      &carrier->state, &expected_value, (int32_t)new_state,
+      iree_memory_order_acq_rel, iree_memory_order_acquire);
+}
+
+// Retires one pending carrier operation. Returns true only to the caller that
+// retired the final operation. Retirement must be the caller's final carrier
+// access unless it owns another explicit lifetime reference: the final caller
+// may complete deactivation and invoke a callback that destroys the carrier.
+static inline bool iree_net_carrier_retire_pending_operation(
+    iree_net_carrier_t* carrier) {
+  int32_t previous = iree_atomic_fetch_sub(&carrier->pending_operations, 1,
+                                           iree_memory_order_acq_rel);
+  IREE_ASSERT(previous > 0, "carrier retired an operation it did not own");
+  return previous == 1;
 }
 
 // Sets the handler for received data. Must be called before activate().

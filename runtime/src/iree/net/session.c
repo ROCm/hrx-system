@@ -212,7 +212,8 @@ struct iree_net_session_t {
 
   // Bootstrap timeout timer. Non-NULL while the timer is in flight.
   // Allocated at session creation, freed in the timer completion callback
-  // (either expiry or cancellation). NULL means no timer pending.
+  // (either expiry or cancellation). NULL means no timer pending. Protected by
+  // |callback_mutex| so deactivation can join timer retirement exactly.
   iree_async_timer_operation_t* bootstrap_timer;
 
   // Retained receive buffer pool (client path only).
@@ -263,6 +264,30 @@ static bool iree_net_session_begin_callback(
   return callback_active;
 }
 
+// Returns true when explicit deactivation has retired every session-owned
+// asynchronous operation and application callback. The caller must hold
+// |callback_mutex|.
+static bool iree_net_session_deactivation_ready_locked(
+    iree_net_session_t* session) {
+  return session->connection_deactivation_requested &&
+         (!session->connection || session->connection_deactivated) &&
+         session->callback_count == 0 && session->bootstrap_timer == NULL;
+}
+
+// Claims an explicit deactivation callback once its completion boundary has
+// been reached. The caller must hold |callback_mutex|.
+static iree_net_session_deactivated_callback_t
+iree_net_session_take_deactivated_callback_locked(iree_net_session_t* session) {
+  iree_net_session_deactivated_callback_t callback = {0};
+  if (iree_net_session_deactivation_ready_locked(session) &&
+      session->deactivated_callback.fn) {
+    callback = session->deactivated_callback;
+    memset(&session->deactivated_callback, 0,
+           sizeof(session->deactivated_callback));
+  }
+  return callback;
+}
+
 // Releases an admitted application callback. The detach completion is taken
 // under the mutex and invoked afterward because it may release the session and
 // its callback target.
@@ -280,16 +305,13 @@ static void iree_net_session_end_callback(iree_net_session_t* session) {
         memset(&session->detach_callback, 0, sizeof(session->detach_callback));
       }
     }
-    if (session->connection_deactivated) {
-      if (session->deactivated_callback.fn) {
-        deactivated_callback = session->deactivated_callback;
-        memset(&session->deactivated_callback, 0,
-               sizeof(session->deactivated_callback));
-      } else {
-        IREE_ASSERT(!session->destroy_after_deactivation,
-                    "implicit session teardown completed before its final "
-                    "application callback returned");
-      }
+    deactivated_callback =
+        iree_net_session_take_deactivated_callback_locked(session);
+    if (session->connection_deactivated && !deactivated_callback.fn &&
+        !session->bootstrap_timer) {
+      IREE_ASSERT(!session->destroy_after_deactivation,
+                  "implicit session teardown completed before its final "
+                  "application callback returned");
     }
   }
   iree_slim_mutex_unlock(&session->callback_mutex);
@@ -415,35 +437,34 @@ static void iree_net_session_set_state(iree_net_session_t* session,
 static void iree_net_session_bootstrap_timer_completion(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
-  (void)flags;
   iree_net_session_t* session = (iree_net_session_t*)user_data;
 
-  // Free the timer operation (the session allocated it at timer start).
-  iree_allocator_free(session->host_allocator, session->bootstrap_timer);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+
+  // Retire the operation before processing its outcome. This prevents an
+  // expiry from trying to cancel itself through the generic failure path and
+  // allows deactivation to observe the exact timer boundary.
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(session->bootstrap_timer ==
+              (iree_async_timer_operation_t*)operation);
   session->bootstrap_timer = NULL;
+  iree_net_session_deactivated_callback_t deactivated_callback =
+      iree_net_session_take_deactivated_callback_locked(session);
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  iree_allocator_free(session->host_allocator, operation);
 
-  if (iree_status_is_cancelled(status)) {
-    // Timer was cancelled (bootstrap completed or session failed before
-    // expiry). Nothing to do — the cancel path already handled the outcome.
-    iree_status_ignore(status);
-    iree_net_session_release(session);
-    return;
-  }
-  iree_status_ignore(status);
-
-  // Guard: if bootstrap already completed (race between timer expiry and
-  // HELLO_ACK arrival in the same CQ batch), the expiry is spurious. The
-  // cancel request was submitted by complete_bootstrap but hasn't taken
-  // effect yet because the timer was already in the CQ.
-  if (iree_net_session_load_state(session) !=
-      IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
-    iree_net_session_release(session);
-    return;
+  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED) &&
+      iree_net_session_load_state(session) ==
+          IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
+    // Timer expired before bootstrap reached a terminal state.
+    iree_net_session_fail(
+        session,
+        iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED, "bootstrap timed out"));
   }
 
-  // Timer expired — bootstrap took too long.
-  iree_net_session_fail(session, iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                                  "bootstrap timed out"));
+  if (deactivated_callback.fn) {
+    deactivated_callback.fn(deactivated_callback.user_data);
+  }
   iree_net_session_release(session);
 }
 
@@ -460,22 +481,34 @@ static iree_status_t iree_net_session_start_bootstrap_timer(
                                              sizeof(*timer), (void**)&timer));
   memset(timer, 0, sizeof(*timer));
 
-  iree_async_operation_initialize(&timer->base, IREE_ASYNC_OPERATION_TYPE_TIMER,
-                                  IREE_ASYNC_OPERATION_FLAG_NONE,
-                                  iree_net_session_bootstrap_timer_completion,
-                                  session);
-  timer->deadline_ns = iree_time_now() + timeout_ns;
+  iree_async_operation_initialize(
+      &timer->base, IREE_ASYNC_OPERATION_TYPE_TIMER,
+      IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+      iree_net_session_bootstrap_timer_completion, session);
+  timer->deadline_ns = iree_relative_timeout_to_deadline_ns(timeout_ns);
 
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(!session->bootstrap_timer);
   session->bootstrap_timer = timer;
+  iree_slim_mutex_unlock(&session->callback_mutex);
   iree_net_session_retain(session);
 
   iree_status_t status =
       iree_async_proactor_submit_one(session->proactor, &timer->base);
   if (!iree_status_is_ok(status)) {
-    // Submit failed — clean up. The callback will not fire.
+    // Submit failed; retire the operation synchronously because its callback
+    // will not fire.
+    iree_slim_mutex_lock(&session->callback_mutex);
+    IREE_ASSERT(session->bootstrap_timer == timer);
     session->bootstrap_timer = NULL;
+    iree_net_session_deactivated_callback_t deactivated_callback =
+        iree_net_session_take_deactivated_callback_locked(session);
+    iree_slim_mutex_unlock(&session->callback_mutex);
     iree_allocator_free(session->host_allocator, timer);
     iree_net_session_release(session);
+    if (deactivated_callback.fn) {
+      deactivated_callback.fn(deactivated_callback.user_data);
+    }
     return status;
   }
 
@@ -485,15 +518,25 @@ static iree_status_t iree_net_session_start_bootstrap_timer(
 // Cancels the bootstrap timer if pending. Safe to call when no timer is active.
 static void iree_net_session_cancel_bootstrap_timer(
     iree_net_session_t* session) {
-  if (!session->bootstrap_timer) return;
-  iree_status_t status = iree_async_proactor_cancel(
-      session->proactor, &session->bootstrap_timer->base);
-  if (!iree_status_is_ok(status)) {
-    // NOT_FOUND means the timer already fired (race with expiry). The
-    // callback will handle cleanup. Any other error is unexpected but safe
-    // to ignore — the callback will still fire.
-    iree_status_ignore(status);
+  iree_slim_mutex_lock(&session->callback_mutex);
+  iree_async_timer_operation_t* timer = session->bootstrap_timer;
+  if (!timer) {
+    iree_slim_mutex_unlock(&session->callback_mutex);
+    return;
   }
+  iree_status_t status =
+      iree_async_proactor_cancel(session->proactor, &timer->base);
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  if (iree_status_is_ok(status)) return;
+  if (iree_status_is_not_found(status)) {
+    // The timer completion won the race and owns the operation until its
+    // callback runs.
+    iree_status_free(status);
+    return;
+  }
+  // The timer owns a session reference until its callback fires. There is no
+  // safe path that can forget an operation after cancellation itself fails.
+  iree_status_abort(status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -516,7 +559,7 @@ static void iree_net_session_fail(iree_net_session_t* session,
     if (expected == (int32_t)IREE_NET_SESSION_STATE_ERROR ||
         expected == (int32_t)IREE_NET_SESSION_STATE_CLOSED) {
       // Another thread already moved to a terminal state.
-      iree_status_ignore(status);
+      iree_status_free(status);
       return;
     }
   } while (!iree_atomic_compare_exchange_weak(
@@ -538,11 +581,11 @@ static void iree_net_session_fail(iree_net_session_t* session,
     if (callbacks.on_error) {
       callbacks.on_error(callbacks.user_data, session, status);
     } else {
-      iree_status_ignore(status);
+      iree_status_free(status);
     }
     iree_net_session_end_callback(session);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 }
 
@@ -1531,17 +1574,16 @@ static void iree_net_session_on_connection_deactivated(void* user_data) {
   IREE_ASSERT(session->connection_deactivation_submitted);
   IREE_ASSERT(!session->connection_deactivated);
   session->connection_deactivated = true;
-  if (session->callback_count == 0) {
-    if (session->deactivated_callback.fn) {
-      callback = session->deactivated_callback;
-      memset(&session->deactivated_callback, 0,
-             sizeof(session->deactivated_callback));
-    } else if (session->destroy_after_deactivation) {
+  if (iree_net_session_deactivation_ready_locked(session)) {
+    callback = iree_net_session_take_deactivated_callback_locked(session);
+    if (!callback.fn && session->destroy_after_deactivation) {
       complete_teardown = true;
     }
   } else {
-    IREE_ASSERT(!session->destroy_after_deactivation,
-                "implicit session teardown completed with active callbacks");
+    IREE_ASSERT(
+        !session->destroy_after_deactivation || session->callback_count > 0,
+        "implicit session teardown completed with a pending bootstrap "
+        "timer");
   }
   iree_slim_mutex_unlock(&session->callback_mutex);
 
@@ -1924,15 +1966,16 @@ iree_net_session_deactivate(iree_net_session_t* session,
   IREE_ASSERT_ARGUMENT(callback.fn);
 
   bool request_accepted = false;
-  bool complete_synchronously = false;
   bool submit_connection_deactivation = false;
+  iree_net_session_deactivated_callback_t synchronous_callback = {0};
   iree_net_session_state_t state = IREE_NET_SESSION_STATE_BOOTSTRAPPING;
   iree_slim_mutex_lock(&session->callback_mutex);
   state = iree_net_session_load_state(session);
-  if (!session->connection && !session->connection_deactivation_requested) {
+  if (state != IREE_NET_SESSION_STATE_BOOTSTRAPPING && !session->connection &&
+      !session->connection_deactivation_requested) {
     session->connection_deactivation_requested = true;
+    session->deactivated_callback = callback;
     request_accepted = true;
-    complete_synchronously = true;
   } else if (state != IREE_NET_SESSION_STATE_BOOTSTRAPPING &&
              session->connection &&
              !session->connection_deactivation_requested) {
@@ -1945,6 +1988,10 @@ iree_net_session_deactivate(iree_net_session_t* session,
     submit_connection_deactivation =
         iree_net_session_prepare_connection_deactivation_locked(session);
   }
+  if (request_accepted) {
+    synchronous_callback =
+        iree_net_session_take_deactivated_callback_locked(session);
+  }
   iree_slim_mutex_unlock(&session->callback_mutex);
   if (!request_accepted) {
     if (state == IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
@@ -1956,8 +2003,8 @@ iree_net_session_deactivate(iree_net_session_t* session,
                             "session deactivation already started");
   }
 
-  if (complete_synchronously) {
-    callback.fn(callback.user_data);
+  if (synchronous_callback.fn) {
+    synchronous_callback.fn(synchronous_callback.user_data);
   } else if (submit_connection_deactivation) {
     iree_net_session_submit_connection_deactivation(session);
   }

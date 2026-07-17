@@ -226,48 +226,6 @@ struct MockLease {
 };
 
 //===----------------------------------------------------------------------===//
-// Test buffer pool (real pool backed by test memory)
-//===----------------------------------------------------------------------===//
-
-class TestBufferPool {
- public:
-  TestBufferPool(iree_host_size_t buffer_count, iree_host_size_t buffer_size)
-      : buffer_count_(buffer_count), buffer_size_(buffer_size) {
-    buffer_memory_.resize(buffer_count * buffer_size, 0);
-    region_ =
-        static_cast<iree_async_region_t*>(malloc(sizeof(iree_async_region_t)));
-    memset(region_, 0, sizeof(*region_));
-    iree_atomic_ref_count_init(&region_->ref_count);
-    region_->destroy_fn = DestroyRegion;
-    region_->base_ptr = buffer_memory_.data();
-    region_->length = buffer_memory_.size();
-    region_->buffer_size = buffer_size;
-    region_->buffer_count = static_cast<uint32_t>(buffer_count);
-    iree_status_t status =
-        iree_async_buffer_pool_create(region_, iree_allocator_system(), &pool_);
-    IREE_CHECK_OK(status);
-    iree_async_region_release(region_);
-  }
-
-  ~TestBufferPool() { iree_async_buffer_pool_release(pool_); }
-
-  iree_async_buffer_pool_t* get() { return pool_; }
-
-  iree_host_size_t AvailableCount() const {
-    return iree_async_buffer_pool_available(pool_);
-  }
-
- private:
-  static void DestroyRegion(iree_async_region_t* region) { free(region); }
-
-  std::vector<uint8_t> buffer_memory_;
-  iree_host_size_t buffer_count_;
-  iree_host_size_t buffer_size_;
-  iree_async_region_t* region_ = nullptr;
-  iree_async_buffer_pool_t* pool_ = nullptr;
-};
-
-//===----------------------------------------------------------------------===//
 // Test context for tracking received messages
 //===----------------------------------------------------------------------===//
 
@@ -298,7 +256,7 @@ struct TestContext {
   }
 
   static void OnError(void* user_data, iree_status_t status) {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   static void OnDeactivated(void* user_data) {
@@ -311,14 +269,26 @@ struct TestContext {
   }
 };
 
+struct MovedLeaseCapture {
+  iree_const_byte_span_t message = {nullptr, 0};
+  iree_async_buffer_lease_t lease = {};
+
+  static iree_status_t OnMessage(void* user_data,
+                                 iree_const_byte_span_t message,
+                                 iree_async_buffer_lease_t* lease) {
+    auto* capture = static_cast<MovedLeaseCapture*>(user_data);
+    capture->message = message;
+    capture->lease = *lease;
+    memset(lease, 0, sizeof(*lease));
+    return iree_ok_status();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Test constants
 //===----------------------------------------------------------------------===//
 
 static constexpr iree_host_size_t kMaxFrameSize = 1024;
-static constexpr iree_host_size_t kPoolBufferCount = 4;
-static constexpr iree_host_size_t kPoolBufferSize = kMaxFrameSize;
-
 //===----------------------------------------------------------------------===//
 // Test fixture
 //===----------------------------------------------------------------------===//
@@ -327,11 +297,9 @@ class FramingAdapterTest : public ::testing::Test {
  protected:
   void SetUp() override {
     mock_carrier_ = MockCarrier::Create();
-    test_pool_ =
-        std::make_unique<TestBufferPool>(kPoolBufferCount, kPoolBufferSize);
     iree_net_frame_length_callback_t frame_length = {TestFrameLength, nullptr};
     IREE_ASSERT_OK(iree_net_framing_adapter_allocate(
-        &mock_carrier_->base, frame_length, kMaxFrameSize, test_pool_->get(),
+        &mock_carrier_->base, frame_length, kMaxFrameSize,
         iree_allocator_system(), &adapter_));
     endpoint_ = iree_net_framing_adapter_as_endpoint(adapter_);
   }
@@ -362,7 +330,6 @@ class FramingAdapterTest : public ::testing::Test {
   iree_net_framing_adapter_t* adapter_ = nullptr;
   iree_net_message_endpoint_t endpoint_;
   std::unique_ptr<MockCarrier> mock_carrier_;
-  std::unique_ptr<TestBufferPool> test_pool_;
   TestContext ctx_;
 };
 
@@ -378,7 +345,6 @@ TEST_F(FramingAdapterTest, AllocateRequiresCarrier) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_framing_adapter_allocate(nullptr, frame_length, kMaxFrameSize,
-                                        test_pool_->get(),
                                         iree_allocator_system(), &adapter));
 }
 
@@ -386,31 +352,20 @@ TEST_F(FramingAdapterTest, AllocateRequiresFrameLengthFn) {
   auto carrier = MockCarrier::Create();
   iree_net_framing_adapter_t* adapter = nullptr;
   iree_net_frame_length_callback_t frame_length = {nullptr, nullptr};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_framing_adapter_allocate(&carrier->base, frame_length,
-                                        kMaxFrameSize, test_pool_->get(),
-                                        iree_allocator_system(), &adapter));
-}
-
-TEST_F(FramingAdapterTest, AllocateRequiresPool) {
-  auto carrier = MockCarrier::Create();
-  iree_net_framing_adapter_t* adapter = nullptr;
-  iree_net_frame_length_callback_t frame_length = {TestFrameLength, nullptr};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_framing_adapter_allocate(
                             &carrier->base, frame_length, kMaxFrameSize,
-                            nullptr, iree_allocator_system(), &adapter));
+                            iree_allocator_system(), &adapter));
 }
 
 TEST_F(FramingAdapterTest, AllocateRequiresNonZeroMaxFrameSize) {
   auto carrier = MockCarrier::Create();
   iree_net_framing_adapter_t* adapter = nullptr;
   iree_net_frame_length_callback_t frame_length = {TestFrameLength, nullptr};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        iree_net_framing_adapter_allocate(
-                            &carrier->base, frame_length, 0, test_pool_->get(),
-                            iree_allocator_system(), &adapter));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_framing_adapter_allocate(&carrier->base, frame_length, 0,
+                                        iree_allocator_system(), &adapter));
 }
 
 TEST_F(FramingAdapterTest, AllocateRejectsActivatedCarrier) {
@@ -418,23 +373,10 @@ TEST_F(FramingAdapterTest, AllocateRejectsActivatedCarrier) {
   iree_net_carrier_set_state(&carrier->base, IREE_NET_CARRIER_STATE_ACTIVE);
   iree_net_framing_adapter_t* adapter = nullptr;
   iree_net_frame_length_callback_t frame_length = {TestFrameLength, nullptr};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_net_framing_adapter_allocate(&carrier->base, frame_length,
-                                        kMaxFrameSize, test_pool_->get(),
-                                        iree_allocator_system(), &adapter));
-}
-
-TEST_F(FramingAdapterTest, AllocateRejectsPoolTooSmall) {
-  auto carrier = MockCarrier::Create();
-  iree_net_framing_adapter_t* adapter = nullptr;
-  iree_net_frame_length_callback_t frame_length = {TestFrameLength, nullptr};
-  // Pool buffer size is kPoolBufferSize=1024, try max_frame_size=2048.
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_framing_adapter_allocate(&carrier->base, frame_length, 2048,
-                                        test_pool_->get(),
-                                        iree_allocator_system(), &adapter));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_framing_adapter_allocate(
+                            &carrier->base, frame_length, kMaxFrameSize,
+                            iree_allocator_system(), &adapter));
 }
 
 //===----------------------------------------------------------------------===//
@@ -504,16 +446,14 @@ TEST_F(FramingAdapterTest, EmptyPayloadFrame) {
   EXPECT_TRUE(ctx_.messages[0].had_lease);
 }
 
-TEST_F(FramingAdapterTest, ZeroCopyPathDoesNotTouchPool) {
+TEST_F(FramingAdapterTest, ZeroCopyPathDeliversReceiveLease) {
   ActivateWithCallbacks();
-
-  iree_host_size_t available_before = test_pool_->AvailableCount();
 
   auto frame = MakeFrame("Zero-copy frame");
   IREE_ASSERT_OK(InjectRecv(frame));
 
   ASSERT_EQ(ctx_.messages.size(), 1u);
-  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  EXPECT_TRUE(ctx_.messages[0].had_lease);
 }
 
 //===----------------------------------------------------------------------===//
@@ -585,13 +525,33 @@ TEST_F(FramingAdapterTest, CopyPathAlwaysDeliversNonNullLease) {
   EXPECT_TRUE(ctx_.messages[0].had_lease);
 }
 
-TEST_F(FramingAdapterTest, CopyPathReturnsPoolBuffer) {
+TEST_F(FramingAdapterTest, CopyPathLeaseCanMoveBeyondCallback) {
+  MovedLeaseCapture capture;
+  iree_net_message_endpoint_set_callbacks(
+      endpoint_,
+      {MovedLeaseCapture::OnMessage, TestContext::OnError, &capture});
+  IREE_ASSERT_OK(iree_net_message_endpoint_activate(endpoint_));
+
+  auto frame = MakeFrame("Move host-backed lease");
+  iree_host_size_t split_point = frame.size() / 2;
+  std::vector<uint8_t> first_half(frame.begin(), frame.begin() + split_point);
+  std::vector<uint8_t> second_half(frame.begin() + split_point, frame.end());
+  IREE_ASSERT_OK(InjectRecv(first_half));
+  IREE_ASSERT_OK(InjectRecv(second_half));
+
+  ASSERT_NE(capture.lease.release.fn, nullptr);
+  EXPECT_EQ(
+      std::vector<uint8_t>(capture.message.data,
+                           capture.message.data + capture.message.data_length),
+      frame);
+  iree_async_buffer_lease_release(&capture.lease);
+}
+
+TEST_F(FramingAdapterTest, CopyPathReleasesHostLease) {
   ActivateWithCallbacks();
 
-  iree_host_size_t available_before = test_pool_->AvailableCount();
-
   // Force copy path by splitting frame across two recvs.
-  auto frame = MakeFrame("Pool buffer lifecycle");
+  auto frame = MakeFrame("Host buffer lifecycle");
   iree_host_size_t split_point = frame.size() / 2;
 
   std::vector<uint8_t> first_half(frame.begin(), frame.begin() + split_point);
@@ -601,14 +561,11 @@ TEST_F(FramingAdapterTest, CopyPathReturnsPoolBuffer) {
   IREE_ASSERT_OK(InjectRecv(second_half));
 
   ASSERT_EQ(ctx_.messages.size(), 1u);
-  // Adapter acquires a pool buffer, delivers, then releases it.
-  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  EXPECT_TRUE(ctx_.messages[0].had_lease);
 }
 
-TEST_F(FramingAdapterTest, MultipleCopyPathFramesRecyclePoolBuffers) {
+TEST_F(FramingAdapterTest, MultipleCopyPathFramesReleaseHostLeases) {
   ActivateWithCallbacks();
-
-  iree_host_size_t available_before = test_pool_->AvailableCount();
 
   // Send several frames, each split across two recvs.
   for (int i = 0; i < 8; ++i) {
@@ -622,9 +579,8 @@ TEST_F(FramingAdapterTest, MultipleCopyPathFramesRecyclePoolBuffers) {
     IREE_ASSERT_OK(InjectRecv(second_half));
   }
 
-  // All 8 frames delivered, pool buffers recycled each time.
+  // All host-backed leases are released after synchronous delivery.
   ASSERT_EQ(ctx_.messages.size(), 8u);
-  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
 }
 
 //===----------------------------------------------------------------------===//
@@ -808,41 +764,6 @@ TEST_F(FramingAdapterTest, HandlerErrorStopsProcessingMultipleFrames) {
 
   // Error on first frame stops processing; second frame never delivered.
   EXPECT_EQ(ctx_.messages.size(), 0u);
-}
-
-//===----------------------------------------------------------------------===//
-// Pool exhaustion during copy path
-//===----------------------------------------------------------------------===//
-
-TEST_F(FramingAdapterTest, PoolExhaustedDuringCopyPath) {
-  ActivateWithCallbacks();
-
-  // Exhaust the reassembly pool.
-  std::vector<iree_async_buffer_lease_t> leases(kPoolBufferCount);
-  for (iree_host_size_t i = 0; i < kPoolBufferCount; ++i) {
-    IREE_ASSERT_OK(
-        iree_async_buffer_pool_acquire(test_pool_->get(), &leases[i]));
-  }
-  EXPECT_EQ(test_pool_->AvailableCount(), 0u);
-
-  // Force copy path by splitting a frame.
-  auto frame = MakeFrame("Copy path with exhausted pool");
-  iree_host_size_t split_point = frame.size() / 2;
-
-  std::vector<uint8_t> first_half(frame.begin(), frame.begin() + split_point);
-  IREE_ASSERT_OK(InjectRecv(first_half));
-
-  // Second recv completes the frame but pool acquire fails.
-  std::vector<uint8_t> second_half(frame.begin() + split_point, frame.end());
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        InjectRecv(second_half));
-
-  EXPECT_EQ(ctx_.messages.size(), 0u);
-
-  // Release leases to clean up.
-  for (auto& lease : leases) {
-    iree_async_buffer_lease_release(&lease);
-  }
 }
 
 //===----------------------------------------------------------------------===//

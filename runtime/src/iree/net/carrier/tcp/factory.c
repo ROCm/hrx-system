@@ -11,6 +11,8 @@
 #include "iree/async/address.h"
 #include "iree/async/operations/net.h"
 #include "iree/async/operations/scheduling.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/net/buffer_lease.h"
 #include "iree/net/carrier/tcp/carrier.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/channel/util/framing_adapter.h"
@@ -39,10 +41,10 @@ typedef struct iree_net_tcp_connection_t iree_net_tcp_connection_t;
 typedef struct iree_net_tcp_pending_frame_t {
   // Next pending frame for the same stream slot.
   struct iree_net_tcp_pending_frame_t* next;
-  // Payload byte count stored in |payload|.
+  // Host-backed lease owning the copied payload bytes.
+  iree_async_buffer_lease_t lease;
+  // Payload byte count stored in |lease|.
   iree_host_size_t payload_length;
-  // Copied payload bytes delivered when the stream activates.
-  uint8_t payload[];
 } iree_net_tcp_pending_frame_t;
 
 // Per-stream state within a TCP connection.
@@ -103,17 +105,36 @@ typedef enum iree_net_tcp_listener_state_e {
 
 typedef struct iree_net_tcp_listener_t {
   iree_net_listener_t base;
+  // Factory retained for listener lifetime.
   iree_net_tcp_factory_t* factory;
+  // Proactor delivering accept and stop completions; retained.
   iree_async_proactor_t* proactor;
+  // Receive pool passed to accepted connections; retained.
   iree_async_buffer_pool_t* recv_pool;
+  // Bound socket owning the pending accept operation.
   iree_async_socket_t* listen_socket;
+  // Serializes listener state with cross-thread stop requests.
+  iree_slim_mutex_t mutex;
+  // Application callback receiving accepted connections and accept errors.
   struct {
     iree_net_listener_accept_callback_t fn;
     void* user_data;
   } accept;
+  // Reusable single-shot accept operation.
   iree_async_socket_accept_operation_t accept_operation;
+  // True while the proactor owns |accept_operation|.
+  bool accept_pending;
+  // NOP establishing a callback boundary when no accept is pending.
+  iree_async_nop_operation_t stop_operation;
+  // True while the proactor owns |stop_operation|.
+  bool stop_operation_pending;
+  // Current listener lifecycle phase.
   iree_net_tcp_listener_state_t state;
+  // Callback delivered after all listener operations retire.
   iree_net_listener_stopped_callback_t stopped_callback;
+  // True after |stopped_callback| has been delivered.
+  bool stopped_delivered;
+  // Allocator used for listener storage.
   iree_allocator_t host_allocator;
 } iree_net_tcp_listener_t;
 
@@ -198,6 +219,7 @@ static void iree_net_tcp_stream_clear_pending_frames(
   iree_net_tcp_pending_frame_t* pending_frame = stream->pending_head;
   while (pending_frame) {
     iree_net_tcp_pending_frame_t* next_frame = pending_frame->next;
+    iree_async_buffer_lease_release(&pending_frame->lease);
     iree_allocator_free(host_allocator, pending_frame);
     pending_frame = next_frame;
   }
@@ -215,19 +237,21 @@ static iree_status_t iree_net_tcp_stream_enqueue_pending_frame(
                             stream->pending_count);
   }
 
-  iree_host_size_t total_size = 0;
-  IREE_RETURN_IF_ERROR(
-      IREE_STRUCT_LAYOUT(sizeof(iree_net_tcp_pending_frame_t), &total_size,
-                         IREE_STRUCT_FIELD_FAM(payload.data_length, uint8_t)));
-
   iree_net_tcp_connection_t* connection = stream->connection;
   iree_allocator_t host_allocator = connection->base.host_allocator;
   iree_net_tcp_pending_frame_t* pending_frame = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, total_size,
-                                             (void**)&pending_frame));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, sizeof(*pending_frame), (void**)&pending_frame));
   memset(pending_frame, 0, sizeof(*pending_frame));
   pending_frame->payload_length = payload.data_length;
-  memcpy(pending_frame->payload, payload.data, payload.data_length);
+  iree_status_t status = iree_net_buffer_lease_allocate(
+      payload.data_length, host_allocator, &pending_frame->lease);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, pending_frame);
+    return status;
+  }
+  memcpy(iree_async_span_ptr(pending_frame->lease.span), payload.data,
+         payload.data_length);
 
   if (stream->pending_tail) {
     stream->pending_tail->next = pending_frame;
@@ -250,26 +274,12 @@ static iree_status_t iree_net_tcp_stream_deliver_pending_frames(
     if (!stream->pending_head) stream->pending_tail = NULL;
     --stream->pending_count;
 
-    iree_async_buffer_lease_t lease;
-    status = iree_async_buffer_pool_acquire(connection->recv_pool, &lease);
-    if (iree_status_is_ok(status)) {
-      if (pending_frame->payload_length > lease.span.length) {
-        status =
-            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                             "pending stream frame length %" PRIhsz
-                             " exceeds receive buffer length %" PRIhsz,
-                             pending_frame->payload_length, lease.span.length);
-      } else {
-        uint8_t* payload_data = iree_async_span_ptr(lease.span);
-        memcpy(payload_data, pending_frame->payload,
-               pending_frame->payload_length);
-        iree_const_byte_span_t payload = iree_make_const_byte_span(
-            payload_data, pending_frame->payload_length);
-        status = stream->callbacks.on_message(stream->callbacks.user_data,
-                                              payload, &lease);
-      }
-      iree_async_buffer_lease_release(&lease);
-    }
+    iree_const_byte_span_t payload = iree_make_const_byte_span(
+        iree_async_span_ptr(pending_frame->lease.span),
+        pending_frame->payload_length);
+    status = stream->callbacks.on_message(stream->callbacks.user_data, payload,
+                                          &pending_frame->lease);
+    iree_async_buffer_lease_release(&pending_frame->lease);
     iree_allocator_free(host_allocator, pending_frame);
   }
   if (!iree_status_is_ok(status)) {
@@ -332,7 +342,7 @@ static void iree_net_tcp_mux_error(void* user_data, iree_status_t status) {
           iree_status_clone(status));
     }
   }
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 static void iree_net_tcp_connection_on_send_complete(
@@ -341,7 +351,7 @@ static void iree_net_tcp_connection_on_send_complete(
     iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease) {
   (void)callback_user_data;
   if (kind != IREE_NET_CARRIER_COMPLETION_SEND || operation_user_data == 0) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     return;
   }
   iree_net_tcp_stream_send_context_t* context =
@@ -355,7 +365,7 @@ static void iree_net_tcp_connection_on_send_complete(
         /*callback_user_data=*/NULL, kind, nested_operation_user_data, status,
         bytes_transferred, recv_lease);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 }
 
@@ -707,9 +717,9 @@ static iree_status_t iree_net_tcp_connection_create(
         .fn = iree_net_tcp_frame_length,
         .user_data = NULL,
     };
-    status = iree_net_framing_adapter_allocate(
-        carrier, frame_length, max_frame_size, recv_pool, host_allocator,
-        &connection->adapter);
+    status =
+        iree_net_framing_adapter_allocate(carrier, frame_length, max_frame_size,
+                                          host_allocator, &connection->adapter);
     if (iree_status_is_ok(status)) {
       // Carrier ownership transferred to adapter.
       carrier = NULL;
@@ -746,11 +756,16 @@ static iree_status_t iree_net_tcp_connection_create(
 static void iree_net_tcp_endpoint_deferred_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
   iree_net_tcp_endpoint_deferred_t* deferred =
       (iree_net_tcp_endpoint_deferred_t*)user_data;
-  iree_status_ignore(status);
-  deferred->endpoint_ready.fn(deferred->endpoint_ready.user_data,
-                              iree_ok_status(), deferred->endpoint);
+  iree_net_message_endpoint_t endpoint = deferred->endpoint;
+  if (!iree_status_is_ok(status)) {
+    endpoint = (iree_net_message_endpoint_t){0};
+  }
+  deferred->endpoint_ready.fn(deferred->endpoint_ready.user_data, status,
+                              endpoint);
   iree_allocator_free(deferred->host_allocator, deferred);
 }
 
@@ -824,93 +839,126 @@ static const iree_net_connection_vtable_t iree_net_tcp_connection_vtable = {
 
 static const iree_net_listener_vtable_t iree_net_tcp_listener_vtable;
 
+static void iree_net_tcp_listener_maybe_finish_stop(
+    iree_net_tcp_listener_t* listener) {
+  iree_net_listener_stopped_callback_t callback = {0};
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state == IREE_NET_TCP_LISTENER_STATE_STOPPING &&
+      !listener->accept_pending && !listener->stop_operation_pending &&
+      !listener->stopped_delivered) {
+    listener->state = IREE_NET_TCP_LISTENER_STATE_STOPPED;
+    listener->stopped_delivered = true;
+    callback = listener->stopped_callback;
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (callback.fn) callback.fn(callback.user_data);
+}
+
 static void iree_net_tcp_listener_free(iree_net_listener_t* base_listener) {
   iree_net_tcp_listener_t* listener = (iree_net_tcp_listener_t*)base_listener;
+  IREE_ASSERT(listener->stopped_delivered,
+              "TCP listener freed before stopped callback");
+  IREE_ASSERT(!listener->accept_pending);
+  IREE_ASSERT(!listener->stop_operation_pending);
+  iree_async_buffer_pool_release(listener->recv_pool);
+  iree_async_proactor_release(listener->proactor);
+  iree_net_transport_factory_release(&listener->factory->base);
   iree_allocator_t host_allocator = listener->host_allocator;
   iree_async_socket_release(listener->listen_socket);
+  iree_slim_mutex_deinitialize(&listener->mutex);
   iree_allocator_free(host_allocator, listener);
 }
 
-// Accept completion callback. Fires for each accepted connection (multishot)
-// or once per accept (single-shot, then resubmitted).
+// Submits one accept while the listener mutex is held.
+static iree_status_t iree_net_tcp_listener_submit_accept_locked(
+    iree_net_tcp_listener_t* listener,
+    iree_async_completion_fn_t completion_fn) {
+  IREE_ASSERT(!listener->accept_pending);
+  iree_async_operation_zero(&listener->accept_operation.base,
+                            sizeof(listener->accept_operation));
+  iree_async_operation_initialize(
+      &listener->accept_operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
+      IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS, completion_fn,
+      listener);
+  listener->accept_operation.listen_socket = listener->listen_socket;
+  listener->accept_pending = true;
+  iree_status_t status = iree_async_proactor_submit_one(
+      listener->proactor, &listener->accept_operation.base);
+  if (!iree_status_is_ok(status)) listener->accept_pending = false;
+  return status;
+}
+
+static void iree_net_tcp_listener_stop_deferred_complete(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  iree_net_tcp_listener_t* listener = (iree_net_tcp_listener_t*)user_data;
+  IREE_ASSERT(!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE));
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->stop_operation_pending);
+  listener->stop_operation_pending = false;
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (!iree_status_is_ok(status)) {
+    listener->accept.fn(listener->accept.user_data, status, NULL);
+  }
+  iree_net_tcp_listener_maybe_finish_stop(listener);
+}
+
+// Accept completion callback. Accepts are single-shot and rearmed only while
+// the listener remains in LISTENING state.
 static void iree_net_tcp_listener_accept_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
   iree_net_tcp_listener_t* listener = (iree_net_tcp_listener_t*)user_data;
   iree_async_socket_accept_operation_t* accept_op =
       (iree_async_socket_accept_operation_t*)operation;
+  IREE_ASSERT(!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE));
 
-  if (listener->state == IREE_NET_TCP_LISTENER_STATE_STOPPING) {
-    if (iree_status_is_ok(status) && accept_op->accepted_socket) {
-      // A connection arrived between stop() and cancellation completing.
-      // Deliver it — the application requested stop, not "reject pending
-      // connections". The connection was already accepted by the kernel.
-      iree_net_connection_t* connection = NULL;
-      iree_status_t create_status = iree_net_tcp_connection_create(
-          listener->factory, listener->proactor, listener->recv_pool,
-          accept_op->accepted_socket, listener->host_allocator, &connection);
-      if (iree_status_is_ok(create_status)) {
-        accept_op->accepted_socket = NULL;  // Ownership transferred.
-        listener->accept.fn(listener->accept.user_data, iree_ok_status(),
-                            connection);
-      } else {
-        iree_async_socket_release(accept_op->accepted_socket);
-        accept_op->accepted_socket = NULL;
-        iree_status_ignore(create_status);
-      }
-    } else {
-      iree_status_ignore(status);
-    }
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->accept_pending);
+  listener->accept_pending = false;
+  iree_slim_mutex_unlock(&listener->mutex);
 
-    // If this is the final completion (no MORE flag), fire stopped callback.
-    if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE)) {
-      listener->state = IREE_NET_TCP_LISTENER_STATE_STOPPED;
-      if (listener->stopped_callback.fn) {
-        listener->stopped_callback.fn(listener->stopped_callback.user_data);
-      }
-    }
-    return;
-  }
-
-  // Normal LISTENING state.
   if (!iree_status_is_ok(status)) {
-    // Accept error — deliver to application as a failed accept.
-    listener->accept.fn(listener->accept.user_data, status, NULL);
-    // For non-fatal errors in single-shot mode, resubmit if still listening.
-    // Multishot handles this internally.
-    return;
-  }
-
-  // Wrap the accepted socket in a connection.
-  iree_net_connection_t* connection = NULL;
-  iree_status_t create_status = iree_net_tcp_connection_create(
-      listener->factory, listener->proactor, listener->recv_pool,
-      accept_op->accepted_socket, listener->host_allocator, &connection);
-  if (iree_status_is_ok(create_status)) {
-    accept_op->accepted_socket = NULL;  // Ownership transferred.
-    listener->accept.fn(listener->accept.user_data, iree_ok_status(),
-                        connection);
-  } else {
     iree_async_socket_release(accept_op->accepted_socket);
     accept_op->accepted_socket = NULL;
-    listener->accept.fn(listener->accept.user_data, create_status, NULL);
-  }
-
-  // For single-shot accept, resubmit to keep accepting.
-  if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE) &&
-      listener->state == IREE_NET_TCP_LISTENER_STATE_LISTENING) {
-    memset(&listener->accept_operation, 0, sizeof(listener->accept_operation));
-    iree_async_operation_initialize(
-        &listener->accept_operation.base,
-        IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT, IREE_ASYNC_OPERATION_FLAG_NONE,
-        iree_net_tcp_listener_accept_complete, listener);
-    listener->accept_operation.listen_socket = listener->listen_socket;
-    iree_status_t submit_status = iree_async_proactor_submit_one(
-        listener->proactor, &listener->accept_operation.base);
-    if (!iree_status_is_ok(submit_status)) {
-      listener->accept.fn(listener->accept.user_data, submit_status, NULL);
+    listener->accept.fn(listener->accept.user_data, status, NULL);
+  } else if (iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED)) {
+    IREE_ASSERT(!accept_op->accepted_socket);
+  } else if (!accept_op->accepted_socket) {
+    listener->accept.fn(
+        listener->accept.user_data,
+        iree_make_status(IREE_STATUS_DATA_LOSS,
+                         "TCP accept completed without an accepted socket"),
+        NULL);
+  } else {
+    // A successful accept racing with stop is still delivered: the connection
+    // was admitted by the kernel before cancellation won.
+    iree_net_connection_t* connection = NULL;
+    iree_status_t create_status = iree_net_tcp_connection_create(
+        listener->factory, listener->proactor, listener->recv_pool,
+        accept_op->accepted_socket, listener->host_allocator, &connection);
+    if (iree_status_is_ok(create_status)) {
+      accept_op->accepted_socket = NULL;
+      listener->accept.fn(listener->accept.user_data, iree_ok_status(),
+                          connection);
+    } else {
+      iree_async_socket_release(accept_op->accepted_socket);
+      accept_op->accepted_socket = NULL;
+      listener->accept.fn(listener->accept.user_data, create_status, NULL);
     }
   }
+
+  iree_status_t rearm_status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state == IREE_NET_TCP_LISTENER_STATE_LISTENING) {
+    rearm_status = iree_net_tcp_listener_submit_accept_locked(
+        listener, iree_net_tcp_listener_accept_complete);
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (!iree_status_is_ok(rearm_status)) {
+    listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
+  }
+  iree_net_tcp_listener_maybe_finish_stop(listener);
 }
 
 static iree_status_t iree_net_tcp_listener_stop(
@@ -918,14 +966,43 @@ static iree_status_t iree_net_tcp_listener_stop(
     iree_net_listener_stopped_callback_t callback) {
   iree_net_tcp_listener_t* listener = (iree_net_tcp_listener_t*)base_listener;
 
-  listener->state = IREE_NET_TCP_LISTENER_STATE_STOPPING;
-  listener->stopped_callback = callback;
-
-  // Cancel the pending accept operation. The cancellation CQE will fire
-  // the accept callback with CANCELLED status, which triggers the stopped
-  // notification.
-  return iree_async_proactor_cancel(listener->proactor,
-                                    &listener->accept_operation.base);
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state != IREE_NET_TCP_LISTENER_STATE_LISTENING) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "TCP listener is already stopping");
+  } else {
+    listener->state = IREE_NET_TCP_LISTENER_STATE_STOPPING;
+    listener->stopped_callback = callback;
+    if (listener->accept_pending) {
+      status = iree_async_proactor_cancel(listener->proactor,
+                                          &listener->accept_operation.base);
+      if (iree_status_is_not_found(status)) {
+        // The accept completion won the race and will clear accept_pending.
+        iree_status_free(status);
+        status = iree_ok_status();
+      }
+    } else {
+      iree_async_operation_zero(&listener->stop_operation.base,
+                                sizeof(listener->stop_operation));
+      iree_async_operation_initialize(
+          &listener->stop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+          iree_net_tcp_listener_stop_deferred_complete, listener);
+      listener->stop_operation_pending = true;
+      status = iree_async_proactor_submit_one(listener->proactor,
+                                              &listener->stop_operation.base);
+      if (!iree_status_is_ok(status)) {
+        listener->stop_operation_pending = false;
+      }
+    }
+    if (!iree_status_is_ok(status)) {
+      listener->state = IREE_NET_TCP_LISTENER_STATE_LISTENING;
+      listener->stopped_callback = (iree_net_listener_stopped_callback_t){0};
+    }
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  return status;
 }
 
 static iree_status_t iree_net_tcp_listener_query_bound_address(
@@ -1123,24 +1200,28 @@ static iree_status_t iree_net_tcp_factory_create_listener(
   listener->proactor = proactor;
   listener->recv_pool = recv_pool;
   listener->listen_socket = listen_socket;
+  iree_slim_mutex_initialize(&listener->mutex);
   listener->accept.fn = accept_callback;
   listener->accept.user_data = user_data;
   listener->state = IREE_NET_TCP_LISTENER_STATE_LISTENING;
   listener->host_allocator = host_allocator;
+  iree_net_transport_factory_retain(&factory->base);
+  iree_async_proactor_retain(proactor);
+  iree_async_buffer_pool_retain(recv_pool);
 
   // Submit the first accept operation. Accept completions write results back
   // into listener->accept_operation and the callback consumes those fields, so
   // use single-shot accepts and resubmit after each accepted connection.
-  iree_async_operation_flags_t accept_flags = IREE_ASYNC_OPERATION_FLAG_NONE;
-  iree_async_operation_initialize(
-      &listener->accept_operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
-      accept_flags, iree_net_tcp_listener_accept_complete, listener);
-  listener->accept_operation.listen_socket = listen_socket;
-  status = iree_async_proactor_submit_one(proactor,
-                                          &listener->accept_operation.base);
+  iree_slim_mutex_lock(&listener->mutex);
+  status = iree_net_tcp_listener_submit_accept_locked(
+      listener, iree_net_tcp_listener_accept_complete);
+  iree_slim_mutex_unlock(&listener->mutex);
   if (!iree_status_is_ok(status)) {
-    iree_async_socket_release(listen_socket);
-    listener->listen_socket = NULL;  // Prevent double-release in free.
+    iree_async_buffer_pool_release(listener->recv_pool);
+    iree_async_proactor_release(listener->proactor);
+    iree_net_transport_factory_release(&listener->factory->base);
+    iree_async_socket_release(listener->listen_socket);
+    iree_slim_mutex_deinitialize(&listener->mutex);
     iree_allocator_free(host_allocator, listener);
     IREE_TRACE_ZONE_END(z0);
     return status;

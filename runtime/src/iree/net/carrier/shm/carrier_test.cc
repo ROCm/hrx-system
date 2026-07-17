@@ -85,7 +85,7 @@ struct CompletionTracker {
     tracker->total_bytes.fetch_add(bytes_transferred,
                                    std::memory_order_relaxed);
     tracker->last_kind.store(kind, std::memory_order_relaxed);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   iree_net_carrier_callback_t AsCallback() { return {Callback, this}; }
@@ -116,7 +116,7 @@ class ShmCarrierTest : public ::testing::Test {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_);
     if (iree_status_is_unavailable(status)) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       GTEST_SKIP() << "Platform proactor unavailable";
     }
     IREE_ASSERT_OK(status);
@@ -185,21 +185,27 @@ class ShmCarrierTest : public ::testing::Test {
 
   void DeactivateAndDrain(iree_net_carrier_t* carrier) {
     iree_net_carrier_state_t state = iree_net_carrier_state(carrier);
-    if (state == IREE_NET_CARRIER_STATE_CREATED ||
-        state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      return;
+    if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
+    if (state != IREE_NET_CARRIER_STATE_CREATED &&
+        state != IREE_NET_CARRIER_STATE_ACTIVE) {
+      iree_status_abort(iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "an existing carrier deactivation must be joined through its "
+          "original callback"));
     }
-    bool deactivated = false;
-    if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      IREE_ASSERT_OK(iree_net_carrier_deactivate(
-          carrier,
-          [](void* user_data) { *static_cast<bool*>(user_data) = true; },
-          &deactivated));
-    }
-    while (!deactivated && iree_net_carrier_state(carrier) !=
-                               IREE_NET_CARRIER_STATE_DEACTIVATED) {
+    std::atomic<bool> deactivated{false};
+    iree_status_t status = iree_net_carrier_deactivate(
+        carrier,
+        [](void* user_data) {
+          static_cast<std::atomic<bool>*>(user_data)->store(
+              true, std::memory_order_release);
+        },
+        &deactivated);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    while (!deactivated.load(std::memory_order_acquire)) {
       iree_host_size_t completed = 0;
-      IREE_ASSERT_OK(PollOnce(&completed));
+      status = PollOnce(&completed);
+      if (!iree_status_is_ok(status)) iree_status_abort(status);
     }
     EXPECT_EQ(iree_net_carrier_state(carrier),
               IREE_NET_CARRIER_STATE_DEACTIVATED);
@@ -221,6 +227,41 @@ TEST_F(ShmCarrierTest, CapabilitiesIncludeDirectAccess) {
   EXPECT_TRUE(caps & IREE_NET_CARRIER_CAPABILITY_REGISTERED_REGIONS);
   EXPECT_TRUE(caps & IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE);
   EXPECT_TRUE(caps & IREE_NET_CARRIER_CAPABILITY_DIRECT_READ);
+}
+
+// The shared-wake scan owns its list while delivering carrier deactivation.
+// Releasing the final carrier from its callback must not destroy the shared
+// wake until the scan has finished unlinking that carrier.
+TEST_F(ShmCarrierTest, FinalDeactivationOwnsSharedWakeThroughScan) {
+  ActivateBoth(MakeNullRecvHandler(), MakeNullRecvHandler());
+
+  DeactivateAndDrain(server_);
+  iree_net_carrier_release(server_);
+  server_ = nullptr;
+
+  // Leave the client as the only persistent owner of the shared wake.
+  iree_net_shm_shared_wake_release(shared_wake_);
+  shared_wake_ = nullptr;
+
+  struct CallbackState {
+    iree_net_carrier_t* carrier;
+    std::atomic<int> call_count{0};
+  } callback_state = {client_};
+  client_ = nullptr;
+
+  IREE_ASSERT_OK(iree_net_carrier_deactivate(
+      callback_state.carrier,
+      [](void* user_data) {
+        auto* state = static_cast<CallbackState*>(user_data);
+        iree_net_carrier_release(state->carrier);
+        state->call_count.fetch_add(1, std::memory_order_release);
+      },
+      &callback_state));
+
+  ASSERT_TRUE(PollUntil([&] {
+    return callback_state.call_count.load(std::memory_order_acquire) != 0;
+  }));
+  EXPECT_EQ(callback_state.call_count.load(std::memory_order_relaxed), 1);
 }
 
 //===----------------------------------------------------------------------===//

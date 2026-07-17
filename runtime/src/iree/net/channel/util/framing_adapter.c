@@ -8,12 +8,11 @@
 
 #include <string.h>
 
+#include "iree/net/buffer_lease.h"
+
 struct iree_net_framing_adapter_t {
   // Owned carrier - released when adapter is freed.
   iree_net_carrier_t* carrier;
-
-  // Referenced pool for copy-path lease bridging - not owned.
-  iree_async_buffer_pool_t* reassembly_pool;
 
   // Message handlers (set_callbacks for atomic handoff).
   iree_net_message_endpoint_callbacks_t callbacks;
@@ -28,7 +27,7 @@ struct iree_net_framing_adapter_t {
 };
 
 // Called by frame_accumulator when a complete frame is ready.
-// Bridges NULL lease (copy path) to valid lease using reassembly_pool.
+// Bridges a copy-path frame to independently owned host storage.
 static iree_status_t iree_net_framing_adapter_on_frame_complete(
     void* user_data, iree_const_byte_span_t frame,
     iree_async_buffer_lease_t* lease) {
@@ -40,10 +39,11 @@ static iree_status_t iree_net_framing_adapter_on_frame_complete(
   }
 
   // Copy path: frame is in accumulator's internal buffer with NULL lease.
-  // message_endpoint contract requires non-NULL lease, so acquire from pool.
+  // Give the message independent host ownership without consuming a registered
+  // receive buffer that may be needed to keep the transport progressing.
   iree_async_buffer_lease_t bridged_lease;
-  IREE_RETURN_IF_ERROR(
-      iree_async_buffer_pool_acquire(adapter->reassembly_pool, &bridged_lease));
+  IREE_RETURN_IF_ERROR(iree_net_buffer_lease_allocate(
+      frame.data_length, adapter->host_allocator, &bridged_lease));
 
   uint8_t* dest = iree_async_span_ptr(bridged_lease.span);
   memcpy(dest, frame.data, frame.data_length);
@@ -53,7 +53,7 @@ static iree_status_t iree_net_framing_adapter_on_frame_complete(
   iree_status_t status = adapter->callbacks.on_message(
       adapter->callbacks.user_data, bridged_frame, &bridged_lease);
 
-  // Release our handle. Handler may have copied the lease to retain it.
+  // Release unless the handler moved the lease and cleared this value.
   iree_async_buffer_lease_release(&bridged_lease);
   return status;
 }
@@ -162,8 +162,8 @@ static void iree_net_framing_adapter_abort_send(
 
 iree_status_t iree_net_framing_adapter_allocate(
     iree_net_carrier_t* carrier, iree_net_frame_length_callback_t frame_length,
-    iree_host_size_t max_frame_size, iree_async_buffer_pool_t* reassembly_pool,
-    iree_allocator_t host_allocator, iree_net_framing_adapter_t** out_adapter) {
+    iree_host_size_t max_frame_size, iree_allocator_t host_allocator,
+    iree_net_framing_adapter_t** out_adapter) {
   *out_adapter = NULL;
 
   if (!carrier) {
@@ -174,10 +174,6 @@ iree_status_t iree_net_framing_adapter_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "frame_length.fn is required");
   }
-  if (!reassembly_pool) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "reassembly_pool is required");
-  }
   if (max_frame_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "max_frame_size must be > 0");
@@ -186,15 +182,6 @@ iree_status_t iree_net_framing_adapter_allocate(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must not be activated before wrapping");
   }
-  iree_host_size_t pool_buffer_size =
-      iree_async_buffer_pool_buffer_size(reassembly_pool);
-  if (pool_buffer_size < max_frame_size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "reassembly_pool buffer_size (%" PRIhsz
-                            ") must be >= max_frame_size (%" PRIhsz ")",
-                            pool_buffer_size, max_frame_size);
-  }
-
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_host_size_t accumulator_storage =
@@ -209,7 +196,6 @@ iree_status_t iree_net_framing_adapter_allocate(
   memset(adapter, 0, total_size);
   adapter->host_allocator = host_allocator;
   adapter->carrier = carrier;
-  adapter->reassembly_pool = reassembly_pool;
   iree_net_endpoint_lifecycle_initialize(&adapter->lifecycle);
 
   iree_net_frame_complete_callback_t on_frame_complete = {

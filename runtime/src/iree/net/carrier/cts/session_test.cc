@@ -362,7 +362,7 @@ TEST_P(SessionTest, ControlDataBidirectional) {
   ASSERT_TRUE(PollUntil([&]() {
     return server_callbacks_.control_data_fired &&
            client_callbacks_.control_data_fired;
-  })) << "Bidirectional control data timed out";
+  })) << "Bidirectional control data did not arrive";
 
   EXPECT_EQ(std::string(server_callbacks_.control_data.begin(),
                         server_callbacks_.control_data.end()),
@@ -432,7 +432,7 @@ TEST_P(SessionTest, DetachCallbacksWaitsForPendingEndpointCallback) {
                           auto* state = static_cast<CallbackState*>(user_data);
                           state->endpoint_order = state->next_order++;
                           state->endpoint_status = iree_status_code(status);
-                          iree_status_ignore(status);
+                          iree_status_free(status);
                           (void)endpoint;
                         },
                         &callback_state}));
@@ -488,7 +488,7 @@ TEST_P(SessionTest, DeactivateWaitsForPendingEndpointCallback) {
                           auto* state = static_cast<CallbackState*>(user_data);
                           state->endpoint_order = state->next_order++;
                           state->endpoint_status = iree_status_code(status);
-                          iree_status_ignore(status);
+                          iree_status_free(status);
                           (void)endpoint;
                         },
                         &callback_state}));
@@ -722,7 +722,7 @@ TEST_P(SessionTest, FrontierWaiterSatisfiedByRemoteAxisAdvance) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &result, &waiter));
 
@@ -799,7 +799,7 @@ TEST_P(SessionTest, AxisFailurePropagatesToWaiters) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &waiter_result, &waiter));
 
@@ -849,7 +849,7 @@ TEST_P(SessionTest, NewWaitsFailAfterAxisFailure) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &result, &waiter));
 
@@ -913,7 +913,7 @@ TEST_P(SessionTest, OpenEndpointSucceeds) {
 
   ASSERT_TRUE(PollUntil([&]() {
     return client_endpoint.fired && server_endpoint.fired;
-  })) << "Endpoint open timed out";
+  })) << "Endpoint open did not complete";
 
   EXPECT_EQ(client_endpoint.status_code, IREE_STATUS_OK);
   EXPECT_EQ(server_endpoint.status_code, IREE_STATUS_OK);
@@ -939,7 +939,7 @@ TEST_P(SessionTest, MultipleEndpointsSucceed) {
   ASSERT_TRUE(PollUntil([&]() {
     return client_ep1.fired && client_ep2.fired && server_ep1.fired &&
            server_ep2.fired;
-  })) << "Multiple endpoint open timed out";
+  })) << "Multiple endpoint opens did not complete";
 
   EXPECT_EQ(client_ep1.status_code, IREE_STATUS_OK);
   EXPECT_EQ(client_ep2.status_code, IREE_STATUS_OK);
@@ -988,7 +988,7 @@ TEST_P(SessionTest, QueueChannelCommandRoundTrip) {
 
   ASSERT_TRUE(PollUntil([&]() {
     return client_ep_result.fired && server_ep_result.fired;
-  })) << "Endpoint open timed out";
+  })) << "Endpoint open did not complete";
   ASSERT_EQ(client_ep_result.status_code, IREE_STATUS_OK);
   ASSERT_EQ(server_ep_result.status_code, IREE_STATUS_OK);
 
@@ -1266,7 +1266,7 @@ TEST_P(SessionTest, ShutdownCleanupFailsRemoteAxisWaiters) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &result, &waiter));
 
@@ -1310,7 +1310,7 @@ TEST_P(SessionTest, GoawayReceivedCleanupFailsRemoteAxisWaiters) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &result, &waiter));
 
@@ -1359,7 +1359,7 @@ TEST_P(SessionTest, GoawayReceivedCleanupFailsFutureFrontierWaits) {
         auto* r = static_cast<WaiterResult*>(user_data);
         r->fired = true;
         r->status_code = iree_status_code(status);
-        iree_status_ignore(status);
+        iree_status_free(status);
       },
       &result, &waiter));
 
@@ -1456,132 +1456,20 @@ TEST_P(SessionTest, ClientErrorsWhenServerNeverResponds) {
   held_connection_ctx.connection = nullptr;
 }
 
-// Normal bootstrap cancels the timer — verify no DEADLINE_EXCEEDED error fires
-// after a successful session establishment.
-TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
-  // This test intentionally observes elapsed time because timer cancellation
-  // is the behavior under test. A one-second bootstrap window leaves enough
-  // room for instrumented CI bootstrap while keeping the test bounded by its
-  // own explicit verification timer.
-  iree_duration_t bootstrap_timeout = iree_make_duration_ms(1000);
-  iree_async_axis_t client_axes[] = {0x0100};
-  uint64_t client_epochs[] = {0};
-  iree_net_session_topology_t client_topo = {};
-  client_topo.axes = client_axes;
-  client_topo.current_epochs = client_epochs;
-  client_topo.axis_count = 1;
-  client_topo.machine_index = 0;
-  client_topo.session_epoch = 1;
+// Successful bootstrap cancels its infinite timers. Session deactivation is
+// the exact join point for those cancellation callbacks; without cancellation
+// no deactivation callback can fire.
+TEST_P(SessionTest, BootstrapTimerRetiresBeforeDeactivation) {
+  EstablishDefaultSessionPair(IREE_DURATION_INFINITE);
 
-  iree_async_axis_t server_axes[] = {0x0200};
-  uint64_t server_epochs[] = {0};
-  iree_net_session_topology_t server_topo = {};
-  server_topo.axes = server_axes;
-  server_topo.current_epochs = server_epochs;
-  server_topo.axis_count = 1;
-  server_topo.machine_index = 1;
-  server_topo.session_epoch = 1;
+  DeactivateSession(server_session_, server_deactivation_);
+  DeactivateSession(client_session_, client_deactivation_);
+  PollUntilComplete([&]() {
+    return server_deactivation_.completed && client_deactivation_.completed;
+  });
 
-  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
-  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
-
-  struct AcceptCtx {
-    iree_async_proactor_t* proactor = nullptr;
-    iree_async_frontier_tracker_t* tracker = nullptr;
-    SessionCallbackTracker* callbacks = nullptr;
-    iree_net_session_t** out_session = nullptr;
-    iree_net_session_topology_t server_topology = {};
-    iree_duration_t bootstrap_timeout = 0;
-    iree::Status status;
-    bool fired = false;
-  } accept_ctx;
-  accept_ctx.proactor = proactor_;
-  accept_ctx.tracker = server_tracker_;
-  accept_ctx.callbacks = &server_callbacks_;
-  accept_ctx.out_session = &server_session_;
-  accept_ctx.server_topology = server_topo;
-  accept_ctx.bootstrap_timeout = bootstrap_timeout;
-
-  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
-      factory_, bind_addr, proactor_, recv_pool_,
-      [](void* user_data, iree_status_t status,
-         iree_net_connection_t* connection) {
-        auto* ctx = static_cast<AcceptCtx*>(user_data);
-        ctx->status = iree::Status(std::move(status));
-
-        if (ctx->status.ok()) {
-          iree_net_session_options_t server_options =
-              iree_net_session_options_default();
-          server_options.local_topology = ctx->server_topology;
-          server_options.session_id = 42;
-          server_options.bootstrap_timeout_ns = ctx->bootstrap_timeout;
-
-          ctx->status = iree::Status(iree_net_session_accept(
-              connection, ctx->proactor, ctx->tracker, &server_options,
-              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
-              ctx->out_session));
-        }
-
-        iree_net_connection_release(connection);
-        ctx->fired = true;
-      },
-      &accept_ctx, iree_allocator_system(), &listener_));
-
-  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
-                            ResolveConnectAddress(bind_str, listener_));
-
-  iree_net_session_options_t client_options =
-      iree_net_session_options_default();
-  client_options.local_topology = client_topo;
-  client_options.bootstrap_timeout_ns = bootstrap_timeout;
-
-  IREE_ASSERT_OK(iree_net_session_connect(
-      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
-      proactor_, recv_pool_, client_tracker_, &client_options,
-      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
-      &client_session_));
-
-  // Bootstrap should complete successfully.
-  ASSERT_TRUE(PollUntil([&]() {
-    return !accept_ctx.status.ok() ||
-           (client_callbacks_.ready_fired && server_callbacks_.ready_fired);
-  })) << "Bootstrap timed out";
-  IREE_ASSERT_OK(accept_ctx.status);
-
-  // Wait for a separate proactor timer started after readiness. By the time it
-  // fires, each bootstrap timer's original deadline has necessarily passed.
-  struct VerificationTimerState {
-    bool completed = false;
-    iree_status_code_t status_code = IREE_STATUS_OK;
-  } verification_timer_state;
-  iree_async_timer_operation_t verification_timer;
-  memset(&verification_timer, 0, sizeof(verification_timer));
-  iree_async_operation_initialize(
-      &verification_timer.base, IREE_ASYNC_OPERATION_TYPE_TIMER,
-      IREE_ASYNC_OPERATION_FLAG_NONE,
-      [](void* user_data, iree_async_operation_t*, iree_status_t status,
-         iree_async_completion_flags_t) {
-        auto* state = static_cast<VerificationTimerState*>(user_data);
-        state->status_code = iree_status_code(status);
-        iree_status_free(status);
-        state->completed = true;
-      },
-      &verification_timer_state);
-  verification_timer.deadline_ns = iree_time_now() + bootstrap_timeout;
-  IREE_ASSERT_OK(
-      iree_async_proactor_submit_one(proactor_, &verification_timer.base));
-  ASSERT_TRUE(PollUntil([&]() { return verification_timer_state.completed; }));
-  EXPECT_EQ(verification_timer_state.status_code, IREE_STATUS_OK);
-
-  // Both sessions should still be OPERATIONAL (no spurious timeout).
-  EXPECT_EQ(iree_net_session_state(client_session_),
-            IREE_NET_SESSION_STATE_OPERATIONAL);
-  EXPECT_EQ(iree_net_session_state(server_session_),
-            IREE_NET_SESSION_STATE_OPERATIONAL);
-  EXPECT_FALSE(client_callbacks_.error_fired)
-      << "Client should not get DEADLINE_EXCEEDED after successful bootstrap";
-  EXPECT_FALSE(server_callbacks_.error_fired)
-      << "Server should not get DEADLINE_EXCEEDED after successful bootstrap";
+  EXPECT_FALSE(client_callbacks_.error_fired);
+  EXPECT_FALSE(server_callbacks_.error_fired);
 }
 
 }  // namespace

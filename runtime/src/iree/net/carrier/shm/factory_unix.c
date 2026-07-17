@@ -7,11 +7,11 @@
 // Cross-process SHM factory operations for POSIX platforms.
 //
 // Implements listener and connect over Unix domain sockets. Each accepted
-// connection runs a synchronous handshake (handshake_posix.c) to exchange SHM
-// handles via SCM_RIGHTS, then creates an independent SHM carrier pair using
-// the socket as a retained descriptor-rights sideband.
+// connection runs its handle exchange on a cancellable bootstrap worker, then
+// creates an independent SHM carrier pair using the socket as a retained
+// descriptor-rights sideband.
 
-#include "iree/net/carrier/shm/factory_internal.h"
+#include "iree/net/carrier/shm/factory_state.h"
 
 #if !defined(IREE_PLATFORM_WINDOWS)
 
@@ -21,6 +21,7 @@
 #include "iree/async/operations/net.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/socket.h"
+#include "iree/net/carrier/shm/factory_bootstrap.h"
 #include "iree/net/carrier/shm/handshake.h"
 
 //===----------------------------------------------------------------------===//
@@ -31,31 +32,71 @@
 typedef enum iree_net_shm_unix_listener_state_e {
   IREE_NET_SHM_UNIX_LISTENER_STATE_LISTENING = 0,
   IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING,
+  IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPED,
 } iree_net_shm_unix_listener_state_t;
+
+// Bounds server-side bootstrap threads per listener. Connections beyond this
+// limit remain in the kernel listen backlog until a worker completes.
+#define IREE_NET_SHM_UNIX_MAX_PENDING_BOOTSTRAPS 16
+
+typedef struct iree_net_shm_unix_listener_t iree_net_shm_unix_listener_t;
+
+// One accepted channel being bootstrapped off the proactor thread.
+typedef struct iree_net_shm_unix_pending_bootstrap_t {
+  // Listener receiving the terminal bootstrap callback.
+  iree_net_shm_unix_listener_t* listener;
+  // Prepared worker operation, valid until its callback begins.
+  iree_net_shm_bootstrap_t* bootstrap;
+  // Intrusive linkage in the listener's cancellation set.
+  struct iree_net_shm_unix_pending_bootstrap_t* next;
+} iree_net_shm_unix_pending_bootstrap_t;
 
 // Listener backed by a Unix domain stream socket. Each accepted connection
 // runs a synchronous handshake to exchange SHM handles and notification
 // primitives, then creates an independent SHM carrier pair. The accept loop
 // supports both multishot (io_uring) and single-shot with re-arm.
-typedef struct iree_net_shm_unix_listener_t {
+struct iree_net_shm_unix_listener_t {
   iree_net_listener_t base;
+  // Factory retained for listener lifetime.
   iree_net_shm_factory_t* factory;
+  // Proactor delivering accept and bootstrap completions.
   iree_async_proactor_t* proactor;
-  iree_async_buffer_pool_t* recv_pool;
+  // Socket accepting cross-process channels.
   iree_async_socket_t* listen_socket;
+  // Consumer accept callback.
   struct {
+    // Function receiving accepted connections and terminal accept errors.
     iree_net_listener_accept_callback_t fn;
+    // Opaque value passed to |fn|.
     void* user_data;
   } accept;
+  // Single-shot accept operation; at most one is pending.
   iree_async_socket_accept_operation_t accept_operation;
+  // Protects lifecycle and pending bootstrap fields from stop callers.
+  iree_slim_mutex_t mutex;
+  // Current listener lifecycle state.
   iree_net_shm_unix_listener_state_t state;
+  // True while |accept_operation| is owned by the proactor.
+  bool accept_pending;
+  // True after the stopped callback has been claimed for delivery.
+  bool stopped_delivered;
+  // True while |stop_operation| is owned by the proactor.
+  bool stop_operation_pending;
+  // Accepted channels currently running bootstrap workers.
+  iree_net_shm_unix_pending_bootstrap_t* pending_bootstraps;
+  // Number of entries in |pending_bootstraps|.
+  iree_host_size_t pending_bootstrap_count;
+  // Callback delivered once accept and bootstrap work has drained.
   iree_net_listener_stopped_callback_t stopped_callback;
+  // NOP used when stop begins with no asynchronous work to drain.
+  iree_async_nop_operation_t stop_operation;
+  // Allocator used for listener and pending bootstrap state.
   iree_allocator_t host_allocator;
   // Full address string (e.g., "unix:/tmp/iree.sock") for
   // query_bound_address. Null-terminated.
   iree_host_size_t address_length;
   char address[];
-} iree_net_shm_unix_listener_t;
+};
 
 static const iree_net_listener_vtable_t iree_net_shm_unix_listener_vtable;
 
@@ -63,102 +104,143 @@ static void iree_net_shm_unix_listener_accept_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags);
 
-// Handles a successfully accepted socket: duplicates the primitive, runs the
-// server-side endpoint handshakes, creates a multi-endpoint connection, and
-// delivers it to the consumer. On failure at any step, reports the error to the
-// consumer.
-static void iree_net_shm_unix_listener_handle_accepted(
-    iree_net_shm_unix_listener_t* listener, iree_async_socket_t* accepted) {
-  // Dup the socket's primitive for the handshake. The duplicate transfers to
-  // the xproc context on success and is closed on failure; releasing the socket
-  // object separately closes the original fd.
-  iree_async_primitive_t handshake_primitive;
-  iree_status_t status =
-      iree_async_primitive_dup(accepted->primitive, &handshake_primitive);
-  iree_async_socket_release(accepted);
+static iree_status_t iree_net_shm_unix_listener_rearm(
+    iree_net_shm_unix_listener_t* listener);
 
-  // Get or create shared_wake for this proactor.
-  iree_net_shm_shared_wake_t* shared_wake = NULL;
-  if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&listener->factory->mutex);
-    status = iree_net_shm_factory_get_or_create_shared_wake(
-        listener->factory, listener->proactor, &shared_wake);
-    iree_slim_mutex_unlock(&listener->factory->mutex);
+// Claims and delivers the stopped callback once every accepted channel and the
+// kernel accept operation have reached terminal completion. Must run on the
+// proactor thread and must be the caller's final access to |listener| because
+// the stopped callback may free it.
+static void iree_net_shm_unix_listener_maybe_finish_stop(
+    iree_net_shm_unix_listener_t* listener) {
+  iree_net_listener_stopped_callback_t callback = {0};
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING &&
+      !listener->accept_pending && !listener->pending_bootstraps &&
+      !listener->stop_operation_pending && !listener->stopped_delivered) {
+    listener->stopped_delivered = true;
+    listener->state = IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPED;
+    callback = listener->stopped_callback;
   }
-
-  uint16_t endpoint_count = listener->factory->options.max_endpoint_count;
-  iree_net_shm_handshake_result_t* handshake_results = NULL;
-  if (iree_status_is_ok(status) && endpoint_count == 0) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "SHM listener requires at least one endpoint");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        listener->host_allocator, endpoint_count, sizeof(*handshake_results),
-        (void**)&handshake_results);
-    if (iree_status_is_ok(status)) {
-      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
-    }
-  }
-  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
-    status = iree_net_shm_handshake_server_endpoint(
-        handshake_primitive, shared_wake, listener->factory->options,
-        listener->proactor, listener->host_allocator, &handshake_results[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_result_attach_file_transfer(
-        &handshake_primitive, listener->host_allocator, &handshake_results[0]);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_async_primitive_close(&handshake_primitive);
-    if (handshake_results) {
-      for (uint16_t i = 0; i < endpoint_count; ++i) {
-        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
-      }
-    }
-  }
-
-  iree_net_connection_t* connection = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create_from_handshake_results(
-        listener->proactor, endpoint_count, handshake_results,
-        listener->recv_pool, listener->host_allocator, &connection);
-  }
-  iree_allocator_free(listener->host_allocator, handshake_results);
-
-  if (iree_status_is_ok(status)) {
-    listener->accept.fn(listener->accept.user_data, iree_ok_status(),
-                        connection);
-  } else {
-    listener->accept.fn(listener->accept.user_data, status, NULL);
-  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (callback.fn) callback.fn(callback.user_data);
 }
 
-// Re-arms the accept operation for single-shot proactors. Multishot proactors
-// deliver IREE_ASYNC_COMPLETION_FLAG_MORE and do not need re-arming.
-static void iree_net_shm_unix_listener_rearm(
-    iree_net_shm_unix_listener_t* listener) {
-  memset(&listener->accept_operation, 0, sizeof(listener->accept_operation));
-  iree_async_operation_initialize(
-      &listener->accept_operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
-      IREE_ASYNC_OPERATION_FLAG_NONE,
-      iree_net_shm_unix_listener_accept_complete, listener);
-  listener->accept_operation.listen_socket = listener->listen_socket;
-  iree_status_t submit_status = iree_async_proactor_submit_one(
-      listener->proactor, &listener->accept_operation.base);
-  if (!iree_status_is_ok(submit_status)) {
-    listener->accept.fn(listener->accept.user_data, submit_status, NULL);
+static void iree_net_shm_unix_pending_bootstrap_complete(
+    void* user_data, iree_status_t status,
+    iree_net_shm_bootstrap_completion_flags_t flags,
+    iree_net_connection_t* connection) {
+  iree_net_shm_unix_pending_bootstrap_t* pending =
+      (iree_net_shm_unix_pending_bootstrap_t*)user_data;
+  iree_net_shm_unix_listener_t* listener = pending->listener;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_slim_mutex_lock(&listener->mutex);
+  iree_net_shm_unix_pending_bootstrap_t** previous =
+      &listener->pending_bootstraps;
+  while (*previous && *previous != pending) {
+    previous = &(*previous)->next;
   }
+  IREE_ASSERT(*previous == pending,
+              "completed SHM bootstrap missing from listener");
+  *previous = pending->next;
+  --listener->pending_bootstrap_count;
+  iree_slim_mutex_unlock(&listener->mutex);
+
+  iree_allocator_free(listener->host_allocator, pending);
+
+  if (iree_any_bit_set(flags,
+                       IREE_NET_SHM_BOOTSTRAP_COMPLETION_FLAG_CANCELLED)) {
+    IREE_ASSERT(!connection);
+    if (!iree_status_is_ok(status)) {
+      listener->accept.fn(listener->accept.user_data, status, NULL);
+    }
+  } else {
+    listener->accept.fn(listener->accept.user_data, status, connection);
+  }
+
+  iree_status_t rearm_status = iree_net_shm_unix_listener_rearm(listener);
+  if (!iree_status_is_ok(rearm_status)) {
+    listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
+  }
+  iree_net_shm_unix_listener_maybe_finish_stop(listener);
+  IREE_TRACE_ZONE_END(z0);
+}
+
+// Prepares and launches the worker for one accepted socket. The listener list
+// owns the pending wrapper until terminal completion.
+static iree_status_t iree_net_shm_unix_listener_start_bootstrap(
+    iree_net_shm_unix_listener_t* listener, iree_async_socket_t* accepted) {
+  iree_async_primitive_t channel = iree_async_primitive_none();
+  iree_status_t status =
+      iree_async_primitive_dup(accepted->primitive, &channel);
+  iree_async_socket_release(accepted);
+
+  iree_net_shm_unix_pending_bootstrap_t* pending = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(listener->host_allocator, sizeof(*pending),
+                                   (void**)&pending);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(pending, 0, sizeof(*pending));
+    pending->listener = listener;
+    status = iree_net_shm_bootstrap_prepare(
+        listener->factory, IREE_NET_SHM_BOOTSTRAP_ROLE_SERVER, &channel,
+        listener->proactor,
+        (iree_net_shm_bootstrap_callback_t){
+            .fn = iree_net_shm_unix_pending_bootstrap_complete,
+            .user_data = pending,
+        },
+        listener->host_allocator, &pending->bootstrap);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&listener->mutex);
+    pending->next = listener->pending_bootstraps;
+    listener->pending_bootstraps = pending;
+    ++listener->pending_bootstrap_count;
+    bool cancel_immediately =
+        listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING;
+    iree_slim_mutex_unlock(&listener->mutex);
+    if (cancel_immediately) {
+      iree_net_shm_bootstrap_cancel(pending->bootstrap);
+    }
+    iree_net_shm_bootstrap_launch(pending->bootstrap);
+  } else {
+    iree_allocator_free(listener->host_allocator, pending);
+    iree_async_primitive_close(&channel);
+  }
+  return status;
+}
+
+// Re-arms the single-shot accept operation when bootstrap admission permits.
+static iree_status_t iree_net_shm_unix_listener_rearm(
+    iree_net_shm_unix_listener_t* listener) {
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  bool can_accept =
+      listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_LISTENING &&
+      !listener->accept_pending &&
+      listener->pending_bootstrap_count <
+          IREE_NET_SHM_UNIX_MAX_PENDING_BOOTSTRAPS;
+  if (can_accept) {
+    memset(&listener->accept_operation, 0, sizeof(listener->accept_operation));
+    iree_async_operation_initialize(
+        &listener->accept_operation.base,
+        IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
+        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+        iree_net_shm_unix_listener_accept_complete, listener);
+    listener->accept_operation.listen_socket = listener->listen_socket;
+    status = iree_async_proactor_submit_one(listener->proactor,
+                                            &listener->accept_operation.base);
+    listener->accept_pending = iree_status_is_ok(status);
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  return status;
 }
 
 // Accept completion callback for the Unix domain socket listener.
-// Runs the server-side handshake on the accepted connection, creates a carrier
-// from the result, wraps it in a connection, and delivers to the consumer.
-//
-// The handshake is synchronous but completes in microseconds over a local Unix
-// domain socket. The 5s timeout in the handshake is a safety valve for
-// pathological peers. During the handshake, the proactor thread is blocked --
-// acceptable for local IPC bootstrapping.
+// Accepted channels move to bootstrap workers before the listener re-arms.
 static void iree_net_shm_unix_listener_accept_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
@@ -167,35 +249,49 @@ static void iree_net_shm_unix_listener_accept_complete(
   iree_async_socket_accept_operation_t* accept_op =
       (iree_async_socket_accept_operation_t*)operation;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_ASSERT(!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE),
+              "SHM listener uses single-shot accepts");
 
-  // Handle stopping: clean up and fire stopped callback on final CQE.
-  if (listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING) {
-    iree_async_socket_release(accept_op->accepted_socket);
-    accept_op->accepted_socket = NULL;
-    iree_status_ignore(status);
-    if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE)) {
-      listener->stopped_callback.fn(listener->stopped_callback.user_data);
-    }
-    IREE_TRACE_ZONE_END(z0);
-    return;
-  }
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->accept_pending);
+  listener->accept_pending = false;
+  iree_slim_mutex_unlock(&listener->mutex);
 
-  if (iree_status_is_ok(status)) {
-    iree_net_shm_unix_listener_handle_accepted(listener,
-                                               accept_op->accepted_socket);
+  bool was_cancelled =
+      iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED);
+  if (iree_status_is_ok(status) && !was_cancelled) {
+    status = iree_net_shm_unix_listener_start_bootstrap(
+        listener, accept_op->accepted_socket);
     accept_op->accepted_socket = NULL;
   } else {
     iree_async_socket_release(accept_op->accepted_socket);
     accept_op->accepted_socket = NULL;
+  }
+
+  if (!iree_status_is_ok(status)) {
     listener->accept.fn(listener->accept.user_data, status, NULL);
   }
-
-  if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE) &&
-      listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_LISTENING) {
-    iree_net_shm_unix_listener_rearm(listener);
+  iree_status_t rearm_status = iree_net_shm_unix_listener_rearm(listener);
+  if (!iree_status_is_ok(rearm_status)) {
+    listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
   }
-
+  iree_net_shm_unix_listener_maybe_finish_stop(listener);
   IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_net_shm_unix_listener_stop_deferred_complete(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  iree_net_shm_unix_listener_t* listener =
+      (iree_net_shm_unix_listener_t*)user_data;
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->stop_operation_pending);
+  listener->stop_operation_pending = false;
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (!iree_status_is_ok(status)) {
+    listener->accept.fn(listener->accept.user_data, status, NULL);
+  }
+  iree_net_shm_unix_listener_maybe_finish_stop(listener);
 }
 
 static void iree_net_shm_unix_listener_free(
@@ -203,7 +299,15 @@ static void iree_net_shm_unix_listener_free(
   iree_net_shm_unix_listener_t* listener =
       (iree_net_shm_unix_listener_t*)base_listener;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_ASSERT(listener->stopped_delivered,
+              "SHM listener freed before stopped callback");
+  IREE_ASSERT(!listener->accept_pending);
+  IREE_ASSERT(!listener->pending_bootstraps);
+  IREE_ASSERT(!listener->stop_operation_pending);
   iree_async_socket_release(listener->listen_socket);
+  iree_async_proactor_release(listener->proactor);
+  iree_net_transport_factory_release(&listener->factory->base);
+  iree_slim_mutex_deinitialize(&listener->mutex);
   iree_allocator_t host_allocator = listener->host_allocator;
   iree_allocator_free(host_allocator, listener);
   IREE_TRACE_ZONE_END(z0);
@@ -215,10 +319,55 @@ static iree_status_t iree_net_shm_unix_listener_stop(
   iree_net_shm_unix_listener_t* listener =
       (iree_net_shm_unix_listener_t*)base_listener;
   IREE_TRACE_ZONE_BEGIN(z0);
-  listener->state = IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING;
-  listener->stopped_callback = callback;
-  iree_status_t status = iree_async_proactor_cancel(
-      listener->proactor, &listener->accept_operation.base);
+
+  bool cancel_accept = false;
+  bool rearm_after_failure = false;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state != IREE_NET_SHM_UNIX_LISTENER_STATE_LISTENING) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "SHM listener is already stopping");
+  } else {
+    listener->state = IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING;
+    listener->stopped_callback = callback;
+    cancel_accept = listener->accept_pending;
+    for (iree_net_shm_unix_pending_bootstrap_t* pending =
+             listener->pending_bootstraps;
+         pending; pending = pending->next) {
+      iree_net_shm_bootstrap_cancel(pending->bootstrap);
+    }
+    if (!listener->accept_pending && !listener->pending_bootstraps) {
+      iree_async_operation_initialize(
+          &listener->stop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+          iree_net_shm_unix_listener_stop_deferred_complete, listener);
+      listener->stop_operation_pending = true;
+      status = iree_async_proactor_submit_one(listener->proactor,
+                                              &listener->stop_operation.base);
+      if (!iree_status_is_ok(status)) {
+        listener->stop_operation_pending = false;
+        listener->state = IREE_NET_SHM_UNIX_LISTENER_STATE_LISTENING;
+        listener->stopped_callback = (iree_net_listener_stopped_callback_t){0};
+        rearm_after_failure = true;
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+
+  if (cancel_accept) {
+    iree_status_t cancel_status = iree_async_proactor_cancel(
+        listener->proactor, &listener->accept_operation.base);
+    if (iree_status_is_not_found(cancel_status)) {
+      // The accept completion won the race and will retire the operation.
+      iree_status_free(cancel_status);
+    } else {
+      status = iree_status_join(status, cancel_status);
+    }
+  }
+  if (rearm_after_failure) {
+    status =
+        iree_status_join(status, iree_net_shm_unix_listener_rearm(listener));
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -252,6 +401,7 @@ iree_status_t iree_net_shm_factory_create_listener_unix(
     iree_net_listener_accept_callback_t accept_callback, void* user_data,
     iree_allocator_t host_allocator, iree_net_listener_t** out_listener) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)recv_pool;
   *out_listener = NULL;
 
   // Parse the Unix domain socket address.
@@ -288,39 +438,33 @@ iree_status_t iree_net_shm_factory_create_listener_unix(
     memset(listener, 0, total_size);
     listener->base.vtable = &iree_net_shm_unix_listener_vtable;
     listener->factory = factory;
+    iree_net_transport_factory_retain(&factory->base);
     listener->proactor = proactor;
-    listener->recv_pool = recv_pool;
+    iree_async_proactor_retain(proactor);
     listener->listen_socket = listen_socket;
     listener->accept.fn = accept_callback;
     listener->accept.user_data = user_data;
+    iree_slim_mutex_initialize(&listener->mutex);
     listener->host_allocator = host_allocator;
     listener->address_length = bind_address.size;
     memcpy(listener->address, bind_address.data, bind_address.size);
     listener->address[bind_address.size] = '\0';
   }
 
-  // Submit the first accept operation. Use multishot if the proactor supports
-  // it for reduced syscall overhead on io_uring.
+  // Submit one accept at a time so bootstrap admission remains bounded.
   if (iree_status_is_ok(status)) {
-    iree_async_proactor_capabilities_t capabilities =
-        iree_async_proactor_query_capabilities(proactor);
-    iree_async_operation_flags_t accept_flags = IREE_ASYNC_OPERATION_FLAG_NONE;
-    if (capabilities & IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT) {
-      accept_flags |= IREE_ASYNC_OPERATION_FLAG_MULTISHOT;
-    }
-    iree_async_operation_initialize(
-        &listener->accept_operation.base,
-        IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT, accept_flags,
-        iree_net_shm_unix_listener_accept_complete, listener);
-    listener->accept_operation.listen_socket = listen_socket;
-    status = iree_async_proactor_submit_one(proactor,
-                                            &listener->accept_operation.base);
+    status = iree_net_shm_unix_listener_rearm(listener);
   }
 
   if (iree_status_is_ok(status)) {
     *out_listener = &listener->base;
   } else {
-    if (listener) iree_allocator_free(host_allocator, listener);
+    if (listener) {
+      iree_slim_mutex_deinitialize(&listener->mutex);
+      iree_async_proactor_release(listener->proactor);
+      iree_net_transport_factory_release(&listener->factory->base);
+      iree_allocator_free(host_allocator, listener);
+    }
     iree_async_socket_release(listen_socket);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -331,94 +475,81 @@ iree_status_t iree_net_shm_factory_create_listener_unix(
 // Cross-process connect (Unix domain socket)
 //===----------------------------------------------------------------------===//
 
-// Heap-allocated state for async Unix domain socket connect. Freed in the
-// connect completion callback after the handshake and carrier creation.
+// Heap-allocated state spanning socket connect and worker bootstrap.
 typedef struct iree_net_shm_unix_connect_state_t {
+  // Proactor operation establishing the Unix domain socket.
   iree_async_socket_connect_operation_t connect_operation;
+  // Consumer connect callback.
   struct {
+    // Function receiving the terminal connection result.
     iree_net_transport_connect_callback_t fn;
+    // Opaque value passed to |fn|.
     void* user_data;
   } callback;
+  // Factory retained until the terminal callback returns.
   iree_net_shm_factory_t* factory;
+  // Proactor used for connect and bootstrap completion.
   iree_async_proactor_t* proactor;
-  iree_async_buffer_pool_t* recv_pool;
+  // Socket owned until its primitive moves to |bootstrap|.
   iree_async_socket_t* socket;
+  // Bootstrap operation after socket connection succeeds.
+  iree_net_shm_bootstrap_t* bootstrap;
+  // Allocator used for this state and the bootstrap.
   iree_allocator_t host_allocator;
 } iree_net_shm_unix_connect_state_t;
 
-// Handles the connected socket: duplicates the primitive, runs the client-side
-// endpoint handshakes, creates a multi-endpoint connection, and delivers it to
-// the consumer. On failure at any step, reports the error to the consumer.
-static void iree_net_shm_unix_connect_handle_connected(
+static void iree_net_shm_unix_connect_state_destroy(
     iree_net_shm_unix_connect_state_t* state) {
-  // Dup the connected socket's primitive for the handshake. The duplicate
-  // transfers to the xproc context on success and is closed on failure;
-  // releasing the socket object separately closes the original fd.
-  iree_async_primitive_t handshake_primitive;
+  iree_async_socket_release(state->socket);
+  iree_net_transport_factory_release(&state->factory->base);
+  iree_allocator_free(state->host_allocator, state);
+}
+
+static void iree_net_shm_unix_connect_bootstrap_complete(
+    void* user_data, iree_status_t status,
+    iree_net_shm_bootstrap_completion_flags_t flags,
+    iree_net_connection_t* connection) {
+  iree_net_shm_unix_connect_state_t* state =
+      (iree_net_shm_unix_connect_state_t*)user_data;
+  state->bootstrap = NULL;
+  if (iree_any_bit_set(flags,
+                       IREE_NET_SHM_BOOTSTRAP_COMPLETION_FLAG_CANCELLED) &&
+      iree_status_is_ok(status)) {
+    status = iree_make_status(IREE_STATUS_CANCELLED,
+                              "SHM connection bootstrap cancelled");
+  }
+  state->callback.fn(state->callback.user_data, status, connection);
+  iree_net_shm_unix_connect_state_destroy(state);
+}
+
+// Moves the connected socket primitive to a client bootstrap worker.
+static iree_status_t iree_net_shm_unix_connect_start_bootstrap(
+    iree_net_shm_unix_connect_state_t* state) {
+  iree_async_primitive_t channel = iree_async_primitive_none();
   iree_status_t status =
-      iree_async_primitive_dup(state->socket->primitive, &handshake_primitive);
+      iree_async_primitive_dup(state->socket->primitive, &channel);
   iree_async_socket_release(state->socket);
   state->socket = NULL;
-
-  // Get or create shared_wake for this proactor.
-  iree_net_shm_shared_wake_t* shared_wake = NULL;
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&state->factory->mutex);
-    status = iree_net_shm_factory_get_or_create_shared_wake(
-        state->factory, state->proactor, &shared_wake);
-    iree_slim_mutex_unlock(&state->factory->mutex);
-  }
-
-  uint16_t endpoint_count = state->factory->options.max_endpoint_count;
-  iree_net_shm_handshake_result_t* handshake_results = NULL;
-  if (iree_status_is_ok(status) && endpoint_count == 0) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "SHM connection requires at least one endpoint");
+    status = iree_net_shm_bootstrap_prepare(
+        state->factory, IREE_NET_SHM_BOOTSTRAP_ROLE_CLIENT, &channel,
+        state->proactor,
+        (iree_net_shm_bootstrap_callback_t){
+            .fn = iree_net_shm_unix_connect_bootstrap_complete,
+            .user_data = state,
+        },
+        state->host_allocator, &state->bootstrap);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(state->host_allocator, endpoint_count,
-                                         sizeof(*handshake_results),
-                                         (void**)&handshake_results);
-    if (iree_status_is_ok(status)) {
-      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
-    }
-  }
-  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
-    status = iree_net_shm_handshake_client_endpoint(
-        handshake_primitive, shared_wake, state->proactor,
-        state->host_allocator, &handshake_results[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_result_attach_file_transfer(
-        &handshake_primitive, state->host_allocator, &handshake_results[0]);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_async_primitive_close(&handshake_primitive);
-    if (handshake_results) {
-      for (uint16_t i = 0; i < endpoint_count; ++i) {
-        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
-      }
-    }
-  }
-
-  iree_net_connection_t* connection = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create_from_handshake_results(
-        state->proactor, endpoint_count, handshake_results, state->recv_pool,
-        state->host_allocator, &connection);
-  }
-  iree_allocator_free(state->host_allocator, handshake_results);
-
-  if (iree_status_is_ok(status)) {
-    state->callback.fn(state->callback.user_data, iree_ok_status(), connection);
+    iree_net_shm_bootstrap_launch(state->bootstrap);
   } else {
-    state->callback.fn(state->callback.user_data, status, NULL);
+    iree_async_primitive_close(&channel);
   }
+  return status;
 }
 
 // Connect completion callback for cross-process SHM connect. On successful
-// connect, runs the client-side handshake, creates a carrier, wraps in a
-// connection, and delivers to the consumer via the callback.
+// connect, moves the channel to a bootstrap worker.
 static void iree_net_shm_unix_connect_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
@@ -427,13 +558,15 @@ static void iree_net_shm_unix_connect_complete(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   if (iree_status_is_ok(status)) {
-    iree_net_shm_unix_connect_handle_connected(state);
+    status = iree_net_shm_unix_connect_start_bootstrap(state);
   } else {
     iree_async_socket_release(state->socket);
-    state->callback.fn(state->callback.user_data, status, NULL);
+    state->socket = NULL;
   }
-
-  iree_allocator_free(state->host_allocator, state);
+  if (!iree_status_is_ok(status)) {
+    state->callback.fn(state->callback.user_data, status, NULL);
+    iree_net_shm_unix_connect_state_destroy(state);
+  }
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -445,6 +578,7 @@ iree_status_t iree_net_shm_factory_connect_unix(
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_transport_connect_callback_t callback, void* user_data) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)recv_pool;
 
   // Parse the Unix domain socket address.
   iree_async_address_t remote_address;
@@ -470,8 +604,8 @@ iree_status_t iree_net_shm_factory_connect_unix(
   state->callback.fn = callback;
   state->callback.user_data = user_data;
   state->factory = factory;
+  iree_net_transport_factory_retain(&factory->base);
   state->proactor = proactor;
-  state->recv_pool = recv_pool;
   state->socket = socket;
   state->host_allocator = factory->host_allocator;
 
@@ -486,7 +620,8 @@ iree_status_t iree_net_shm_factory_connect_unix(
       iree_async_proactor_submit_one(proactor, &state->connect_operation.base);
   if (!iree_status_is_ok(status)) {
     iree_async_socket_release(socket);
-    iree_allocator_free(factory->host_allocator, state);
+    state->socket = NULL;
+    iree_net_shm_unix_connect_state_destroy(state);
   }
 
   IREE_TRACE_ZONE_END(z0);

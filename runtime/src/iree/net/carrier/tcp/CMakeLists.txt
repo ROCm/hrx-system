@@ -49,6 +49,8 @@ iree_cc_library(
     ::carrier
     iree::async
     iree::base
+    iree::base::threading
+    iree::net::buffer_lease
     iree::net::channel::util::frame_sender
     iree::net::channel::util::framing_adapter
     iree::net::connection

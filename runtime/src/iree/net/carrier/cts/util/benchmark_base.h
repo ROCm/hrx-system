@@ -44,7 +44,7 @@ struct BenchmarkContext {
     auto* ctx = static_cast<BenchmarkContext*>(callback_user_data);
     ctx->last_status_code = iree_status_code(status);
     ctx->send_completions.fetch_add(1, std::memory_order_release);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   // Recv handler that counts received messages.
@@ -63,7 +63,7 @@ struct BenchmarkContext {
   }
 
   // Polls until the expected completions are received.
-  bool SpinPollUntilComplete(int expected_sends, int expected_recvs) {
+  bool PollUntilComplete(int expected_sends, int expected_recvs) {
     while (send_completions.load(std::memory_order_acquire) < expected_sends ||
            recv_completions.load(std::memory_order_acquire) < expected_recvs) {
       iree_host_size_t count = 0;

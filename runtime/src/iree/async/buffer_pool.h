@@ -122,8 +122,9 @@ typedef uint32_t iree_async_buffer_index_t;
 
 // A buffer acquired from a pool or received from the kernel.
 //
-// Value type — the pool tracks availability by buffer index in an internal
-// freelist, not by lease pointer. Callers may copy or embed leases freely.
+// Move-only value type. Transfer ownership by copying the value and clearing
+// the source before either value is released. Copying without clearing would
+// duplicate the recycle callback and return the same buffer more than once.
 //
 // Release is polymorphic: call iree_async_buffer_lease_release() to return
 // the buffer to its source (pool freelist or recv ring).
@@ -149,8 +150,9 @@ typedef struct iree_async_buffer_lease_t {
 // For recv leases: recycles the buffer to the provided buffer ring.
 // The caller must not access the lease's span data after this call.
 //
-// This function is idempotent: calling it multiple times on the same lease
-// is safe (subsequent calls are no-ops). This simplifies error handling paths.
+// This function is idempotent for the same lease value: calling it repeatedly
+// is safe because the first call clears the release callback. Independently
+// copied lease values are separate owners and must not both be released.
 static inline void iree_async_buffer_lease_release(
     iree_async_buffer_lease_t* lease) {
   if (!lease) return;

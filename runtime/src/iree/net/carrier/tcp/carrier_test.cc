@@ -166,6 +166,42 @@ struct RecvTestContext {
   iree_status_t handler_return_status = iree_ok_status();
 };
 
+struct RetainedRecvContext {
+  // Lease moved out of the receive callback.
+  iree_async_buffer_lease_t lease = {};
+  // Number of receive buffers available for poisoning moved-from metadata.
+  iree_host_size_t buffer_count = 0;
+  // True after the receive callback has moved |lease|.
+  bool handler_called = false;
+};
+
+struct CountingAllocator {
+  // Number of allocation requests issued through this allocator.
+  uint32_t allocation_count = 0;
+  // Number of free requests issued through this allocator.
+  uint32_t free_count = 0;
+
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    CountingAllocator* allocator = static_cast<CountingAllocator*>(self);
+    switch (command) {
+      case IREE_ALLOCATOR_COMMAND_MALLOC:
+      case IREE_ALLOCATOR_COMMAND_CALLOC:
+        ++allocator->allocation_count;
+        break;
+      case IREE_ALLOCATOR_COMMAND_FREE:
+        ++allocator->free_count;
+        break;
+      default:
+        break;
+    }
+    return iree_allocator_system().ctl(iree_allocator_system().self, command,
+                                       params, inout_ptr);
+  }
+};
+
 static iree_status_t TestRecvHandler(void* user_data, iree_async_span_t data,
                                      iree_async_buffer_lease_t* lease) {
   auto* ctx = static_cast<RecvTestContext*>(user_data);
@@ -174,6 +210,20 @@ static iree_status_t TestRecvHandler(void* user_data, iree_async_span_t data,
   ctx->received_data.insert(ctx->received_data.end(), ptr, ptr + data.length);
   iree_async_buffer_lease_release(lease);
   return ctx->handler_return_status;
+}
+
+static iree_status_t RetainRecvLeaseHandler(void* user_data,
+                                            iree_async_span_t data,
+                                            iree_async_buffer_lease_t* lease) {
+  (void)data;
+  auto* ctx = static_cast<RetainedRecvContext*>(user_data);
+  ctx->lease = *lease;
+  memset(lease, 0, sizeof(*lease));
+  // Moved-from metadata has no ownership meaning and must not be inspected.
+  lease->buffer_index = (ctx->lease.buffer_index + 1) %
+                        (iree_async_buffer_index_t)ctx->buffer_count;
+  ctx->handler_called = true;
+  return iree_ok_status();
 }
 
 // Test-only region with caller-owned storage.
@@ -391,6 +441,71 @@ TEST_F(TcpCarrierTest, QueuedSendRetainsRegisteredRegion) {
 
   DeactivateAndWait(proactor_, carrier);
   iree_net_carrier_release(carrier);
+  iree_async_socket_release(client);
+  iree_async_socket_release(listener);
+}
+
+TEST_F(TcpCarrierTest, StolenRecvLeaseIgnoresMovedSourceMetadata) {
+  iree_async_socket_t* client = nullptr;
+  iree_async_socket_t* server = nullptr;
+  iree_async_socket_t* listener = nullptr;
+  EstablishConnection(&client, &server, &listener);
+
+  const iree_host_size_t buffer_count =
+      iree_async_buffer_pool_capacity(recv_pool_);
+  ASSERT_GT(buffer_count, 1u);
+
+  iree_net_tcp_carrier_options_t options =
+      iree_net_tcp_carrier_options_default();
+  options.single_shot_recv_count = 1;
+  CountingAllocator host_allocator;
+  iree_net_carrier_t* carrier = nullptr;
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
+      proactor_, server, recv_pool_, options, {nullptr, nullptr},
+      host_allocator.allocator(), &carrier));
+  ASSERT_NE(carrier, nullptr);
+  EXPECT_EQ(host_allocator.allocation_count, 1u);
+
+  RetainedRecvContext recv_context;
+  recv_context.buffer_count = buffer_count;
+  iree_net_carrier_set_recv_handler(carrier,
+                                    {RetainRecvLeaseHandler, &recv_context});
+  IREE_ASSERT_OK(iree_net_carrier_activate(carrier));
+
+  const char message[] = "retained receive lease";
+  bool send_complete = false;
+  iree_async_socket_send_operation_t send_operation;
+  memset(&send_operation, 0, sizeof(send_operation));
+  iree_async_operation_initialize(
+      &send_operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      [](void* user_data, iree_async_operation_t*, iree_status_t status,
+         iree_async_completion_flags_t) {
+        IREE_CHECK_OK(status);
+        *static_cast<bool*>(user_data) = true;
+      },
+      &send_complete);
+  send_operation.socket = client;
+  iree_async_span_t message_span =
+      iree_async_span_from_ptr(const_cast<char*>(message), sizeof(message) - 1);
+  send_operation.buffers = iree_async_span_list_make(&message_span, 1);
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &send_operation.base));
+
+  while (!send_complete || !recv_context.handler_called) {
+    iree_host_size_t count = 0;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
+  }
+  DeactivateAndWait(proactor_, carrier);
+  iree_net_carrier_release(carrier);
+  EXPECT_EQ(host_allocator.free_count, 0u);
+
+  // The moved lease owns the carrier's final reference. Returning it must free
+  // the exact carrier allocation through the counting allocator.
+  iree_async_buffer_lease_release(&recv_context.lease);
+  EXPECT_EQ(host_allocator.free_count, 1u);
+
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
 }

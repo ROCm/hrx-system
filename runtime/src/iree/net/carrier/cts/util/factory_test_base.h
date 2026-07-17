@@ -57,7 +57,7 @@ struct ConnectResult {
     result->fired = true;
     result->status_code = iree_status_code(status);
     result->connection = connection;
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 };
 
@@ -73,7 +73,7 @@ struct EndpointReadyResult {
     result->fired = true;
     result->status_code = iree_status_code(status);
     result->endpoint = endpoint;
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 };
 
@@ -176,11 +176,12 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
         endpoint,
         [](void* user_data) { *static_cast<bool*>(user_data) = true; },
         &deactivated);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
-      return;
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+    if (!PollUntil([&]() { return deactivated; })) {
+      iree_status_abort(iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "proactor failed while joining endpoint deactivation"));
     }
-    PollUntil([&]() { return deactivated; });
   }
 
   //===--------------------------------------------------------------------===//
@@ -279,8 +280,9 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
                (accept_ctx.fired && connect_ctx.fired);
       });
       if (!ok) {
-        status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                  "connection establishment timed out");
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "proactor polling failed during connection establishment");
       }
     }
     if (iree_status_is_ok(status) && !accept_ctx.status.ok()) {

@@ -232,7 +232,7 @@ TEST_P(SendRecvTest, MultipleRequestResponse) {
     // Wait for this request's echo response before sending next.
     ASSERT_TRUE(PollUntil([&] {
       return client_capture.total_bytes.load() >= bytes_before + 4;
-    })) << "Timeout waiting for echo response "
+    })) << "Proactor failed before echo response "
         << i;
   }
 

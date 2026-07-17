@@ -254,7 +254,8 @@ class SessionTestBase : public FactoryTestBase {
   // complete within a single proactor poll cycle.
   void EstablishSessionPair(const iree_net_session_topology_t& client_topology,
                             const iree_net_session_topology_t& server_topology,
-                            uint64_t server_session_id = 42) {
+                            uint64_t server_session_id = 42,
+                            iree_duration_t bootstrap_timeout_ns = 0) {
     IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
     iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
@@ -264,12 +265,14 @@ class SessionTestBase : public FactoryTestBase {
       SessionTestBase* test = nullptr;
       iree_net_session_topology_t server_topology = {};
       uint64_t server_session_id = 0;
+      iree_duration_t bootstrap_timeout_ns = 0;
       iree::Status status;
       bool fired = false;
     } accept_ctx;
     accept_ctx.test = this;
     accept_ctx.server_topology = server_topology;
     accept_ctx.server_session_id = server_session_id;
+    accept_ctx.bootstrap_timeout_ns = bootstrap_timeout_ns;
 
     IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
         factory_, bind_addr, proactor_, recv_pool_,
@@ -283,6 +286,7 @@ class SessionTestBase : public FactoryTestBase {
                 iree_net_session_options_default();
             server_options.local_topology = ctx->server_topology;
             server_options.session_id = ctx->server_session_id;
+            server_options.bootstrap_timeout_ns = ctx->bootstrap_timeout_ns;
 
             ctx->status = iree::Status(iree_net_session_accept(
                 connection, ctx->test->proactor_, ctx->test->server_tracker_,
@@ -303,6 +307,7 @@ class SessionTestBase : public FactoryTestBase {
     iree_net_session_options_t client_options =
         iree_net_session_options_default();
     client_options.local_topology = client_topology;
+    client_options.bootstrap_timeout_ns = bootstrap_timeout_ns;
 
     IREE_ASSERT_OK(iree_net_session_connect(
         factory_,
@@ -315,7 +320,7 @@ class SessionTestBase : public FactoryTestBase {
     ASSERT_TRUE(PollUntil([&]() {
       return !accept_ctx.status.ok() ||
              (client_callbacks_.ready_fired && server_callbacks_.ready_fired);
-    })) << "Session bootstrap timed out"
+    })) << "Session bootstrap did not complete"
         << " client_error=" << client_callbacks_.error_code
         << " client_message=" << client_callbacks_.error_message
         << " server_error=" << server_callbacks_.error_code
@@ -326,7 +331,7 @@ class SessionTestBase : public FactoryTestBase {
   // Establishes a session pair with simple single-axis topologies.
   // Client: axis 0x0100 at epoch 0, machine_index=0, session_epoch=1.
   // Server: axis 0x0200 at epoch 0, machine_index=1, session_epoch=1.
-  void EstablishDefaultSessionPair() {
+  void EstablishDefaultSessionPair(iree_duration_t bootstrap_timeout_ns = 0) {
     iree_async_axis_t client_axes[] = {0x0100};
     uint64_t client_epochs[] = {0};
     iree_net_session_topology_t client_topo = {};
@@ -345,7 +350,8 @@ class SessionTestBase : public FactoryTestBase {
     server_topo.machine_index = 1;
     server_topo.session_epoch = 1;
 
-    EstablishSessionPair(client_topo, server_topo);
+    EstablishSessionPair(client_topo, server_topo, /*server_session_id=*/42,
+                         bootstrap_timeout_ns);
   }
 
   //===--------------------------------------------------------------------===//

@@ -20,15 +20,13 @@
 //
 // When frames span multiple buffers (TCP stream fragmentation), the adapter
 // reassembles fragments in the embedded frame_accumulator. For these copy-path
-// frames, the adapter acquires a buffer from the reassembly pool and delivers
-// that buffer's lease to the handler, maintaining the message_endpoint contract
-// that lease is always non-NULL.
+// frames, the adapter copies the frame into host-backed lease storage. This
+// keeps registered receive buffers available for preposted transport I/O while
+// maintaining the message_endpoint contract that the lease is always non-NULL.
 //
 // ## Ownership model
 //
-// The adapter takes ownership of the carrier (releases it when freed). The
-// reassembly pool is referenced but not owned - caller must keep it alive for
-// the adapter's lifetime.
+// The adapter takes ownership of the carrier and releases it when freed.
 //
 // ## Usage
 //
@@ -36,7 +34,7 @@
 //
 //   iree_net_framing_adapter_t* adapter = NULL;
 //   IREE_RETURN_IF_ERROR(iree_net_framing_adapter_allocate(
-//       carrier, frame_length, max_frame_size, pool, allocator, &adapter));
+//       carrier, frame_length, max_frame_size, allocator, &adapter));
 //   iree_net_message_endpoint_t endpoint =
 //       iree_net_framing_adapter_as_endpoint(adapter);
 //   iree_net_message_endpoint_set_callbacks(endpoint, callbacks);
@@ -50,7 +48,6 @@
 #ifndef IREE_NET_CHANNEL_UTIL_FRAMING_ADAPTER_H_
 #define IREE_NET_CHANNEL_UTIL_FRAMING_ADAPTER_H_
 
-#include "iree/async/buffer_pool.h"
 #include "iree/base/api.h"
 #include "iree/net/carrier.h"
 #include "iree/net/channel/util/frame_accumulator.h"
@@ -73,17 +70,12 @@ typedef struct iree_net_framing_adapter_t iree_net_framing_adapter_t;
 // are needed. See iree_net_frame_length_fn_t documentation for protocol
 // requirements.
 //
-// The |reassembly_pool| is used to allocate buffers for copy-path frames (when
-// frames span receive buffers). The pool is referenced but not owned - caller
-// must keep it alive for the adapter's lifetime. Pool buffer size must be at
-// least |max_frame_size| bytes.
-//
 // The |max_frame_size| limits the largest frame the adapter can handle. Frames
 // larger than this return IREE_STATUS_RESOURCE_EXHAUSTED from the recv path.
 iree_status_t iree_net_framing_adapter_allocate(
     iree_net_carrier_t* carrier, iree_net_frame_length_callback_t frame_length,
-    iree_host_size_t max_frame_size, iree_async_buffer_pool_t* reassembly_pool,
-    iree_allocator_t host_allocator, iree_net_framing_adapter_t** out_adapter);
+    iree_host_size_t max_frame_size, iree_allocator_t host_allocator,
+    iree_net_framing_adapter_t** out_adapter);
 
 // Frees the adapter and releases the owned carrier.
 //

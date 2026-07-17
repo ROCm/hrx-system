@@ -38,6 +38,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net:buffer_lease",
         "//runtime/src/iree/net:connection",
         "//runtime/src/iree/net:endpoint_lifecycle",
         "//runtime/src/iree/net:message_endpoint",

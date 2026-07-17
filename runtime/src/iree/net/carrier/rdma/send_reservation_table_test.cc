@@ -48,14 +48,16 @@ class SendReservationTableTest : public ::testing::Test {
         /*user_data=*/0, out_handle);
   }
 
+  iree_async_buffer_lease_t MakeLease() { return ::MakeLease(&release_count_); }
+
   iree_net_rdma_send_reservation_table_t table_ = {};
+  uint32_t release_count_ = 0;
 };
 
 TEST_F(SendReservationTableTest, AcquireAndResolveTransfersLease) {
   IREE_ASSERT_OK(Initialize(2));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(Acquire(&lease, /*byte_length=*/64, &handle));
   EXPECT_EQ(nullptr, lease.release.fn);
@@ -76,19 +78,18 @@ TEST_F(SendReservationTableTest, AcquireAndResolveTransfersLease) {
 
   iree_async_buffer_lease_release(&reservation.buffer_lease);
   iree_async_buffer_lease_release(&reservation.buffer_lease);
-  EXPECT_EQ(1u, release_count);
+  EXPECT_EQ(1u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, AbortReleasesLease) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(Acquire(&lease, /*byte_length=*/32, &handle));
 
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_abort(&table_, handle));
-  EXPECT_EQ(1u, release_count);
+  EXPECT_EQ(1u, release_count_);
   EXPECT_EQ(1u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
 }
@@ -96,12 +97,11 @@ TEST_F(SendReservationTableTest, AbortReleasesLease) {
 TEST_F(SendReservationTableTest, CommitQueuesPendingReservationsInOrder) {
   IREE_ASSERT_OK(Initialize(2));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t first_lease = MakeLease();
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
   EXPECT_NE(0u, first_handle);
-  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t second_lease = MakeLease();
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(Acquire(&second_lease, /*byte_length=*/48, &second_handle));
 
@@ -119,7 +119,7 @@ TEST_F(SendReservationTableTest, CommitQueuesPendingReservationsInOrder) {
       &table_, &pending_handle, &reservation));
   EXPECT_EQ(first_handle, pending_handle);
   EXPECT_EQ(32u, reservation.byte_length);
-  EXPECT_EQ(0u, release_count);
+  EXPECT_EQ(0u, release_count_);
 
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
       &table_, &pending_handle, &reservation));
@@ -139,14 +139,13 @@ TEST_F(SendReservationTableTest, CommitQueuesPendingReservationsInOrder) {
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
   EXPECT_EQ(0u, iree_net_rdma_send_reservation_table_pending_count(&table_));
   iree_async_buffer_lease_release(&reservation.buffer_lease);
-  EXPECT_EQ(2u, release_count);
+  EXPECT_EQ(2u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, CommitConsumesCallerHandle) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(Acquire(&lease, /*byte_length=*/32, &handle));
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
@@ -164,7 +163,7 @@ TEST_F(SendReservationTableTest, CommitConsumesCallerHandle) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       iree_net_rdma_send_reservation_table_abort(&table_, handle));
-  EXPECT_EQ(0u, release_count);
+  EXPECT_EQ(0u, release_count_);
 
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
       &table_, nullptr, &reservation));
@@ -174,8 +173,7 @@ TEST_F(SendReservationTableTest, CommitConsumesCallerHandle) {
 TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
       &table_, &lease, /*byte_length=*/32,
@@ -194,7 +192,7 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   EXPECT_EQ(0x1234u, reservation.user_data);
 
   iree_async_buffer_lease_release(&reservation.buffer_lease);
-  EXPECT_EQ(1u, release_count);
+  EXPECT_EQ(1u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
@@ -230,12 +228,11 @@ TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
 TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   IREE_ASSERT_OK(Initialize(3));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t first_lease = MakeLease();
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
   EXPECT_NE(0u, first_handle);
-  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t second_lease = MakeLease();
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(Acquire(&second_lease, /*byte_length=*/48, &second_handle));
   IREE_ASSERT_OK(
@@ -245,7 +242,7 @@ TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   IREE_ASSERT_OK(
       iree_net_rdma_send_reservation_table_abort_all(&table_, &aborted_count));
   EXPECT_EQ(2u, aborted_count);
-  EXPECT_EQ(2u, release_count);
+  EXPECT_EQ(2u, release_count_);
   EXPECT_EQ(3u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
   EXPECT_EQ(0u, iree_net_rdma_send_reservation_table_pending_count(&table_));
@@ -262,11 +259,10 @@ TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
 TEST_F(SendReservationTableTest, ResolveNextDrainsActiveReservations) {
   IREE_ASSERT_OK(Initialize(3));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t first_lease = MakeLease();
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
-  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t second_lease = MakeLease();
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
       &table_, &second_lease, /*byte_length=*/48,
@@ -303,30 +299,28 @@ TEST_F(SendReservationTableTest, ResolveNextDrainsActiveReservations) {
   EXPECT_FALSE(found);
   EXPECT_EQ(3u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
-  EXPECT_EQ(2u, release_count);
+  EXPECT_EQ(2u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, DeinitializeReleasesOutstandingLeases) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(Acquire(&lease, /*byte_length=*/32, &handle));
 
   iree_net_rdma_send_reservation_table_deinitialize(&table_);
-  EXPECT_EQ(1u, release_count);
+  EXPECT_EQ(1u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, ReportsCapacityExhaustion) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t first_lease = MakeLease();
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
 
-  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t second_lease = MakeLease();
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -338,8 +332,7 @@ TEST_F(SendReservationTableTest, ReportsCapacityExhaustion) {
 TEST_F(SendReservationTableTest, RejectsStaleAndDoubleResolve) {
   IREE_ASSERT_OK(Initialize(1));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t first_lease = MakeLease();
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
 
@@ -351,7 +344,7 @@ TEST_F(SendReservationTableTest, RejectsStaleAndDoubleResolve) {
                         iree_net_rdma_send_reservation_table_resolve(
                             &table_, first_handle, &reservation));
 
-  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t second_lease = MakeLease();
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(Acquire(&second_lease, /*byte_length=*/16, &second_handle));
   EXPECT_NE(first_handle, second_handle);
@@ -363,8 +356,7 @@ TEST_F(SendReservationTableTest, RejectsStaleAndDoubleResolve) {
 TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Initialize(0));
 
-  uint32_t release_count = 0;
-  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_async_buffer_lease_t lease = MakeLease();
   iree_net_carrier_send_handle_t handle = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_acquire(

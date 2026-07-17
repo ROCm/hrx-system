@@ -7,10 +7,9 @@
 // Cross-process SHM handshake: bootstraps carrier pairs over a connected
 // channel (Unix domain socket on POSIX, named pipe on Windows).
 //
-// The handshake is a two-message synchronous exchange. The server creates the
-// SHM region, sends an OFFER with its handles, and receives an ACCEPT with
-// the client's handles. The client receives the OFFER, maps the SHM region,
-// and sends its ACCEPT.
+// The handshake is a three-message blocking exchange. Production factory paths
+// run it on a dedicated bootstrap worker and observe completion through the
+// proactor; direct callers are responsible for providing a peer concurrently.
 //
 // After the handshake, each side has everything needed to create an
 // iree_net_shm_carrier_t: a mapping of the shared ring buffers, a proxy
@@ -32,6 +31,7 @@
 #include "iree/async/primitive.h"
 #include "iree/async/proactor.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/base/internal/shm.h"
 #include "iree/net/carrier/shm/carrier.h"
 #include "iree/net/carrier/shm/shared_wake.h"
@@ -46,27 +46,46 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 #define IREE_NET_SHM_HANDSHAKE_MAGIC 0x49524853u  // "IRHS" (IREE Handshake SHM)
-#define IREE_NET_SHM_HANDSHAKE_VERSION 1u
-
-// Handshake timeout in milliseconds. If the peer doesn't respond within this
-// window, the handshake fails with DEADLINE_EXCEEDED.
-#define IREE_NET_SHM_HANDSHAKE_TIMEOUT_MS 5000
+#define IREE_NET_SHM_HANDSHAKE_VERSION 2u
 
 enum iree_net_shm_handshake_message_type_e {
   // Server → Client: offering the SHM region and server's wake handles.
   IREE_NET_SHM_HANDSHAKE_MESSAGE_OFFER = 1u,
   // Client → Server: accepting with client's wake handles.
   IREE_NET_SHM_HANDSHAKE_MESSAGE_ACCEPT = 2u,
+  // Server → Client: receiver ownership of all handles is established.
+  IREE_NET_SHM_HANDSHAKE_MESSAGE_READY = 3u,
 };
 typedef uint8_t iree_net_shm_handshake_message_type_t;
+
+// Cooperative cancellation checked around each blocking channel operation.
+// A NULL pointer or NULL |requested| field represents no cancellation.
+typedef struct iree_net_shm_handshake_cancellation_t {
+  // Atomic flag set to nonzero when the handshake must terminate.
+  const iree_atomic_int32_t* requested;
+  // Waitable primitive signaled when |requested| transitions to nonzero.
+  iree_async_primitive_t interrupt_primitive;
+} iree_net_shm_handshake_cancellation_t;
+
+// Returns true when |cancellation| requests termination.
+static inline bool iree_net_shm_handshake_cancellation_is_requested(
+    const iree_net_shm_handshake_cancellation_t* cancellation) {
+  return cancellation && cancellation->requested &&
+         iree_atomic_load(cancellation->requested, iree_memory_order_acquire) !=
+             0;
+}
 
 // Fixed-size message header. Sent as the primary payload on the socket.
 // Handles are sent alongside (POSIX: SCM_RIGHTS ancillary data; Windows:
 // named object strings appended after the header).
 typedef struct iree_net_shm_handshake_header_t {
+  // Protocol magic identifying SHM bootstrap messages.
   uint32_t magic;
+  // Protocol version governing message and ownership semantics.
   uint32_t version;
+  // Message payload and attached-handle shape.
   iree_net_shm_handshake_message_type_t type;
+  // Reserved for future message flags; must be zero.
   uint8_t reserved[3];
   // OFFER only: total size of the SHM region in bytes.
   uint32_t region_size;
@@ -84,7 +103,8 @@ typedef struct iree_net_shm_handshake_header_t {
 // Implemented in handshake_posix.c and handshake_win32.c.
 
 // Handles exchanged alongside a handshake message. The OFFER includes the
-// SHM region handle plus wake handles; the ACCEPT includes only wake handles.
+// SHM region handle plus wake handles, the ACCEPT includes only wake handles,
+// and READY includes no handles.
 typedef struct iree_net_shm_handshake_handles_t {
   // Sending process ID for platforms where the receiver needs it to interpret
   // handle values. Zero when the platform does not provide a process ID.
@@ -102,13 +122,17 @@ typedef struct iree_net_shm_handshake_handles_t {
 // DuplicateHandle over WriteFile.
 iree_status_t iree_net_shm_handshake_send(
     iree_async_primitive_t channel,
+    const iree_net_shm_handshake_cancellation_t* cancellation,
     const iree_net_shm_handshake_header_t* header,
     const iree_net_shm_handshake_handles_t* handles);
 
 // Receives a handshake message with attached handles from the channel.
-// Blocks with timeout until data is available.
+// Blocks until data is available, cancellation is requested, or the peer
+// disconnects.
 iree_status_t iree_net_shm_handshake_recv(
-    iree_async_primitive_t channel, iree_net_shm_handshake_header_t* out_header,
+    iree_async_primitive_t channel,
+    const iree_net_shm_handshake_cancellation_t* cancellation,
+    iree_net_shm_handshake_header_t* out_header,
     iree_net_shm_handshake_handles_t* out_handles);
 
 // Closes all handles in a handshake_handles_t. Used for error cleanup.
@@ -155,7 +179,9 @@ iree_status_t iree_net_shm_handshake_result_attach_file_transfer(
 // iree_net_shm_handshake_result_attach_file_transfer() on the control endpoint
 // after all endpoint handshakes complete.
 iree_status_t iree_net_shm_handshake_server_endpoint(
-    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
+    iree_async_primitive_t channel,
+    const iree_net_shm_handshake_cancellation_t* cancellation,
+    iree_net_shm_shared_wake_t* shared_wake,
     iree_net_shm_carrier_options_t options, iree_async_proactor_t* proactor,
     iree_allocator_t host_allocator,
     iree_net_shm_handshake_result_t* out_result);
@@ -167,17 +193,19 @@ iree_status_t iree_net_shm_handshake_server_endpoint(
 // iree_net_shm_handshake_result_attach_file_transfer() on the control endpoint
 // after all endpoint handshakes complete.
 iree_status_t iree_net_shm_handshake_client_endpoint(
-    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
-    iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
+    iree_async_primitive_t channel,
+    const iree_net_shm_handshake_cancellation_t* cancellation,
+    iree_net_shm_shared_wake_t* shared_wake, iree_async_proactor_t* proactor,
+    iree_allocator_t host_allocator,
     iree_net_shm_handshake_result_t* out_result);
 
-// Server side: create SHM region, send OFFER, receive ACCEPT, assemble
-// carrier params.
+// Server side: creates a SHM region, exchanges OFFER and ACCEPT, establishes
+// all local resources, and sends READY before returning carrier params.
 //
 // |channel| is a connected channel primitive (Unix domain socket fd on POSIX,
-// named pipe HANDLE on Windows). The handshake is synchronous with a timeout;
-// the channel is transferred to the returned xproc context on success and
-// closed on failure.
+// named pipe HANDLE on Windows). The handshake blocks until its peer completes
+// the exchange; the channel is transferred to the returned xproc context on
+// success and closed on failure.
 //
 // |shared_wake| must have been created with
 // iree_net_shm_shared_wake_create_shared().
@@ -190,11 +218,12 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     iree_allocator_t host_allocator,
     iree_net_shm_handshake_result_t* out_result);
 
-// Client side: receive OFFER, map SHM region, send ACCEPT, assemble carrier
-// params.
+// Client side: receives OFFER, maps the SHM region, sends ACCEPT, and waits for
+// READY before returning carrier params.
 //
-// Same semantics as server: synchronous with timeout, channel transferred to
-// the returned xproc context on success and closed on failure.
+// Same semantics as server: blocks until the exchange completes, with the
+// channel transferred to the returned xproc context on success and closed on
+// failure.
 IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,

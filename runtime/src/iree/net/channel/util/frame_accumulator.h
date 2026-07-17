@@ -109,14 +109,12 @@ typedef struct iree_net_frame_length_callback_t {
 //
 // ## Lease ownership
 //
-// The accumulator retains ownership of the lease and will release it after
-// push_lease returns (regardless of callback success or failure). If the
-// callback needs to defer processing of a zero-copy frame, it MUST call
-// iree_async_buffer_lease_retain() to acquire its own reference before
-// returning. The retained reference must later be released when processing
-// completes.
+// The accumulator owns the lease and releases it after push_lease returns. A
+// callback that needs to defer processing may move ownership by copying the
+// lease and clearing the callback's lease value before returning. The moved
+// lease must be released when processing completes.
 //
-// Note: A single lease may span multiple frames. Retaining the lease keeps
+// Note: A single lease may span multiple frames. Moving the lease keeps
 // the entire buffer alive, not just the current frame's bytes.
 //
 // ## Error handling

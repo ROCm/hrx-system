@@ -10,6 +10,7 @@
 
 #include "iree/async/operations/scheduling.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/net/buffer_lease.h"
 #include "iree/net/carrier/loopback/carrier.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/connection.h"
@@ -41,12 +42,12 @@ typedef struct iree_net_loopback_factory_t {
 // Thin adapter that bridges loopback carrier recv_handler to message_endpoint
 // callbacks. Loopback carrier delivers NULL lease (data is in sender's stack
 // buffer), but message_endpoint consumers expect valid leases. This adapter
-// acquires from recv_pool, copies, and delivers with a valid lease.
+// copies into host-backed ownership and delivers with a valid lease.
 typedef struct iree_net_loopback_endpoint_adapter_t {
   // Owned carrier.
   iree_net_carrier_t* carrier;
-  // Referenced recv_pool for lease bridging.
-  iree_async_buffer_pool_t* recv_pool;
+  // Allocator used for host-backed receive leases.
+  iree_allocator_t host_allocator;
   // Message and error handlers from the endpoint consumer.
   iree_net_message_endpoint_callbacks_t callbacks;
   // Coordinates endpoint and connection deactivation requests.
@@ -65,18 +66,10 @@ static iree_status_t iree_net_loopback_endpoint_on_recv(
     return adapter->callbacks.on_message(adapter->callbacks.user_data, message,
                                          lease);
   }
-  // NULL lease: acquire from pool, copy, deliver with valid lease.
+  // NULL lease: copy into independently owned host storage.
   iree_async_buffer_lease_t bridged;
-  memset(&bridged, 0, sizeof(bridged));
-  IREE_RETURN_IF_ERROR(
-      iree_async_buffer_pool_acquire(adapter->recv_pool, &bridged));
-  if (data.length > bridged.span.length) {
-    iree_async_buffer_lease_release(&bridged);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "loopback recv frame length %" PRIhsz
-                            " exceeds receive buffer capacity %" PRIhsz,
-                            data.length, bridged.span.length);
-  }
+  IREE_RETURN_IF_ERROR(iree_net_buffer_lease_allocate(
+      data.length, adapter->host_allocator, &bridged));
   uint8_t* destination = iree_async_span_ptr(bridged.span);
   memcpy(destination, iree_async_span_ptr(data), data.length);
   iree_const_byte_span_t message =
@@ -102,7 +95,7 @@ static void iree_net_loopback_endpoint_carrier_error(void* user_data,
   if (adapter->callbacks.on_error) {
     adapter->callbacks.on_error(adapter->callbacks.user_data, status);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 }
 
@@ -219,8 +212,7 @@ static const iree_net_message_endpoint_vtable_t
 };
 
 static iree_status_t iree_net_loopback_endpoint_adapter_allocate(
-    iree_net_carrier_t* carrier, iree_async_buffer_pool_t* recv_pool,
-    iree_allocator_t host_allocator,
+    iree_net_carrier_t* carrier, iree_allocator_t host_allocator,
     iree_net_loopback_endpoint_adapter_t** out_adapter) {
   *out_adapter = NULL;
   iree_net_loopback_endpoint_adapter_t* adapter = NULL;
@@ -228,7 +220,7 @@ static iree_status_t iree_net_loopback_endpoint_adapter_allocate(
                                              (void**)&adapter));
   memset(adapter, 0, sizeof(*adapter));
   adapter->carrier = carrier;
-  adapter->recv_pool = recv_pool;
+  adapter->host_allocator = host_allocator;
   iree_net_endpoint_lifecycle_initialize(&adapter->lifecycle);
   *out_adapter = adapter;
   return iree_ok_status();
@@ -264,9 +256,6 @@ typedef struct iree_net_loopback_endpoint_slot_t {
 typedef struct iree_net_loopback_connection_t {
   iree_net_connection_t base;
   iree_async_proactor_t* proactor;
-  // Referenced recv_pool for endpoint adapter creation. May be NULL for
-  // connections that never open endpoints (e.g., factory-level tests).
-  iree_async_buffer_pool_t* recv_pool;
   uint16_t max_endpoint_count;
   uint16_t allocated_endpoint_count;
   // Joins endpoint drains during connection deactivation.
@@ -282,7 +271,7 @@ static const iree_net_connection_vtable_t iree_net_loopback_connection_vtable;
 // connection owns any carriers placed in its slots (released on destroy).
 static iree_status_t iree_net_loopback_connection_create(
     iree_async_proactor_t* proactor, uint16_t max_endpoint_count,
-    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
+    iree_allocator_t host_allocator,
     iree_net_loopback_connection_t** out_connection) {
   *out_connection = NULL;
 
@@ -300,7 +289,6 @@ static iree_status_t iree_net_loopback_connection_create(
                                  host_allocator, max_endpoint_count,
                                  &connection->base);
   connection->proactor = proactor;
-  connection->recv_pool = recv_pool;
   connection->max_endpoint_count = max_endpoint_count;
   *out_connection = connection;
   return iree_ok_status();
@@ -375,11 +363,16 @@ typedef struct iree_net_loopback_endpoint_deferred_t {
 static void iree_net_loopback_endpoint_deferred_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
   iree_net_loopback_endpoint_deferred_t* deferred =
       (iree_net_loopback_endpoint_deferred_t*)user_data;
-  iree_status_ignore(status);
-  deferred->endpoint_ready.fn(deferred->endpoint_ready.user_data,
-                              iree_ok_status(), deferred->endpoint);
+  iree_net_message_endpoint_t endpoint = deferred->endpoint;
+  if (!iree_status_is_ok(status)) {
+    endpoint = (iree_net_message_endpoint_t){0};
+  }
+  deferred->endpoint_ready.fn(deferred->endpoint_ready.user_data, status,
+                              endpoint);
   iree_allocator_free(deferred->host_allocator, deferred);
 }
 
@@ -395,17 +388,12 @@ static iree_status_t iree_net_loopback_connection_open_endpoint(
                             "all %u endpoint slots allocated",
                             (unsigned)connection->max_endpoint_count);
   }
-  if (!connection->recv_pool) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "recv_pool required for endpoint creation");
-  }
-
   uint16_t slot_index = connection->allocated_endpoint_count++;
   iree_net_loopback_endpoint_slot_t* slot = &connection->endpoints[slot_index];
 
   // Create adapter, transferring carrier ownership.
   iree_status_t status = iree_net_loopback_endpoint_adapter_allocate(
-      slot->carrier, connection->recv_pool, host_allocator, &slot->adapter);
+      slot->carrier, host_allocator, &slot->adapter);
   if (!iree_status_is_ok(status)) {
     connection->allocated_endpoint_count--;
     return status;
@@ -532,7 +520,7 @@ static void iree_net_loopback_stop_deferred_complete(
     iree_async_completion_flags_t flags) {
   iree_net_loopback_stop_deferred_t* deferred =
       (iree_net_loopback_stop_deferred_t*)user_data;
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
   deferred->stopped.fn(deferred->stopped.user_data);
   iree_allocator_free(deferred->host_allocator, deferred);
 }
@@ -558,7 +546,7 @@ static iree_status_t iree_net_loopback_listener_stop(
     deferred->host_allocator = listener->host_allocator;
     iree_async_operation_initialize(
         &deferred->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-        IREE_ASYNC_OPERATION_FLAG_NONE,
+        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
         iree_net_loopback_stop_deferred_complete, deferred);
     status =
         iree_async_proactor_submit_one(listener->proactor, &deferred->nop.base);
@@ -661,17 +649,20 @@ typedef struct iree_net_loopback_connect_deferred_t {
 static void iree_net_loopback_connect_deferred_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
   iree_net_loopback_connect_deferred_t* deferred =
       (iree_net_loopback_connect_deferred_t*)user_data;
-  iree_status_ignore(status);
-  if (iree_status_is_ok(deferred->error_status)) {
+  status = iree_status_join(status, deferred->error_status);
+  if (iree_status_is_ok(status)) {
     deferred->accept.fn(deferred->accept.user_data, iree_ok_status(),
                         deferred->server_connection);
     deferred->connect.fn(deferred->connect.user_data, iree_ok_status(),
                          deferred->client_connection);
   } else {
-    deferred->connect.fn(deferred->connect.user_data, deferred->error_status,
-                         NULL);
+    iree_net_connection_release(deferred->client_connection);
+    iree_net_connection_release(deferred->server_connection);
+    deferred->connect.fn(deferred->connect.user_data, status, NULL);
   }
   iree_allocator_free(deferred->host_allocator, deferred);
 }
@@ -682,6 +673,7 @@ static iree_status_t iree_net_loopback_factory_connect(
     iree_net_transport_connect_callback_t callback, void* user_data) {
   iree_net_loopback_factory_t* factory =
       (iree_net_loopback_factory_t*)base_factory;
+  (void)recv_pool;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_net_loopback_connect_deferred_t* deferred = NULL;
@@ -710,12 +702,10 @@ static iree_status_t iree_net_loopback_factory_connect(
 
     // Create connections with empty endpoint slots.
     status = iree_net_loopback_connection_create(
-        proactor, max_endpoints, recv_pool, factory->host_allocator,
-        &client_connection);
+        proactor, max_endpoints, factory->host_allocator, &client_connection);
     if (iree_status_is_ok(status)) {
       status = iree_net_loopback_connection_create(
-          proactor, max_endpoints, recv_pool, factory->host_allocator,
-          &server_connection);
+          proactor, max_endpoints, factory->host_allocator, &server_connection);
     }
 
     // Create carrier pairs and distribute to endpoint slots.
@@ -767,7 +757,7 @@ static iree_status_t iree_net_loopback_factory_connect(
       iree_net_loopback_connect_deferred_complete, deferred);
   status = iree_async_proactor_submit_one(proactor, &deferred->nop.base);
   if (!iree_status_is_ok(status)) {
-    iree_status_ignore(deferred->error_status);
+    iree_status_free(deferred->error_status);
     iree_net_connection_release(deferred->client_connection);
     iree_net_connection_release(deferred->server_connection);
     iree_allocator_free(factory->host_allocator, deferred);
@@ -785,6 +775,7 @@ static iree_status_t iree_net_loopback_factory_create_listener(
   iree_net_loopback_factory_t* factory =
       (iree_net_loopback_factory_t*)base_factory;
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)recv_pool;
   *out_listener = NULL;
 
   iree_host_size_t total_size =

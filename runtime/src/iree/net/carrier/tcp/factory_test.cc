@@ -105,7 +105,7 @@ class TcpFactoryTest : public ::testing::Test {
         {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
          &stopped}));
     ASSERT_TRUE(PollUntil([&]() { return stopped; }))
-        << "Listener stop timed out";
+        << "Listener stop callback did not fire";
   }
 
   iree_async_proactor_t* proactor_ = nullptr;
@@ -128,7 +128,7 @@ static void TrackConnectCallback(void* user_data, iree_status_t status,
   result->fired = true;
   result->status_code = iree_status_code(status);
   result->connection = connection;
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 struct EndpointResult {
@@ -143,7 +143,7 @@ static void TrackEndpointReady(void* user_data, iree_status_t status,
   result->fired = true;
   result->status_code = iree_status_code(status);
   result->endpoint = endpoint;
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 struct MessageCapture {
@@ -166,7 +166,7 @@ struct MessageCapture {
     auto* capture = static_cast<MessageCapture*>(user_data);
     capture->error_fired = true;
     capture->error_code = iree_status_code(status);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   iree_net_message_endpoint_callbacks_t callbacks() {
@@ -242,7 +242,7 @@ TEST_F(TcpFactoryTest, ListenerEphemeralPort) {
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         auto* ctx = static_cast<AcceptCtx*>(user_data);
-        iree_status_ignore(status);
+        iree_status_free(status);
         iree_net_connection_release(connection);
         ctx->fired = true;
       },
@@ -261,6 +261,54 @@ TEST_F(TcpFactoryTest, ListenerEphemeralPort) {
   iree_net_listener_free(info.listener);
 }
 
+TEST_F(TcpFactoryTest, StopFromAcceptCallbackUsesDeferredBoundary) {
+  struct StopContext {
+    iree_net_listener_t* listener = nullptr;
+    iree_net_connection_t* connection = nullptr;
+    bool accept_fired = false;
+    bool stopped = false;
+    iree_status_code_t accept_status_code = IREE_STATUS_OK;
+    iree_status_code_t stop_status_code = IREE_STATUS_OK;
+  } stop_context;
+
+  auto info = CreateListener(
+      [](void* user_data, iree_status_t status,
+         iree_net_connection_t* connection) {
+        auto* context = static_cast<StopContext*>(user_data);
+        context->accept_fired = true;
+        context->accept_status_code = iree_status_code(status);
+        context->connection = connection;
+        iree_status_free(status);
+        iree_status_t stop_status = iree_net_listener_stop(
+            context->listener,
+            {[](void* user_data) {
+               static_cast<StopContext*>(user_data)->stopped = true;
+             },
+             context});
+        context->stop_status_code = iree_status_code(stop_status);
+        iree_status_free(stop_status);
+      },
+      &stop_context);
+  stop_context.listener = info.listener;
+
+  ConnectResult connect_result;
+  IREE_ASSERT_OK(iree_net_transport_factory_connect(
+      factory_, iree_make_cstring_view(info.connect_address.c_str()), proactor_,
+      recv_pool_, TrackConnectCallback, &connect_result));
+  ASSERT_TRUE(PollUntil([&] {
+    return stop_context.accept_fired && connect_result.fired &&
+           stop_context.stopped;
+  })) << "TCP connect, accept, and listener stop did not complete";
+
+  EXPECT_EQ(stop_context.accept_status_code, IREE_STATUS_OK);
+  EXPECT_EQ(stop_context.stop_status_code, IREE_STATUS_OK);
+  ASSERT_NE(stop_context.connection, nullptr);
+  ASSERT_NE(connect_result.connection, nullptr);
+  iree_net_connection_release(stop_context.connection);
+  iree_net_connection_release(connect_result.connection);
+  iree_net_listener_free(info.listener);
+}
+
 TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
   ConnectResult accept_result;
   auto info = CreateListener(TrackConnectCallback, &accept_result);
@@ -272,7 +320,7 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
 
   ASSERT_TRUE(PollUntil([&]() {
     return accept_result.fired && connect_result.fired;
-  })) << "TCP connect/accept timed out";
+  })) << "TCP connect/accept did not complete";
   ASSERT_EQ(accept_result.status_code, IREE_STATUS_OK);
   ASSERT_EQ(connect_result.status_code, IREE_STATUS_OK);
   ASSERT_NE(accept_result.connection, nullptr);
@@ -289,7 +337,7 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
       server_connection, {TrackEndpointReady, &server_control_endpoint}));
   ASSERT_TRUE(PollUntil([&]() {
     return client_control_endpoint.fired && server_control_endpoint.fired;
-  })) << "Control endpoint open timed out";
+  })) << "Control endpoint open did not complete";
   ASSERT_EQ(client_control_endpoint.status_code, IREE_STATUS_OK);
   ASSERT_EQ(server_control_endpoint.status_code, IREE_STATUS_OK);
 
@@ -308,7 +356,7 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
   IREE_ASSERT_OK(iree_net_connection_open_endpoint(
       server_connection, {TrackEndpointReady, &server_future_endpoint}));
   ASSERT_TRUE(PollUntil([&]() { return server_future_endpoint.fired; }))
-      << "Server future endpoint open timed out";
+      << "Server future endpoint open did not complete";
   ASSERT_EQ(server_future_endpoint.status_code, IREE_STATUS_OK);
 
   MessageCapture server_future_capture;
@@ -333,7 +381,7 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
   IREE_ASSERT_OK(iree_net_connection_open_endpoint(
       client_connection, {TrackEndpointReady, &client_future_endpoint}));
   ASSERT_TRUE(PollUntil([&]() { return client_future_endpoint.fired; }))
-      << "Client future endpoint open timed out";
+      << "Client future endpoint open did not complete";
   ASSERT_EQ(client_future_endpoint.status_code, IREE_STATUS_OK);
 
   MessageCapture client_future_capture;
@@ -357,7 +405,7 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
       server_connection, {DeactivateResult::Callback, &server_deactivated});
   ASSERT_TRUE(PollUntil([&]() {
     return client_deactivated.fired && server_deactivated.fired;
-  })) << "TCP connection deactivation timed out";
+  })) << "TCP connection deactivation did not complete";
 
   iree_net_connection_release(client_connection);
   iree_net_connection_release(server_connection);

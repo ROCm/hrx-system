@@ -317,8 +317,7 @@ static void iree_net_loopback_carrier_disconnect_notify_completion(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
   (void)user_data;
-  (void)flags;
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
   iree_net_loopback_disconnect_notify_t* notify =
       (iree_net_loopback_disconnect_notify_t*)operation;
   iree_net_loopback_carrier_t* peer = notify->peer;
@@ -326,7 +325,8 @@ static void iree_net_loopback_carrier_disconnect_notify_completion(
 
   // Fire the handler only while the peer is still accepting callbacks.
   iree_net_carrier_state_t state = iree_net_carrier_state(&peer->base);
-  if (state == IREE_NET_CARRIER_STATE_ACTIVE &&
+  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED) &&
+      state == IREE_NET_CARRIER_STATE_ACTIVE &&
       peer->peer_disconnect_handler.fn) {
     peer->peer_disconnect_handler.fn(
         peer->peer_disconnect_handler.user_data,
@@ -347,7 +347,7 @@ static void iree_net_loopback_carrier_notify_peer_disconnect(
     notify->peer = peer;
     iree_async_operation_initialize(
         &notify->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-        IREE_ASYNC_OPERATION_FLAG_NONE,
+        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
         iree_net_loopback_carrier_disconnect_notify_completion, notify);
     status = iree_async_proactor_submit_one(peer->proactor, &notify->nop.base);
     if (!iree_status_is_ok(status)) {
@@ -357,7 +357,7 @@ static void iree_net_loopback_carrier_notify_peer_disconnect(
   if (!iree_status_is_ok(status)) {
     // Synchronous fallback on OOM or submit failure. Safe because the handler
     // operates on the surviving peer, not the carrier being torn down.
-    iree_status_ignore(status);
+    iree_status_free(status);
     if (iree_net_carrier_state(&peer->base) == IREE_NET_CARRIER_STATE_ACTIVE &&
         peer->peer_disconnect_handler.fn) {
       peer->peer_disconnect_handler.fn(
@@ -568,7 +568,7 @@ static void iree_net_loopback_pending_send_deliver(
                               pending_send->user_data, delivery_status,
                               pending_send->total_size, NULL);
   } else {
-    iree_status_ignore(delivery_status);
+    iree_status_free(delivery_status);
   }
 
   iree_net_loopback_carrier_end_peer_receive(peer);
@@ -586,7 +586,7 @@ static void iree_net_loopback_pending_send_fail(
                               pending_send->user_data, completion_status,
                               pending_send->total_size, NULL);
   } else {
-    iree_status_ignore(completion_status);
+    iree_status_free(completion_status);
   }
   iree_net_loopback_carrier_end_send_operation(carrier);
   iree_net_loopback_pending_send_free(pending_send);
@@ -616,7 +616,7 @@ static void iree_net_loopback_carrier_send_drain_completion(
       iree_net_loopback_pending_send_fail(pending_send, status);
     }
   }
-  iree_status_ignore(status);
+  iree_status_free(status);
   iree_net_carrier_release(&carrier->base);
 }
 

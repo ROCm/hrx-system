@@ -4,13 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Private header shared by factory.c, factory_unix.c, and factory_win32.c.
-//
-// Contains the factory struct definition and declarations for shared utility
-// functions that the platform-specific cross-process implementations need.
+// Shared factory representation and platform entry points.
 
-#ifndef IREE_NET_CARRIER_SHM_FACTORY_INTERNAL_H_
-#define IREE_NET_CARRIER_SHM_FACTORY_INTERNAL_H_
+#ifndef IREE_NET_CARRIER_SHM_FACTORY_STATE_H_
+#define IREE_NET_CARRIER_SHM_FACTORY_STATE_H_
 
 #include "iree/async/proactor.h"
 #include "iree/base/api.h"
@@ -66,14 +63,6 @@ iree_status_t iree_net_shm_factory_get_or_create_shared_wake(
     iree_net_shm_factory_t* factory, iree_async_proactor_t* proactor,
     iree_net_shm_shared_wake_t** out_shared_wake);
 
-// Creates an SHM connection with the given initial carrier. The connection
-// takes ownership of |initial_carrier| -- the caller must not release it on
-// success. On failure, the caller retains ownership.
-iree_status_t iree_net_shm_connection_create(
-    iree_async_proactor_t* proactor, iree_net_carrier_t* initial_carrier,
-    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
-    iree_net_connection_t** out_connection);
-
 // Creates an SHM connection from one carrier per endpoint handshake result.
 //
 // On success, the connection owns each result context through its carrier and
@@ -81,8 +70,7 @@ iree_status_t iree_net_shm_connection_create(
 // unconsumed result contexts are released before returning.
 iree_status_t iree_net_shm_connection_create_from_handshake_results(
     iree_async_proactor_t* proactor, uint16_t endpoint_count,
-    iree_net_shm_handshake_result_t* results,
-    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* results, iree_allocator_t host_allocator,
     iree_net_connection_t** out_connection);
 
 //===----------------------------------------------------------------------===//
@@ -132,4 +120,4 @@ iree_status_t iree_net_shm_factory_connect_win32(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_NET_CARRIER_SHM_FACTORY_INTERNAL_H_
+#endif  // IREE_NET_CARRIER_SHM_FACTORY_STATE_H_

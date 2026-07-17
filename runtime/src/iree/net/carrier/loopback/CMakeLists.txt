@@ -38,6 +38,7 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::threading
+    iree::net::buffer_lease
     iree::net::channel::util::frame_sender
     iree::net::connection
     iree::net::endpoint_lifecycle

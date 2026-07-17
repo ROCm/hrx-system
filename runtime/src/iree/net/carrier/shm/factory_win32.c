@@ -6,23 +6,12 @@
 
 // Cross-process SHM factory operations for Windows.
 //
-// Implements listener and connect over Windows named pipes. Each accepted
-// connection runs a synchronous handshake (handshake_win32.c) to exchange SHM
-// handles via DuplicateHandle, then creates an independent SHM carrier pair.
-//
-// The named pipe bootstraps each carrier: ConnectNamedPipe accepts a client,
-// the handshake exchanges SHM region and notification handles, and the pipe is
-// then retained by the xproc context. Windows handle transfer is not advertised
-// until that sideband is integrated with the proactor. The carrier uses the SHM
-// ring buffers directly.
-//
-// Async accept uses EVENT_WAIT: the pipe is NOT associated with IOCP. An
-// iree_async_event_t signals when ConnectNamedPipe completes (the event's
-// Win32 HANDLE is set as the hEvent in the OVERLAPPED structure). When a client
-// connects, the kernel signals the event, and EVENT_WAIT delivers the
-// completion to the proactor thread.
+// Named pipes provide the bootstrap channel. ConnectNamedPipe admission is
+// monitored by the proactor, while each handle exchange runs on a dedicated
+// cancellable bootstrap worker. No blocking peer I/O runs on the proactor
+// thread.
 
-#include "iree/net/carrier/shm/factory_internal.h"
+#include "iree/net/carrier/shm/factory_state.h"
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
@@ -31,32 +20,24 @@
 
 #include "iree/async/event.h"
 #include "iree/async/operations/scheduling.h"
-#include "iree/net/carrier/shm/handshake.h"
-
-//===----------------------------------------------------------------------===//
-// Helpers
-//===----------------------------------------------------------------------===//
+#include "iree/net/carrier/shm/factory_bootstrap.h"
 
 // Prefix for Windows named pipe paths.
 static const WCHAR iree_net_shm_pipe_prefix[] = L"\\\\.\\pipe\\";
-#define IREE_NET_SHM_PIPE_PREFIX_LENGTH 9  // wcslen(L"\\\\.\\pipe\\")
+#define IREE_NET_SHM_PIPE_PREFIX_LENGTH 9
 
-// Maximum total pipe path length in wide characters (including null
-// terminator). Windows named pipe paths must be <= MAX_PATH.
+// Maximum total pipe path length in wide characters, including the terminator.
 #define IREE_NET_SHM_MAX_PIPE_PATH_LENGTH (MAX_PATH + 1)
 
-// Strips the "pipe:" prefix from an address and returns the pipe name portion.
-// The caller already verified the prefix via starts_with in the factory
-// dispatch.
+// Bounds server-side bootstrap threads per listener. Additional clients remain
+// in the named-pipe connection queue until a worker completes.
+#define IREE_NET_SHM_WIN32_MAX_PENDING_BOOTSTRAPS 16
+
 static iree_string_view_t iree_net_shm_win32_strip_pipe_prefix(
     iree_string_view_t address) {
   return iree_make_string_view(address.data + 5, address.size - 5);
 }
 
-// Builds the wide-character pipe path (\\.\pipe\<name>) from a UTF-8 name.
-// |out_path| must have room for IREE_NET_SHM_MAX_PIPE_PATH_LENGTH WCHARs.
-// Returns the path length in WCHARs (excluding null terminator) via
-// |out_path_length|.
 static iree_status_t iree_net_shm_win32_build_pipe_path(iree_string_view_t name,
                                                         WCHAR* out_path,
                                                         int* out_path_length) {
@@ -64,8 +45,6 @@ static iree_status_t iree_net_shm_win32_build_pipe_path(iree_string_view_t name,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pipe name is empty");
   }
 
-  // Convert the name from UTF-8 to wide characters. First pass: compute the
-  // required length.
   int wide_name_length = MultiByteToWideChar(
       CP_UTF8, MB_ERR_INVALID_CHARS, name.data, (int)name.size, NULL, 0);
   if (wide_name_length <= 0) {
@@ -81,7 +60,6 @@ static iree_status_t iree_net_shm_win32_build_pipe_path(iree_string_view_t name,
                             IREE_NET_SHM_MAX_PIPE_PATH_LENGTH - 1);
   }
 
-  // Copy prefix and convert name into the output buffer.
   memcpy(out_path, iree_net_shm_pipe_prefix,
          IREE_NET_SHM_PIPE_PREFIX_LENGTH * sizeof(WCHAR));
   MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name.data, (int)name.size,
@@ -93,51 +71,75 @@ static iree_status_t iree_net_shm_win32_build_pipe_path(iree_string_view_t name,
 }
 
 //===----------------------------------------------------------------------===//
-// Cross-process listener (Windows named pipe)
+// Cross-process listener
 //===----------------------------------------------------------------------===//
 
 typedef enum iree_net_shm_win32_listener_state_e {
   IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING = 0,
   IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPING,
+  IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPED,
 } iree_net_shm_win32_listener_state_t;
 
-// Listener backed by a Windows named pipe. Each accepted connection runs a
-// synchronous handshake to exchange SHM handles and notification primitives,
-// then creates an independent SHM carrier pair.
-//
-// Accept loop: CreateNamedPipeW -> ConnectNamedPipe (overlapped, event-based)
-// -> EVENT_WAIT -> callback -> handshake -> carrier -> deliver -> new pipe
-// instance -> repeat.
-typedef struct iree_net_shm_win32_listener_t {
+typedef struct iree_net_shm_win32_listener_t iree_net_shm_win32_listener_t;
+
+// One accepted pipe being bootstrapped off the proactor thread.
+typedef struct iree_net_shm_win32_pending_bootstrap_t {
+  // Listener receiving the terminal bootstrap callback.
+  iree_net_shm_win32_listener_t* listener;
+  // Prepared worker operation, valid until its callback begins.
+  iree_net_shm_bootstrap_t* bootstrap;
+  // Intrusive linkage in the listener's cancellation set.
+  struct iree_net_shm_win32_pending_bootstrap_t* next;
+} iree_net_shm_win32_pending_bootstrap_t;
+
+struct iree_net_shm_win32_listener_t {
   iree_net_listener_t base;
+  // Factory retained for listener lifetime.
   iree_net_shm_factory_t* factory;
+  // Proactor delivering accept and bootstrap completions.
   iree_async_proactor_t* proactor;
-  iree_async_buffer_pool_t* recv_pool;
-  // Current pipe instance awaiting ConnectNamedPipe. Set to
-  // INVALID_HANDLE_VALUE after being consumed by the handshake or on cleanup.
+  // Current named-pipe instance, or INVALID_HANDLE_VALUE when consumed.
   HANDLE pipe_handle;
-  // Event signaled when ConnectNamedPipe completes. The event's Win32 HANDLE
-  // is set as hEvent in the OVERLAPPED structure. The proactor monitors this
-  // event via EVENT_WAIT. Retained for the listener's lifetime and reused
-  // across accept cycles.
+  // Event signaled by the current ConnectNamedPipe operation.
   iree_async_event_t* event;
-  // OVERLAPPED for the pending ConnectNamedPipe call. hEvent points to the
-  // event's primitive HANDLE.
+  // Kernel state for the current ConnectNamedPipe operation.
   OVERLAPPED overlapped;
+  // Proactor operation awaiting |event|.
   iree_async_event_wait_operation_t event_wait_operation;
+  // Consumer accept callback.
   struct {
+    // Function receiving accepted connections and terminal accept errors.
     iree_net_listener_accept_callback_t fn;
+    // Opaque value passed to |fn|.
     void* user_data;
   } accept;
+  // Protects lifecycle and pending bootstrap fields from stop callers.
+  iree_slim_mutex_t mutex;
+  // Current listener lifecycle state.
   iree_net_shm_win32_listener_state_t state;
+  // True while |event_wait_operation| is owned by the proactor.
+  bool accept_pending;
+  // True while the kernel may access |overlapped|.
+  bool connect_operation_pending;
+  // True while |stop_operation| is owned by the proactor.
+  bool stop_operation_pending;
+  // True after the stopped callback has been claimed for delivery.
+  bool stopped_delivered;
+  // Accepted channels currently running bootstrap workers.
+  iree_net_shm_win32_pending_bootstrap_t* pending_bootstraps;
+  // Number of entries in |pending_bootstraps|.
+  iree_host_size_t pending_bootstrap_count;
+  // Callback delivered once accept and bootstrap work has drained.
   iree_net_listener_stopped_callback_t stopped_callback;
+  // NOP used when stop begins with no asynchronous work to drain.
+  iree_async_nop_operation_t stop_operation;
+  // Allocator used for listener and pending bootstrap state.
   iree_allocator_t host_allocator;
-  // Full address string (e.g., "pipe:my-service") for query_bound_address.
-  // Null-terminated. The pipe: prefix is stripped and converted to a wide pipe
-  // path on the stack each time a new pipe instance is created.
+  // Full address string retained for query_bound_address.
   iree_host_size_t address_length;
+  // Null-terminated address storage.
   char address[];
-} iree_net_shm_win32_listener_t;
+};
 
 static const iree_net_listener_vtable_t iree_net_shm_win32_listener_vtable;
 
@@ -145,11 +147,59 @@ static void iree_net_shm_win32_listener_accept_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags);
 
-// Creates a new named pipe instance. Stores the handle in
-// listener->pipe_handle (which must be INVALID_HANDLE_VALUE on entry). The
-// pipe is duplex, overlapped, byte-mode.
+static iree_status_t iree_net_shm_win32_listener_rearm(
+    iree_net_shm_win32_listener_t* listener);
+
+static void iree_net_shm_win32_listener_maybe_finish_stop(
+    iree_net_shm_win32_listener_t* listener) {
+  iree_net_listener_stopped_callback_t callback = {0};
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state == IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPING &&
+      !listener->accept_pending && !listener->connect_operation_pending &&
+      !listener->stop_operation_pending && !listener->pending_bootstraps &&
+      !listener->stopped_delivered) {
+    listener->state = IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPED;
+    listener->stopped_delivered = true;
+    callback = listener->stopped_callback;
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (callback.fn) callback.fn(callback.user_data);
+}
+
+// Cancels and exactly retires a pending ConnectNamedPipe operation. This is
+// used only when the proactor event wait itself failed; normal listener stop
+// lets the event wait observe the kernel cancellation completion directly.
+static iree_status_t iree_net_shm_win32_listener_cancel_and_await_connect(
+    iree_net_shm_win32_listener_t* listener) {
+  if (!listener->connect_operation_pending) return iree_ok_status();
+
+  iree_status_t status = iree_ok_status();
+  if (!CancelIoEx(listener->pipe_handle, &listener->overlapped)) {
+    DWORD error = GetLastError();
+    if (error != ERROR_NOT_FOUND) {
+      status =
+          iree_make_status(iree_status_code_from_win32_error(error),
+                           "CancelIoEx failed while retiring ConnectNamedPipe");
+    }
+  }
+
+  DWORD bytes_transferred = 0;
+  if (!GetOverlappedResult(listener->pipe_handle, &listener->overlapped,
+                           &bytes_transferred, /*bWait=*/TRUE)) {
+    DWORD error = GetLastError();
+    if (error != ERROR_OPERATION_ABORTED) {
+      status = iree_status_join(
+          status, iree_make_status(iree_status_code_from_win32_error(error),
+                                   "failed to retire ConnectNamedPipe"));
+    }
+  }
+  listener->connect_operation_pending = false;
+  return status;
+}
+
 static iree_status_t iree_net_shm_win32_listener_create_pipe(
     iree_net_shm_win32_listener_t* listener) {
+  IREE_ASSERT(listener->pipe_handle == INVALID_HANDLE_VALUE);
   iree_string_view_t name = iree_net_shm_win32_strip_pipe_prefix(
       iree_make_string_view(listener->address, listener->address_length));
 
@@ -158,233 +208,241 @@ static iree_status_t iree_net_shm_win32_listener_create_pipe(
   IREE_RETURN_IF_ERROR(
       iree_net_shm_win32_build_pipe_path(name, pipe_path, &pipe_path_length));
 
-  listener->pipe_handle = CreateNamedPipeW(
-      pipe_path, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
-      4096,   // Output buffer size (handshake messages are ~100 bytes).
-      4096,   // Input buffer size.
-      0,      // Default timeout (only affects WaitNamedPipe, not us).
-      NULL);  // Default security attributes.
+  listener->pipe_handle =
+      CreateNamedPipeW(pipe_path, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                       PIPE_UNLIMITED_INSTANCES, 4096, 4096, 0, NULL);
   if (listener->pipe_handle == INVALID_HANDLE_VALUE) {
     return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
                             "CreateNamedPipeW failed for pipe '%.*s'",
                             (int)name.size, name.data);
   }
-
   return iree_ok_status();
 }
 
-// Starts an overlapped ConnectNamedPipe and submits an EVENT_WAIT to get
-// notified when a client connects. The listener's pipe_handle must be valid
-// and the event must be ready (not pending from a previous wait).
-static iree_status_t iree_net_shm_win32_listener_start_accept(
+// Starts ConnectNamedPipe and arms its event wait. The listener mutex is held
+// across this function so stop cannot observe partially submitted state.
+static iree_status_t iree_net_shm_win32_listener_start_accept_locked(
     iree_net_shm_win32_listener_t* listener) {
-  // Initialize the OVERLAPPED with the event's Win32 HANDLE. When the kernel
-  // completes ConnectNamedPipe, it signals this event.
-  memset(&listener->overlapped, 0, sizeof(listener->overlapped));
-  listener->overlapped.hEvent =
-      (HANDLE)listener->event->primitive.value.win32_handle;
+  IREE_ASSERT(!listener->accept_pending);
+  IREE_ASSERT(!listener->connect_operation_pending);
+  IREE_ASSERT(listener->pipe_handle != INVALID_HANDLE_VALUE);
 
-  // Start listening for a client connection.
-  BOOL connected =
-      ConnectNamedPipe(listener->pipe_handle, &listener->overlapped);
-  if (!connected) {
-    DWORD error = GetLastError();
-    if (error == ERROR_IO_PENDING) {
-      // Normal case: waiting for a client to connect. The kernel will signal
-      // the event when a client arrives.
-    } else if (error == ERROR_PIPE_CONNECTED) {
-      // A client connected between CreateNamedPipeW and ConnectNamedPipe.
-      // Signal the event so the EVENT_WAIT fires immediately.
-      IREE_RETURN_IF_ERROR(iree_async_event_set(listener->event));
-    } else {
-      return iree_make_status(iree_status_code_from_win32_error(error),
-                              "ConnectNamedPipe failed");
-    }
-  } else {
-    // ConnectNamedPipe returning TRUE with an overlapped structure is
-    // documented as an error case by MSDN. Treat as unexpected success and
-    // signal the event to proceed.
-    IREE_RETURN_IF_ERROR(iree_async_event_set(listener->event));
+  HANDLE event_handle = (HANDLE)listener->event->primitive.value.win32_handle;
+  if (!ResetEvent(event_handle)) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "ResetEvent failed for ConnectNamedPipe");
   }
 
-  // Submit EVENT_WAIT to deliver the completion to the proactor thread.
-  memset(&listener->event_wait_operation, 0,
-         sizeof(listener->event_wait_operation));
-  iree_async_operation_initialize(
-      &listener->event_wait_operation.base,
-      IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT, IREE_ASYNC_OPERATION_FLAG_NONE,
-      iree_net_shm_win32_listener_accept_complete, listener);
-  listener->event_wait_operation.event = listener->event;
-  iree_status_t status = iree_async_proactor_submit_one(
-      listener->proactor, &listener->event_wait_operation.base);
+  memset(&listener->overlapped, 0, sizeof(listener->overlapped));
+  listener->overlapped.hEvent = event_handle;
+
+  iree_status_t status = iree_ok_status();
+  BOOL connected =
+      ConnectNamedPipe(listener->pipe_handle, &listener->overlapped);
+  if (connected) {
+    status = iree_async_event_set(listener->event);
+  } else {
+    DWORD error = GetLastError();
+    if (error == ERROR_IO_PENDING) {
+      listener->connect_operation_pending = true;
+    } else if (error == ERROR_PIPE_CONNECTED) {
+      status = iree_async_event_set(listener->event);
+    } else {
+      status = iree_make_status(iree_status_code_from_win32_error(error),
+                                "ConnectNamedPipe failed");
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(&listener->event_wait_operation, 0,
+           sizeof(listener->event_wait_operation));
+    iree_async_operation_initialize(
+        &listener->event_wait_operation.base,
+        IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT, IREE_ASYNC_OPERATION_FLAG_NONE,
+        iree_net_shm_win32_listener_accept_complete, listener);
+    listener->event_wait_operation.event = listener->event;
+    status = iree_async_proactor_submit_one(
+        listener->proactor, &listener->event_wait_operation.base);
+    listener->accept_pending = iree_status_is_ok(status);
+  }
+
   if (!iree_status_is_ok(status)) {
-    // Submit failed: the pending ConnectNamedPipe has no completion path.
-    // Close the pipe handle to cancel the overlapped IO and prevent leaking
-    // the handle. This makes start_accept self-contained: callers don't need
-    // to handle partial cleanup.
+    status = iree_status_join(
+        status, iree_net_shm_win32_listener_cancel_and_await_connect(listener));
     CloseHandle(listener->pipe_handle);
     listener->pipe_handle = INVALID_HANDLE_VALUE;
   }
   return status;
 }
 
-// Re-arms the accept loop: creates a new pipe instance (the previous one was
-// consumed by the handshake) and starts listening for the next connection.
 static iree_status_t iree_net_shm_win32_listener_rearm(
     iree_net_shm_win32_listener_t* listener) {
-  iree_status_t status = iree_net_shm_win32_listener_create_pipe(listener);
-  if (!iree_status_is_ok(status)) return status;
-  return iree_net_shm_win32_listener_start_accept(listener);
-}
-
-// Handles a successfully accepted pipe connection: takes ownership of the pipe,
-// runs the server-side endpoint handshakes, creates a multi-endpoint
-// connection, and delivers it to the consumer. On failure at any step, reports
-// the error to the consumer.
-static void iree_net_shm_win32_listener_handle_accepted(
-    iree_net_shm_win32_listener_t* listener) {
-  // Take ownership of the connected pipe. The handshake transfers the
-  // primitive to the xproc context on success and closes it on failure.
-  HANDLE pipe = listener->pipe_handle;
-  listener->pipe_handle = INVALID_HANDLE_VALUE;
-  iree_async_primitive_t channel =
-      iree_async_primitive_from_win32_handle((uintptr_t)pipe);
-
-  // Get or create shared_wake for this proactor.
-  iree_net_shm_shared_wake_t* shared_wake = NULL;
-  iree_slim_mutex_lock(&listener->factory->mutex);
-  iree_status_t status = iree_net_shm_factory_get_or_create_shared_wake(
-      listener->factory, listener->proactor, &shared_wake);
-  iree_slim_mutex_unlock(&listener->factory->mutex);
-
-  uint16_t endpoint_count = listener->factory->options.max_endpoint_count;
-  iree_net_shm_handshake_result_t* handshake_results = NULL;
-  if (iree_status_is_ok(status) && endpoint_count == 0) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "SHM listener requires at least one endpoint");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        listener->host_allocator, endpoint_count, sizeof(*handshake_results),
-        (void**)&handshake_results);
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  bool can_accept =
+      listener->state == IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING &&
+      !listener->accept_pending &&
+      listener->pending_bootstrap_count <
+          IREE_NET_SHM_WIN32_MAX_PENDING_BOOTSTRAPS;
+  if (can_accept) {
+    status = iree_net_shm_win32_listener_create_pipe(listener);
     if (iree_status_is_ok(status)) {
-      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
+      status = iree_net_shm_win32_listener_start_accept_locked(listener);
     }
   }
-  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
-    status = iree_net_shm_handshake_server_endpoint(
-        channel, shared_wake, listener->factory->options, listener->proactor,
-        listener->host_allocator, &handshake_results[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_result_attach_file_transfer(
-        &channel, listener->host_allocator, &handshake_results[0]);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_async_primitive_close(&channel);
-    if (handshake_results) {
-      for (uint16_t i = 0; i < endpoint_count; ++i) {
-        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
-      }
-    }
-  }
-
-  iree_net_connection_t* connection = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create_from_handshake_results(
-        listener->proactor, endpoint_count, handshake_results,
-        listener->recv_pool, listener->host_allocator, &connection);
-  }
-  iree_allocator_free(listener->host_allocator, handshake_results);
-
-  if (iree_status_is_ok(status)) {
-    listener->accept.fn(listener->accept.user_data, iree_ok_status(),
-                        connection);
-  } else {
-    listener->accept.fn(listener->accept.user_data, status, NULL);
-  }
+  iree_slim_mutex_unlock(&listener->mutex);
+  return status;
 }
 
-// Accept completion callback. Fires on the proactor thread when the
-// EVENT_WAIT for ConnectNamedPipe completes. Runs the server-side handshake,
-// creates a carrier, delivers to the consumer, and re-arms for the next
-// connection.
-//
-// The handshake is synchronous but completes in microseconds over a local
-// named pipe. The 5s timeout in the handshake is a safety valve for
-// pathological peers. During the handshake, the proactor thread is blocked --
-// acceptable for local IPC bootstrapping.
+static void iree_net_shm_win32_pending_bootstrap_complete(
+    void* user_data, iree_status_t status,
+    iree_net_shm_bootstrap_completion_flags_t flags,
+    iree_net_connection_t* connection) {
+  iree_net_shm_win32_pending_bootstrap_t* pending =
+      (iree_net_shm_win32_pending_bootstrap_t*)user_data;
+  iree_net_shm_win32_listener_t* listener = pending->listener;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_slim_mutex_lock(&listener->mutex);
+  iree_net_shm_win32_pending_bootstrap_t** previous =
+      &listener->pending_bootstraps;
+  while (*previous && *previous != pending) {
+    previous = &(*previous)->next;
+  }
+  IREE_ASSERT(*previous == pending,
+              "completed SHM bootstrap missing from listener");
+  *previous = pending->next;
+  --listener->pending_bootstrap_count;
+  iree_slim_mutex_unlock(&listener->mutex);
+  iree_allocator_free(listener->host_allocator, pending);
+
+  if (iree_any_bit_set(flags,
+                       IREE_NET_SHM_BOOTSTRAP_COMPLETION_FLAG_CANCELLED)) {
+    IREE_ASSERT(!connection);
+    if (!iree_status_is_ok(status)) {
+      listener->accept.fn(listener->accept.user_data, status, NULL);
+    }
+  } else {
+    listener->accept.fn(listener->accept.user_data, status, connection);
+  }
+
+  iree_status_t rearm_status = iree_net_shm_win32_listener_rearm(listener);
+  if (!iree_status_is_ok(rearm_status)) {
+    listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
+  }
+  iree_net_shm_win32_listener_maybe_finish_stop(listener);
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static iree_status_t iree_net_shm_win32_listener_start_bootstrap(
+    iree_net_shm_win32_listener_t* listener) {
+  IREE_ASSERT(listener->pipe_handle != INVALID_HANDLE_VALUE);
+  iree_async_primitive_t channel =
+      iree_async_primitive_from_win32_handle((uintptr_t)listener->pipe_handle);
+  listener->pipe_handle = INVALID_HANDLE_VALUE;
+
+  iree_net_shm_win32_pending_bootstrap_t* pending = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      listener->host_allocator, sizeof(*pending), (void**)&pending);
+  if (iree_status_is_ok(status)) {
+    memset(pending, 0, sizeof(*pending));
+    pending->listener = listener;
+    status = iree_net_shm_bootstrap_prepare(
+        listener->factory, IREE_NET_SHM_BOOTSTRAP_ROLE_SERVER, &channel,
+        listener->proactor,
+        (iree_net_shm_bootstrap_callback_t){
+            .fn = iree_net_shm_win32_pending_bootstrap_complete,
+            .user_data = pending,
+        },
+        listener->host_allocator, &pending->bootstrap);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&listener->mutex);
+    pending->next = listener->pending_bootstraps;
+    listener->pending_bootstraps = pending;
+    ++listener->pending_bootstrap_count;
+    bool cancel_immediately =
+        listener->state != IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING;
+    iree_slim_mutex_unlock(&listener->mutex);
+    if (cancel_immediately) {
+      iree_net_shm_bootstrap_cancel(pending->bootstrap);
+    }
+    iree_net_shm_bootstrap_launch(pending->bootstrap);
+  } else {
+    iree_allocator_free(listener->host_allocator, pending);
+    iree_async_primitive_close(&channel);
+  }
+  return status;
+}
+
 static void iree_net_shm_win32_listener_accept_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
   iree_net_shm_win32_listener_t* listener =
       (iree_net_shm_win32_listener_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_ASSERT(!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE));
 
-  // Handle stopping: close the pipe and fire the stopped callback.
-  if (listener->state == IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPING) {
-    iree_status_ignore(status);
-    if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
-      CloseHandle(listener->pipe_handle);
-      listener->pipe_handle = INVALID_HANDLE_VALUE;
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->accept_pending);
+  listener->accept_pending = false;
+  bool is_stopping =
+      listener->state != IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING;
+  iree_slim_mutex_unlock(&listener->mutex);
+
+  bool connect_cancelled = false;
+  if (iree_status_is_ok(status) && listener->connect_operation_pending) {
+    DWORD bytes_transferred = 0;
+    if (!GetOverlappedResult(listener->pipe_handle, &listener->overlapped,
+                             &bytes_transferred, /*bWait=*/FALSE)) {
+      DWORD error = GetLastError();
+      if (is_stopping && error == ERROR_OPERATION_ABORTED) {
+        connect_cancelled = true;
+      } else {
+        status = iree_make_status(iree_status_code_from_win32_error(error),
+                                  "ConnectNamedPipe failed");
+      }
     }
-    listener->stopped_callback.fn(listener->stopped_callback.user_data);
-    IREE_TRACE_ZONE_END(z0);
-    return;
+    listener->connect_operation_pending = false;
+  } else if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status, iree_net_shm_win32_listener_cancel_and_await_connect(listener));
+  }
+
+  if (iree_status_is_ok(status) && !connect_cancelled) {
+    status = iree_net_shm_win32_listener_start_bootstrap(listener);
+  } else if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(listener->pipe_handle);
+    listener->pipe_handle = INVALID_HANDLE_VALUE;
   }
 
   if (!iree_status_is_ok(status)) {
-    // EVENT_WAIT failed (e.g., proactor shutdown). Report to consumer.
-    if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
-      CloseHandle(listener->pipe_handle);
-      listener->pipe_handle = INVALID_HANDLE_VALUE;
-    }
     listener->accept.fn(listener->accept.user_data, status, NULL);
-    IREE_TRACE_ZONE_END(z0);
-    return;
   }
 
-  // Confirm ConnectNamedPipe completed successfully via GetOverlappedResult.
-  // bWait=FALSE because the I/O has already completed (the event was
-  // signaled).
-  DWORD bytes_transferred = 0;
-  if (!GetOverlappedResult(listener->pipe_handle, &listener->overlapped,
-                           &bytes_transferred, /*bWait=*/FALSE)) {
-    DWORD error = GetLastError();
-    CloseHandle(listener->pipe_handle);
-    listener->pipe_handle = INVALID_HANDLE_VALUE;
-    listener->accept.fn(
-        listener->accept.user_data,
-        iree_make_status(iree_status_code_from_win32_error(error),
-                         "ConnectNamedPipe failed (overlapped result)"),
-        NULL);
-    // Re-arm with a fresh pipe instance.
-    iree_status_t rearm_status = iree_net_shm_win32_listener_rearm(listener);
-    if (!iree_status_is_ok(rearm_status)) {
-      listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
-    }
-    IREE_TRACE_ZONE_END(z0);
-    return;
+  iree_status_t rearm_status = iree_net_shm_win32_listener_rearm(listener);
+  if (!iree_status_is_ok(rearm_status)) {
+    listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
   }
-
-  // Connection accepted -- run the handshake and deliver the carrier.
-  iree_net_shm_win32_listener_handle_accepted(listener);
-
-  // Re-arm: create a new pipe instance and start accepting. Check state
-  // first in case stop() was called during the (synchronous) handshake.
-  if (listener->state == IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING) {
-    iree_status_t rearm_status = iree_net_shm_win32_listener_rearm(listener);
-    if (!iree_status_is_ok(rearm_status)) {
-      listener->accept.fn(listener->accept.user_data, rearm_status, NULL);
-    }
-  } else {
-    // stop() was called during the handshake. The pipe was consumed by the
-    // handshake and no new I/O is pending, so fire stopped_callback directly.
-    listener->stopped_callback.fn(listener->stopped_callback.user_data);
-  }
-
+  iree_net_shm_win32_listener_maybe_finish_stop(listener);
   IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_net_shm_win32_listener_stop_deferred_complete(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  iree_net_shm_win32_listener_t* listener =
+      (iree_net_shm_win32_listener_t*)user_data;
+  iree_slim_mutex_lock(&listener->mutex);
+  IREE_ASSERT(listener->stop_operation_pending);
+  listener->stop_operation_pending = false;
+  iree_slim_mutex_unlock(&listener->mutex);
+  if (!iree_status_is_ok(status)) {
+    listener->accept.fn(listener->accept.user_data, status, NULL);
+  }
+  iree_net_shm_win32_listener_maybe_finish_stop(listener);
 }
 
 static void iree_net_shm_win32_listener_free(
@@ -392,12 +450,19 @@ static void iree_net_shm_win32_listener_free(
   iree_net_shm_win32_listener_t* listener =
       (iree_net_shm_win32_listener_t*)base_listener;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_ASSERT(listener->stopped_delivered,
+              "SHM listener freed before stopped callback");
+  IREE_ASSERT(!listener->accept_pending);
+  IREE_ASSERT(!listener->connect_operation_pending);
+  IREE_ASSERT(!listener->stop_operation_pending);
+  IREE_ASSERT(!listener->pending_bootstraps);
   if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
     CloseHandle(listener->pipe_handle);
   }
-  if (listener->event) {
-    iree_async_event_release(listener->event);
-  }
+  iree_async_event_release(listener->event);
+  iree_async_proactor_release(listener->proactor);
+  iree_net_transport_factory_release(&listener->factory->base);
+  iree_slim_mutex_deinitialize(&listener->mutex);
   iree_allocator_t host_allocator = listener->host_allocator;
   iree_allocator_free(host_allocator, listener);
   IREE_TRACE_ZONE_END(z0);
@@ -409,20 +474,56 @@ static iree_status_t iree_net_shm_win32_listener_stop(
   iree_net_shm_win32_listener_t* listener =
       (iree_net_shm_win32_listener_t*)base_listener;
   IREE_TRACE_ZONE_BEGIN(z0);
-  listener->stopped_callback = callback;
-  listener->state = IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPING;
-  // Cancel the pending ConnectNamedPipe. The kernel completes the I/O with
-  // ERROR_OPERATION_ABORTED and signals the OVERLAPPED event. This triggers
-  // the EVENT_WAIT, and the callback sees state=STOPPING for cleanup.
-  //
-  // If the pipe was already consumed (callback is running the handshake),
-  // CancelIoEx has nothing to cancel. The callback will detect STOPPING after
-  // the handshake and fire stopped_callback directly.
-  if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
-    CancelIoEx(listener->pipe_handle, &listener->overlapped);
+
+  bool rearm_after_failure = false;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  if (listener->state != IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "SHM listener is already stopping");
+  } else {
+    listener->state = IREE_NET_SHM_WIN32_LISTENER_STATE_STOPPING;
+    listener->stopped_callback = callback;
+    for (iree_net_shm_win32_pending_bootstrap_t* pending =
+             listener->pending_bootstraps;
+         pending; pending = pending->next) {
+      iree_net_shm_bootstrap_cancel(pending->bootstrap);
+    }
+
+    if (listener->accept_pending && listener->connect_operation_pending &&
+        !CancelIoEx(listener->pipe_handle, &listener->overlapped)) {
+      DWORD error = GetLastError();
+      if (error != ERROR_NOT_FOUND) {
+        status = iree_make_status(iree_status_code_from_win32_error(error),
+                                  "CancelIoEx failed for ConnectNamedPipe");
+      }
+    }
+
+    if (!listener->accept_pending && !listener->pending_bootstraps) {
+      iree_async_operation_initialize(
+          &listener->stop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+          iree_net_shm_win32_listener_stop_deferred_complete, listener);
+      listener->stop_operation_pending = true;
+      iree_status_t submit_status = iree_async_proactor_submit_one(
+          listener->proactor, &listener->stop_operation.base);
+      if (!iree_status_is_ok(submit_status)) {
+        listener->stop_operation_pending = false;
+        listener->state = IREE_NET_SHM_WIN32_LISTENER_STATE_LISTENING;
+        listener->stopped_callback = (iree_net_listener_stopped_callback_t){0};
+        rearm_after_failure = true;
+      }
+      status = iree_status_join(status, submit_status);
+    }
+  }
+  iree_slim_mutex_unlock(&listener->mutex);
+
+  if (rearm_after_failure) {
+    status =
+        iree_status_join(status, iree_net_shm_win32_listener_rearm(listener));
   }
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_net_shm_win32_listener_query_bound_address(
@@ -445,18 +546,15 @@ static const iree_net_listener_vtable_t iree_net_shm_win32_listener_vtable = {
     .query_bound_address = iree_net_shm_win32_listener_query_bound_address,
 };
 
-// Creates a cross-process listener on a Windows named pipe. Validates the
-// address, creates the pipe instance, and submits the initial accept operation.
 iree_status_t iree_net_shm_factory_create_listener_win32(
     iree_net_shm_factory_t* factory, iree_string_view_t bind_address,
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_listener_accept_callback_t accept_callback, void* user_data,
     iree_allocator_t host_allocator, iree_net_listener_t** out_listener) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)recv_pool;
   *out_listener = NULL;
 
-  // Validate the pipe name by building the wide path (catches empty names and
-  // paths that exceed MAX_PATH).
   iree_string_view_t name = iree_net_shm_win32_strip_pipe_prefix(bind_address);
   WCHAR pipe_path[IREE_NET_SHM_MAX_PIPE_PATH_LENGTH];
   int pipe_path_length = 0;
@@ -464,13 +562,10 @@ iree_status_t iree_net_shm_factory_create_listener_win32(
       z0,
       iree_net_shm_win32_build_pipe_path(name, pipe_path, &pipe_path_length));
 
-  // Create the event for ConnectNamedPipe signaling. The event is reused
-  // across accept cycles (one per listener, not per connection).
   iree_async_event_t* event = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_async_event_create(proactor, &event));
 
-  // Allocate the listener with trailing space for the address string.
   iree_host_size_t total_size = 0;
   iree_status_t status = IREE_STRUCT_LAYOUT(
       iree_sizeof_struct(iree_net_shm_win32_listener_t), &total_size,
@@ -484,163 +579,82 @@ iree_status_t iree_net_shm_factory_create_listener_win32(
     memset(listener, 0, total_size);
     listener->base.vtable = &iree_net_shm_win32_listener_vtable;
     listener->factory = factory;
+    iree_net_transport_factory_retain(&factory->base);
     listener->proactor = proactor;
-    listener->recv_pool = recv_pool;
+    iree_async_proactor_retain(proactor);
     listener->pipe_handle = INVALID_HANDLE_VALUE;
     listener->event = event;
     listener->accept.fn = accept_callback;
     listener->accept.user_data = user_data;
+    iree_slim_mutex_initialize(&listener->mutex);
     listener->host_allocator = host_allocator;
     listener->address_length = bind_address.size;
     memcpy(listener->address, bind_address.data, bind_address.size);
     listener->address[bind_address.size] = '\0';
   }
 
-  // Create the first pipe instance.
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_win32_listener_create_pipe(listener);
-  }
-
-  // Start listening for the first connection.
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_win32_listener_start_accept(listener);
+    status = iree_net_shm_win32_listener_rearm(listener);
   }
 
   if (iree_status_is_ok(status)) {
     *out_listener = &listener->base;
+  } else if (listener) {
+    iree_slim_mutex_deinitialize(&listener->mutex);
+    iree_async_proactor_release(listener->proactor);
+    iree_net_transport_factory_release(&listener->factory->base);
+    iree_async_event_release(listener->event);
+    iree_allocator_free(host_allocator, listener);
   } else {
-    if (listener) {
-      if (listener->pipe_handle != INVALID_HANDLE_VALUE) {
-        CloseHandle(listener->pipe_handle);
-      }
-      iree_allocator_free(host_allocator, listener);
-    }
     iree_async_event_release(event);
   }
+
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 //===----------------------------------------------------------------------===//
-// Cross-process connect (Windows named pipe)
+// Cross-process connect
 //===----------------------------------------------------------------------===//
 
-// Heap-allocated state for async named pipe connect. Freed in the NOP
-// completion callback after the handshake and carrier creation.
 typedef struct iree_net_shm_win32_connect_state_t {
-  iree_async_nop_operation_t nop_operation;
+  // Consumer connect callback.
   struct {
+    // Function receiving the terminal connection result.
     iree_net_transport_connect_callback_t fn;
+    // Opaque value passed to |fn|.
     void* user_data;
   } callback;
-  iree_net_shm_factory_t* factory;
-  iree_async_proactor_t* proactor;
-  iree_async_buffer_pool_t* recv_pool;
-  // Connected pipe handle, passed to the handshake. Set to INVALID_HANDLE_VALUE
-  // after the handshake takes ownership.
-  HANDLE pipe_handle;
+  // Bootstrap operation valid until its callback begins.
+  iree_net_shm_bootstrap_t* bootstrap;
+  // Allocator used for this state.
   iree_allocator_t host_allocator;
 } iree_net_shm_win32_connect_state_t;
 
-// Handles the connected pipe: runs the client-side endpoint handshakes, creates
-// a multi-endpoint connection, and delivers it to the consumer. On failure at
-// any step, reports the error to the consumer.
-static void iree_net_shm_win32_connect_handle_connected(
-    iree_net_shm_win32_connect_state_t* state) {
-  // Take ownership of the pipe for the handshake. The handshake transfers the
-  // channel primitive to the xproc context on success and closes it on failure.
-  iree_async_primitive_t channel =
-      iree_async_primitive_from_win32_handle((uintptr_t)state->pipe_handle);
-  state->pipe_handle = INVALID_HANDLE_VALUE;
-
-  // Get or create shared_wake for this proactor.
-  iree_net_shm_shared_wake_t* shared_wake = NULL;
-  iree_slim_mutex_lock(&state->factory->mutex);
-  iree_status_t status = iree_net_shm_factory_get_or_create_shared_wake(
-      state->factory, state->proactor, &shared_wake);
-  iree_slim_mutex_unlock(&state->factory->mutex);
-
-  uint16_t endpoint_count = state->factory->options.max_endpoint_count;
-  iree_net_shm_handshake_result_t* handshake_results = NULL;
-  if (iree_status_is_ok(status) && endpoint_count == 0) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "SHM connection requires at least one endpoint");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(state->host_allocator, endpoint_count,
-                                         sizeof(*handshake_results),
-                                         (void**)&handshake_results);
-    if (iree_status_is_ok(status)) {
-      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
-    }
-  }
-  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
-    status = iree_net_shm_handshake_client_endpoint(
-        channel, shared_wake, state->proactor, state->host_allocator,
-        &handshake_results[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_result_attach_file_transfer(
-        &channel, state->host_allocator, &handshake_results[0]);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_async_primitive_close(&channel);
-    if (handshake_results) {
-      for (uint16_t i = 0; i < endpoint_count; ++i) {
-        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
-      }
-    }
-  }
-
-  iree_net_connection_t* connection = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create_from_handshake_results(
-        state->proactor, endpoint_count, handshake_results, state->recv_pool,
-        state->host_allocator, &connection);
-  }
-  iree_allocator_free(state->host_allocator, handshake_results);
-
-  if (iree_status_is_ok(status)) {
-    state->callback.fn(state->callback.user_data, iree_ok_status(), connection);
-  } else {
-    state->callback.fn(state->callback.user_data, status, NULL);
-  }
-}
-
-// NOP completion callback for deferred delivery of the connect result. The
-// pipe is already connected (CreateFile succeeded synchronously); we use a NOP
-// to run the handshake on the proactor thread.
-static void iree_net_shm_win32_connect_nop_complete(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
+static void iree_net_shm_win32_connect_bootstrap_complete(
+    void* user_data, iree_status_t status,
+    iree_net_shm_bootstrap_completion_flags_t flags,
+    iree_net_connection_t* connection) {
   iree_net_shm_win32_connect_state_t* state =
       (iree_net_shm_win32_connect_state_t*)user_data;
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  if (iree_status_is_ok(status)) {
-    iree_net_shm_win32_connect_handle_connected(state);
-  } else {
-    // NOP failed (cancelled or proactor shutdown). Close the pipe and report.
-    if (state->pipe_handle != INVALID_HANDLE_VALUE) {
-      CloseHandle(state->pipe_handle);
-    }
-    state->callback.fn(state->callback.user_data, status, NULL);
+  state->bootstrap = NULL;
+  if (iree_any_bit_set(flags,
+                       IREE_NET_SHM_BOOTSTRAP_COMPLETION_FLAG_CANCELLED) &&
+      iree_status_is_ok(status)) {
+    status = iree_make_status(IREE_STATUS_CANCELLED,
+                              "SHM connection bootstrap cancelled");
   }
-
+  state->callback.fn(state->callback.user_data, status, connection);
   iree_allocator_free(state->host_allocator, state);
-  IREE_TRACE_ZONE_END(z0);
 }
 
-// Initiates a cross-process connect to a Windows named pipe. Opens the pipe
-// via CreateFile (which connects synchronously), then submits a NOP to defer
-// the handshake to the proactor thread.
 iree_status_t iree_net_shm_factory_connect_win32(
     iree_net_shm_factory_t* factory, iree_string_view_t address,
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_transport_connect_callback_t callback, void* user_data) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)recv_pool;
 
-  // Build the wide pipe path from the address.
   iree_string_view_t name = iree_net_shm_win32_strip_pipe_prefix(address);
   WCHAR pipe_path[IREE_NET_SHM_MAX_PIPE_PATH_LENGTH];
   int pipe_path_length = 0;
@@ -648,13 +662,8 @@ iree_status_t iree_net_shm_factory_connect_win32(
       z0,
       iree_net_shm_win32_build_pipe_path(name, pipe_path, &pipe_path_length));
 
-  // Open the pipe. CreateFile on a named pipe connects to an existing server
-  // instance synchronously -- either it succeeds immediately or fails.
-  HANDLE pipe = CreateFileW(pipe_path, GENERIC_READ | GENERIC_WRITE,
-                            0,     // No sharing.
-                            NULL,  // Default security.
-                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED,
-                            NULL);  // No template.
+  HANDLE pipe = CreateFileW(pipe_path, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
   if (pipe == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
     IREE_TRACE_ZONE_END(z0);
@@ -662,7 +671,8 @@ iree_status_t iree_net_shm_factory_connect_win32(
       return iree_make_status(IREE_STATUS_UNAVAILABLE,
                               "all pipe instances busy for '%.*s'; retry later",
                               (int)name.size, name.data);
-    } else if (error == ERROR_FILE_NOT_FOUND) {
+    }
+    if (error == ERROR_FILE_NOT_FOUND) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "no server listening on pipe '%.*s'",
                               (int)name.size, name.data);
@@ -672,36 +682,34 @@ iree_status_t iree_net_shm_factory_connect_win32(
                             (int)name.size, name.data);
   }
 
-  // Allocate connect state for the deferred handshake.
   iree_net_shm_win32_connect_state_t* state = NULL;
   iree_status_t status = iree_allocator_malloc(factory->host_allocator,
                                                sizeof(*state), (void**)&state);
-  if (!iree_status_is_ok(status)) {
-    CloseHandle(pipe);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-  memset(state, 0, sizeof(*state));
-  state->callback.fn = callback;
-  state->callback.user_data = user_data;
-  state->factory = factory;
-  state->proactor = proactor;
-  state->recv_pool = recv_pool;
-  state->pipe_handle = pipe;
-  state->host_allocator = factory->host_allocator;
+  if (iree_status_is_ok(status)) {
+    memset(state, 0, sizeof(*state));
+    state->callback.fn = callback;
+    state->callback.user_data = user_data;
+    state->host_allocator = factory->host_allocator;
 
-  // Submit a NOP for deferred delivery. The handshake runs on the proactor
-  // thread in the NOP callback.
-  iree_async_operation_initialize(
-      &state->nop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_shm_win32_connect_nop_complete,
-      state);
-  status = iree_async_proactor_submit_one(proactor, &state->nop_operation.base);
+    iree_async_primitive_t channel =
+        iree_async_primitive_from_win32_handle((uintptr_t)pipe);
+    status = iree_net_shm_bootstrap_prepare(
+        factory, IREE_NET_SHM_BOOTSTRAP_ROLE_CLIENT, &channel, proactor,
+        (iree_net_shm_bootstrap_callback_t){
+            .fn = iree_net_shm_win32_connect_bootstrap_complete,
+            .user_data = state,
+        },
+        factory->host_allocator, &state->bootstrap);
+    if (iree_status_is_ok(status)) {
+      pipe = INVALID_HANDLE_VALUE;
+      iree_net_shm_bootstrap_launch(state->bootstrap);
+    }
+  }
+
   if (!iree_status_is_ok(status)) {
-    CloseHandle(pipe);
+    if (pipe != INVALID_HANDLE_VALUE) CloseHandle(pipe);
     iree_allocator_free(factory->host_allocator, state);
   }
-
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

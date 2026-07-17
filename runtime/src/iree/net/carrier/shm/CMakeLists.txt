@@ -54,6 +54,7 @@ iree_cc_library(
     ::xproc_context
     iree::async
     iree::base
+    iree::base::internal
     iree::base::internal::mpsc_queue
     iree::base::internal::shm
   PUBLIC
@@ -114,7 +115,9 @@ iree_cc_library(
     "factory.h"
   SRCS
     "factory.c"
-    "factory_internal.h"
+    "factory_bootstrap.c"
+    "factory_bootstrap.h"
+    "factory_state.h"
     "factory_unix.c"
     "factory_win32.c"
   DEPS
@@ -124,7 +127,10 @@ iree_cc_library(
     ::shm_pair
     iree::async
     iree::base
+    iree::base::internal
     iree::base::threading
+    iree::base::threading::thread
+    iree::net::buffer_lease
     iree::net::channel::util::frame_sender
     iree::net::connection
     iree::net::endpoint_lifecycle

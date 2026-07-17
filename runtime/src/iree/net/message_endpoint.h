@@ -55,8 +55,9 @@ extern "C" {
 // reassembled from fragments. |message.data| is aligned to
 // IREE_NET_MESSAGE_ALIGNMENT.
 //
-// To keep the message data valid beyond the callback, retain the lease via
-// iree_async_buffer_lease_retain(). Release it when done processing.
+// To keep the message data valid beyond the callback, move the lease by copying
+// it and clearing the callback's lease value. Release the moved lease when
+// done.
 //
 // Return iree_ok_status() to continue receiving. Returning an error triggers
 // the endpoint's error handler and may cause deactivation.

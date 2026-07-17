@@ -275,7 +275,8 @@ typedef struct iree_net_session_options_t {
   iree_net_session_topology_t local_topology;
 
   // Timeout for bootstrap to complete (HELLO -> HELLO_ACK or REJECT).
-  // Zero uses IREE_NET_SESSION_DEFAULT_BOOTSTRAP_TIMEOUT_NS.
+  // Zero uses IREE_NET_SESSION_DEFAULT_BOOTSTRAP_TIMEOUT_NS and
+  // IREE_DURATION_INFINITE disables expiry while preserving cancellation.
   iree_duration_t bootstrap_timeout_ns;
 
   // Protocol version to offer. Zero uses IREE_NET_BOOTSTRAP_PROTOCOL_VERSION.
@@ -397,14 +398,15 @@ IREE_API_EXPORT void iree_net_session_detach_callbacks(
 // The deactivation request closes the transport submission gate before
 // draining. Calls already admitted cross their submission boundary first, and
 // their callbacks are allowed to finish. |callback| fires exactly once after
-// the control and application endpoints have drained and may fire synchronously
-// when no endpoint is active.
+// the control and application endpoints, bootstrap timer, and all application
+// callbacks have retired. It may fire synchronously when none are active.
 //
 // An actively bootstrapping connection cannot be deactivated. A failed session
-// that never acquired a connection completes deactivation synchronously. The
-// caller must retain |session| until |callback| fires. This operation must be
-// issued exactly once. Releasing the final session reference without calling
-// this function performs the same drain implicitly before destruction.
+// that never acquired a connection completes deactivation after its bootstrap
+// timer cancellation retires. The caller must retain |session| until |callback|
+// fires. This operation must be issued exactly once. Releasing the final
+// session reference without calling this function performs the same drain
+// implicitly before destruction.
 IREE_API_EXPORT iree_status_t
 iree_net_session_deactivate(iree_net_session_t* session,
                             iree_net_session_deactivated_callback_t callback);

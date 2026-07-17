@@ -63,8 +63,7 @@ iree_status_t iree_net_frame_accumulator_push_lease(
         iree_status_t status = accumulator->on_frame_complete.fn(
             accumulator->on_frame_complete.user_data, frame, lease);
         if (!iree_status_is_ok(status)) {
-          // Always release our handle. If callback retained the lease (called
-          // iree_async_buffer_lease_retain), it has its own reference.
+          // Release unless the callback moved the lease and cleared this value.
           iree_async_buffer_lease_release(lease);
           return status;
         }
