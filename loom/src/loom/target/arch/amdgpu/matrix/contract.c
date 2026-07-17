@@ -79,12 +79,11 @@ static const loom_amdgpu_matrix_feature_bits_t
             LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
             LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
             LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12,
+        // GFX1250 replaces the legacy WMMA and SWMMAC instruction shapes;
+        // these feature sets are not backwards-compatible ISA generations.
         [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250] =
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
             LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
             LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12 |
             LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
 };
 

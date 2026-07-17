@@ -2,6 +2,54 @@
   "version": 1,
   "cases": [
     {
+      "name": "gates legacy gfx12 WMMA off gfx1250",
+      "steps": [
+        {
+          "name": "compile-gfx1200-control",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx12_wmma_bf16_f32.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1200",
+              "--output={tmp}/gfx12_wmma_bf16_f32_gfx1200.hal",
+              "--emit-target-artifact={tmp}/gfx12_wmma_bf16_f32_gfx1200.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx12_wmma_bf16_f32_gfx1200.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx12_wmma_bf16_f32.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/gfx12_wmma_bf16_f32_gfx1250.hal",
+              "--emit-target-artifact={tmp}/gfx12_wmma_bf16_f32_gfx1250.hsaco"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [AMDGPU/021]",
+                "matrix constraint 'processor_features' is not satisfied"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {

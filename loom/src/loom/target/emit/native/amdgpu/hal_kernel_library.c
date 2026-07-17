@@ -445,7 +445,8 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
       0;
   if (iree_any_bit_set(feature_bits,
                        LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
-                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12)) {
+                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
+                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250)) {
     fp8_bf8_support |=
         LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED;
   }

@@ -772,13 +772,16 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     const char* profile_name;
     // Active matrix feature expected for |processor_name|.
     const char* feature_name;
+    // Native FP8/BF8 support kind expected for |processor_name|.
+    const char* fp8_bf8_native_kind;
   };
   static constexpr MatrixFeatureReportCase kCases[] = {
-      {"gfx942", "mfma-gfx940", "mfma-gfx940-fp8"},
-      {"gfx950", "mfma-gfx950", "mfma-gfx950-scale-f8f6f4"},
-      {"gfx1100", "wmma-gfx11", "wmma-gfx11"},
-      {"gfx1200", "wmma-gfx12", "wmma-gfx12"},
-      {"gfx1250", "wmma-gfx1250", "wmma-gfx1250-scale-f8f6f4"},
+      {"gfx942", "mfma-gfx940", "mfma-gfx940-fp8", "unscaled"},
+      {"gfx950", "mfma-gfx950", "mfma-gfx950-scale-f8f6f4", "unscaled_scaled"},
+      {"gfx1100", "wmma-gfx11", "wmma-gfx11", "none"},
+      {"gfx1200", "wmma-gfx12", "wmma-gfx12", "unscaled"},
+      {"gfx1250", "wmma-gfx1250", "wmma-gfx1250-scale-f8f6f4",
+       "unscaled_scaled"},
   };
 
   iree_host_size_t checked_count = 0;
@@ -823,6 +826,14 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
         << test_case.processor_name;
     EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "matrix_feature",
                                           test_case.feature_name))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu",
+                                          "matrix_fp8_native_kind",
+                                          test_case.fp8_bf8_native_kind))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu",
+                                          "matrix_bf8_native_kind",
+                                          test_case.fp8_bf8_native_kind))
         << test_case.processor_name;
     loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
     ASSERT_TRUE(loom_amdgpu_matrix_feature_bits_from_profile(
