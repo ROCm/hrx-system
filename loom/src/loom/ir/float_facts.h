@@ -39,6 +39,11 @@ typedef enum loom_float_clamp_kind_e {
   LOOM_FLOAT_CLAMP_IEEE = 2,
 } loom_float_clamp_kind_t;
 
+typedef enum loom_float_turns_kind_e {
+  LOOM_FLOAT_TURNS_SIN = 0,
+  LOOM_FLOAT_TURNS_COS = 1,
+} loom_float_turns_kind_t;
+
 typedef enum loom_float_integer_conversion_kind_e {
   // Signed destination interpretation used by scalar.fptosi.
   LOOM_FLOAT_INTEGER_CONVERSION_SIGNED = 0,
@@ -86,6 +91,14 @@ void loom_value_facts_eval_float_ternary(loom_scalar_type_t scalar_type,
                                          loom_float_ternary_f32_fn_t f32_fn,
                                          loom_float_ternary_f64_fn_t f64_fn,
                                          loom_value_facts_t* out_facts);
+
+// Evaluates sine or cosine over turns with exact quarter-turn range reduction.
+// Finite inputs preserve periodicity and produce exact cardinal values with
+// OpenCL-compatible signed zeros. NaN and infinity produce arithmetic NaN.
+void loom_value_facts_eval_float_turns(loom_scalar_type_t scalar_type,
+                                       loom_float_turns_kind_t kind,
+                                       const loom_value_facts_t* input,
+                                       loom_value_facts_t* out_facts);
 
 // Applies the exact payload-preserving sign transforms. NaN results remain
 // non-materializable because the compact fact payload cannot retain their bits.

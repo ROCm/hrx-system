@@ -2313,7 +2313,7 @@ iree_status_t loom_vector_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns: sin(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // vector.sinturnsf
 LOOM_DEFINE_ISA(loom_vector_sinturnsf_isa, LOOM_OP_VECTOR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_sinturnsf_input, 0)
@@ -2329,7 +2329,7 @@ iree_status_t loom_vector_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns: cos(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // vector.costurnsf
 LOOM_DEFINE_ISA(loom_vector_costurnsf_isa, LOOM_OP_VECTOR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_costurnsf_input, 0)

@@ -102,10 +102,6 @@ static float div_f32(float a, float b) { return a / b; }
 static double div_f64(double a, double b) { return a / b; }
 static float rsqrt_f32(float x) { return 1.0f / sqrtf(x); }
 static double rsqrt_f64(double x) { return 1.0 / sqrt(x); }
-static float sinturns_f32(float x) { return sinf(6.28318530717958647692f * x); }
-static double sinturns_f64(double x) { return sin(6.28318530717958647692 * x); }
-static float costurns_f32(float x) { return cosf(6.28318530717958647692f * x); }
-static double costurns_f64(double x) { return cos(6.28318530717958647692 * x); }
 static float roundeven_f32(float x) { return nearbyintf(x); }
 static double roundeven_f64(double x) { return nearbyint(x); }
 static float logistic_f32(float x) { return 1.0f / (1.0f + expf(-x)); }
@@ -292,8 +288,32 @@ FLOAT_UNARY_FACTS(loom_scalar_rsqrtf_facts, rsqrt_f32, rsqrt_f64)
 FLOAT_UNARY_FACTS(loom_scalar_cbrtf_facts, cbrtf, cbrt)
 FLOAT_UNARY_FACTS(loom_scalar_sinf_facts, sinf, sin)
 FLOAT_UNARY_FACTS(loom_scalar_cosf_facts, cosf, cos)
-FLOAT_UNARY_FACTS(loom_scalar_sinturnsf_facts, sinturns_f32, sinturns_f64)
-FLOAT_UNARY_FACTS(loom_scalar_costurnsf_facts, costurns_f32, costurns_f64)
+
+static iree_status_t loom_scalar_turnsf_facts(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_float_turns_kind_t kind) {
+  loom_value_facts_eval_float_turns(loom_scalar_result_element_type(module, op),
+                                    kind, &operand_facts[0], &result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_scalar_sinturnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_turnsf_facts(module, op, operand_facts, result_facts,
+                                  LOOM_FLOAT_TURNS_SIN);
+}
+
+iree_status_t loom_scalar_costurnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_turnsf_facts(module, op, operand_facts, result_facts,
+                                  LOOM_FLOAT_TURNS_COS);
+}
+
 FLOAT_UNARY_FACTS(loom_scalar_tanf_facts, tanf, tan)
 FLOAT_UNARY_FACTS(loom_scalar_asinf_facts, asinf, asin)
 FLOAT_UNARY_FACTS(loom_scalar_acosf_facts, acosf, acos)

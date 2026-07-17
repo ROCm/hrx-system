@@ -65,22 +65,6 @@ static loom_scalar_type_t loom_vector_result_element_type(
       loom_module_value_type(module, loom_op_const_results(op)[0]));
 }
 
-static float loom_vector_sinturns_f32(float x) {
-  return sinf(6.28318530717958647692f * x);
-}
-
-static double loom_vector_sinturns_f64(double x) {
-  return sin(6.28318530717958647692 * x);
-}
-
-static float loom_vector_costurns_f32(float x) {
-  return cosf(6.28318530717958647692f * x);
-}
-
-static double loom_vector_costurns_f64(double x) {
-  return cos(6.28318530717958647692 * x);
-}
-
 static float loom_vector_add_f32(float lhs, float rhs) { return lhs + rhs; }
 static double loom_vector_add_f64(double lhs, double rhs) { return lhs + rhs; }
 
@@ -1641,6 +1625,15 @@ static void loom_vector_float_abs_transfer(loom_scalar_type_t scalar_type,
   loom_value_facts_eval_float_abs(scalar_type, input, out);
 }
 
+static void loom_vector_float_turns_transfer(loom_scalar_type_t scalar_type,
+                                             const loom_value_facts_t* input,
+                                             const void* user_data,
+                                             loom_value_facts_t* out) {
+  const loom_float_turns_kind_t kind =
+      *(const loom_float_turns_kind_t*)user_data;
+  loom_value_facts_eval_float_turns(scalar_type, kind, input, out);
+}
+
 static void loom_vector_float_minmax_transfer(loom_scalar_type_t scalar_type,
                                               const loom_value_facts_t* lhs,
                                               const loom_value_facts_t* rhs,
@@ -3183,12 +3176,32 @@ LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_rsqrtf_facts, loom_vector_rsqrt_f32,
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_cbrtf_facts, cbrtf, cbrt)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_sinf_facts, sinf, sin)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_cosf_facts, cosf, cos)
-LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_sinturnsf_facts,
-                              loom_vector_sinturns_f32,
-                              loom_vector_sinturns_f64)
-LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_costurnsf_facts,
-                              loom_vector_costurns_f32,
-                              loom_vector_costurns_f64)
+
+static iree_status_t loom_vector_turnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts, loom_float_turns_kind_t kind) {
+  return loom_vector_float_unary_summary_facts(
+      context, loom_vector_result_element_type(module, op), operand_facts,
+      result_facts, loom_vector_float_turns_transfer, &kind);
+}
+
+iree_status_t loom_vector_sinturnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_vector_turnsf_facts(context, module, op, operand_facts,
+                                  result_facts, LOOM_FLOAT_TURNS_SIN);
+}
+
+iree_status_t loom_vector_costurnsf_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_vector_turnsf_facts(context, module, op, operand_facts,
+                                  result_facts, LOOM_FLOAT_TURNS_COS);
+}
+
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_tanf_facts, tanf, tan)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_asinf_facts, asinf, asin)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_acosf_facts, acosf, acos)

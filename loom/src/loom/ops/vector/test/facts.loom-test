@@ -542,7 +542,7 @@ func.def @turn_trig_uniform_exact_quadrants() -> (f32, f32, f32, f32) {
   %r0 = scalar.constant 0.0 : f32
   %r1 = scalar.constant 1.0 : f32
   %r2 = scalar.constant 1.0 : f32
-  %r3 = scalar.constant -4.3711388286737929e-08 : f32
+  %r3 = scalar.constant 0.0 : f32
   func.return %r0, %r1, %r2, %r3 : f32, f32, f32, f32
 }
 

@@ -3092,7 +3092,7 @@ vector_cosf = _lanewise_unary(
 vector_sinturnsf = _lanewise_unary(
     "vector.sinturnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise sine over turns: sin(2*pi*x), where 1.0 is one full revolution."),
+    doc=("Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_VF,
     facts="loom_vector_sinturnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -3101,7 +3101,7 @@ vector_sinturnsf = _lanewise_unary(
 vector_costurnsf = _lanewise_unary(
     "vector.costurnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise cosine over turns: cos(2*pi*x), where 1.0 is one full revolution."),
+    doc=("Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_VF,
     facts="loom_vector_costurnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",

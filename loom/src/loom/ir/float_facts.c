@@ -177,6 +177,125 @@ void loom_value_facts_eval_float_ternary(loom_scalar_type_t scalar_type,
   loom_value_facts_propagate_ternary_distribution(*a, *b, *c, out_facts);
 }
 
+// Reduces |input| to an angle in [-pi/4, pi/4] and returns its quadrant.
+// The quarter-turn divisor is exactly representable, so remquo preserves the
+// periodic position of every finite input while providing the low quotient
+// bits needed to recover the quadrant.
+static float loom_float_reduce_turns_f32(float input, int* out_quadrant) {
+  int quotient = 0;
+  const float residual = remquof(input, 0.25f, &quotient);
+  int quadrant = quotient % 4;
+  if (quadrant < 0) quadrant += 4;
+  *out_quadrant = quadrant;
+  return residual * 6.2831853071795864769252867665590057683943387987502f;
+}
+
+static double loom_float_reduce_turns_f64(double input, int* out_quadrant) {
+  int quotient = 0;
+  const double residual = remquo(input, 0.25, &quotient);
+  int quadrant = quotient % 4;
+  if (quadrant < 0) quadrant += 4;
+  *out_quadrant = quadrant;
+  return residual * 6.2831853071795864769252867665590057683943387987502;
+}
+
+static float loom_float_eval_turns_f32(float input, const void* user_data) {
+  const loom_float_turns_kind_t kind =
+      *(const loom_float_turns_kind_t*)user_data;
+  int quadrant = 0;
+  const float angle = loom_float_reduce_turns_f32(input, &quadrant);
+  if (angle == 0.0f) {
+    if (kind == LOOM_FLOAT_TURNS_SIN) {
+      if (quadrant == 1) return 1.0f;
+      if (quadrant == 3) return -1.0f;
+      return copysignf(0.0f, input);
+    }
+    if (quadrant == 0) return 1.0f;
+    if (quadrant == 2) return -1.0f;
+    return 0.0f;
+  }
+  if (kind == LOOM_FLOAT_TURNS_SIN) {
+    switch (quadrant) {
+      case 0:
+        return sinf(angle);
+      case 1:
+        return cosf(angle);
+      case 2:
+        return -sinf(angle);
+      default:
+        return -cosf(angle);
+    }
+  }
+  switch (quadrant) {
+    case 0:
+      return cosf(angle);
+    case 1:
+      return -sinf(angle);
+    case 2:
+      return -cosf(angle);
+    default:
+      return sinf(angle);
+  }
+}
+
+static double loom_float_eval_turns_f64(double input, const void* user_data) {
+  const loom_float_turns_kind_t kind =
+      *(const loom_float_turns_kind_t*)user_data;
+  int quadrant = 0;
+  const double angle = loom_float_reduce_turns_f64(input, &quadrant);
+  if (angle == 0.0) {
+    if (kind == LOOM_FLOAT_TURNS_SIN) {
+      if (quadrant == 1) return 1.0;
+      if (quadrant == 3) return -1.0;
+      return copysign(0.0, input);
+    }
+    if (quadrant == 0) return 1.0;
+    if (quadrant == 2) return -1.0;
+    return 0.0;
+  }
+  if (kind == LOOM_FLOAT_TURNS_SIN) {
+    switch (quadrant) {
+      case 0:
+        return sin(angle);
+      case 1:
+        return cos(angle);
+      case 2:
+        return -sin(angle);
+      default:
+        return -cos(angle);
+    }
+  }
+  switch (quadrant) {
+    case 0:
+      return cos(angle);
+    case 1:
+      return -sin(angle);
+    case 2:
+      return -cos(angle);
+    default:
+      return sin(angle);
+  }
+}
+
+void loom_value_facts_eval_float_turns(loom_scalar_type_t scalar_type,
+                                       loom_float_turns_kind_t kind,
+                                       const loom_value_facts_t* input,
+                                       loom_value_facts_t* out_facts) {
+  if (kind != LOOM_FLOAT_TURNS_SIN && kind != LOOM_FLOAT_TURNS_COS) {
+    *out_facts = loom_value_facts_unknown();
+    loom_value_facts_propagate_unary_distribution(*input, out_facts);
+    return;
+  }
+  if (loom_value_facts_is_nan(*input) || loom_value_facts_is_inf(*input)) {
+    *out_facts = loom_value_facts_exact_float(scalar_type, NAN);
+    loom_value_facts_propagate_unary_distribution(*input, out_facts);
+    return;
+  }
+  loom_value_facts_eval_float_unary_data(
+      scalar_type, input, loom_float_eval_turns_f32, loom_float_eval_turns_f64,
+      &kind, out_facts);
+}
+
 static float loom_float_negate_f32(float value) { return -value; }
 static double loom_float_negate_f64(double value) { return -value; }
 static float loom_float_abs_f32(float value) { return fabsf(value); }

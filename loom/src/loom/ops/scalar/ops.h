@@ -928,7 +928,7 @@ iree_status_t loom_scalar_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.sinturnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_sinturnsf_isa, LOOM_OP_SCALAR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_sinturnsf_input, 0)
@@ -944,7 +944,7 @@ iree_status_t loom_scalar_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.costurnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_costurnsf_isa, LOOM_OP_SCALAR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_costurnsf_input, 0)

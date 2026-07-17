@@ -31,6 +31,36 @@ static double ExactFloatValue(loom_scalar_type_t scalar_type,
   return value;
 }
 
+static loom_value_facts_t EvaluateTurnsFacts(loom_scalar_type_t scalar_type,
+                                             loom_float_turns_kind_t kind,
+                                             loom_value_facts_t input) {
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_eval_float_turns(scalar_type, kind, &input, &result);
+  return result;
+}
+
+static double EvaluateTurns(loom_scalar_type_t scalar_type,
+                            loom_float_turns_kind_t kind, double input) {
+  return ExactFloatValue(
+      scalar_type,
+      EvaluateTurnsFacts(scalar_type, kind,
+                         loom_value_facts_exact_float(scalar_type, input)));
+}
+
+static uint64_t DoubleBits(double value) {
+  uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+static void ExpectTurnsPeriodic(loom_scalar_type_t scalar_type, double lhs,
+                                double rhs) {
+  EXPECT_EQ(DoubleBits(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, lhs)),
+            DoubleBits(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, rhs)));
+  EXPECT_EQ(DoubleBits(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, lhs)),
+            DoubleBits(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, rhs)));
+}
+
 static uint64_t BitMask(int32_t bit_count) {
   return bit_count == 64 ? UINT64_MAX
                          : (UINT64_C(1) << bit_count) - UINT64_C(1);
@@ -102,6 +132,146 @@ TEST(FloatFacts, PreservesF64InstructionPrecision) {
                                      SubF64, &result);
 
   EXPECT_DOUBLE_EQ(ExactFloatValue(LOOM_SCALAR_TYPE_F64, result), 1.0);
+}
+
+TEST(FloatFacts, TurnsPreserveCardinalsAtEveryDeclaredWidth) {
+  constexpr loom_scalar_type_t kScalarTypes[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64,
+  };
+  for (const loom_scalar_type_t scalar_type : kScalarTypes) {
+    SCOPED_TRACE(loom_scalar_type_name(scalar_type));
+
+    const double sin_positive_zero =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, 0.0);
+    EXPECT_EQ(sin_positive_zero, 0.0);
+    EXPECT_FALSE(std::signbit(sin_positive_zero));
+    const double sin_negative_zero =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, -0.0);
+    EXPECT_EQ(sin_negative_zero, 0.0);
+    EXPECT_TRUE(std::signbit(sin_negative_zero));
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, 0.0), 1.0);
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, -0.0), 1.0);
+
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, 0.25), 1.0);
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, -0.25), -1.0);
+    const double cos_positive_quarter =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, 0.25);
+    EXPECT_EQ(cos_positive_quarter, 0.0);
+    EXPECT_FALSE(std::signbit(cos_positive_quarter));
+    const double cos_negative_quarter =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, -0.25);
+    EXPECT_EQ(cos_negative_quarter, 0.0);
+    EXPECT_FALSE(std::signbit(cos_negative_quarter));
+
+    const double sin_positive_half =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, 0.5);
+    EXPECT_EQ(sin_positive_half, 0.0);
+    EXPECT_FALSE(std::signbit(sin_positive_half));
+    const double sin_negative_half =
+        EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, -0.5);
+    EXPECT_EQ(sin_negative_half, 0.0);
+    EXPECT_TRUE(std::signbit(sin_negative_half));
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, 0.5), -1.0);
+    EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, -0.5), -1.0);
+  }
+}
+
+TEST(FloatFacts, TurnsPreserveLargeInputPeriodicity) {
+  ExpectTurnsPeriodic(LOOM_SCALAR_TYPE_F32, 0.125, 1048576.125);
+  ExpectTurnsPeriodic(LOOM_SCALAR_TYPE_F32, -0.125, -1048576.125);
+  ExpectTurnsPeriodic(LOOM_SCALAR_TYPE_F64, 0.125, 562949953421312.125);
+  ExpectTurnsPeriodic(LOOM_SCALAR_TYPE_F64, -0.125, -562949953421312.125);
+
+  EXPECT_EQ(
+      EvaluateTurns(LOOM_SCALAR_TYPE_F32, LOOM_FLOAT_TURNS_SIN, 2097151.75),
+      -1.0);
+  EXPECT_EQ(
+      EvaluateTurns(LOOM_SCALAR_TYPE_F32, LOOM_FLOAT_TURNS_COS, 2097151.75),
+      0.0);
+  EXPECT_EQ(EvaluateTurns(LOOM_SCALAR_TYPE_F64, LOOM_FLOAT_TURNS_SIN,
+                          1125899906842623.75),
+            -1.0);
+  EXPECT_EQ(EvaluateTurns(LOOM_SCALAR_TYPE_F64, LOOM_FLOAT_TURNS_COS,
+                          1125899906842623.75),
+            0.0);
+
+  constexpr loom_scalar_type_t kScalarTypes[] = {
+      LOOM_SCALAR_TYPE_F32,
+      LOOM_SCALAR_TYPE_F64,
+  };
+  constexpr double kLargeIntegers[] = {
+      16777216.0,
+      9007199254740992.0,
+  };
+  const double kMaxFinite[] = {
+      std::numeric_limits<float>::max(),
+      std::numeric_limits<double>::max(),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kScalarTypes); ++i) {
+    const loom_scalar_type_t scalar_type = kScalarTypes[i];
+    SCOPED_TRACE(loom_scalar_type_name(scalar_type));
+    const double magnitudes[] = {kLargeIntegers[i], kMaxFinite[i]};
+    for (const double magnitude : magnitudes) {
+      const double positive_sin =
+          EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, magnitude);
+      EXPECT_EQ(positive_sin, 0.0);
+      EXPECT_FALSE(std::signbit(positive_sin));
+      const double negative_sin =
+          EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_SIN, -magnitude);
+      EXPECT_EQ(negative_sin, 0.0);
+      EXPECT_TRUE(std::signbit(negative_sin));
+      EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, magnitude),
+                1.0);
+      EXPECT_EQ(EvaluateTurns(scalar_type, LOOM_FLOAT_TURNS_COS, -magnitude),
+                1.0);
+    }
+  }
+}
+
+TEST(FloatFacts, TurnsProduceArithmeticNanForNonFiniteInputs) {
+  constexpr loom_scalar_type_t kScalarTypes[] = {
+      LOOM_SCALAR_TYPE_F32,
+      LOOM_SCALAR_TYPE_F64,
+  };
+  constexpr uint64_t kSignalingNanBits[] = {
+      UINT64_C(0x7F800001),
+      UINT64_C(0x7FF0000000000001),
+  };
+  constexpr loom_scalar_type_t kIntegerTypes[] = {
+      LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64,
+  };
+  constexpr loom_float_turns_kind_t kKinds[] = {
+      LOOM_FLOAT_TURNS_SIN,
+      LOOM_FLOAT_TURNS_COS,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kScalarTypes); ++i) {
+    const loom_scalar_type_t scalar_type = kScalarTypes[i];
+    loom_value_facts_t signaling_nan_bits =
+        loom_value_facts_exact_i64(static_cast<int64_t>(kSignalingNanBits[i]));
+    loom_value_facts_t signaling_nan = loom_value_facts_unknown();
+    loom_value_facts_eval_scalar_bitcast(kIntegerTypes[i], scalar_type,
+                                         &signaling_nan_bits, &signaling_nan);
+    ASSERT_TRUE(loom_value_facts_is_nan(signaling_nan));
+    ASSERT_FALSE(loom_value_facts_is_exact(signaling_nan));
+
+    const loom_value_facts_t inputs[] = {
+        loom_value_facts_exact_float(scalar_type,
+                                     std::numeric_limits<double>::quiet_NaN()),
+        signaling_nan,
+        loom_value_facts_exact_float(scalar_type, INFINITY),
+        loom_value_facts_exact_float(scalar_type, -INFINITY),
+    };
+    for (const loom_float_turns_kind_t kind : kKinds) {
+      for (const loom_value_facts_t input : inputs) {
+        const loom_value_facts_t result =
+            EvaluateTurnsFacts(scalar_type, kind, input);
+        EXPECT_TRUE(loom_value_facts_is_nan(result));
+        EXPECT_TRUE(loom_value_facts_is_not_inf(result));
+      }
+    }
+  }
 }
 
 TEST(FloatFacts, FloatToIntegerUsesEveryDeclaredWidth) {
