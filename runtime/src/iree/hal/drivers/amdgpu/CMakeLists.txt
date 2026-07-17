@@ -175,6 +175,7 @@ iree_cc_library(
     "source_context.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::hal
     iree::hal::drivers::amdgpu::util::loaded_code_object
   PUBLIC

@@ -138,6 +138,7 @@ iree_runtime_cc_library(
     hdrs = ["source_context.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdgpu/util:loaded_code_object",
     ],
