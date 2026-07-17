@@ -1234,21 +1234,9 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
       /*payload_values=*/&command_buffer_signal_value,
   };
   iree_hal_buffer_binding_t bindings[4] = {
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
+      {0},
+      {0},
+      {0},
       {
           /*buffer=*/output_buffer.get(),
           /*offset=*/0,
@@ -1365,21 +1353,13 @@ TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesBindingTableSlots) {
       /*payload_values=*/&command_buffer_signal_value,
   };
   iree_hal_buffer_binding_t bindings[4] = {
+      {0},
       {
           /*buffer=*/input_buffer.get(),
           /*offset=*/0,
           /*length=*/IREE_HAL_WHOLE_BUFFER,
       },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
+      {0},
       {
           /*buffer=*/output_buffer.get(),
           /*offset=*/0,
@@ -1529,21 +1509,9 @@ TEST_F(HostQueueCommandBufferTest,
       /*payload_values=*/&command_buffer_signal_value,
   };
   iree_hal_buffer_binding_t bindings[4] = {
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
+      {0},
+      {0},
+      {0},
       {
           /*buffer=*/output_buffer.get(),
           /*offset=*/0,
@@ -1666,21 +1634,13 @@ TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
       /*payload_values=*/&command_buffer_signal_value,
   };
   iree_hal_buffer_binding_t bindings[4] = {
+      {0},
       {
           /*buffer=*/input_buffer.get(),
           /*offset=*/0,
           /*length=*/IREE_HAL_WHOLE_BUFFER,
       },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
-      {
-          /*buffer=*/input_buffer.get(),
-          /*offset=*/0,
-          /*length=*/IREE_HAL_WHOLE_BUFFER,
-      },
+      {0},
       {
           /*buffer=*/output_buffer.get(),
           /*offset=*/0,
@@ -2019,7 +1979,6 @@ TEST_F(HostQueueCommandBufferTest,
         dealloca_wait_list, dealloca_signal_list, transient_buffer,
         IREE_HAL_DEALLOCA_FLAG_NONE);
   }
-
   iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
 
   if (iree_status_is_ok(status)) {

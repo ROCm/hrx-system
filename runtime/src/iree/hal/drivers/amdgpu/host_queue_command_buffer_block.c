@@ -134,6 +134,17 @@ iree_status_t iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
 
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
+    if (!binding_table.bindings[i].buffer) {
+      if (IREE_UNLIKELY(binding_table.bindings[i].offset != 0 ||
+                        binding_table.bindings[i].length != 0)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "queue_execute binding table slot %" PRIu32
+                                " is a NULL binding with non-zero range",
+                                i);
+      }
+      out_binding_ptrs[i] = 0;
+      continue;
+    }
     status = iree_hal_amdgpu_host_queue_resolve_binding_base_ptr(
         &binding_table.bindings[i], &out_binding_ptrs[i]);
     if (!iree_status_is_ok(status)) {
