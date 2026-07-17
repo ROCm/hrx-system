@@ -590,6 +590,45 @@ class CiTest(unittest.TestCase):
         self.assertIn(xfail_target, gfx120x_test.argv)
         self.assertNotIn(xfail_target, gfx110x_test.argv)
 
+    def test_amdgpu_gfx1151_quarantines_manual_asan_execution(self):
+        xfail_target = (
+            "-//runtime/src/iree/hal/drivers/amdgpu/cts:manual_asan_executable_tests"
+        )
+        gfx1151_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//runtime/...",
+                "--amdgpu-target",
+                "gfx1151",
+            ]
+        )
+        gfx110x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//runtime/...",
+                "--amdgpu-target",
+                "gfx110X-all",
+            ]
+        )
+
+        gfx1151_steps = ci.steps_from_args(gfx1151_args)
+        gfx110x_steps = ci.steps_from_args(gfx110x_args)
+        gfx1151_test = next(
+            step
+            for step in gfx1151_steps
+            if step.name == "Test IREE AMDGPU runtime resources"
+        )
+        gfx110x_test = next(
+            step
+            for step in gfx110x_steps
+            if step.name == "Test IREE AMDGPU runtime resources"
+        )
+
+        self.assertIn(xfail_target, gfx1151_test.argv)
+        self.assertNotIn(xfail_target, gfx110x_test.argv)
+
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
             [
