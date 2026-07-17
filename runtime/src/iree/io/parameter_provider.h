@@ -37,8 +37,11 @@ typedef enum iree_io_parameter_provider_signal_e {
 } iree_io_parameter_provider_signal_t;
 
 typedef struct iree_io_parameter_span_t {
+  // Byte offset within the source or target parameter.
   uint64_t parameter_offset;
+  // Byte offset within the caller-provided buffer.
   iree_device_size_t buffer_offset;
+  // Number of bytes transferred between the parameter and buffer.
   iree_device_size_t length;
 } iree_io_parameter_span_t;
 
@@ -109,6 +112,21 @@ typedef struct iree_io_parameter_gather_t {
   // Semaphores signaled after this gather completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
 } iree_io_parameter_gather_t;
+
+typedef struct iree_io_parameter_scatter_t {
+  // Provider scope containing the target parameters.
+  iree_string_view_t target_scope;
+  // Source buffer consumed by the scatter.
+  iree_hal_buffer_t* source_buffer;
+  // Number of spans enumerated by |enumerator|.
+  iree_host_size_t count;
+  // Target keys and source/target spans to scatter.
+  iree_io_parameter_enumerator_t enumerator;
+  // Semaphores that must be reached before this scatter can start.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after this scatter completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+} iree_io_parameter_scatter_t;
 
 // Loads zero or more spans from |provider| into buffers for use on |device|.
 // The |enumerator| defines the source keys in |source_scope| and the offset and
@@ -208,6 +226,18 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter(
     iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
     iree_host_size_t count, iree_io_parameter_enumerator_t enumerator);
 
+// Scatters one or more independent groups from caller-owned source buffers to
+// |provider|. Implementations may batch target movement across groups, but each
+// group preserves its own wait and signal semaphore lists. This allows a caller
+// to present enough work for provider-side balancing while retaining the
+// fine-grained readiness edges needed for bounded streaming and backpressure.
+//
+// Returns IREE_STATUS_NOT_FOUND if any parameter is not found.
+IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter_batch(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t scatter_count,
+    const iree_io_parameter_scatter_t* scatters);
+
 //===----------------------------------------------------------------------===//
 // iree_io_parameter_provider_t implementation details
 //===----------------------------------------------------------------------===//
@@ -252,6 +282,11 @@ typedef struct iree_io_parameter_provider_vtable_t {
       const iree_hal_semaphore_list_t signal_semaphore_list,
       iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
       iree_host_size_t count, iree_io_parameter_enumerator_t enumerator);
+
+  iree_status_t(IREE_API_PTR* scatter_batch)(
+      iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+      iree_hal_queue_affinity_t queue_affinity, iree_host_size_t scatter_count,
+      const iree_io_parameter_scatter_t* scatters);
 } iree_io_parameter_provider_vtable_t;
 
 struct iree_io_parameter_provider_t {

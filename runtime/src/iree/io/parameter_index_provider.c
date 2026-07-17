@@ -361,68 +361,64 @@ static iree_status_t iree_io_parameter_index_provider_resolve_entry(
   return status;
 }
 
-typedef struct iree_io_parameter_file_read_t {
-  // Retained source file backing the pending read.
-  iree_hal_file_t* source_file;
-  // Source byte offset within |source_file|.
-  uint64_t source_file_offset;
-  // Target buffer receiving the pending read.
-  iree_hal_buffer_t* target_buffer;
-  // Target byte offset within |target_buffer|.
-  iree_device_size_t target_buffer_offset;
-  // Byte length of the pending read.
+typedef struct iree_io_parameter_file_transfer_t {
+  // Retained file backing the pending transfer.
+  iree_hal_file_t* file;
+  // Byte offset within |file|.
+  uint64_t file_offset;
+  // Buffer backing the pending transfer.
+  iree_hal_buffer_t* buffer;
+  // Byte offset within |buffer|.
+  iree_device_size_t buffer_offset;
+  // Byte length of the pending transfer.
   iree_device_size_t length;
-} iree_io_parameter_file_read_t;
+} iree_io_parameter_file_transfer_t;
 
-static void iree_io_parameter_file_read_deinitialize(
-    iree_io_parameter_file_read_t* file_read) {
-  iree_hal_file_release(file_read->source_file);
-  memset(file_read, 0, sizeof(*file_read));
+static void iree_io_parameter_file_transfer_deinitialize(
+    iree_io_parameter_file_transfer_t* transfer) {
+  iree_hal_file_release(transfer->file);
+  memset(transfer, 0, sizeof(*transfer));
 }
 
-static bool iree_io_parameter_file_read_try_extend(
-    iree_io_parameter_file_read_t* file_read, iree_hal_file_t* source_file,
-    uint64_t source_file_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_buffer_offset, iree_device_size_t length) {
-  if (!file_read->source_file || file_read->source_file != source_file ||
-      file_read->target_buffer != target_buffer) {
+static bool iree_io_parameter_file_transfer_try_extend(
+    iree_io_parameter_file_transfer_t* transfer, iree_hal_file_t* file,
+    uint64_t file_offset, iree_hal_buffer_t* buffer,
+    iree_device_size_t buffer_offset, iree_device_size_t length) {
+  if (!transfer->file || transfer->file != file || transfer->buffer != buffer) {
     return false;
   }
 
-  if (file_read->length > UINT64_MAX - file_read->source_file_offset) {
+  if (transfer->length > UINT64_MAX - transfer->file_offset) {
     return false;
   }
-  const uint64_t source_file_end_offset =
-      file_read->source_file_offset + file_read->length;
-  iree_device_size_t target_buffer_end_offset = 0;
-  if (!iree_device_size_checked_add(file_read->target_buffer_offset,
-                                    file_read->length,
-                                    &target_buffer_end_offset)) {
+  const uint64_t file_end_offset = transfer->file_offset + transfer->length;
+  iree_device_size_t buffer_end_offset = 0;
+  if (!iree_device_size_checked_add(transfer->buffer_offset, transfer->length,
+                                    &buffer_end_offset)) {
     return false;
   }
-  if (source_file_offset != source_file_end_offset ||
-      target_buffer_offset != target_buffer_end_offset) {
+  if (file_offset != file_end_offset || buffer_offset != buffer_end_offset) {
     return false;
   }
 
   iree_device_size_t extended_length = 0;
-  if (!iree_device_size_checked_add(file_read->length, length,
+  if (!iree_device_size_checked_add(transfer->length, length,
                                     &extended_length)) {
     return false;
   }
-  file_read->length = extended_length;
+  transfer->length = extended_length;
   return true;
 }
 
-static void iree_io_parameter_file_read_assign(
-    iree_io_parameter_file_read_t* file_read, iree_hal_file_t* source_file,
-    uint64_t source_file_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_buffer_offset, iree_device_size_t length) {
-  file_read->source_file = source_file;
-  file_read->source_file_offset = source_file_offset;
-  file_read->target_buffer = target_buffer;
-  file_read->target_buffer_offset = target_buffer_offset;
-  file_read->length = length;
+static void iree_io_parameter_file_transfer_assign(
+    iree_io_parameter_file_transfer_t* transfer, iree_hal_file_t* file,
+    uint64_t file_offset, iree_hal_buffer_t* buffer,
+    iree_device_size_t buffer_offset, iree_device_size_t length) {
+  transfer->file = file;
+  transfer->file_offset = file_offset;
+  transfer->buffer = buffer;
+  transfer->buffer_offset = buffer_offset;
+  transfer->length = length;
 }
 
 typedef struct {
@@ -611,13 +607,12 @@ static iree_status_t iree_io_parameter_op_batch_enqueue_file_read(
 
 static iree_status_t iree_io_parameter_op_batch_flush_file_read(
     iree_io_parameter_op_batch_t* batch,
-    iree_io_parameter_file_read_t* file_read) {
-  if (!file_read->source_file) return iree_ok_status();
+    iree_io_parameter_file_transfer_t* transfer) {
+  if (!transfer->file) return iree_ok_status();
   iree_status_t status = iree_io_parameter_op_batch_enqueue_file_read(
-      batch, file_read->source_file, file_read->source_file_offset,
-      file_read->target_buffer, file_read->target_buffer_offset,
-      file_read->length, 0);
-  iree_io_parameter_file_read_deinitialize(file_read);
+      batch, transfer->file, transfer->file_offset, transfer->buffer,
+      transfer->buffer_offset, transfer->length, 0);
+  iree_io_parameter_file_transfer_deinitialize(transfer);
   return status;
 }
 
@@ -642,6 +637,17 @@ static iree_status_t iree_io_parameter_op_batch_enqueue_file_write(
       target_file, target_file_offset, length, flags);
 
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_op_batch_flush_file_write(
+    iree_io_parameter_op_batch_t* batch,
+    iree_io_parameter_file_transfer_t* transfer) {
+  if (!transfer->file) return iree_ok_status();
+  iree_status_t status = iree_io_parameter_op_batch_enqueue_file_write(
+      batch, transfer->buffer, transfer->buffer_offset, transfer->file,
+      transfer->file_offset, transfer->length, 0);
+  iree_io_parameter_file_transfer_deinitialize(transfer);
   return status;
 }
 
@@ -751,7 +757,13 @@ static iree_status_t iree_io_parameter_op_batch_end(
   return status;
 }
 
-typedef struct iree_io_parameter_gather_batch_group_t {
+typedef struct iree_io_parameter_transfer_batch_group_t {
+  // Number of operations scheduled for this group.
+  iree_host_size_t operation_count;
+  // Semaphores that must be reached before this group can start.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after this group completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
   // Readiness semaphore for groups with multi-semaphore incoming waits.
   iree_hal_semaphore_t* start_semaphore;
   // Payload value signaled on |start_semaphore|.
@@ -760,21 +772,19 @@ typedef struct iree_io_parameter_gather_batch_group_t {
   uint8_t timeline_mask;
   // Latest payload value used by this group on each timeline.
   uint64_t timeline_values[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
-} iree_io_parameter_gather_batch_group_t;
+} iree_io_parameter_transfer_batch_group_t;
 
-typedef struct iree_io_parameter_gather_batch_t {
+typedef struct iree_io_parameter_transfer_batch_t {
   // Parameter provider sourcing the parameter metadata.
   iree_io_parameter_index_provider_t* provider;
   // Device hosting the batch operation.
   iree_hal_device_t* device;
   // Queue affinity indicating where batch operations can run.
   iree_hal_queue_affinity_t queue_affinity;
-  // Number of gather groups in |gathers|.
-  iree_host_size_t gather_count;
-  // Gather groups being scheduled. Unowned.
-  const iree_io_parameter_gather_t* gathers;
+  // Number of independently synchronized transfer groups.
+  iree_host_size_t group_count;
   // Per-group readiness and completion tracking.
-  iree_io_parameter_gather_batch_group_t* groups;
+  iree_io_parameter_transfer_batch_group_t* groups;
   // Number of groups that already have completion barriers submitted.
   iree_host_size_t completed_group_count;
   // Number of concurrent timelines available for processing the batch.
@@ -787,13 +797,12 @@ typedef struct iree_io_parameter_gather_batch_t {
       timeline_semaphores[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
   // Current payload per timeline.
   uint64_t timeline_values[IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY];
-} iree_io_parameter_gather_batch_t;
+} iree_io_parameter_transfer_batch_t;
 
-static iree_status_t iree_io_parameter_gather_batch_begin(
+static iree_status_t iree_io_parameter_transfer_batch_begin(
     iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
-    const iree_io_parameter_gather_t* gathers,
-    iree_io_parameter_gather_batch_t* IREE_RESTRICT out_batch) {
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t group_count,
+    iree_io_parameter_transfer_batch_t* IREE_RESTRICT out_batch) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_batch);
@@ -801,24 +810,34 @@ static iree_status_t iree_io_parameter_gather_batch_begin(
   out_batch->provider = provider;
   out_batch->device = device;
   out_batch->queue_affinity = queue_affinity;
-  out_batch->gather_count = gather_count;
-  out_batch->gathers = gathers;
+  out_batch->group_count = group_count;
   out_batch->concurrency =
       iree_max(1, iree_min(provider->max_concurrent_operations,
                            IREE_IO_PARAMETER_OP_BATCH_MAX_CONCURRENCY));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      provider->host_allocator, gather_count, sizeof(out_batch->groups[0]),
+      provider->host_allocator, group_count, sizeof(out_batch->groups[0]),
       (void**)&out_batch->groups));
-  memset(out_batch->groups, 0, gather_count * sizeof(out_batch->groups[0]));
+  memset(out_batch->groups, 0, group_count * sizeof(out_batch->groups[0]));
   return iree_ok_status();
 }
 
-static iree_status_t iree_io_parameter_gather_batch_begin_group(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index) {
+static void iree_io_parameter_transfer_batch_initialize_group(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
+    iree_host_size_t operation_count,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
   IREE_ASSERT_ARGUMENT(batch);
-  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
-  iree_io_parameter_gather_batch_group_t* group = &batch->groups[group_index];
-  if (gather->count == 0 || gather->wait_semaphore_list.count <= 1) {
+  iree_io_parameter_transfer_batch_group_t* group = &batch->groups[group_index];
+  group->operation_count = operation_count;
+  group->wait_semaphore_list = wait_semaphore_list;
+  group->signal_semaphore_list = signal_semaphore_list;
+}
+
+static iree_status_t iree_io_parameter_transfer_batch_begin_group(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index) {
+  IREE_ASSERT_ARGUMENT(batch);
+  iree_io_parameter_transfer_batch_group_t* group = &batch->groups[group_index];
+  if (group->operation_count == 0 || group->wait_semaphore_list.count <= 1) {
     return iree_ok_status();
   }
 
@@ -832,11 +851,11 @@ static iree_status_t iree_io_parameter_gather_batch_begin_group(
       .payload_values = &group->start_value,
   };
   return iree_hal_device_queue_barrier(
-      batch->device, batch->queue_affinity, gather->wait_semaphore_list,
+      batch->device, batch->queue_affinity, group->wait_semaphore_list,
       start_signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
-typedef struct iree_io_parameter_gather_batch_step_t {
+typedef struct iree_io_parameter_transfer_batch_step_t {
   // Wait list for the operation.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Signal list for the operation.
@@ -847,12 +866,12 @@ typedef struct iree_io_parameter_gather_batch_step_t {
   uint64_t wait_values[2];
   // Scratch signal payload value storage.
   uint64_t signal_value;
-} iree_io_parameter_gather_batch_step_t;
+} iree_io_parameter_transfer_batch_step_t;
 
-static iree_status_t iree_io_parameter_gather_batch_advance_timeline(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+static iree_status_t iree_io_parameter_transfer_batch_advance_timeline(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
     uint64_t op_byte_length,
-    iree_io_parameter_gather_batch_step_t* IREE_RESTRICT out_step) {
+    iree_io_parameter_transfer_batch_step_t* IREE_RESTRICT out_step) {
   IREE_ASSERT_ARGUMENT(batch);
   IREE_ASSERT_ARGUMENT(out_step);
   memset(out_step, 0, sizeof(*out_step));
@@ -886,8 +905,7 @@ static iree_status_t iree_io_parameter_gather_batch_advance_timeline(
   const uint64_t next_timeline_value = ++batch->timeline_values[timeline_index];
   batch->timeline_bytes_outstanding[timeline_index] += op_byte_length;
 
-  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
-  iree_io_parameter_gather_batch_group_t* group = &batch->groups[group_index];
+  iree_io_parameter_transfer_batch_group_t* group = &batch->groups[group_index];
   const uint8_t timeline_bit = (uint8_t)(1u << timeline_index);
   const bool group_touched_timeline =
       iree_all_bits_set(group->timeline_mask, timeline_bit);
@@ -897,11 +915,11 @@ static iree_status_t iree_io_parameter_gather_batch_advance_timeline(
     if (group->start_semaphore) {
       out_step->wait_semaphores[wait_count] = group->start_semaphore;
       out_step->wait_values[wait_count++] = group->start_value;
-    } else if (gather->wait_semaphore_list.count == 1) {
+    } else if (group->wait_semaphore_list.count == 1) {
       out_step->wait_semaphores[wait_count] =
-          gather->wait_semaphore_list.semaphores[0];
+          group->wait_semaphore_list.semaphores[0];
       out_step->wait_values[wait_count++] =
-          gather->wait_semaphore_list.payload_values[0];
+          group->wait_semaphore_list.payload_values[0];
     }
   }
   if (previous_timeline_value != 0) {
@@ -925,8 +943,8 @@ static iree_status_t iree_io_parameter_gather_batch_advance_timeline(
   return iree_ok_status();
 }
 
-static iree_status_t iree_io_parameter_gather_batch_enqueue_splat(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+static iree_status_t iree_io_parameter_transfer_batch_enqueue_splat(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
     iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
     iree_device_size_t length, const void* pattern,
     iree_host_size_t pattern_length) {
@@ -935,10 +953,10 @@ static iree_status_t iree_io_parameter_gather_batch_enqueue_splat(
   IREE_ASSERT_ARGUMENT(pattern);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_io_parameter_gather_batch_step_t step;
+  iree_io_parameter_transfer_batch_step_t step;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_parameter_gather_batch_advance_timeline(batch, group_index,
-                                                          length, &step));
+      z0, iree_io_parameter_transfer_batch_advance_timeline(batch, group_index,
+                                                            length, &step));
   iree_status_t status = iree_hal_device_queue_fill(
       batch->device, batch->queue_affinity, step.wait_semaphore_list,
       step.signal_semaphore_list, buffer, buffer_offset, length, pattern,
@@ -948,8 +966,8 @@ static iree_status_t iree_io_parameter_gather_batch_enqueue_splat(
   return status;
 }
 
-static iree_status_t iree_io_parameter_gather_batch_enqueue_file_read(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
+static iree_status_t iree_io_parameter_transfer_batch_enqueue_file_read(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
     iree_hal_file_t* source_file, uint64_t source_file_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_buffer_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
@@ -958,10 +976,10 @@ static iree_status_t iree_io_parameter_gather_batch_enqueue_file_read(
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_io_parameter_gather_batch_step_t step;
+  iree_io_parameter_transfer_batch_step_t step;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_parameter_gather_batch_advance_timeline(batch, group_index,
-                                                          length, &step));
+      z0, iree_io_parameter_transfer_batch_advance_timeline(batch, group_index,
+                                                            length, &step));
   iree_status_t status = iree_hal_device_queue_read(
       batch->device, batch->queue_affinity, step.wait_semaphore_list,
       step.signal_semaphore_list, source_file, source_file_offset,
@@ -971,28 +989,60 @@ static iree_status_t iree_io_parameter_gather_batch_enqueue_file_read(
   return status;
 }
 
-static iree_status_t iree_io_parameter_gather_batch_flush_file_read(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index,
-    iree_io_parameter_file_read_t* file_read) {
-  if (!file_read->source_file) return iree_ok_status();
-  iree_status_t status = iree_io_parameter_gather_batch_enqueue_file_read(
-      batch, group_index, file_read->source_file, file_read->source_file_offset,
-      file_read->target_buffer, file_read->target_buffer_offset,
-      file_read->length, 0);
-  iree_io_parameter_file_read_deinitialize(file_read);
+static iree_status_t iree_io_parameter_transfer_batch_flush_file_read(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
+    iree_io_parameter_file_transfer_t* transfer) {
+  if (!transfer->file) return iree_ok_status();
+  iree_status_t status = iree_io_parameter_transfer_batch_enqueue_file_read(
+      batch, group_index, transfer->file, transfer->file_offset,
+      transfer->buffer, transfer->buffer_offset, transfer->length, 0);
+  iree_io_parameter_file_transfer_deinitialize(transfer);
   return status;
 }
 
-static iree_status_t iree_io_parameter_gather_batch_complete_group(
-    iree_io_parameter_gather_batch_t* batch, iree_host_size_t group_index) {
+static iree_status_t iree_io_parameter_transfer_batch_enqueue_file_write(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_buffer_offset,
+    iree_hal_file_t* target_file, uint64_t target_file_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags) {
   IREE_ASSERT_ARGUMENT(batch);
-  const iree_io_parameter_gather_t* gather = &batch->gathers[group_index];
-  const iree_io_parameter_gather_batch_group_t* group =
+  IREE_ASSERT_ARGUMENT(source_buffer);
+  IREE_ASSERT_ARGUMENT(target_file);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_io_parameter_transfer_batch_step_t step;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_io_parameter_transfer_batch_advance_timeline(batch, group_index,
+                                                            length, &step));
+  iree_status_t status = iree_hal_device_queue_write(
+      batch->device, batch->queue_affinity, step.wait_semaphore_list,
+      step.signal_semaphore_list, source_buffer, source_buffer_offset,
+      target_file, target_file_offset, length, flags);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_transfer_batch_flush_file_write(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index,
+    iree_io_parameter_file_transfer_t* transfer) {
+  if (!transfer->file) return iree_ok_status();
+  iree_status_t status = iree_io_parameter_transfer_batch_enqueue_file_write(
+      batch, group_index, transfer->buffer, transfer->buffer_offset,
+      transfer->file, transfer->file_offset, transfer->length, 0);
+  iree_io_parameter_file_transfer_deinitialize(transfer);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_transfer_batch_complete_group(
+    iree_io_parameter_transfer_batch_t* batch, iree_host_size_t group_index) {
+  IREE_ASSERT_ARGUMENT(batch);
+  const iree_io_parameter_transfer_batch_group_t* group =
       &batch->groups[group_index];
   if (group->timeline_mask == 0) {
     return iree_hal_device_queue_barrier(
-        batch->device, batch->queue_affinity, gather->wait_semaphore_list,
-        gather->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+        batch->device, batch->queue_affinity, group->wait_semaphore_list,
+        group->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
   }
 
   iree_hal_semaphore_t*
@@ -1012,19 +1062,19 @@ static iree_status_t iree_io_parameter_gather_batch_complete_group(
   };
   return iree_hal_device_queue_barrier(
       batch->device, batch->queue_affinity, wait_semaphore_list,
-      gather->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+      group->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
-static iree_status_t iree_io_parameter_gather_batch_end(
-    iree_io_parameter_gather_batch_t* batch, iree_status_t status) {
+static iree_status_t iree_io_parameter_transfer_batch_end(
+    iree_io_parameter_transfer_batch_t* batch, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(batch);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(
       z0, iree_status_code_string(iree_status_code(status)));
 
   while (iree_status_is_ok(status) &&
-         batch->completed_group_count < batch->gather_count) {
-    status = iree_io_parameter_gather_batch_complete_group(
+         batch->completed_group_count < batch->group_count) {
+    status = iree_io_parameter_transfer_batch_complete_group(
         batch, batch->completed_group_count);
     if (iree_status_is_ok(status)) {
       ++batch->completed_group_count;
@@ -1033,8 +1083,8 @@ static iree_status_t iree_io_parameter_gather_batch_end(
 
   if (!iree_status_is_ok(status)) {
     for (iree_host_size_t i = batch->completed_group_count;
-         i < batch->gather_count; ++i) {
-      iree_hal_semaphore_list_fail(batch->gathers[i].signal_semaphore_list,
+         i < batch->group_count; ++i) {
+      iree_hal_semaphore_list_fail(batch->groups[i].signal_semaphore_list,
                                    iree_status_clone(status));
     }
   }
@@ -1042,7 +1092,7 @@ static iree_status_t iree_io_parameter_gather_batch_end(
   for (iree_host_size_t i = 0; i < batch->concurrency; ++i) {
     iree_hal_semaphore_release(batch->timeline_semaphores[i]);
   }
-  for (iree_host_size_t i = 0; i < batch->gather_count; ++i) {
+  for (iree_host_size_t i = 0; i < batch->group_count; ++i) {
     iree_hal_semaphore_release(batch->groups[i].start_semaphore);
   }
   iree_allocator_free(batch->provider->host_allocator, batch->groups);
@@ -1231,7 +1281,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
 
   // Process each entry by enqueuing the appropriate operation.
   iree_status_t status = iree_ok_status();
-  iree_io_parameter_file_read_t pending_file_read = {0};
+  iree_io_parameter_file_transfer_t pending_file_read = {0};
   for (iree_host_size_t i = 0; i < count; ++i) {
     IREE_TRACE_ZONE_BEGIN_NAMED(
         z_entry, "iree_io_parameter_index_provider_gather_entry");
@@ -1269,7 +1319,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
           IREE_ASSERT(source_file);
           const uint64_t source_file_offset =
               source_entry->storage.file.offset + span.parameter_offset;
-          if (iree_io_parameter_file_read_try_extend(
+          if (iree_io_parameter_file_transfer_try_extend(
                   &pending_file_read, source_file, source_file_offset,
                   target_buffer, span.buffer_offset, span.length)) {
             iree_hal_file_release(source_file);
@@ -1278,7 +1328,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
             status = iree_io_parameter_op_batch_flush_file_read(
                 &batch, &pending_file_read);
             if (iree_status_is_ok(status)) {
-              iree_io_parameter_file_read_assign(
+              iree_io_parameter_file_transfer_assign(
                   &pending_file_read, source_file, source_file_offset,
                   target_buffer, span.buffer_offset, span.length);
               source_file = NULL;
@@ -1305,7 +1355,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
     status =
         iree_io_parameter_op_batch_flush_file_read(&batch, &pending_file_read);
   } else {
-    iree_io_parameter_file_read_deinitialize(&pending_file_read);
+    iree_io_parameter_file_transfer_deinitialize(&pending_file_read);
   }
 
   // Flush any outstanding batch operations and end the batch.
@@ -1324,9 +1374,9 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, gather_count);
 
-  iree_io_parameter_gather_batch_t batch;
-  iree_status_t status = iree_io_parameter_gather_batch_begin(
-      provider, device, queue_affinity, gather_count, gathers, &batch);
+  iree_io_parameter_transfer_batch_t batch;
+  iree_status_t status = iree_io_parameter_transfer_batch_begin(
+      provider, device, queue_affinity, gather_count, &batch);
   if (!iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < gather_count; ++i) {
       iree_hal_semaphore_list_fail(gathers[i].signal_semaphore_list,
@@ -1334,6 +1384,14 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
     }
     IREE_TRACE_ZONE_END(z0);
     return status;
+  }
+
+  for (iree_host_size_t group_index = 0; group_index < gather_count;
+       ++group_index) {
+    const iree_io_parameter_gather_t* gather = &gathers[group_index];
+    iree_io_parameter_transfer_batch_initialize_group(
+        &batch, group_index, gather->count, gather->wait_semaphore_list,
+        gather->signal_semaphore_list);
   }
 
   for (iree_host_size_t group_index = 0;
@@ -1346,13 +1404,13 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
                                 group_index);
       break;
     }
-    status = iree_io_parameter_gather_batch_begin_group(&batch, group_index);
+    status = iree_io_parameter_transfer_batch_begin_group(&batch, group_index);
   }
 
   for (iree_host_size_t group_index = 0;
        group_index < gather_count && iree_status_is_ok(status); ++group_index) {
     const iree_io_parameter_gather_t* gather = &gathers[group_index];
-    iree_io_parameter_file_read_t pending_file_read = {0};
+    iree_io_parameter_file_transfer_t pending_file_read = {0};
     for (iree_host_size_t i = 0; i < gather->count; ++i) {
       IREE_TRACE_ZONE_BEGIN_NAMED(
           z_entry, "iree_io_parameter_index_provider_gather_batch_entry");
@@ -1375,10 +1433,10 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
         switch (source_entry->type) {
           case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT: {
             IREE_ASSERT(!source_file);
-            status = iree_io_parameter_gather_batch_flush_file_read(
+            status = iree_io_parameter_transfer_batch_flush_file_read(
                 &batch, group_index, &pending_file_read);
             if (iree_status_is_ok(status)) {
-              status = iree_io_parameter_gather_batch_enqueue_splat(
+              status = iree_io_parameter_transfer_batch_enqueue_splat(
                   &batch, group_index, gather->target_buffer,
                   span.buffer_offset, span.length,
                   source_entry->storage.splat.pattern,
@@ -1390,16 +1448,16 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
             IREE_ASSERT(source_file);
             const uint64_t source_file_offset =
                 source_entry->storage.file.offset + span.parameter_offset;
-            if (iree_io_parameter_file_read_try_extend(
+            if (iree_io_parameter_file_transfer_try_extend(
                     &pending_file_read, source_file, source_file_offset,
                     gather->target_buffer, span.buffer_offset, span.length)) {
               iree_hal_file_release(source_file);
               source_file = NULL;
             } else {
-              status = iree_io_parameter_gather_batch_flush_file_read(
+              status = iree_io_parameter_transfer_batch_flush_file_read(
                   &batch, group_index, &pending_file_read);
               if (iree_status_is_ok(status)) {
-                iree_io_parameter_file_read_assign(
+                iree_io_parameter_file_transfer_assign(
                     &pending_file_read, source_file, source_file_offset,
                     gather->target_buffer, span.buffer_offset, span.length);
                 source_file = NULL;
@@ -1422,14 +1480,14 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
       if (!iree_status_is_ok(status)) break;
     }
     if (iree_status_is_ok(status)) {
-      status = iree_io_parameter_gather_batch_flush_file_read(
+      status = iree_io_parameter_transfer_batch_flush_file_read(
           &batch, group_index, &pending_file_read);
     } else {
-      iree_io_parameter_file_read_deinitialize(&pending_file_read);
+      iree_io_parameter_file_transfer_deinitialize(&pending_file_read);
     }
   }
 
-  status = iree_io_parameter_gather_batch_end(&batch, status);
+  status = iree_io_parameter_transfer_batch_end(&batch, status);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1455,6 +1513,7 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
 
   // Process each entry by enqueuing the appropriate operation.
   iree_status_t status = iree_ok_status();
+  iree_io_parameter_file_transfer_t pending_file_write = {0};
   for (iree_host_size_t i = 0; i < count; ++i) {
     IREE_TRACE_ZONE_BEGIN_NAMED(
         z_entry, "iree_io_parameter_index_provider_scatter_entry");
@@ -1478,10 +1537,23 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
       switch (target_entry->type) {
         case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
           IREE_ASSERT(target_file);
-          status = iree_io_parameter_op_batch_enqueue_file_write(
-              &batch, source_buffer, span.buffer_offset, target_file,
-              target_entry->storage.file.offset + span.parameter_offset,
-              span.length, 0);
+          const uint64_t target_file_offset =
+              target_entry->storage.file.offset + span.parameter_offset;
+          if (iree_io_parameter_file_transfer_try_extend(
+                  &pending_file_write, target_file, target_file_offset,
+                  source_buffer, span.buffer_offset, span.length)) {
+            iree_hal_file_release(target_file);
+            target_file = NULL;
+          } else {
+            status = iree_io_parameter_op_batch_flush_file_write(
+                &batch, &pending_file_write);
+            if (iree_status_is_ok(status)) {
+              iree_io_parameter_file_transfer_assign(
+                  &pending_file_write, target_file, target_file_offset,
+                  source_buffer, span.buffer_offset, span.length);
+              target_file = NULL;
+            }
+          }
           break;
         }
         default: {
@@ -1499,9 +1571,132 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
     IREE_TRACE_ZONE_END(z_entry);
     if (!iree_status_is_ok(status)) break;
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_op_batch_flush_file_write(&batch,
+                                                         &pending_file_write);
+  } else {
+    iree_io_parameter_file_transfer_deinitialize(&pending_file_write);
+  }
 
   // Flush any outstanding batch operations and end the batch.
   status = iree_io_parameter_op_batch_end(&batch, status);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_io_parameter_index_provider_scatter_batch(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t scatter_count,
+    const iree_io_parameter_scatter_t* scatters) {
+  iree_io_parameter_index_provider_t* provider =
+      iree_io_parameter_index_provider_cast(base_provider);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, scatter_count);
+
+  iree_io_parameter_transfer_batch_t batch;
+  iree_status_t status = iree_io_parameter_transfer_batch_begin(
+      provider, device, queue_affinity, scatter_count, &batch);
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < scatter_count; ++i) {
+      iree_hal_semaphore_list_fail(scatters[i].signal_semaphore_list,
+                                   iree_status_clone(status));
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  for (iree_host_size_t group_index = 0; group_index < scatter_count;
+       ++group_index) {
+    const iree_io_parameter_scatter_t* scatter = &scatters[group_index];
+    iree_io_parameter_transfer_batch_initialize_group(
+        &batch, group_index, scatter->count, scatter->wait_semaphore_list,
+        scatter->signal_semaphore_list);
+  }
+
+  for (iree_host_size_t group_index = 0;
+       group_index < scatter_count && iree_status_is_ok(status);
+       ++group_index) {
+    const iree_io_parameter_scatter_t* scatter = &scatters[group_index];
+    if (scatter->count != 0 && !scatter->source_buffer) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "scatter batch group %" PRIhsz
+                                " requires a source buffer",
+                                group_index);
+      break;
+    }
+    status = iree_io_parameter_transfer_batch_begin_group(&batch, group_index);
+  }
+
+  for (iree_host_size_t group_index = 0;
+       group_index < scatter_count && iree_status_is_ok(status);
+       ++group_index) {
+    const iree_io_parameter_scatter_t* scatter = &scatters[group_index];
+    iree_io_parameter_file_transfer_t pending_file_write = {0};
+    for (iree_host_size_t i = 0; i < scatter->count; ++i) {
+      IREE_TRACE_ZONE_BEGIN_NAMED(
+          z_entry, "iree_io_parameter_index_provider_scatter_batch_entry");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z_entry, i);
+
+      const iree_io_parameter_index_entry_t* target_entry = NULL;
+      iree_io_parameter_span_t span;
+      iree_hal_file_t* target_file = NULL;
+      status = iree_io_parameter_index_provider_resolve_entry(
+          provider, device, queue_affinity, scatter->target_scope,
+          scatter->enumerator, i, IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry,
+          &span, &target_file);
+      if (iree_status_is_ok(status)) {
+        IREE_TRACE_ZONE_APPEND_TEXT(z_entry, target_entry->key.data,
+                                    target_entry->key.size);
+        IREE_TRACE_ZONE_APPEND_VALUE_I64(z_entry, span.length);
+      }
+
+      if (iree_status_is_ok(status)) {
+        switch (target_entry->type) {
+          case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
+            IREE_ASSERT(target_file);
+            const uint64_t target_file_offset =
+                target_entry->storage.file.offset + span.parameter_offset;
+            if (iree_io_parameter_file_transfer_try_extend(
+                    &pending_file_write, target_file, target_file_offset,
+                    scatter->source_buffer, span.buffer_offset, span.length)) {
+              iree_hal_file_release(target_file);
+              target_file = NULL;
+            } else {
+              status = iree_io_parameter_transfer_batch_flush_file_write(
+                  &batch, group_index, &pending_file_write);
+              if (iree_status_is_ok(status)) {
+                iree_io_parameter_file_transfer_assign(
+                    &pending_file_write, target_file, target_file_offset,
+                    scatter->source_buffer, span.buffer_offset, span.length);
+                target_file = NULL;
+              }
+            }
+            break;
+          }
+          default: {
+            status = iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "scatter not supported with parameters of type %d",
+                (int)target_entry->type);
+            break;
+          }
+        }
+      }
+
+      iree_hal_file_release(target_file);
+      IREE_TRACE_ZONE_END(z_entry);
+      if (!iree_status_is_ok(status)) break;
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_io_parameter_transfer_batch_flush_file_write(
+          &batch, group_index, &pending_file_write);
+    } else {
+      iree_io_parameter_file_transfer_deinitialize(&pending_file_write);
+    }
+  }
+
+  status = iree_io_parameter_transfer_batch_end(&batch, status);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1516,4 +1711,5 @@ static const iree_io_parameter_provider_vtable_t
         .gather = iree_io_parameter_index_provider_gather,
         .gather_batch = iree_io_parameter_index_provider_gather_batch,
         .scatter = iree_io_parameter_index_provider_scatter,
+        .scatter_batch = iree_io_parameter_index_provider_scatter_batch,
 };
