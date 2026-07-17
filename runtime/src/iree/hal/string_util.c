@@ -671,7 +671,9 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_buffer_elements(
       iree_hal_element_dense_byte_count(element_type);
   iree_host_size_t element_capacity = data_ptr.data_length / element_size;
   if (iree_string_view_is_empty(data_str)) {
-    memset(data_ptr.data, 0, data_ptr.data_length);
+    if (data_ptr.data_length > 0) {
+      memset(data_ptr.data, 0, data_ptr.data_length);
+    }
     return iree_ok_status();
   }
   iree_host_size_t src_i = 0;
