@@ -175,6 +175,7 @@ iree_cc_library(
     "source_context.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::hal
     iree::hal::drivers::amdgpu::util::loaded_code_object
   PUBLIC
@@ -753,6 +754,7 @@ iree_cc_test(
     iree::hal::drivers::amdgpu::cts::tsan_executable_testdata_amdgpu
     iree::hal::drivers::amdgpu::util::executable_target
     iree::hal::drivers::amdgpu::util::packet
+    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

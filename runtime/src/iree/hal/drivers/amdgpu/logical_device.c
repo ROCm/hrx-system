@@ -172,6 +172,12 @@ IREE_API_EXPORT void iree_hal_amdgpu_logical_device_options_initialize(
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY;
   out_options->host_queues.upload_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY;
+  iree_hal_amdgpu_staging_pool_options_t file_staging_options;
+  iree_hal_amdgpu_staging_pool_options_initialize(&file_staging_options);
+  out_options->file_staging.slot_size = file_staging_options.slot_size;
+  out_options->file_staging.slot_count = file_staging_options.slot_count;
+  out_options->file_staging.force_fine_host_memory =
+      file_staging_options.force_fine_host_memory;
 
   out_options->asan.shadow_scale_shift =
       IREE_HAL_AMDGPU_SHADOW_MAP_DEFAULT_SCALE_SHIFT;
@@ -1678,6 +1684,10 @@ static void iree_hal_amdgpu_logical_device_translate_physical_options(
       options->host_queues.kernarg_capacity;
   out_options->host_queue_upload_capacity =
       options->host_queues.upload_capacity;
+  out_options->file_staging.slot_size = options->file_staging.slot_size;
+  out_options->file_staging.slot_count = options->file_staging.slot_count;
+  out_options->file_staging.force_fine_host_memory =
+      options->file_staging.force_fine_host_memory;
   out_options->force_wait_barrier_defer = options->force_wait_barrier_defer;
   out_options->enable_experimental_pm4_command_buffers =
       options->enable_experimental_pm4_command_buffers;
@@ -1887,6 +1897,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     physical_params->queue_count = (uint32_t)physical_device->host_queue_count;
     physical_params->compute_unit_count = physical_device->compute_unit_count;
     physical_params->wavefront_size = physical_device->wavefront_size;
+    physical_params->maximum_waves_per_compute_unit =
+        physical_device->maximum_waves_per_compute_unit;
     physical_params->maximum_workgroup_local_memory_size =
         physical_device->group_segment_max_size;
   }

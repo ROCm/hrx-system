@@ -118,6 +118,18 @@ typedef struct loom_func_provider_summary_t {
 
   // Borrowed predicate list for feasibility checks.
   const loom_predicate_t* predicates;
+
+  // Ancestor kinds that must be supplied by each provider application site.
+  const loom_op_kind_t* required_caller_ancestors;
+
+  // Ancestor kinds that must be absent from each provider application site.
+  const loom_op_kind_t* forbidden_caller_ancestors;
+
+  // Number of entries in |required_caller_ancestors|.
+  uint16_t required_caller_ancestor_count;
+
+  // Number of entries in |forbidden_caller_ancestors|.
+  uint16_t forbidden_caller_ancestor_count;
 } loom_func_provider_summary_t;
 
 // Borrowed provider result range.

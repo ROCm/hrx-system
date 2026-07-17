@@ -44,6 +44,7 @@ loom_cc_binary(
 
 iree_execution_test_suite(
     name = "execution_test",
+    data = ["testdata/archive_many_symbols.loom"],
     manifests = ["loom-link.test.json"],
     tags = ["hostonly"],
     tools = {

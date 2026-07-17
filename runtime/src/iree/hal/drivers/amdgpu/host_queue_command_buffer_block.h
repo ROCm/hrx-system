@@ -31,6 +31,11 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer_block(
 
 // Resolves queue_execute binding table entries into raw device base pointers
 // indexed by their original binding table slot.
+//
+// Command-buffer binding tables are addressed by slot and may contain unused
+// empty slots below |command_buffer->binding_count|. Empty slots resolve to
+// zero; generic command-buffer submission validation ensures that every slot
+// consumed by a recorded command is populated.
 iree_status_t iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table, uint64_t* out_binding_ptrs);

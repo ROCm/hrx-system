@@ -47,6 +47,13 @@ IREE_FLAG(int32_t, amdgpu_default_pool_frontier_capacity, 0,
           "Maximum death-frontier entry count stored per free default-pool "
           "block or 0 for the default.");
 
+IREE_FLAG(int64_t, amdgpu_file_staging_slot_size, 0,
+          "Byte length of each queue_read/queue_write file staging slot. Must "
+          "be a power of two or 0 for the default.");
+IREE_FLAG(int32_t, amdgpu_file_staging_slot_count, 0,
+          "Number of queue_read/queue_write file staging slots per physical "
+          "device. Must be a power of two or 0 for the default.");
+
 IREE_FLAG(string, amdgpu_queue_placement, "any",
           "Device queue placement: 'any' (currently host), 'host', or "
           "'device' (reserved and currently unsupported).");
@@ -248,6 +255,21 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
     }
     device_options->default_pool.frontier_capacity =
         (uint8_t)FLAG_amdgpu_default_pool_frontier_capacity;
+  }
+  if (FLAG_amdgpu_file_staging_slot_size) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_flag_int64_to_host_size(
+        "--amdgpu_file_staging_slot_size", FLAG_amdgpu_file_staging_slot_size,
+        &device_options->file_staging.slot_size));
+  }
+  if (FLAG_amdgpu_file_staging_slot_count) {
+    if (FLAG_amdgpu_file_staging_slot_count < 0) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "file staging slot count must be non-negative (got %d)",
+          FLAG_amdgpu_file_staging_slot_count);
+    }
+    device_options->file_staging.slot_count =
+        (uint32_t)FLAG_amdgpu_file_staging_slot_count;
   }
 
   if (strcmp(FLAG_amdgpu_queue_placement, "any") == 0) {

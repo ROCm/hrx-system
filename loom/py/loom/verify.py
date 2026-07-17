@@ -621,6 +621,11 @@ class ModuleVerifier:
                         operation.name == trait.args[0] for operation in parent_stack
                     ):
                         continue
+                    # Template bodies are verified before their application
+                    # context is known. Provider selection checks deferred
+                    # ancestor requirements at each materialization site.
+                    if self._has_deferred_template_ancestor(parent_stack):
+                        continue
                     expected = trait.args[0] if trait.args else "<missing>"
                     self.diagnostics.error(
                         "op is missing required ancestor",
@@ -638,6 +643,19 @@ class ModuleVerifier:
                             source=path,
                             details=(f"forbidden ancestor op '{trait.args[0]}'",),
                         )
+
+    def _has_deferred_template_ancestor(
+        self, parent_stack: tuple[Operation, ...]
+    ) -> bool:
+        for operation in reversed(parent_stack):
+            declaration = self.registry.op(operation.name)
+            if operation.name == "func.template":
+                return True
+            if declaration and any(
+                trait.name == "IsolatedFromAbove" for trait in declaration.traits
+            ):
+                return False
+        return False
 
     def _verify_regions(
         self,

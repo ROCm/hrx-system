@@ -180,7 +180,7 @@ static iree_status_t iree_io_enumerate_safetensors_entries(
   // Add entry to the index.
   iree_io_parameter_index_entry_t entry = {
       .key = key,
-      .metadata = iree_const_byte_span_empty(),
+      .metadata = iree_make_const_byte_span(value.data, value.size),
       .length = end - begin,
       .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE,
       .storage =

@@ -341,6 +341,11 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
       IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_NONE;
   uint32_t maximum_workgroup_local_memory_size =
       params->physical_devices[0].maximum_workgroup_local_memory_size;
+  uint32_t maximum_resident_subgroup_count =
+      params->physical_devices[0].maximum_waves_per_compute_unit;
+  uint32_t maximum_resident_invocation_count =
+      params->physical_devices[0].maximum_waves_per_compute_unit *
+      params->physical_devices[0].wavefront_size;
   uint32_t compute_unit_count = 0;
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
     const iree_hal_amdgpu_device_spec_physical_device_params_t*
@@ -360,6 +365,13 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
     maximum_workgroup_local_memory_size =
         iree_min(maximum_workgroup_local_memory_size,
                  physical_device->maximum_workgroup_local_memory_size);
+    maximum_resident_subgroup_count =
+        iree_min(maximum_resident_subgroup_count,
+                 physical_device->maximum_waves_per_compute_unit);
+    maximum_resident_invocation_count =
+        iree_min(maximum_resident_invocation_count,
+                 physical_device->maximum_waves_per_compute_unit *
+                     physical_device->wavefront_size);
     if (IREE_UNLIKELY(UINT32_MAX - compute_unit_count <
                       physical_device->compute_unit_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -393,6 +405,10 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
               supported_wavefront_sizes),
       .execution.unit_count = compute_unit_count,
       .execution.group_count = (uint32_t)params->physical_device_count,
+      .execution.maximum_resident_invocation_count =
+          maximum_resident_invocation_count,
+      .execution.maximum_resident_subgroup_count =
+          maximum_resident_subgroup_count,
       .execution.maximum_workgroup_local_memory_size =
           maximum_workgroup_local_memory_size,
       .execution.maximum_workgroup_local_memory_size_optin =

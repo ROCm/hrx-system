@@ -112,6 +112,35 @@ TEST(FileContents, ReadWriteContentsMmap) {
   iree_io_file_contents_free(read_contents);
 }
 
+TEST(FileContents, StdioStreamFillMultiBytePattern) {
+  iree::testing::TempFilePath path("iree_file_contents_test");
+
+  // File must not exist.
+  ASSERT_FALSE(path.Exists());
+
+  iree_io_stream_t* stream = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_stream_open(
+      IREE_IO_STDIO_STREAM_MODE_WRITE | IREE_IO_STDIO_STREAM_MODE_DISCARD,
+      path.path_view(), iree_allocator_system(), &stream));
+
+  const uint8_t pattern[] = {0x34, 0x12};
+  IREE_EXPECT_OK(iree_io_stream_fill(stream, 3, pattern, sizeof(pattern)));
+
+  iree_io_stream_release(stream);
+
+  iree_io_file_contents_t* read_contents = NULL;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      path.path_view(), iree_allocator_system(), &read_contents));
+
+  const uint8_t expected[] = {0x34, 0x12, 0x34, 0x12, 0x34, 0x12};
+  EXPECT_EQ(sizeof(expected), read_contents->const_buffer.data_length);
+  EXPECT_EQ(memcmp(expected, read_contents->const_buffer.data,
+                   read_contents->const_buffer.data_length),
+            0);
+
+  iree_io_file_contents_free(read_contents);
+}
+
 // Tests that a file opened for reading can be opened again concurrently.
 // Validates FILE_SHARE_READ behavior on Windows. Without it, the second open
 // fails with ERROR_SHARING_VIOLATION.

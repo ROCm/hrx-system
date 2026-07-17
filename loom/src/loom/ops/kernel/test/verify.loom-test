@@ -81,6 +81,25 @@ func.def @subgroup_collective_requires_kernel_def(%value: f32) {
 
 // ====
 
+func.template<demo.workgroup_reduce> @workgroup_reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.template<demo.isolated_workgroup_reduce> @isolated_workgroup_reduce_provider() -> (f32) {
+  %result = test.isolated_region -> (f32) {
+    %value = test.constant 1.0 : f32
+    // ERROR@+1: STRUCTURE/029 "kernel.workgroup.reduce" "required" "kernel.def" "test.isolated_region"
+    %sum = kernel.workgroup.reduce<addf> %value : f32
+    test.yield %sum : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
 test.target<low_core> @test_target
 
 kernel.def @subgroup_shuffle_requires_i32_offset() {
@@ -291,6 +310,30 @@ kernel.def @workgroup_barrier_rejects_lane_varying_counted_loop_bound() {
   %lane = kernel.workitem.id<x> : index
   scf.for %i = [%zero to %lane step %one] {
     // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="loop_upper_bound", control_value="lane", control_op_name="scf.for", control_distribution="lane_varying"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  kernel.return
+}
+
+// ====
+
+config.decl @runtime.valid_token_count : %value: index where [range(%value, 1, 131072)]
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @workgroup_barrier_accepts_config_derived_loop_bound() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %valid_token_count = config.get @runtime.valid_token_count : index
+  %rounded_token_count = index.add %valid_token_count, %fifteen : index
+  %tile_count = index.div %rounded_token_count, %sixteen : index
+  scf.for %tile = [%zero to %tile_count step %one] {
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
   kernel.return

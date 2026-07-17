@@ -846,9 +846,11 @@ static iree_status_t loom_link_cli_module_roots_append(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      allocator, roots->count + 1, sizeof(*roots->values), &roots->capacity,
-      (void**)&roots->values));
+  if (roots->count == roots->capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        allocator, roots->count + 1, sizeof(*roots->values), &roots->capacity,
+        (void**)&roots->values));
+  }
   roots->values[roots->count++] = value;
   return iree_ok_status();
 }

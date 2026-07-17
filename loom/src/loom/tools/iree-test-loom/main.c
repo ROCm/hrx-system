@@ -12,7 +12,9 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/stdio_stream.h"
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/config/config.h"
@@ -63,6 +65,80 @@ enum {
   // expectations.
   IREE_TEST_LOOM_DEVICE_EVENT_CAPACITY = 256,
 };
+
+typedef struct iree_test_loom_file_provider_t {
+  // Host allocator used for resolved path storage.
+  iree_allocator_t host_allocator;
+  // Borrowed directory containing the input module for relative fixture reads.
+  iree_string_view_t input_dir;
+} iree_test_loom_file_provider_t;
+
+static bool iree_test_loom_path_is_absolute(iree_string_view_t path) {
+  if (iree_string_view_is_empty(path)) {
+    return false;
+  }
+  if (path.data[0] == '/' || path.data[0] == '\\') {
+    return true;
+  }
+  if (path.size >= 3 && path.data[1] == ':' &&
+      (path.data[2] == '/' || path.data[2] == '\\')) {
+    const char drive = path.data[0];
+    return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z');
+  }
+  return false;
+}
+
+static iree_status_t iree_test_loom_dup_string_view(iree_string_view_t value,
+                                                    iree_allocator_t allocator,
+                                                    char** out_value) {
+  *out_value = NULL;
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_add(value.size, 1, &storage_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "string storage size overflow");
+  }
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, storage_size, (void**)&storage));
+  if (value.size != 0) {
+    memcpy(storage, value.data, value.size);
+  }
+  storage[value.size] = '\0';
+  *out_value = storage;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_test_loom_resolve_file_read_path(
+    const iree_test_loom_file_provider_t* provider, iree_string_view_t path,
+    char** out_path) {
+  *out_path = NULL;
+  if (loom_tooling_file_path_is_stdio(path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.read paths must name a file");
+  }
+  if (iree_test_loom_path_is_absolute(path) ||
+      iree_string_view_is_empty(provider->input_dir)) {
+    return iree_test_loom_dup_string_view(path, provider->host_allocator,
+                                          out_path);
+  }
+  return iree_file_path_join(provider->input_dir, path,
+                             provider->host_allocator, out_path);
+}
+
+static iree_status_t iree_test_loom_open_file_for_read(
+    void* user_data, iree_string_view_t path, iree_io_stream_t** out_stream) {
+  *out_stream = NULL;
+  const iree_test_loom_file_provider_t* provider =
+      (const iree_test_loom_file_provider_t*)user_data;
+  char* resolved_path = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_test_loom_resolve_file_read_path(provider, path, &resolved_path));
+  iree_status_t status = iree_io_stdio_stream_open(
+      IREE_IO_STDIO_STREAM_MODE_READ, iree_make_cstring_view(resolved_path),
+      provider->host_allocator, out_stream);
+  iree_allocator_free(provider->host_allocator, resolved_path);
+  return status;
+}
 
 static iree_status_t iree_test_loom_register_context(void* user_data,
                                                      loom_context_t* context) {
@@ -615,6 +691,14 @@ int iree_test_loom_main(int argc, char** argv,
       (argc < 2 || iree_string_view_equal(input_path, IREE_SV("-")))
           ? IREE_SV("<stdin>")
           : input_path;
+  iree_test_loom_file_provider_t file_provider = {
+      // Host allocator used for resolved path storage.
+      .host_allocator = allocator,
+      // Directory containing the input module for relative fixture reads.
+      .input_dir = iree_string_view_equal(filename, IREE_SV("<stdin>"))
+                       ? iree_string_view_empty()
+                       : iree_file_path_dirname(filename),
+  };
   iree_string_view_t source = iree_string_view_empty();
   if (iree_status_is_ok(status)) {
     status = loom_tooling_read_input_file(input_path, allocator, &contents);
@@ -646,6 +730,11 @@ int iree_test_loom_main(int argc, char** argv,
     loom_testbench_case_execution_options_t execution_options = {0};
     loom_testbench_case_execution_options_initialize(&execution_options);
     execution_options.materializer.host_allocator = allocator;
+    execution_options.materializer.open_read_file =
+        (loom_testbench_file_open_callback_t){
+            .fn = iree_test_loom_open_file_for_read,
+            .user_data = &file_provider,
+        };
     if (iree_status_is_ok(status) &&
         iree_test_loom_selected_cases_have_device_event_expectation(
             &module_plan, selected_case_name)) {

@@ -7,7 +7,16 @@
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.diagnostics import DiagnosticEngine
 from loom.dialect.test import ALL_TEST_OPS
-from loom.dsl import ANY, INTEGER, Op, Operand, Result
+from loom.dsl import (
+    ANY,
+    INTEGER,
+    ISOLATED_FROM_ABOVE,
+    HasAncestor,
+    Op,
+    Operand,
+    RegionDef,
+    Result,
+)
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
@@ -227,6 +236,77 @@ def test_verifier_runs_declarative_constraints() -> None:
     diagnostics = verify_module(module, ops=ALL_TEST_OPS)
 
     assert _diagnostic_text_contains(diagnostics, "SameType constraint violated")
+
+
+def test_verifier_defers_template_ancestor_requirement() -> None:
+    requires_context = Op(
+        "test.requires_context",
+        traits=[HasAncestor("test.context")],
+    )
+    template = Op(
+        "func.template",
+        traits=[ISOLATED_FROM_ABOVE],
+        regions=[RegionDef("body")],
+    )
+    module = Module()
+    template_op = Operation(
+        name="func.template",
+        regions=[
+            Region(
+                blocks=[
+                    Block(ops=[Operation(name="test.requires_context")]),
+                ]
+            )
+        ],
+    )
+    module.symbols.append(_symbol("provider", template_op))
+
+    diagnostics = verify_module(
+        module,
+        ops=(*ALL_TEST_OPS, requires_context, template),
+    )
+
+    assert not diagnostics.has_errors
+
+
+def test_verifier_does_not_defer_through_nested_isolation() -> None:
+    requires_context = Op(
+        "test.requires_context",
+        traits=[HasAncestor("test.context")],
+    )
+    isolated = Op(
+        "test.nested_isolated",
+        traits=[ISOLATED_FROM_ABOVE],
+        regions=[RegionDef("body")],
+    )
+    template = Op(
+        "func.template",
+        traits=[ISOLATED_FROM_ABOVE],
+        regions=[RegionDef("body")],
+    )
+    isolated_op = Operation(
+        name="test.nested_isolated",
+        regions=[
+            Region(
+                blocks=[
+                    Block(ops=[Operation(name="test.requires_context")]),
+                ]
+            )
+        ],
+    )
+    template_op = Operation(
+        name="func.template",
+        regions=[Region(blocks=[Block(ops=[isolated_op])])],
+    )
+    module = Module()
+    module.symbols.append(_symbol("provider", template_op))
+
+    diagnostics = verify_module(
+        module,
+        ops=(*ALL_TEST_OPS, requires_context, isolated, template),
+    )
+
+    assert _diagnostic_text_contains(diagnostics, "missing required ancestor")
 
 
 def test_verifier_reports_missing_region_terminator() -> None:
