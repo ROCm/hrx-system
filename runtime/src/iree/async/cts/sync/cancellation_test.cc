@@ -8,6 +8,7 @@
 //
 // These tests verify the cancel() API behavior:
 // - Cancelled operations receive CANCELLED status in their callback
+// - Control-flow cancellation receives OK with a CANCELLED completion flag
 // - The callback ALWAYS fires (never lost) after cancel returns
 // - Double-cancel is harmless (second cancel silently succeeds)
 // - Cancel of already-completed operation is harmless
@@ -54,6 +55,30 @@ TEST_P(CancellationTest, CancelPendingTimer) {
   // The callback must have fired with CANCELLED status.
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
+}
+
+// Cancel a timer whose cancellation is an expected control-flow outcome.
+TEST_P(CancellationTest, CancelPendingTimerAsControlFlow) {
+  iree_async_timer_operation_t timer;
+  memset(&timer, 0, sizeof(timer));
+  timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
+  timer.base.flags = IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS;
+  timer.deadline_ns = IREE_TIME_INFINITE_FUTURE;
+
+  CompletionTracker tracker;
+  timer.base.completion_fn = CompletionTracker::Callback;
+  timer.base.user_data = &tracker;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
+  PollUntil(/*min_completions=*/1);
+
+  EXPECT_EQ(tracker.call_count, 1);
+  IREE_EXPECT_OK(tracker.ConsumeStatus());
+  EXPECT_TRUE(iree_any_bit_set(tracker.last_flags,
+                               IREE_ASYNC_COMPLETION_FLAG_CANCELLED));
+  EXPECT_FALSE(
+      iree_any_bit_set(tracker.last_flags, IREE_ASYNC_COMPLETION_FLAG_MORE));
 }
 
 // Cancel an already-completed timer is harmless.
@@ -465,6 +490,32 @@ TEST_P(CancellationTest, CancelPendingAccept) {
 
   EXPECT_EQ(accept_tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, accept_tracker.ConsumeStatus());
+  EXPECT_EQ(accept_op.accepted_socket, nullptr);
+
+  iree_async_socket_release(listener);
+}
+
+// Cancel an accept as part of an orderly listener shutdown.
+TEST_P(CancellationTest, CancelPendingAcceptAsControlFlow) {
+  iree_async_address_t listen_address;
+  iree_async_socket_t* listener = CreateListener(&listen_address);
+
+  iree_async_socket_accept_operation_t accept_op;
+  CompletionTracker accept_tracker;
+  InitAcceptOperation(&accept_op, listener, CompletionTracker::Callback,
+                      &accept_tracker);
+  accept_op.base.flags |= IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &accept_op.base));
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
+  PollUntil(/*min_completions=*/1);
+
+  EXPECT_EQ(accept_tracker.call_count, 1);
+  IREE_EXPECT_OK(accept_tracker.ConsumeStatus());
+  EXPECT_TRUE(iree_any_bit_set(accept_tracker.last_flags,
+                               IREE_ASYNC_COMPLETION_FLAG_CANCELLED));
+  EXPECT_FALSE(iree_any_bit_set(accept_tracker.last_flags,
+                                IREE_ASYNC_COMPLETION_FLAG_MORE));
   EXPECT_EQ(accept_op.accepted_socket, nullptr);
 
   iree_async_socket_release(listener);

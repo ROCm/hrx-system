@@ -81,6 +81,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
@@ -1314,6 +1315,8 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     iree_async_operation_release_resources(operation);
   }
 
+  iree_status_code_t status_code = iree_status_code(status);
+
   // Invoke callback and release to pool. The helper extracts the pool pointer
   // before the callback (which may free the operation when pool is NULL).
   iree_async_proactor_complete_operation(operation, status, flags);
@@ -1323,7 +1326,7 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   // post-CQE MPSC drain in the poll loop). Kernel ops are submitted and
   // produce their own CQEs.
   if (continuation) {
-    if (iree_status_is_ok(status)) {
+    if (status_code == IREE_STATUS_OK) {
       iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
                                                                continuation);
     } else {

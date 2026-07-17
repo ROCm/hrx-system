@@ -228,6 +228,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
