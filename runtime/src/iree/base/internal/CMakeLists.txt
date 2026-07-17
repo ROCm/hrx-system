@@ -45,6 +45,7 @@ iree_cc_test(
   SRCS
     "math_test.cc"
   DEPS
+    ::fpu_state
     ::internal
     iree::testing::gtest
     iree::testing::gtest_main

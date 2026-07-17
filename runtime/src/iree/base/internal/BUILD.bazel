@@ -60,6 +60,7 @@ iree_runtime_cc_test(
     name = "math_test",
     srcs = ["math_test.cc"],
     deps = [
+        ":fpu_state",
         ":internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

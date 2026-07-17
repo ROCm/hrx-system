@@ -317,48 +317,121 @@ static inline uint64_t iree_math_round_up_to_pow2_u64(uint64_t n) {
   const int prefix##exp_bias IREE_ATTRIBUTE_UNUSED =                         \
       bias_tweak + (1u << (prefix##exp_bits - 1)) - 1;
 
-// Generic conversion from any less-than-32-bit floating-point format to f32.
-// The `src` value is typed as a uint32_t for genericity but occupies only the
-// bottom (1 + exp_bits + mantissa_bits) bits. The upper bits of `src` are
-// unused.
+// Constructs the exact f32 payload for any narrower floating-point format.
+// The |src| value occupies only the bottom
+// (1 + |exp_bits| + |mantissa_bits|) bits. All finite source values must be
+// exactly representable in f32.
+static inline uint32_t iree_math_make_f32_bits_from_bits(
+    uint32_t src, int exp_bits, int mantissa_bits, bool have_infinity,
+    bool have_nan, int bias_tweak, bool nan_as_neg_zero) {
+  IREE_MATH_FP_FORMAT_CONSTANTS(src_, exp_bits, mantissa_bits, bias_tweak)
+  IREE_MATH_FP_FORMAT_CONSTANTS(f32_, 8, 23, 0)
+  const uint32_t f32_sign = (src & src_sign_mask)
+                            << (f32_sign_shift - src_sign_shift);
+  const uint32_t src_exp = src & src_exp_mask;
+  const uint32_t src_mantissa = src & src_mantissa_mask;
+  if (have_nan && nan_as_neg_zero && src == src_sign_mask) {
+    // Some finite-only formats reserve the negative-zero payload for NaN.
+    return f32_exp_mask | (1u << (f32_mantissa_bits - 1));
+  }
+  if (src_exp == src_exp_mask) {
+    if (have_infinity) {
+      if (have_nan && src_mantissa) {
+        return f32_exp_mask | (1u << (f32_mantissa_bits - 1));
+      }
+      return f32_sign | f32_exp_mask;
+    } else if (have_nan && src_mantissa == src_mantissa_mask &&
+               !nan_as_neg_zero) {
+      // Finite-only formats may reserve the maximum mantissa for NaN.
+      return f32_exp_mask | (1u << (f32_mantissa_bits - 1));
+    }
+  }
+
+  const uint32_t significand =
+      src_exp == 0 ? src_mantissa : (1u << src_mantissa_bits) | src_mantissa;
+  if (significand == 0) return f32_sign;
+
+  // Interpret the finite value as |significand| * 2^|scale| and normalize the
+  // integer significand directly into an f32 payload. This avoids executing
+  // floating-point arithmetic under the caller's rounding and denormal modes.
+  const int encoded_exp = (int)(src_exp >> src_exp_shift);
+  const int scale =
+      (src_exp == 0 ? 1 : encoded_exp) - src_exp_bias - src_mantissa_bits;
+  const int leading_bit = 31 - iree_math_count_leading_zeros_u32(significand);
+  const int arithmetic_exp = scale + leading_bit;
+  if (arithmetic_exp >= 1 - f32_exp_bias) {
+    const uint32_t f32_exp = (uint32_t)(arithmetic_exp + f32_exp_bias)
+                             << f32_exp_shift;
+    const uint32_t f32_mantissa = (significand ^ (1u << leading_bit))
+                                  << (f32_mantissa_bits - leading_bit);
+    return f32_sign | f32_exp | f32_mantissa;
+  }
+
+  // Source values below the f32 normal range remain exact f32 subnormals. The
+  // shift is non-negative because all supported source values are exactly
+  // representable in f32.
+  const int f32_subnormal_shift =
+      scale - (1 - f32_exp_bias - f32_mantissa_bits);
+  return f32_sign | (significand << f32_subnormal_shift);
+}
+
+// Converts a narrower source payload to a C |float| without executing
+// floating-point arithmetic.
 static inline float iree_math_make_f32_from_bits(uint32_t src, int exp_bits,
                                                  int mantissa_bits,
                                                  bool have_infinity,
                                                  bool have_nan, int bias_tweak,
                                                  bool nan_as_neg_zero) {
-  IREE_MATH_FP_FORMAT_CONSTANTS(src_, exp_bits, mantissa_bits, bias_tweak)
-  const float float_sign = (src & src_sign_mask) ? -1.f : 1.f;
-  const uint32_t src_exp = src & src_exp_mask;
-  const uint32_t src_mantissa = src & src_mantissa_mask;
-  if (src_exp == src_exp_mask) {
-    // Top exponent value normally means infinity or NaN.
-    if (have_infinity) {
-      // NaN or Inf case.
-      if (have_nan && src_mantissa) {
-        return NAN;
-      }
-      return float_sign * INFINITY;
-    }
-    if (have_nan) {
-      // No infinities => more large finite values, unless this is a NaN.
-      if (src_mantissa == src_mantissa_mask && !nan_as_neg_zero) {
-        return NAN;
-      }
-    }
-  } else if (have_nan && nan_as_neg_zero && src == src_sign_mask) {
-    // Case of small FP types using the negative-0 encoding for NaN.
-    return NAN;
-  } else if (src_exp == 0) {
-    // Denormals. In that case, the exponent is interpreted as 1 instead of the
-    // encoded 0, and the result is proportional to src_mantissa instead of
-    // having an implied leading 1.
-    return float_sign *
-           ldexpf(src_mantissa, 1 - src_exp_bias - src_mantissa_bits);
+  const uint32_t f32_bits = iree_math_make_f32_bits_from_bits(
+      src, exp_bits, mantissa_bits, have_infinity, have_nan, bias_tweak,
+      nan_as_neg_zero);
+  float value = 0.0f;
+  memcpy(&value, &f32_bits, sizeof(value));
+  return value;
+}
+
+// Constructs the exact f64 payload represented by an f32 payload.
+static inline uint64_t iree_math_make_f64_bits_from_f32_bits(
+    uint32_t f32_bits) {
+  IREE_MATH_FP_FORMAT_CONSTANTS(f32_, 8, 23, 0)
+  const int f64_mantissa_bits = 52;
+  const int f64_exp_shift = 52;
+  const int f64_exp_bias = 1023;
+  const uint64_t f64_exp_mask = UINT64_C(0x7FF0000000000000);
+  const uint64_t f64_sign = (uint64_t)(f32_bits & f32_sign_mask) << 32;
+  const uint32_t f32_exp = f32_bits & f32_exp_mask;
+  const uint32_t f32_mantissa = f32_bits & f32_mantissa_mask;
+  if (f32_exp == f32_exp_mask) {
+    if (f32_mantissa == 0) return f64_sign | f64_exp_mask;
+    const uint64_t f64_mantissa =
+        ((uint64_t)f32_mantissa << (f64_mantissa_bits - f32_mantissa_bits)) |
+        (UINT64_C(1) << (f64_mantissa_bits - 1));
+    return f64_sign | f64_exp_mask | f64_mantissa;
   }
-  // Normal value.
-  return float_sign *
-         ldexpf(src_mantissa + (1 << src_mantissa_bits),
-                (src_exp >> src_exp_shift) - src_exp_bias - src_mantissa_bits);
+
+  const uint32_t significand =
+      f32_exp == 0 ? f32_mantissa : (1u << f32_mantissa_bits) | f32_mantissa;
+  if (significand == 0) return f64_sign;
+
+  const int encoded_exp = (int)(f32_exp >> f32_exp_shift);
+  const int scale =
+      (f32_exp == 0 ? 1 : encoded_exp) - f32_exp_bias - f32_mantissa_bits;
+  const int leading_bit = 31 - iree_math_count_leading_zeros_u32(significand);
+  const int arithmetic_exp = scale + leading_bit;
+  const uint64_t f64_exp = (uint64_t)(arithmetic_exp + f64_exp_bias)
+                           << f64_exp_shift;
+  const uint64_t f64_mantissa = (uint64_t)(significand ^ (1u << leading_bit))
+                                << (f64_mantissa_bits - leading_bit);
+  return f64_sign | f64_exp | f64_mantissa;
+}
+
+// Converts an f32 payload exactly to a C |double| without executing
+// floating-point arithmetic.
+static inline double iree_math_make_f64_from_f32_bits(uint32_t f32_bits) {
+  const uint64_t f64_bits = iree_math_make_f64_bits_from_f32_bits(f32_bits);
+  double value = 0.0;
+  memcpy(&value, &f64_bits, sizeof(value));
+  return value;
 }
 
 // Helper for rounding to nearest-even. Does not right-shift. Returns the
@@ -521,11 +594,22 @@ static inline uint32_t iree_math_truncate_f32_to_bits_rounding_to_nearest_even(
 #define IREE_MATH_MAKE_FLOAT_TYPE_HELPERS(                                   \
     NAME, INT_TYPE, EXP_BITS, MANTISSA_BITS, HAVE_INFINITY, HAVE_NAN,        \
     BIAS_TWEAK, NAN_AS_NEG_ZERO)                                             \
-  /* Converts a to a 32-bit C `float`. */                                    \
+  /* Constructs the exact 32-bit IEEE payload for a source payload. */       \
+  static inline uint32_t iree_math_##NAME##_to_f32_bits(INT_TYPE src) {      \
+    return iree_math_make_f32_bits_from_bits(src, EXP_BITS, MANTISSA_BITS,   \
+                                             HAVE_INFINITY, HAVE_NAN,        \
+                                             BIAS_TWEAK, NAN_AS_NEG_ZERO);   \
+  }                                                                          \
+  /* Converts a source payload to a 32-bit C `float`. */                     \
   static inline float iree_math_##NAME##_to_f32(INT_TYPE src) {              \
     return iree_math_make_f32_from_bits(src, EXP_BITS, MANTISSA_BITS,        \
                                         HAVE_INFINITY, HAVE_NAN, BIAS_TWEAK, \
                                         NAN_AS_NEG_ZERO);                    \
+  }                                                                          \
+  /* Converts exactly to a 64-bit C `double`. */                             \
+  static inline double iree_math_##NAME##_to_f64(INT_TYPE src) {             \
+    return iree_math_make_f64_from_f32_bits(                                 \
+        iree_math_##NAME##_to_f32_bits(src));                                \
   }                                                                          \
   /* Truncates a 32-bit C `float`, rounding to nearest even. */              \
   static inline INT_TYPE iree_math_f32_to_##NAME(float value) {              \
@@ -618,12 +702,19 @@ IREE_MATH_MAKE_FLOAT_TYPE_HELPERS(f4e2m1fn, uint8_t, 2, 1,
 // The scale type E8M0FNU is unique in multiple ways: no mantissa, no sign, and
 // no zero. Retrofitting it into the above shared conversion code would be
 // tricky and not worth it, so here are stand-alone conversion routines:
+static inline uint32_t iree_math_f8e8m0fnu_to_f32_bits(uint8_t src) {
+  if (src == 0xFF) return UINT32_C(0x7FC00000);
+  if (src == 0) return UINT32_C(0x00400000);
+  return (uint32_t)src << 23;
+}
 static inline float iree_math_f8e8m0fnu_to_f32(uint8_t src) {
-  if (src == 0xFF) {
-    return NAN;
-  } else {
-    return ldexpf(1.0f, src - 127);
-  }
+  const uint32_t f32_bits = iree_math_f8e8m0fnu_to_f32_bits(src);
+  float value = 0.0f;
+  memcpy(&value, &f32_bits, sizeof(value));
+  return value;
+}
+static inline double iree_math_f8e8m0fnu_to_f64(uint8_t src) {
+  return iree_math_make_f64_from_f32_bits(iree_math_f8e8m0fnu_to_f32_bits(src));
 }
 static inline uint8_t iree_math_f32_to_f8e8m0fnu(float value) {
   if (!isfinite(value)) {

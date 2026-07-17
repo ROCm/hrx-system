@@ -8,8 +8,10 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
+#include "iree/base/internal/fpu_state.h"
 #include "iree/testing/gtest.h"
 
 namespace loom {
@@ -290,6 +292,25 @@ TEST(FloatFacts, RawNanBitcastRemainsNonMaterializable) {
   loom_value_facts_eval_scalar_bitcast(
       LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I32, &negated, &roundtrip_bits);
   EXPECT_TRUE(loom_value_facts_is_unknown(roundtrip_bits));
+}
+
+TEST(FloatFacts, BitcastPreservesBF16SubnormalUnderFlushToZero) {
+  loom_value_facts_t source_bits = loom_value_facts_exact_i64(1);
+  loom_value_facts_t value = loom_value_facts_unknown();
+
+  const iree_fpu_state_t fpu_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  loom_value_facts_eval_scalar_bitcast(
+      LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_BF16, &source_bits, &value);
+  double exact_value = 0.0;
+  const bool is_exact = loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_BF16,
+                                                        value, &exact_value);
+  uint64_t exact_bits = 0;
+  std::memcpy(&exact_bits, &exact_value, sizeof(exact_bits));
+  iree_fpu_state_pop(fpu_state);
+
+  EXPECT_TRUE(is_exact);
+  EXPECT_EQ(UINT64_C(0x37A0000000000000), exact_bits);
 }
 
 TEST(FloatFacts, MinnumSkipsOneNanAndCanonicalizesTwo) {

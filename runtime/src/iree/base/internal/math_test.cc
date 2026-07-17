@@ -8,7 +8,11 @@
 
 #include <cfloat>
 #include <cmath>
+#include <cstring>
+#include <functional>
+#include <vector>
 
+#include "iree/base/internal/fpu_state.h"
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -272,6 +276,193 @@ static void CheckFiniteRoundingBoundaries(
     EXPECT_EQ(sign_mask | rounded_midpoint, convert_f32_to_small(-midpoint));
     EXPECT_EQ(sign_mask | upper, convert_f32_to_small(-above_midpoint));
   }
+}
+
+enum class WideningExpectationKind {
+  kExactBits,
+  kQuietNaN,
+};
+
+struct WideningExpectation {
+  // Expected result classification.
+  WideningExpectationKind kind;
+  // Exact f32 payload when |kind| is |kExactBits|.
+  uint32_t f32_bits;
+  // Exact f64 payload when |kind| is |kExactBits|.
+  uint64_t f64_bits;
+};
+
+enum NarrowFloatFormatFlagBits : uint32_t {
+  kNarrowFloatHasInfinity = 1u << 0,
+  kNarrowFloatHasNaN = 1u << 1,
+  kNarrowFloatNaNAsNegativeZero = 1u << 2,
+};
+using NarrowFloatFormatFlags = uint32_t;
+
+struct NarrowFloatFormat {
+  // Name included in per-payload failure traces.
+  const char* name;
+  // Number of encoded exponent bits.
+  int exponent_bits;
+  // Number of encoded mantissa bits.
+  int mantissa_bits;
+  // Adjustment to the conventional exponent bias.
+  int bias_tweak;
+  // Special encoding policies for the format.
+  NarrowFloatFormatFlags flags;
+};
+
+static WideningExpectation ExactWideningExpectation(uint32_t f32_bits) {
+  float f32_value = 0.0f;
+  std::memcpy(&f32_value, &f32_bits, sizeof(f32_value));
+  const double f64_value = static_cast<double>(f32_value);
+  uint64_t f64_bits = 0;
+  std::memcpy(&f64_bits, &f64_value, sizeof(f64_bits));
+  return {WideningExpectationKind::kExactBits, f32_bits, f64_bits};
+}
+
+static std::vector<WideningExpectation> BuildWideningExpectations(
+    NarrowFloatFormat format) {
+  const uint32_t sign_mask = 1u
+                             << (format.exponent_bits + format.mantissa_bits);
+  const uint32_t mantissa_mask = (1u << format.mantissa_bits) - 1;
+  const uint32_t exponent_mask = ((1u << format.exponent_bits) - 1)
+                                 << format.mantissa_bits;
+  std::vector<WideningExpectation> expectations(sign_mask << 1);
+  for (uint32_t source = 0; source < expectations.size(); ++source) {
+    const uint32_t exponent = source & exponent_mask;
+    const uint32_t mantissa = source & mantissa_mask;
+    bool is_nan = false;
+    bool is_infinity = false;
+    if (exponent == exponent_mask) {
+      if (format.flags & kNarrowFloatHasInfinity) {
+        is_nan = (format.flags & kNarrowFloatHasNaN) && mantissa != 0;
+        is_infinity = !is_nan;
+      } else if ((format.flags & kNarrowFloatHasNaN) &&
+                 !(format.flags & kNarrowFloatNaNAsNegativeZero)) {
+        is_nan = mantissa == mantissa_mask;
+      }
+    }
+    if ((format.flags & kNarrowFloatNaNAsNegativeZero) && source == sign_mask) {
+      is_nan = true;
+    }
+
+    WideningExpectation& expectation = expectations[source];
+    if (is_nan) {
+      expectation.kind = WideningExpectationKind::kQuietNaN;
+    } else {
+      uint32_t f32_bits = 0;
+      if (is_infinity) {
+        f32_bits = UINT32_C(0x7F800000);
+      } else {
+        const float value =
+            DecodePositiveFinite(source & (sign_mask - 1), format.exponent_bits,
+                                 format.mantissa_bits, format.bias_tweak);
+        std::memcpy(&f32_bits, &value, sizeof(f32_bits));
+      }
+      if (source & sign_mask) f32_bits |= UINT32_C(0x80000000);
+      expectation = ExactWideningExpectation(f32_bits);
+    }
+  }
+  return expectations;
+}
+
+template <typename UintType>
+static void CheckWideningExpectations(
+    const char* format_name,
+    const std::vector<WideningExpectation>& expectations,
+    std::function<float(UintType)> convert_small_to_f32,
+    std::function<double(UintType)> convert_small_to_f64) {
+  const auto check_expectations = [&]() {
+    for (uint32_t source = 0; source < expectations.size(); ++source) {
+      SCOPED_TRACE(::testing::Message()
+                   << format_name << " source payload " << source);
+      const float f32_value =
+          convert_small_to_f32(static_cast<UintType>(source));
+      uint32_t actual_f32_bits = 0;
+      std::memcpy(&actual_f32_bits, &f32_value, sizeof(actual_f32_bits));
+      const double f64_value =
+          convert_small_to_f64(static_cast<UintType>(source));
+      uint64_t actual_f64_bits = 0;
+      std::memcpy(&actual_f64_bits, &f64_value, sizeof(actual_f64_bits));
+      const WideningExpectation& expectation = expectations[source];
+      if (expectation.kind == WideningExpectationKind::kQuietNaN) {
+        ASSERT_EQ(UINT32_C(0x7F800000), actual_f32_bits & UINT32_C(0x7F800000));
+        ASSERT_NE(0u, actual_f32_bits & UINT32_C(0x007FFFFF));
+        ASSERT_NE(0u, actual_f32_bits & UINT32_C(0x00400000));
+        ASSERT_EQ(UINT64_C(0x7FF0000000000000),
+                  actual_f64_bits & UINT64_C(0x7FF0000000000000));
+        ASSERT_NE(UINT64_C(0), actual_f64_bits & UINT64_C(0x000FFFFFFFFFFFFF));
+        ASSERT_NE(UINT64_C(0), actual_f64_bits & UINT64_C(0x0008000000000000));
+      } else {
+        ASSERT_EQ(expectation.f32_bits, actual_f32_bits);
+        ASSERT_EQ(expectation.f64_bits, actual_f64_bits);
+      }
+    }
+  };
+
+  check_expectations();
+  const iree_fpu_state_t fpu_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  check_expectations();
+  iree_fpu_state_pop(fpu_state);
+}
+
+template <typename UintType>
+static void CheckWideningPayloads(
+    NarrowFloatFormat format,
+    std::function<float(UintType)> convert_small_to_f32,
+    std::function<double(UintType)> convert_small_to_f64) {
+  CheckWideningExpectations(format.name, BuildWideningExpectations(format),
+                            convert_small_to_f32, convert_small_to_f64);
+}
+
+TEST(FloatWideningTest, EveryPayloadIsExactUnderFlushToZero) {
+  CheckWideningPayloads<uint16_t>(
+      {"f16", 5, 10, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_f16_to_f32, iree_math_f16_to_f64);
+  CheckWideningPayloads<uint16_t>(
+      {"bf16", 8, 7, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_bf16_to_f32, iree_math_bf16_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e5m2", 5, 2, 0, kNarrowFloatHasInfinity | kNarrowFloatHasNaN},
+      iree_math_f8e5m2_to_f32, iree_math_f8e5m2_to_f64);
+  CheckWideningPayloads<uint8_t>({"f8e4m3fn", 4, 3, 0, kNarrowFloatHasNaN},
+                                 iree_math_f8e4m3fn_to_f32,
+                                 iree_math_f8e4m3fn_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e5m2fnuz", 5, 2, 1,
+       kNarrowFloatHasNaN | kNarrowFloatNaNAsNegativeZero},
+      iree_math_f8e5m2fnuz_to_f32, iree_math_f8e5m2fnuz_to_f64);
+  CheckWideningPayloads<uint8_t>(
+      {"f8e4m3fnuz", 4, 3, 1,
+       kNarrowFloatHasNaN | kNarrowFloatNaNAsNegativeZero},
+      iree_math_f8e4m3fnuz_to_f32, iree_math_f8e4m3fnuz_to_f64);
+  CheckWideningPayloads<uint8_t>({"f6e3m2fn", 3, 2, 0, 0},
+                                 iree_math_f6e3m2fn_to_f32,
+                                 iree_math_f6e3m2fn_to_f64);
+  CheckWideningPayloads<uint8_t>({"f6e2m3fn", 2, 3, 0, 0},
+                                 iree_math_f6e2m3fn_to_f32,
+                                 iree_math_f6e2m3fn_to_f64);
+  CheckWideningPayloads<uint8_t>({"f4e2m1fn", 2, 1, 0, 0},
+                                 iree_math_f4e2m1fn_to_f32,
+                                 iree_math_f4e2m1fn_to_f64);
+}
+
+TEST(FloatWideningTest, EveryE8M0PayloadIsExactUnderFlushToZero) {
+  std::vector<WideningExpectation> expectations(256);
+  for (uint32_t source = 0; source < expectations.size(); ++source) {
+    if (source == 0xFF) {
+      expectations[source].kind = WideningExpectationKind::kQuietNaN;
+    } else {
+      const uint32_t f32_bits =
+          source == 0 ? UINT32_C(0x00400000) : source << 23;
+      expectations[source] = ExactWideningExpectation(f32_bits);
+    }
+  }
+  CheckWideningExpectations<uint8_t>("f8e8m0fnu", expectations,
+                                     iree_math_f8e8m0fnu_to_f32,
+                                     iree_math_f8e8m0fnu_to_f64);
 }
 
 TEST(F16ConversionTest, Denormals) {

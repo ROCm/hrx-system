@@ -26,15 +26,13 @@ static double loom_float_round_to_type(loom_scalar_type_t scalar_type,
                                        double value) {
   switch (scalar_type) {
     case LOOM_SCALAR_TYPE_F8E4M3:
-      return (double)iree_math_f8e4m3fn_to_f32(
-          iree_math_f32_to_f8e4m3fn((float)value));
+      return iree_math_f8e4m3fn_to_f64(iree_math_f32_to_f8e4m3fn((float)value));
     case LOOM_SCALAR_TYPE_F8E5M2:
-      return (double)iree_math_f8e5m2_to_f32(
-          iree_math_f32_to_f8e5m2((float)value));
+      return iree_math_f8e5m2_to_f64(iree_math_f32_to_f8e5m2((float)value));
     case LOOM_SCALAR_TYPE_F16:
-      return (double)iree_math_f16_to_f32(iree_math_f32_to_f16((float)value));
+      return iree_math_f16_to_f64(iree_math_f32_to_f16((float)value));
     case LOOM_SCALAR_TYPE_BF16:
-      return (double)iree_math_bf16_to_f32(iree_math_f32_to_bf16((float)value));
+      return iree_math_bf16_to_f64(iree_math_f32_to_bf16((float)value));
     case LOOM_SCALAR_TYPE_F32:
       return (double)(float)value;
     case LOOM_SCALAR_TYPE_F64:
@@ -44,12 +42,8 @@ static double loom_float_round_to_type(loom_scalar_type_t scalar_type,
   }
 }
 
-loom_value_facts_t loom_value_facts_exact_float(loom_scalar_type_t scalar_type,
-                                                double value) {
-  if (!loom_float_type_is_supported(scalar_type)) {
-    return loom_value_facts_unknown();
-  }
-  value = loom_float_round_to_type(scalar_type, value);
+// Constructs exact facts for a value already rounded to its declared type.
+static loom_value_facts_t loom_value_facts_exact_rounded_float(double value) {
   loom_value_facts_t facts = {0};
   memcpy(&facts.range_lo, &value, sizeof(value));
   facts.range_hi = facts.range_lo;
@@ -67,6 +61,15 @@ loom_value_facts_t loom_value_facts_exact_float(loom_scalar_type_t scalar_type,
   }
   loom_value_facts_mark_uniform(&facts);
   return facts;
+}
+
+loom_value_facts_t loom_value_facts_exact_float(loom_scalar_type_t scalar_type,
+                                                double value) {
+  if (!loom_float_type_is_supported(scalar_type)) {
+    return loom_value_facts_unknown();
+  }
+  return loom_value_facts_exact_rounded_float(
+      loom_float_round_to_type(scalar_type, value));
 }
 
 loom_value_facts_t loom_value_facts_known_nan(void) {
@@ -479,32 +482,31 @@ static bool loom_float_facts_from_bits(loom_scalar_type_t scalar_type,
   }
   switch (scalar_type) {
     case LOOM_SCALAR_TYPE_F8E4M3:
-      *out_facts = loom_value_facts_exact_float(
-          scalar_type, iree_math_f8e4m3fn_to_f32((uint8_t)bits));
+      *out_facts = loom_value_facts_exact_rounded_float(
+          iree_math_f8e4m3fn_to_f64((uint8_t)bits));
       return true;
     case LOOM_SCALAR_TYPE_F8E5M2:
-      *out_facts = loom_value_facts_exact_float(
-          scalar_type, iree_math_f8e5m2_to_f32((uint8_t)bits));
+      *out_facts = loom_value_facts_exact_rounded_float(
+          iree_math_f8e5m2_to_f64((uint8_t)bits));
       return true;
     case LOOM_SCALAR_TYPE_F16:
-      *out_facts = loom_value_facts_exact_float(
-          scalar_type, iree_math_f16_to_f32((uint16_t)bits));
+      *out_facts = loom_value_facts_exact_rounded_float(
+          iree_math_f16_to_f64((uint16_t)bits));
       return true;
     case LOOM_SCALAR_TYPE_BF16:
-      *out_facts = loom_value_facts_exact_float(
-          scalar_type, iree_math_bf16_to_f32((uint16_t)bits));
+      *out_facts = loom_value_facts_exact_rounded_float(
+          iree_math_bf16_to_f64((uint16_t)bits));
       return true;
     case LOOM_SCALAR_TYPE_F32: {
       uint32_t f32_bits = (uint32_t)bits;
-      float value = 0.0f;
-      memcpy(&value, &f32_bits, sizeof(value));
-      *out_facts = loom_value_facts_exact_float(scalar_type, value);
+      *out_facts = loom_value_facts_exact_rounded_float(
+          iree_math_make_f64_from_f32_bits(f32_bits));
       return true;
     }
     case LOOM_SCALAR_TYPE_F64: {
       double value = 0.0;
       memcpy(&value, &bits, sizeof(value));
-      *out_facts = loom_value_facts_exact_float(scalar_type, value);
+      *out_facts = loom_value_facts_exact_rounded_float(value);
       return true;
     }
     default:
