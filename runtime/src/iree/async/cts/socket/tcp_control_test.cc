@@ -47,8 +47,7 @@ TEST_P(ShutdownTest, Shutdown_Write) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
   IREE_ASSERT_OK(send_tracker.ConsumeStatus());
 
   // Shutdown client's write direction.
@@ -68,8 +67,7 @@ TEST_P(ShutdownTest, Shutdown_Write) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   IREE_EXPECT_OK(recv_tracker.ConsumeStatus());
   EXPECT_EQ(recv_op.bytes_received, message_length);
@@ -82,8 +80,7 @@ TEST_P(ShutdownTest, Shutdown_Write) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   // On EOF, recv returns 0 bytes (status may be OK with 0 bytes or a specific
   // EOF status depending on implementation).
@@ -133,8 +130,7 @@ TEST_P(ShutdownTest, Shutdown_WriteStillReceives) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   IREE_EXPECT_OK(recv_tracker.ConsumeStatus());
@@ -170,8 +166,7 @@ TEST_P(ShutdownTest, Shutdown_Both) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(recv_tracker.call_count, 1);
   EXPECT_EQ(recv_op.bytes_received, 0u);  // EOF
@@ -321,8 +316,7 @@ TEST_P(BindListenErrorTest, Accept_NonListening) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &accept_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   // Accept should fail with INVALID_ARGUMENT or similar.
   EXPECT_EQ(accept_tracker.call_count, 1);
@@ -376,8 +370,7 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
   IREE_ASSERT_OK(send_tracker.ConsumeStatus());
 
   // Client closes WITHOUT reading the data. LINGER_ZERO causes immediate RST.
@@ -400,8 +393,7 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
                       CompletionTracker::Callback, &rst_probe_tracker);
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(proactor_, &rst_probe_op.base));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/1);
     iree_status_ignore(rst_probe_tracker.ConsumeStatus());
   }
 
@@ -421,8 +413,7 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send2_op.base));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
 
     if (!iree_status_is_ok(send2_tracker.last_status)) {
       got_error = true;
@@ -468,8 +459,7 @@ TEST_P(ResetTest, Reset_RecvAfterPeerClose) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(recv_tracker.call_count, 1);
   // Either EOF (OK with 0 bytes) or an error.
@@ -514,8 +504,7 @@ TEST_P(ResetTest, Reset_SendAfterPeerShutdown) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
 
     if (!iree_status_is_ok(send_tracker.last_status)) {
       got_error = true;
@@ -571,8 +560,7 @@ TEST_P(ResetTest, Reset_LingerZero) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -605,8 +593,7 @@ TEST_P(ResetTest, Reset_LingerZero) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_ASSERT_OK(send_tracker.ConsumeStatus());
   IREE_ASSERT_OK(recv_tracker.ConsumeStatus());
@@ -625,8 +612,7 @@ TEST_P(ResetTest, Reset_LingerZero) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(rst_tracker.call_count, 1);
   // LINGER_ZERO should cause RST, which results in ECONNRESET -> UNAVAILABLE.

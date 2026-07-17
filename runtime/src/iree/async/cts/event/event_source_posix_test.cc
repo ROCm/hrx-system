@@ -135,12 +135,8 @@ TEST_P(EventSourceEventfdTest, CallbackFires) {
   // Signal the eventfd.
   SignalEventFd(fd);
 
-  // Poll until callback fires. Internal callbacks don't count toward
-  // "completions", so we poll with short timeouts and check the state directly.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(200);
-  while (state.call_count.load() == 0 && iree_time_now() < deadline) {
-    PollOnce();
-  }
+  PollUntilCondition([&] { return state.call_count.load() != 0; },
+                     "event source callback");
 
   EXPECT_GE(state.call_count.load(), 1) << "Callback should have fired";
 
@@ -183,12 +179,8 @@ TEST_P(EventSourceEventfdTest, MultipleSignals) {
   for (int i = 0; i < kSignalCount; ++i) {
     int count_before = state.call_count.load();
     SignalEventFd(fd);
-    // Poll until this signal is processed.
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-    while (state.call_count.load() <= count_before &&
-           iree_time_now() < deadline) {
-      PollOnce();
-    }
+    PollUntilCondition([&] { return state.call_count.load() > count_before; },
+                       "event source callback");
   }
 
   EXPECT_GE(state.call_count.load(), kSignalCount)
@@ -229,10 +221,8 @@ TEST_P(EventSourceEventfdTest, UnregisterStopsCallbacks) {
 
   // Verify callback works initially.
   SignalEventFd(fd);
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-  while (state.call_count.load() == 0 && iree_time_now() < deadline) {
-    PollOnce();
-  }
+  PollUntilCondition([&] { return state.call_count.load() != 0; },
+                     "event source callback");
   int count_before_unregister = state.call_count.load();
   EXPECT_GE(count_before_unregister, 1);
 
@@ -241,7 +231,6 @@ TEST_P(EventSourceEventfdTest, UnregisterStopsCallbacks) {
 
   // Signal again after unregister.
   SignalEventFd(fd);
-  PollOnce();
 
   // Callback count should not have increased.
   EXPECT_EQ(state.call_count.load(), count_before_unregister)
@@ -378,11 +367,8 @@ TEST_P(EventSourcePosixTest, PipeHangupDeliversPollHup) {
   // Close the write end - this triggers POLLHUP on the read end.
   close(write_fd);
 
-  // Poll until callback fires.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(200);
-  while (state.call_count.load() == 0 && iree_time_now() < deadline) {
-    PollOnce();
-  }
+  PollUntilCondition([&] { return state.call_count.load() != 0; },
+                     "event source callback");
 
   ASSERT_GE(state.call_count.load(), 1) << "Callback should have fired";
 
@@ -442,11 +428,8 @@ TEST_P(EventSourcePosixTest, PipeDataDeliversPollIn) {
   ssize_t written = write(write_fd, msg, strlen(msg));
   ASSERT_EQ(written, (ssize_t)strlen(msg));
 
-  // Poll until callback fires.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(200);
-  while (state.call_count.load() == 0 && iree_time_now() < deadline) {
-    PollOnce();
-  }
+  PollUntilCondition([&] { return state.call_count.load() != 0; },
+                     "event source callback");
 
   ASSERT_GE(state.call_count.load(), 1) << "Callback should have fired";
 

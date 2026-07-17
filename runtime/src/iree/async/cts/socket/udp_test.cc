@@ -71,8 +71,7 @@ class UdpTest : public SocketTestBase<> {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_b.base));
 
     // UDP connect is typically synchronous, but poll to be safe.
-    PollUntil(/*min_completions=*/2,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/2);
 
     ASSERT_EQ(tracker_a.call_count, 1);
     IREE_ASSERT_OK(tracker_a.ConsumeStatus());
@@ -113,8 +112,7 @@ TEST_P(UdpTest, UDP_ConnectedLoopback) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, message_length);
@@ -152,8 +150,7 @@ TEST_P(UdpTest, UDP_MessageBoundary) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send1.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send2.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Each recv should get exactly one datagram, not a merged stream.
   char recv1_buffer[256], recv2_buffer[256];
@@ -175,8 +172,7 @@ TEST_P(UdpTest, UDP_MessageBoundary) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv1.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv2.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Each recv should get exactly one message (order may vary).
   IREE_EXPECT_OK(recv1_tracker.ConsumeStatus());
@@ -246,8 +242,7 @@ TEST_P(UdpTest, UDP_Bidirectional) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_a.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_b.base));
 
-  PollUntil(/*min_completions=*/4,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/4);
 
   // Verify both directions.
   IREE_EXPECT_OK(send_a_tracker.ConsumeStatus());
@@ -315,8 +310,7 @@ TEST_P(UdpTest, UDP_BurstTransfer) {
         iree_async_proactor_submit_one(proactor_, &recv_ops[i].base));
   }
 
-  PollUntil(/*min_completions=*/kNumDatagrams * 2,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumDatagrams * 2);
 
   // Verify all sends completed.
   for (int i = 0; i < kNumDatagrams; ++i) {
@@ -401,8 +395,7 @@ TEST_P(UnconnectedUdpTest, SendtoRecvfrom_Basic) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sendto_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Verify send completed.
   IREE_EXPECT_OK(sendto_tracker.ConsumeStatus());
@@ -481,8 +474,7 @@ TEST_P(UnconnectedUdpTest, SendtoRecvfrom_ReplyToSender) {
       iree_async_proactor_submit_one(proactor_, &client_sendto_op.base));
 
   // Wait for server to receive.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_ASSERT_OK(client_send_tracker.ConsumeStatus());
   IREE_ASSERT_OK(server_recv_tracker.ConsumeStatus());
@@ -516,8 +508,7 @@ TEST_P(UnconnectedUdpTest, SendtoRecvfrom_ReplyToSender) {
   IREE_ASSERT_OK(
       iree_async_proactor_submit_one(proactor_, &client_recvfrom_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(server_send_tracker.ConsumeStatus());
   IREE_EXPECT_OK(client_recv_tracker.ConsumeStatus());
@@ -590,8 +581,7 @@ TEST_P(UnconnectedUdpTest, SendtoRecvfrom_ScatterGather) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sendto_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(sendto_tracker.ConsumeStatus());
   EXPECT_EQ(sendto_op.bytes_sent, total_length);

@@ -100,7 +100,7 @@ static void BM_WakeNoWaiters(::benchmark::State& state,
     }
 
     if (!context->SpinPollUntilComplete(1)) {
-      state.SkipWithError("Poll timeout");
+      state.SkipWithError("Poll failed");
       break;
     }
 
@@ -139,9 +139,7 @@ static void BM_CrossThread(::benchmark::State& state,
         futex_word.store(signal, std::memory_order_release);
         iree_futex_wake(&futex_word, 1);
       } else {
-        // Use futex wait with short timeout for responsive signaling.
-        iree_futex_wait(&wake_signal, signal,
-                        iree_time_now() + 1000000);  // 1ms timeout.
+        iree_futex_wait(&wake_signal, signal, IREE_TIME_INFINITE_FUTURE);
       }
     }
   });
@@ -172,7 +170,7 @@ static void BM_CrossThread(::benchmark::State& state,
 
     // Wait for completion.
     if (!context->SpinPollUntilComplete(1)) {
-      state.SkipWithError("Poll timeout");
+      state.SkipWithError("Poll failed");
       break;
     }
 
@@ -181,6 +179,7 @@ static void BM_CrossThread(::benchmark::State& state,
   }
 
   stop_signaler.store(true, std::memory_order_release);
+  wake_signal.fetch_add(1, std::memory_order_release);
   iree_futex_wake(&wake_signal, 1);
   signaler.join();
 

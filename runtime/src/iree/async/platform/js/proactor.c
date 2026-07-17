@@ -531,7 +531,8 @@ static iree_status_t iree_async_proactor_js_register_relay(
 }
 
 static void iree_async_proactor_js_unregister_relay(
-    iree_async_proactor_t* proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   IREE_ASSERT(false, "unregister_relay called on JS proactor");
 }
 

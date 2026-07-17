@@ -165,6 +165,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "semaphore_wait",
+    srcs = ["semaphore_wait.c"],
+    hdrs = ["semaphore_wait.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "sequence_emulation",
     srcs = ["sequence_emulation.c"],
     hdrs = ["sequence_emulation.h"],

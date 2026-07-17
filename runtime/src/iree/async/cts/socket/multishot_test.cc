@@ -77,8 +77,7 @@ TEST_P(MultishotTest, MultishotAccept_MultipleConnections) {
     // must loop until the connect_tracker confirms our connect is done.
     // The connect_op is stack-local and must not outlive this iteration.
     while (connect_tracker.call_count == 0) {
-      PollUntil(/*min_completions=*/1,
-                /*total_budget=*/iree_make_duration_ms(2000));
+      PollUntil(/*min_completions=*/1);
     }
 
     // accepted_socket is overwritten on each multishot accept completion.
@@ -102,8 +101,7 @@ TEST_P(MultishotTest, MultishotAccept_MultipleConnections) {
   // have already consumed accept completions, but on a slow system the last
   // accept(s) may still be in the poll thread pipeline.
   while (accept_log.entries.empty()) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/1);
   }
 
   // Verify we got multiple accept completions with MORE flag set.
@@ -127,22 +125,11 @@ TEST_P(MultishotTest, MultishotAccept_MultipleConnections) {
 
   // Cancel the multishot accept and wait for the cancellation completion.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
-  {
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
-    while (!accept_log.final_received && iree_time_now() < deadline) {
-      PollOnce();
-    }
-  }
+  PollUntilCondition([&] { return accept_log.final_received; },
+                     "multishot accept cancellation");
 
   EXPECT_TRUE(accept_log.final_received)
       << "Multishot accept should have terminated after cancel";
-
-  // Safety: if the cancellation didn't complete above, drain to ensure the
-  // accept_op is removed from the proactor before this stack frame exits.
-  // Without this, TearDown would process operations against destroyed memory.
-  if (!accept_log.final_received) {
-    DrainPending();
-  }
 
   iree_async_socket_release(listener);
 }
@@ -184,14 +171,12 @@ TEST_P(MultishotTest, MultishotAccept_ListenerClose) {
   // the connect_tracker confirms our connect is done. The connect_op is
   // stack-local and must not outlive this scope.
   while (connect_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/1);
   }
 
   // Also wait for at least one accept completion.
   while (accept_log.entries.empty()) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/1);
   }
 
   ASSERT_GE(accept_log.entries.size(), 1u);
@@ -203,21 +188,11 @@ TEST_P(MultishotTest, MultishotAccept_ListenerClose) {
 
   // Cancel the multishot accept and wait for the cancellation completion.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
-  {
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
-    while (!accept_log.final_received && iree_time_now() < deadline) {
-      PollOnce();
-    }
-  }
+  PollUntilCondition([&] { return accept_log.final_received; },
+                     "multishot accept cancellation");
 
   EXPECT_TRUE(accept_log.final_received)
       << "Multishot accept should have terminated after cancel";
-
-  // Safety: if the cancellation didn't complete above, drain to ensure the
-  // accept_op is removed from the proactor before this stack frame exits.
-  if (!accept_log.final_received) {
-    DrainPending();
-  }
 
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
@@ -270,26 +245,14 @@ TEST_P(MultishotTest, MultishotRecv_MultipleMessages) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-    // Wait for this specific send to complete. PollUntil returns when ANY
-    // completion fires (possibly the multishot recv), so we must loop until
-    // the send_tracker confirms our send is done. The send_op is stack-local
-    // and must not outlive this iteration.
-    while (send_tracker.call_count == 0) {
-      PollUntil(/*min_completions=*/1,
-                /*total_budget=*/iree_make_duration_ms(1000));
-    }
+    // The send operation is stack-local and must complete in this iteration.
+    PollUntilCondition([&] { return send_tracker.call_count > 0; },
+                       "multishot test send");
+    IREE_ASSERT_OK(send_tracker.ConsumeStatus());
   }
 
-  // Wait for at least one recv completion. Sends complete eagerly via writev
-  // at submit time, so PollUntil during the send loop above may be satisfied
-  // by send completions alone without any recv firing. DrainPending uses
-  // immediate (0ms) timeout and breaks on the first empty poll, which is wrong
-  // here — we need a blocking wait for the recv that may not have been
-  // processed by the poll thread yet.
-  while (recv_log.entries.empty()) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
-  }
+  PollUntilCondition([&] { return !recv_log.entries.empty(); },
+                     "first multishot receive");
 
   // TCP may coalesce messages, so we might get fewer completions than
   // messages sent. The key verification is that multishot mode is active.
@@ -306,21 +269,11 @@ TEST_P(MultishotTest, MultishotRecv_MultipleMessages) {
 
   // Cancel the multishot recv and wait for the cancellation completion.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &recv_op.base));
-  {
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
-    while (!recv_log.final_received && iree_time_now() < deadline) {
-      PollOnce();
-    }
-  }
+  PollUntilCondition([&] { return recv_log.final_received; },
+                     "multishot receive cancellation");
 
   EXPECT_TRUE(recv_log.final_received)
       << "Multishot recv should have terminated after cancel";
-
-  // Safety: if the cancellation didn't complete above, drain to ensure the
-  // recv_op is removed from the proactor before this stack frame exits.
-  if (!recv_log.final_received) {
-    DrainPending();
-  }
 
   iree_async_socket_release(client);
   iree_async_socket_release(server);
@@ -367,8 +320,7 @@ TEST_P(MultishotTest, MultishotRecv_ConnectionClose) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Wait for send and potentially first recv.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   // Close the client (sender side). Use release (not a close operation)
   // because the close operation's completion goes through the completion queue
@@ -380,12 +332,8 @@ TEST_P(MultishotTest, MultishotRecv_ConnectionClose) {
   // Wait for the multishot recv to terminate (EOF from peer close).
   // On macOS loopback, the FIN from close may take a few microseconds to
   // propagate. Poll until the recv delivers its final callback (no MORE).
-  {
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-    while (!recv_log.final_received && iree_time_now() < deadline) {
-      PollOnce();
-    }
-  }
+  PollUntilCondition([&] { return recv_log.final_received; },
+                     "multishot receive termination");
 
   // Verify multishot terminated (final_received should be true).
   // The final completion should either be a 0-byte read (EOF) or an error,
@@ -397,14 +345,6 @@ TEST_P(MultishotTest, MultishotRecv_ConnectionClose) {
     const auto& last = recv_log.entries.back();
     EXPECT_FALSE(last.flags & IREE_ASYNC_COMPLETION_FLAG_MORE)
         << "Final recv should not have MORE flag";
-  }
-
-  // Safety: if multishot recv didn't terminate, cancel it to prevent SEGFAULT
-  // during TearDown. The recv_op is stack-local; the proactor's fd chain would
-  // reference dangling memory when processing operations during shutdown.
-  if (!recv_log.final_received) {
-    iree_status_ignore(iree_async_proactor_cancel(proactor_, &recv_op.base));
-    DrainPending();
   }
 
   iree_async_socket_release(server);

@@ -32,17 +32,33 @@ typedef enum iree_async_io_uring_relay_state_e {
   // Relay is active and monitoring source.
   IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE = 0,
 
-  // Relay is marked for removal, waiting for final CQE.
-  // The sink will not fire in this state.
-  IREE_ASYNC_IO_URING_RELAY_STATE_ZOMBIE = 1,
+  // Terminal unregistration was requested but an SQE was not available for
+  // the cancellation operation. The sink will not fire in this state.
+  IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING = 1,
+
+  // The terminal cancellation operation was submitted and the relay is
+  // waiting for its final source CQE. The sink will not fire in this state.
+  IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED = 2,
 
   // Relay needs to re-arm its source monitoring but failed due to SQ pressure.
   // The proactor will retry submission on the next poll cycle.
-  IREE_ASYNC_IO_URING_RELAY_STATE_PENDING_REARM = 2,
+  IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING = 3,
 
-  // Relay failed to re-arm due to an unrecoverable error (syscall failure).
-  // The error callback has been invoked. Relay should be unregistered.
-  IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED = 3,
+  // Relay faulted while its multishot source was still active, but an SQE was
+  // not available to cancel it. The sink will not fire in this state.
+  IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING = 4,
+
+  // Relay faulted and cancellation of its active multishot source was
+  // submitted. The sink will not fire in this state.
+  IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED = 5,
+
+  // Relay faulted and has no remaining kernel references. The caller-visible
+  // handle remains valid until terminal unregistration.
+  IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED = 6,
+
+  // A persistent poll source terminated without a relay fault. The
+  // caller-visible handle remains valid until terminal unregistration.
+  IREE_ASYNC_IO_URING_RELAY_STATE_TERMINAL = 7,
 } iree_async_io_uring_relay_state_t;
 
 //===----------------------------------------------------------------------===//
@@ -56,7 +72,8 @@ iree_status_t iree_async_io_uring_register_relay(
     iree_async_relay_t** out_relay);
 
 void iree_async_io_uring_unregister_relay(
-    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay);
+    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback);
 
 // Called from CQE processing when a relay's source fires.
 // Executes the sink action and handles re-arming or cleanup.
@@ -64,8 +81,9 @@ void iree_async_io_uring_handle_relay_cqe(
     iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay,
     int32_t result, uint32_t cqe_flags);
 
-// Retries re-arming relays that are in PENDING_REARM state.
-// Called from poll() after processing CQEs when SQ space may be available.
+// Retries terminal unregistration and source re-arming operations deferred by
+// SQ pressure. Called from poll() after processing CQEs when space may be
+// available.
 void iree_async_io_uring_retry_pending_relays(
     iree_async_proactor_io_uring_t* proactor);
 

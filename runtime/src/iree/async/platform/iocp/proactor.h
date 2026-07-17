@@ -17,6 +17,7 @@
 #include "iree/async/proactor.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/util/message_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/async/util/signal.h"
 #include "iree/base/internal/atomic_slist.h"
@@ -253,6 +254,9 @@ typedef struct iree_async_proactor_iocp_t {
   // Semaphore wait operations funneled to the poll thread.
   iree_atomic_slist_t pending_semaphore_waits;
 
+  // Serializes wait operation association with cancellation and completion.
+  iree_async_semaphore_wait_context_t semaphore_wait_context;
+
   // Sorted timer list (poll thread only). Timers are inserted from
   // pending_queue drain and removed by expiration or cancellation.
   iree_async_iocp_timer_list_t timers;
@@ -378,56 +382,6 @@ static inline iree_async_proactor_iocp_t* iree_async_proactor_iocp_cast(
 }
 
 //===----------------------------------------------------------------------===//
-// Semaphore wait tracker (shared between submit and poll/cancel)
-//===----------------------------------------------------------------------===//
-
-// Tracks a pending SEMAPHORE_WAIT operation.
-// Heap-allocated per wait operation, freed when the operation completes.
-// Contains embedded timepoints for each semaphore being waited on.
-typedef struct iree_async_iocp_semaphore_wait_tracker_t {
-  // Intrusive MPSC list link for pending completion queue.
-  iree_atomic_slist_entry_t slist_entry;
-
-  // Back-pointer to the wait operation being tracked.
-  iree_async_semaphore_wait_operation_t* operation;
-
-  // Proactor to wake when a semaphore fires.
-  iree_async_proactor_iocp_t* proactor;
-
-  // Allocator used for this tracker.
-  iree_allocator_t allocator;
-
-  // Number of semaphores being waited on.
-  iree_host_size_t count;
-
-  // Number of successfully registered timepoints. Used during cleanup to
-  // cancel only the timepoints that were actually registered.
-  iree_host_size_t registered_count;
-
-  // For ALL mode: remaining semaphores to satisfy (count down to 0).
-  // For ANY mode: first satisfied index (starts at -1, CAS to winning index).
-  iree_atomic_int32_t remaining_or_satisfied;
-
-  // Completion status. Written by timepoint callback if failure occurs.
-  // CAS: first non-OK status wins.
-  iree_atomic_intptr_t completion_status;
-
-  // Guards against double-enqueue to the pending_semaphore_waits slist.
-  // Multiple paths can independently decide to enqueue (success callback via
-  // remaining_or_satisfied, error callback unconditionally, cancel via
-  // completion_status). Only the thread that CAS-es this from 0 to 1
-  // actually pushes the tracker to the slist.
-  iree_atomic_int32_t enqueued;
-
-  // LINKED chain continuation head. When the wait has LINKED flag, the
-  // chain is transferred here during submit and dispatched on completion.
-  iree_async_operation_t* continuation_head;
-
-  // Flexible array of timepoints (one per semaphore).
-  iree_async_semaphore_timepoint_t timepoints[];
-} iree_async_iocp_semaphore_wait_tracker_t;
-
-//===----------------------------------------------------------------------===//
 // Internal APIs (shared across proactor implementation files)
 //===----------------------------------------------------------------------===//
 
@@ -471,12 +425,6 @@ void iree_async_proactor_iocp_submit_continuation_chain(
 iree_host_size_t iree_async_proactor_iocp_dispatch_linked_continuation(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
     iree_status_t trigger_status);
-
-// Enqueues a completed semaphore wait tracker for the poll thread to drain.
-// Called from timepoint callbacks running on arbitrary threads.
-// (proactor_submit.c)
-void iree_async_proactor_iocp_semaphore_wait_enqueue_completion(
-    iree_async_iocp_semaphore_wait_tracker_t* tracker);
 
 // Submit vtable implementation (in proactor_submit.c).
 iree_status_t iree_async_proactor_iocp_submit(

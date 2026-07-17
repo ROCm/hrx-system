@@ -101,8 +101,7 @@ TEST_P(RelayTest, PersistentNotificationRelay) {
     PollUntilNotificationEpochAdvances(sink_notification, epoch_before);
   }
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   iree_async_notification_release(source_notification);
   iree_async_notification_release(sink_notification);
@@ -127,14 +126,12 @@ TEST_P(RelayTest, UnregisterNotificationWhilePending) {
   ASSERT_NE(relay, nullptr);
 
   // Unregister cancels the relay's pending SQE and processes the cancel CQE.
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   // Signal after unregister — no relay SQE is watching, so no CQE is produced.
   uint32_t sink_epoch_before =
       iree_async_notification_query_epoch(sink_notification);
   iree_async_notification_signal(source_notification, 1);
-  DrainPending();
 
   uint32_t sink_epoch_after =
       iree_async_notification_query_epoch(sink_notification);
@@ -234,11 +231,52 @@ TEST_P(RelayTest, NotificationToNotificationFutexMode) {
                                        "futex relay sink epoch advance");
   }
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   iree_async_notification_release(source_notification);
   iree_async_notification_release(sink_notification);
+}
+
+// Proactor destruction completes an unregistration that has not been polled.
+TEST_P(RelayTest, DestroyCompletesPendingUnregistration) {
+  iree_async_notification_t* source_notification = nullptr;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &source_notification));
+
+  iree_async_notification_t* sink_notification = nullptr;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &sink_notification));
+
+  iree_async_relay_t* relay = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_relay(
+      proactor_, iree_async_relay_source_from_notification(source_notification),
+      iree_async_relay_sink_signal_notification(sink_notification, 1),
+      IREE_ASYNC_RELAY_FLAG_PERSISTENT, iree_async_relay_error_callback_none(),
+      &relay));
+
+  struct CompletionState {
+    // Source notification reference released by the callback.
+    iree_async_notification_t* source_notification;
+    // Sink notification reference released by the callback.
+    iree_async_notification_t* sink_notification;
+    // Set after both caller-owned references have been released.
+    bool completed = false;
+  } state = {source_notification, sink_notification};
+  iree_async_relay_unregistered_callback_t callback = {
+      +[](void* user_data) {
+        auto* state = static_cast<CompletionState*>(user_data);
+        iree_async_notification_release(state->source_notification);
+        iree_async_notification_release(state->sink_notification);
+        state->completed = true;
+      },
+      &state,
+  };
+
+  iree_async_proactor_unregister_relay(proactor_, relay, callback);
+  iree_async_proactor_release(proactor_);
+  proactor_ = nullptr;
+
+  EXPECT_TRUE(state.completed);
 }
 
 CTS_REGISTER_TEST_SUITE(RelayTest);

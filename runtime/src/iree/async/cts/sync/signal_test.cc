@@ -166,8 +166,9 @@ TEST_P(SignalTest, SignalDelivery) {
   // Send SIGUSR1 to ourselves.
   raise(SIGUSR1);
 
-  // Poll to deliver the signal.
-  PollOnce();
+  PollUntilCondition(
+      [&] { return tracker.call_count.load(std::memory_order_relaxed) >= 1; },
+      "signal callback");
 
   // Callback should have fired.
   EXPECT_GE(tracker.call_count.load(std::memory_order_relaxed), 1);
@@ -193,8 +194,12 @@ TEST_P(SignalTest, MultipleSubscribers) {
   // Send signal.
   raise(SIGUSR2);
 
-  // Poll to deliver the signal.
-  PollOnce();
+  PollUntilCondition(
+      [&] {
+        return tracker1.call_count.load(std::memory_order_relaxed) >= 1 &&
+               tracker2.call_count.load(std::memory_order_relaxed) >= 1;
+      },
+      "signal callbacks");
 
   // Both callbacks should have fired.
   EXPECT_GE(tracker1.call_count.load(std::memory_order_relaxed), 1);

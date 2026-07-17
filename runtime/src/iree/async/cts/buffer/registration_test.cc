@@ -612,8 +612,7 @@ TEST_P(BufferRegistrationTest, RecvPoolRejectsReadOnlyRegion) {
   IREE_ASSERT_OK(iree_async_proactor_submit(
       proactor_,
       (iree_async_operation_list_t){setup_ops, IREE_ARRAYSIZE(setup_ops)}));
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_ASSERT_OK(connect_tracker.ConsumeStatus());
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());

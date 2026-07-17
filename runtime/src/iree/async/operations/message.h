@@ -70,9 +70,10 @@ typedef uint32_t iree_async_message_flags_t;
 //   immediately after data arrives, with no userspace round-trip between them.
 //
 // Lifetime:
-//   The operation struct must remain valid until the completion callback fires
-//   (or until poll drains, if SKIP_SOURCE_COMPLETION is set). The target
-//   proactor must be valid and not destroyed until the message is delivered.
+//   The operation struct must remain valid until the completion callback fires.
+//   Operations with SKIP_SOURCE_COMPLETION may be released after submit
+//   returns. The target proactor must remain valid until the message callback
+//   fires.
 typedef struct iree_async_message_operation_t {
   iree_async_operation_t base;
 

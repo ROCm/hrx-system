@@ -145,8 +145,7 @@ class SocketTestBase : public CtsTestBase<BaseType> {
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(this->proactor_, &connect_op.base));
 
-    this->PollUntil(/*min_completions=*/2,
-                    /*total_budget=*/iree_make_duration_ms(5000));
+    this->PollUntil(/*min_completions=*/2);
 
     ASSERT_NE(accept_op.accepted_socket, nullptr);
     *out_server = accept_op.accepted_socket;
@@ -193,8 +192,7 @@ class SocketTestBase : public CtsTestBase<BaseType> {
                       CompletionTracker::Callback, &rst_probe_tracker);
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(this->proactor_, &rst_probe_op.base));
-    this->PollUntil(/*min_completions=*/1,
-                    /*total_budget=*/iree_make_duration_ms(5000));
+    this->PollUntil(/*min_completions=*/1);
     iree_status_ignore(rst_probe_tracker.ConsumeStatus());
   }
 
@@ -204,10 +202,8 @@ class SocketTestBase : public CtsTestBase<BaseType> {
   // This helper properly waits for each recv operation to complete using
   // operation-specific tracking, rather than relying on global completion
   // counts (which can miscount when sends complete concurrently).
-  iree_host_size_t RecvAll(
-      iree_async_socket_t* socket, uint8_t* buffer,
-      iree_host_size_t expected_length,
-      iree_duration_t timeout = iree_make_duration_ms(5000)) {
+  iree_host_size_t RecvAll(iree_async_socket_t* socket, uint8_t* buffer,
+                           iree_host_size_t expected_length) {
     iree_host_size_t total_received = 0;
     while (total_received < expected_length) {
       iree_async_span_t recv_span = iree_async_span_from_ptr(
@@ -225,8 +221,9 @@ class SocketTestBase : public CtsTestBase<BaseType> {
       // completions globally, so we must check the tracker rather than
       // assuming the completion we wait for is our recv.
       while (recv_tracker.call_count == 0) {
-        this->PollUntil(/*min_completions=*/1, /*total_budget=*/timeout);
+        this->PollUntil(/*min_completions=*/1);
       }
+      IREE_CHECK_OK(recv_tracker.ConsumeStatus());
 
       if (recv_op.bytes_received == 0) break;  // EOF.
       total_received += recv_op.bytes_received;

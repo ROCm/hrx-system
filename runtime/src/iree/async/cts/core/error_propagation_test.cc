@@ -54,8 +54,7 @@ TEST_P(ErrorPropagationTest, SendOnClosedConnectionSetsStickyFailure) {
                     IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                     CompletionTracker::Callback, &tracker);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
   IREE_EXPECT_NOT_OK(tracker.ConsumeStatus())
       << "Send should fail after peer RST set sticky failure";
 
@@ -91,8 +90,7 @@ TEST_P(ErrorPropagationTest, StickyFailurePersistsAcrossOperations) {
                       IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                       CompletionTracker::Callback, &tracker);
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
     IREE_EXPECT_NOT_OK(tracker.ConsumeStatus())
         << "First send should fail after peer RST";
   }
@@ -105,8 +103,7 @@ TEST_P(ErrorPropagationTest, StickyFailurePersistsAcrossOperations) {
                       IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                       CompletionTracker::Callback, &tracker);
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
 
     IREE_EXPECT_NOT_OK(tracker.ConsumeStatus())
         << "Subsequent send " << i << " should also fail";
@@ -144,8 +141,7 @@ TEST_P(ErrorPropagationTest, ProactorContinuesAfterSocketFailure) {
                       IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                       CompletionTracker::Callback, &tracker);
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
     IREE_EXPECT_NOT_OK(tracker.ConsumeStatus())
         << "Client1 send should fail after peer RST";
   }
@@ -171,8 +167,7 @@ TEST_P(ErrorPropagationTest, ProactorContinuesAfterSocketFailure) {
                     CompletionTracker::Callback, &send_tracker);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Both operations on client2/server2 should succeed.
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -229,8 +224,7 @@ TEST_P(ErrorPropagationTest, MultishotRecvPeerCloseDeliversFinalCallback) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op1.base));
 
   // Wait for send completion.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   // Close client. Use release (not a close operation) because the close
   // operation's completion goes through the completion queue and can satisfy
@@ -242,12 +236,8 @@ TEST_P(ErrorPropagationTest, MultishotRecvPeerCloseDeliversFinalCallback) {
   // Wait for the multishot recv to terminate (EOF from peer close).
   // On macOS loopback, the FIN from close may take a few microseconds to
   // propagate. Poll until the recv delivers its final callback (no MORE).
-  {
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-    while (!log.final_received && iree_time_now() < deadline) {
-      PollOnce();
-    }
-  }
+  PollUntilCondition([&] { return log.final_received; },
+                     "multishot receive termination");
 
   // Verify multishot terminated (final_received should be true).
   EXPECT_TRUE(log.final_received)
@@ -260,14 +250,6 @@ TEST_P(ErrorPropagationTest, MultishotRecvPeerCloseDeliversFinalCallback) {
         << "Final callback should NOT have MORE flag";
     // Final status could be OK (graceful close with 0 bytes) or error.
     iree_status_ignore(log.ConsumeStatus(final_idx));
-  }
-
-  // Safety: if multishot recv didn't terminate, cancel it to prevent SEGFAULT
-  // during TearDown. The recv_op is stack-local; the proactor's fd chain would
-  // reference dangling memory when processing operations during shutdown.
-  if (!log.final_received) {
-    iree_status_ignore(iree_async_proactor_cancel(proactor_, &recv_op.base));
-    DrainPending();
   }
 
   iree_async_socket_release(server);
@@ -294,8 +276,7 @@ TEST_P(ErrorPropagationTest, ConnectFailureCarriesCorrectStatus) {
                        CompletionTracker::Callback, &tracker);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   // Should be an error - typically CONNECTION_REFUSED or similar.
@@ -332,8 +313,7 @@ TEST_P(ErrorPropagationTest, OperationAfterSocketError) {
                     CompletionTracker::Callback, &recv_tracker);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(recv_tracker.call_count, 1)
       << "Recv on a broken socket should still complete";
@@ -384,8 +364,7 @@ TEST_P(ErrorPropagationTest, ConnectFailurePropagatesThroughLinkedChain) {
   iree_async_operation_list_t list = {operations, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Connect should have failed.
   EXPECT_EQ(connect_tracker.call_count, 1);
@@ -413,8 +392,7 @@ TEST_P(ErrorPropagationTest, TimerDeadlineInPastCompletesOk) {
   timer.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());

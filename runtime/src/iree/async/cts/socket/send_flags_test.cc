@@ -71,8 +71,7 @@ TEST_P(SendFlagsTest, ZeroCopySendBasic) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
   // Poll until send and recv complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(send_tracker.call_count, 1);
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
@@ -128,8 +127,7 @@ TEST_P(SendFlagsTest, ZeroCopySendLargeBuffer) {
 
   // Poll for send completion (may have completed during recv loop).
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -184,8 +182,7 @@ TEST_P(SendFlagsTest, MoreFlagCoalesces) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op2.base));
 
   // Poll until both sends complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(send_tracker1.call_count, 1);
   IREE_EXPECT_OK(send_tracker1.ConsumeStatus());
@@ -253,8 +250,7 @@ TEST_P(SendFlagsTest, ZeroCopyWithMoreeFlag) {
 
   // Poll until both sends complete.
   while (send_tracker1.call_count == 0 || send_tracker2.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker1.call_count, 1);
@@ -319,8 +315,7 @@ TEST_P(SendFlagsTest, ZeroCopyBufferSafetyOnCompletion) {
 
   // Poll for send completion.
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   // After callback fires, it's safe to modify the buffer.
@@ -398,8 +393,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
 
   // Poll for send completion.
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -479,8 +473,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
 
   // Wait for send completion.
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   total_sent += send_op.bytes_sent;
@@ -564,8 +557,7 @@ TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
       RecvAll(server, recv_buffer.data(), partial_length);
 
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -643,8 +635,7 @@ TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
       RecvAll(server, recv_buffer.data(), total_length);
 
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -740,8 +731,7 @@ TEST_P(SendFlagsTest, ConcurrentRegisteredSends) {
     if (trackers[i].call_count > 0) ++send_completed;
   }
   while (send_completed < kNumConcurrent) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
     send_completed = 0;
     for (int i = 0; i < kNumConcurrent; ++i) {
       if (trackers[i].call_count > 0) ++send_completed;
@@ -825,8 +815,7 @@ TEST_P(SendFlagsTest, ZeroCopySendUnregisteredFallback) {
       RecvAll(server, recv_buffer.data(), send_length);
 
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -908,8 +897,7 @@ TEST_P(SendFlagsTest, ScatterGatherMixedRegistration) {
       RecvAll(server, recv_buffer.data(), total_length);
 
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -969,8 +957,7 @@ TEST_P(SendFlagsTest, ZeroCopyFallbackWhenCapabilityDisabled) {
       RecvAll(server, recv_buffer.data(), send_length);
 
   while (send_tracker.call_count == 0) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(send_tracker.call_count, 1);
@@ -1111,8 +1098,7 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
     if (trackers[i].call_count > 0) ++send_completed;
   }
   while (send_completed < 3) {
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
     send_completed = 0;
     for (int i = 0; i < 3; ++i) {
       if (trackers[i].call_count > 0) ++send_completed;

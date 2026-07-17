@@ -753,7 +753,7 @@ TEST(SemaphoreTest, MarkTaintedAboveOnlyDecreases) {
 
 TEST(MultiWaitTest, EmptyListSucceeds) {
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, nullptr, nullptr, 0, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, nullptr, nullptr, 0, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 }
 
@@ -765,7 +765,7 @@ TEST(MultiWaitTest, SingleSemaphoreAlreadySatisfied) {
 
   uint64_t value = 5;
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   iree_async_semaphore_release(sem);
@@ -779,7 +779,7 @@ TEST(MultiWaitTest, SingleSemaphoreExactValue) {
 
   uint64_t value = 10;
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   iree_async_semaphore_release(sem);
@@ -844,7 +844,7 @@ TEST(MultiWaitTest, AllModeAllAlreadySatisfied) {
   }
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   for (int i = 0; i < kCount; ++i) {
@@ -871,9 +871,8 @@ TEST(MultiWaitTest, AllModeSignaledFromThread) {
   });
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount,
-      iree_make_timeout_ms(5000), IREE_ASYNC_WAIT_FLAG_NONE,
-      iree_allocator_system()));
+      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   signaler.join();
 
@@ -899,9 +898,8 @@ TEST(MultiWaitTest, AnyModeFirstSatisfied) {
   });
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount,
-      iree_make_timeout_ms(5000), IREE_ASYNC_WAIT_FLAG_NONE,
-      iree_allocator_system()));
+      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   signaler.join();
 
@@ -927,9 +925,8 @@ TEST(MultiWaitTest, AnyModeMiddleSatisfied) {
   });
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount,
-      iree_make_timeout_ms(5000), IREE_ASYNC_WAIT_FLAG_NONE,
-      iree_allocator_system()));
+      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   signaler.join();
 
@@ -955,7 +952,7 @@ TEST(MultiWaitTest, AnyModeAlreadySatisfied) {
       iree_allocator_system(), &sems[2]));
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ANY, sems, values, kCount, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   for (int i = 0; i < kCount; ++i) {
@@ -981,9 +978,8 @@ TEST(MultiWaitTest, FailureAbortsWait) {
   });
 
   iree_status_t status = iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount,
-      iree_make_timeout_ms(5000), IREE_ASYNC_WAIT_FLAG_NONE,
-      iree_allocator_system());
+      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
   // multi_wait returns the actual failure code (not ABORTED) so the caller
   // knows the specific error without needing a follow-up query.
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
@@ -1007,7 +1003,7 @@ TEST(MultiWaitTest, AlreadyFailedSemaphoreAbortsImmediately) {
 
   uint64_t value = 10;
   iree_status_t status = iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
   iree_status_free(status);
@@ -1076,7 +1072,7 @@ TEST(MultiWaitTest, LargeCountUsesHeapAllocation) {
   }
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_make_timeout_ms(100),
+      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_immediate_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   for (int i = 0; i < kCount; ++i) {
@@ -1104,9 +1100,8 @@ TEST(MultiWaitTest, AllModeStaggeredSignals) {
   });
 
   IREE_ASSERT_OK(iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount,
-      iree_make_timeout_ms(5000), IREE_ASYNC_WAIT_FLAG_NONE,
-      iree_allocator_system()));
+      IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system()));
 
   // Verify all semaphores reached their values.
   for (int i = 0; i < kCount; ++i) {

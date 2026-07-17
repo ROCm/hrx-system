@@ -76,8 +76,7 @@ class LargeTransferTest : public SocketTestBase<> {
         return 0;
       }
 
-      PollUntil(/*min_completions=*/1,
-                /*total_budget=*/iree_make_duration_ms(30000));
+      PollUntil(/*min_completions=*/1);
 
       if (!iree_status_is_ok(tracker.last_status)) {
         ADD_FAILURE() << "SendAll: completion error at offset " << total_sent
@@ -121,8 +120,7 @@ class LargeTransferTest : public SocketTestBase<> {
         return 0;
       }
 
-      PollUntil(/*min_completions=*/1,
-                /*total_budget=*/iree_make_duration_ms(30000));
+      PollUntil(/*min_completions=*/1);
 
       if (!iree_status_is_ok(tracker.last_status)) {
         ADD_FAILURE() << "RecvAll: completion error at offset "
@@ -171,8 +169,7 @@ TEST_P(LargeTransferTest, LargeTransfer_1MB) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -231,8 +228,7 @@ TEST_P(LargeTransferTest, LargeTransfer_1MB) {
     }
 
     // Poll until at least one operation completes.
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(30000));
+    PollUntil(/*min_completions=*/1);
 
     // Process send completion.
     if (send_in_flight && send_tracker.call_count > 0) {
@@ -312,8 +308,7 @@ TEST_P(LargeTransferTest, LargeTransfer_SmallSendBuffer) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -375,8 +370,7 @@ TEST_P(LargeTransferTest, LargeTransfer_Chunked) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   ASSERT_EQ(connect_tracker.call_count, 1);
@@ -435,8 +429,7 @@ TEST_P(LargeTransferTest, LargeTransfer_Chunked) {
     }
 
     // Poll until at least one operation completes.
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(30000));
+    PollUntil(/*min_completions=*/1);
 
     // Process send completion.
     if (send_in_flight && send_tracker.call_count > 0) {
@@ -497,8 +490,7 @@ TEST_P(LargeTransferTest, LargeTransfer_Bidirectional) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until connect and accept complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   ASSERT_EQ(connect_tracker.call_count, 1);
@@ -588,8 +580,7 @@ TEST_P(LargeTransferTest, LargeTransfer_Bidirectional) {
 
     if (pending_count == 0) break;
 
-    PollUntil(/*min_completions=*/pending_count,
-              /*total_budget=*/iree_make_duration_ms(30000));
+    PollUntil(/*min_completions=*/pending_count);
 
     // Process completed operations and resubmit if needed.
     if (client_send_pending && client_send_tracker.call_count > 0) {
@@ -730,8 +721,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Sequential) {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
     // Poll until both complete.
-    PollUntil(/*min_completions=*/2,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/2);
 
     ASSERT_EQ(accept_tracker.call_count, 1);
     IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -772,8 +762,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Sequential) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-    PollUntil(/*min_completions=*/2,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/2);
 
     IREE_EXPECT_OK(send_tracker.ConsumeStatus());
     IREE_EXPECT_OK(recv_tracker.ConsumeStatus());
@@ -828,8 +817,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Parallel) {
   }
 
   // Poll until all connections established (accepts + connects).
-  PollUntil(/*min_completions=*/kNumConnections * 2,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumConnections * 2);
 
   // Verify all accepts succeeded.
   for (int i = 0; i < kNumConnections; ++i) {
@@ -881,8 +869,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Parallel) {
   }
 
   // Poll until all sends and recvs complete.
-  PollUntil(/*min_completions=*/kNumConnections * 2,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumConnections * 2);
 
   // Verify all sends and recvs completed.
   for (int i = 0; i < kNumConnections; ++i) {
@@ -952,8 +939,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Interleaved) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-    PollUntil(/*min_completions=*/2,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/2);
 
     ASSERT_NE(accept_op.accepted_socket, nullptr);
     servers[i] = accept_op.accepted_socket;
@@ -1000,8 +986,7 @@ TEST_P(ConcurrentConnectionsTest, ConcurrentConnections_Interleaved) {
     }
 
     // Poll until all complete.
-    PollUntil(/*min_completions=*/kNumConnections * 2,
-              /*total_budget=*/iree_make_duration_ms(10000));
+    PollUntil(/*min_completions=*/kNumConnections * 2);
 
     // Verify all data.
     for (int i = 0; i < kNumConnections; ++i) {
@@ -1077,8 +1062,7 @@ TEST_P(ScatterGatherTest, SendScatter_MultipleBuffers) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, total_length);
@@ -1135,8 +1119,7 @@ TEST_P(ScatterGatherTest, ScatterGather_ZeroLengthBuffer) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, total_length);
@@ -1185,8 +1168,7 @@ TEST_P(ScatterGatherTest, ScatterGather_SingleBuffer) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, length);
@@ -1241,8 +1223,7 @@ TEST_P(ScatterGatherTest, ScatterGather_ManyBuffers) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, total_length);
@@ -1302,8 +1283,7 @@ TEST_P(ScatterGatherTest, RecvScatter_MultipleBuffers) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, message_length);
@@ -1366,8 +1346,7 @@ TEST_P(ScatterGatherTest, ScatterGather_Bidirectional) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, total_length);
