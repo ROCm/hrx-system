@@ -66,11 +66,11 @@ static iree_hal_semaphore_list_t MakeSemaphoreList(
   };
 }
 
-static bool HostQueueHasPostDrainAction(iree_hal_amdgpu_host_queue_t* queue) {
-  iree_slim_mutex_lock(&queue->locks.post_drain_mutex);
-  const bool has_action = queue->post_drain.head != NULL;
-  iree_slim_mutex_unlock(&queue->locks.post_drain_mutex);
-  return has_action;
+static bool HostQueueHasPendingOperation(iree_hal_amdgpu_host_queue_t* queue) {
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  const bool has_operation = queue->pending_head != NULL;
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  return has_operation;
 }
 
 static iree_status_t EnqueueRawBlockingBarrier(
@@ -755,8 +755,8 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
         /*source_offset=*/0, file, /*target_offset=*/0, kMultiSlotTransferSize,
         IREE_HAL_WRITE_FLAG_NONE);
   }
-  const bool retry_parked =
-      iree_status_is_ok(status) && HostQueueHasPostDrainAction(queue);
+  const bool write_parked =
+      iree_status_is_ok(status) && HostQueueHasPendingOperation(queue);
 
   iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
 
@@ -769,7 +769,7 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
       iree_hsa_signal_destroy(IREE_LIBHSA(&libhsa_), blocker_signal));
 
   IREE_ASSERT_OK(status);
-  EXPECT_TRUE(retry_parked);
+  EXPECT_TRUE(write_parked);
 
   std::vector<uint8_t> contents =
       ReadTempFileContents(path, kMultiSlotTransferSize);
