@@ -810,13 +810,61 @@ typedef enum loom_amdgpu_workgroup_reduce_publication_kind_e {
   LOOM_AMDGPU_WORKGROUP_REDUCE_PUBLICATION_REDUNDANT_SUBGROUP_LEADER_LANE = 3,
 } loom_amdgpu_workgroup_reduce_publication_kind_t;
 
+#define LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY 4
+
+typedef struct loom_amdgpu_explicit_packet_immediate_t {
+  // Module string ID for the immediate field name.
+  loom_string_id_t name_id;
+  // Concrete immediate value emitted for the packet.
+  uint16_t value;
+} loom_amdgpu_explicit_packet_immediate_t;
+
+typedef struct loom_amdgpu_explicit_packet_immediate_template_t {
+  // Borrowed immediate field name resolved during packet planning.
+  iree_string_view_t name;
+  // Concrete immediate value emitted for the packet.
+  uint16_t value;
+} loom_amdgpu_explicit_packet_immediate_template_t;
+
+typedef struct loom_amdgpu_explicit_packet_plan_t {
+  // Descriptor row selected for the explicit packet.
+  loom_low_lower_resolved_descriptor_t descriptor;
+  // Immediate rows emitted on the descriptor.
+  loom_amdgpu_explicit_packet_immediate_t
+      immediates[LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY];
+  // Number of populated immediate rows.
+  iree_host_size_t immediate_count;
+} loom_amdgpu_explicit_packet_plan_t;
+
+typedef enum loom_amdgpu_kernel_barrier_lowering_kind_e {
+  // No lowering has been selected.
+  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE = 0,
+  // Emit a full workgroup barrier packet.
+  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_S_BARRIER = 1,
+  // Emit a wait packet that drains LDS effects for a single-wave workgroup.
+  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_LDS_WAIT = 2,
+  // Emit the split signal/wait barrier packet pair used by GFX12+ targets.
+  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_SPLIT_BARRIER = 3,
+} loom_amdgpu_kernel_barrier_lowering_kind_t;
+
+typedef struct loom_amdgpu_kernel_barrier_plan_t {
+  // Concrete synchronization packet path selected for kernel.barrier.
+  loom_amdgpu_kernel_barrier_lowering_kind_t kind;
+  // Explicit wait packet selected when |kind| is LDS_WAIT.
+  loom_amdgpu_explicit_packet_plan_t wait;
+  // Explicit signal packet selected when |kind| is SPLIT_BARRIER.
+  loom_amdgpu_explicit_packet_plan_t split_signal;
+  // Explicit wait packet selected when |kind| is SPLIT_BARRIER.
+  loom_amdgpu_explicit_packet_plan_t split_wait;
+} loom_amdgpu_kernel_barrier_plan_t;
+
 typedef struct loom_amdgpu_workgroup_collective_cross_wave_descriptors_t {
   // Descriptor row selected for LDS reads between waves.
   loom_low_lower_resolved_descriptor_t lds_read_descriptor;
   // Descriptor row selected for LDS writes between waves.
   loom_low_lower_resolved_descriptor_t lds_write_descriptor;
-  // Descriptor row selected to synchronize LDS publication.
-  loom_low_lower_resolved_descriptor_t barrier_descriptor;
+  // Target-selected packet plan used to synchronize LDS publication.
+  loom_amdgpu_kernel_barrier_plan_t barrier;
   // Descriptor row selected to restrict publication to producer lanes.
   loom_low_lower_resolved_descriptor_t saveexec_descriptor;
   // Descriptor row selected to restore EXEC after lane-restricted regions.
@@ -1398,54 +1446,6 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   // Result vector type.
   loom_type_t result_type;
 } loom_amdgpu_fragment_repack_plan_t;
-
-#define LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY 4
-
-typedef struct loom_amdgpu_explicit_packet_immediate_t {
-  // Module string ID for the immediate field name.
-  loom_string_id_t name_id;
-  // Concrete immediate value emitted for the packet.
-  uint16_t value;
-} loom_amdgpu_explicit_packet_immediate_t;
-
-typedef struct loom_amdgpu_explicit_packet_immediate_template_t {
-  // Borrowed immediate field name resolved during packet planning.
-  iree_string_view_t name;
-  // Concrete immediate value emitted for the packet.
-  uint16_t value;
-} loom_amdgpu_explicit_packet_immediate_template_t;
-
-typedef struct loom_amdgpu_explicit_packet_plan_t {
-  // Descriptor row selected for the explicit packet.
-  loom_low_lower_resolved_descriptor_t descriptor;
-  // Immediate rows emitted on the descriptor.
-  loom_amdgpu_explicit_packet_immediate_t
-      immediates[LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY];
-  // Number of populated immediate rows.
-  iree_host_size_t immediate_count;
-} loom_amdgpu_explicit_packet_plan_t;
-
-typedef enum loom_amdgpu_kernel_barrier_lowering_kind_e {
-  // No lowering has been selected.
-  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE = 0,
-  // Emit a full workgroup barrier packet.
-  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_S_BARRIER = 1,
-  // Emit a wait packet that drains LDS effects for a single-wave workgroup.
-  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_LDS_WAIT = 2,
-  // Emit the split signal/wait barrier packet pair used by GFX12+ targets.
-  LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_SPLIT_BARRIER = 3,
-} loom_amdgpu_kernel_barrier_lowering_kind_t;
-
-typedef struct loom_amdgpu_kernel_barrier_plan_t {
-  // Concrete synchronization packet path selected for kernel.barrier.
-  loom_amdgpu_kernel_barrier_lowering_kind_t kind;
-  // Explicit wait packet selected when |kind| is LDS_WAIT.
-  loom_amdgpu_explicit_packet_plan_t wait;
-  // Explicit signal packet selected when |kind| is SPLIT_BARRIER.
-  loom_amdgpu_explicit_packet_plan_t split_signal;
-  // Explicit wait packet selected when |kind| is SPLIT_BARRIER.
-  loom_amdgpu_explicit_packet_plan_t split_wait;
-} loom_amdgpu_kernel_barrier_plan_t;
 
 #define LOOM_AMDGPU_ATOMIC_WAIT_CAPACITY 2
 #define LOOM_AMDGPU_ATOMIC_CACHE_CONTROL_CAPACITY 2

@@ -1679,12 +1679,8 @@ static iree_status_t loom_amdgpu_emit_workgroup_reduce_scratch_read(
 static iree_status_t loom_amdgpu_emit_workgroup_reduce_barrier(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_workgroup_reduce_plan_t* plan) {
-  loom_op_t* barrier_op = NULL;
-  return loom_low_lower_emit_resolved_descriptor_op(
-      context, &plan->cross_wave.barrier_descriptor, /*operands=*/NULL,
-      /*operand_count=*/0, loom_make_named_attr_slice(NULL, 0),
-      /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
-      /*tied_result_count=*/0, source_op->location, &barrier_op);
+  return loom_amdgpu_collective_emit_cross_wave_barrier(context, source_op,
+                                                        &plan->cross_wave);
 }
 
 static iree_status_t loom_amdgpu_emit_workgroup_reduce_saveexec(

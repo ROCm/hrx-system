@@ -93,6 +93,12 @@ iree_status_t loom_amdgpu_collective_resolve_cross_wave_descriptors(
     loom_amdgpu_workgroup_collective_cross_wave_descriptors_t* out_descriptors,
     bool* out_present);
 
+// Emits the target-selected barrier sequence for cross-wave LDS publication.
+iree_status_t loom_amdgpu_collective_emit_cross_wave_barrier(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_workgroup_collective_cross_wave_descriptors_t*
+        descriptors);
+
 // Verifies descriptors required for cross-wave LDS exchange in workgroup
 // collective lowering.
 iree_status_t loom_amdgpu_collective_verify_cross_wave_descriptor_requirements(
