@@ -83,10 +83,15 @@ typedef struct iree_hal_remote_client_device_t {
   // all devices created by the same driver.
   iree_hal_remote_recv_pool_t* recv_pool;
 
-  // Active session (NULL when disconnected).
+  // Network session owned by the device, or NULL before connection begins.
+  // Once assigned, the session remains retained through terminal deactivation
+  // so operations racing the state transition can safely reach its closed
+  // submission gate. Released only during final device destruction.
   iree_net_session_t* session;
 
-  // Borrowed carrier backing the active session, or NULL if unavailable.
+  // Borrowed carrier backing |session|, or NULL if unavailable.
+  // Remains addressable while the owning session is retained, including after
+  // terminal transport deactivation.
   iree_net_carrier_t* session_carrier;
 
   // FILE_REGISTER capabilities derived from |session_carrier|.
@@ -95,9 +100,9 @@ typedef struct iree_hal_remote_client_device_t {
 
   // Queue channel for HAL command dispatch (0 until queue endpoint opens).
   // Published with release ordering and read with acquire ordering by queue
-  // submissions. Disconnect detaches the channel from its endpoint but leaves
-  // the channel object alive until device destroy or replacement so submitters
-  // do not need per-operation lifetime fences.
+  // submissions. Terminal deactivation closes the channel but leaves the
+  // object retained until device destruction so submitters that already
+  // observed CONNECTED do not need per-operation lifetime fences.
   iree_atomic_intptr_t queue_channel;
 
   // Client-local bulk channel, transfer, chunk, and profiling state.
@@ -150,6 +155,9 @@ typedef struct iree_hal_remote_client_device_t {
   // Pending connect callback (valid during CONNECTING state until queue and
   // bulk endpoints are both ready).
   iree_hal_remote_client_device_connected_callback_t connect_callback;
+
+  // Completion callback for terminal device deactivation.
+  iree_hal_remote_client_device_deactivated_callback_t deactivate_callback;
 
   // Trailing storage layout:
   //   char identifier_storage[identifier.size]

@@ -26,3 +26,12 @@ iree_runtime_hal_cts_test_suite(
   BACKENDS
     ::backends
 )
+
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    metal
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote
+)

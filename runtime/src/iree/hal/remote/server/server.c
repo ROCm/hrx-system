@@ -6,6 +6,7 @@
 
 #include "iree/hal/remote/server/server.h"
 
+#include "iree/async/operations/scheduling.h"
 #include "iree/hal/device_spec.h"
 #include "iree/hal/remote/protocol/bootstrap.h"
 #include "iree/hal/remote/protocol/common.h"
@@ -344,23 +345,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, device_count,
-                                         sizeof(iree_hal_executable_cache_t*),
-                                         (void**)&server->executable_caches);
-  }
-
-  if (iree_status_is_ok(status)) {
-    memset(server->executable_caches, 0,
-           device_count * sizeof(*server->executable_caches));
-    for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
-         ++i) {
-      status = iree_hal_executable_cache_create(
-          devices[i], iree_make_cstring_view("remote-server"),
-          &server->executable_caches[i]);
-    }
-  }
-
-  if (iree_status_is_ok(status)) {
     *out_server = server;
   } else if (server) {
     iree_hal_remote_server_destroy(server);
@@ -435,12 +419,6 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
   // Release retained objects.
   iree_net_transport_factory_release(server->options.transport_factory);
   iree_hal_remote_file_index_release(server->options.file_index);
-  if (server->executable_caches) {
-    for (iree_host_size_t i = 0; i < server->device_count; ++i) {
-      iree_hal_executable_cache_release(server->executable_caches[i]);
-    }
-    iree_allocator_free(host_allocator, server->executable_caches);
-  }
   for (iree_host_size_t i = 0; i < server->device_count; ++i) {
     iree_hal_device_release(server->devices[i]);
   }
@@ -596,7 +574,7 @@ static void iree_hal_remote_server_on_accept(
       server->sessions[slot].bulk_session = NULL;
       server->sessions[slot].server = NULL;
     }
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -669,30 +647,17 @@ iree_hal_remote_server_start(iree_hal_remote_server_t* server) {
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_remote_server_stop(
-    iree_hal_remote_server_t* server,
-    iree_hal_remote_server_stopped_callback_t callback) {
-  IREE_ASSERT_ARGUMENT(server);
+// Performs stop processing on the proactor thread. The public stop entry point
+// publishes STOPPING and schedules this routine so that session teardown is
+// serialized with endpoint callbacks.
+static void iree_hal_remote_server_stop_on_proactor(
+    iree_hal_remote_server_t* server) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Transition to STOPPING under the lock. After this, on_accept rejects
-  // new connections and remove_session checks for shutdown completion.
-  // Session shutdown calls are safe under the lock — they send GOAWAY frames
-  // asynchronously and do not re-enter session_mutex.
+  // STOPPING is published by the requesting thread before this operation is
+  // submitted so that new accepts are rejected immediately.
   iree_slim_mutex_lock(&server->session_mutex);
-
-  if (server->state != IREE_HAL_REMOTE_SERVER_STATE_RUNNING) {
-    iree_hal_remote_server_state_t current_state = server->state;
-    iree_slim_mutex_unlock(&server->session_mutex);
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "server must be in RUNNING state to stop "
-                            "(current state: %d)",
-                            (int)current_state);
-  }
-
-  server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPING;
-  server->stopped_callback = callback;
+  IREE_ASSERT_EQ(server->state, IREE_HAL_REMOTE_SERVER_STATE_STOPPING);
 
   // Send GOAWAY to all active sessions.
   for (uint32_t i = 0; i < server->options.max_connections; ++i) {
@@ -703,15 +668,32 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_stop(
         iree_status_t goaway_status = iree_net_session_shutdown(
             server->sessions[i].session, /*reason_code=*/0,
             iree_make_cstring_view("server stopping"));
-        // Shutdown may fail if the session is already in a terminal state
-        // (race with async error). That's fine — the session will be removed
-        // when its error/goaway callback fires.
-        iree_status_ignore(goaway_status);
+        // Stop unconditionally removes and deactivates every session below, so
+        // a GOAWAY send failure is represented by that terminal teardown.
+        iree_status_free(goaway_status);
       }
     }
   }
 
   iree_slim_mutex_unlock(&server->session_mutex);
+
+  // Relinquish ownership of each draining session. Sending GOAWAY transitions
+  // the local session to DRAINING but does not produce a local completion
+  // callback; waiting for the peer to send GOAWAY back would leave the server
+  // stuck in STOPPING for transports that deactivate silently. Retain each
+  // session while dropping the lock so a concurrent peer callback can remove
+  // the same slot safely.
+  for (uint32_t i = 0; i < server->options.max_connections; ++i) {
+    iree_net_session_t* session = NULL;
+    iree_slim_mutex_lock(&server->session_mutex);
+    session = server->sessions[i].session;
+    iree_net_session_retain(session);
+    iree_slim_mutex_unlock(&server->session_mutex);
+    if (session) {
+      iree_hal_remote_server_remove_session(server, session);
+      iree_net_session_release(session);
+    }
+  }
 
   // Stop the listener (no more accepts). Done outside the lock because
   // listener_stop may have internal synchronization.
@@ -722,12 +704,11 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_stop(
     iree_status_t stop_status =
         iree_net_listener_stop(server->listener, listener_callback);
     if (!iree_status_is_ok(stop_status)) {
-      // Listener stop failed — free it directly and proceed.
-      iree_status_ignore(stop_status);
-      iree_slim_mutex_lock(&server->session_mutex);
-      iree_net_listener_free(server->listener);
-      server->listener = NULL;
-      iree_slim_mutex_unlock(&server->session_mutex);
+      // stop() has already returned to the application and its callback has no
+      // status channel. Freeing a listener that still owns accept operations
+      // would be a use-after-free, so fail loud instead of violating the
+      // listener lifecycle contract.
+      iree_status_abort(stop_status);
     }
   }
 
@@ -747,7 +728,88 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_stop(
   }
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+}
+
+// Proactor operation carrying the retained server until stop processing has
+// been dispatched. Allocated per request so the stopped callback may restart
+// and stop the same server while this callback is still unwinding.
+typedef struct iree_hal_remote_server_stop_operation_t {
+  // NOP used to enter the server's proactor thread.
+  iree_async_nop_operation_t nop;
+
+  // Server retained until stop processing has been dispatched.
+  iree_hal_remote_server_t* server;
+} iree_hal_remote_server_stop_operation_t;
+
+static void iree_hal_remote_server_stop_operation_complete(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+
+  iree_hal_remote_server_stop_operation_t* stop_operation =
+      (iree_hal_remote_server_stop_operation_t*)user_data;
+  iree_hal_remote_server_t* server = stop_operation->server;
+  iree_hal_remote_server_stop_on_proactor(server);
+
+  iree_allocator_t host_allocator = server->host_allocator;
+  iree_allocator_free(host_allocator, stop_operation);
+  iree_hal_remote_server_release(server);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_remote_server_stop(
+    iree_hal_remote_server_t* server,
+    iree_hal_remote_server_stopped_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(server);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_remote_server_stop_operation_t* stop_operation = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      server->host_allocator, sizeof(*stop_operation), (void**)&stop_operation);
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+  memset(stop_operation, 0, sizeof(*stop_operation));
+
+  // Publish STOPPING before scheduling so that accept callbacks reject new
+  // connections while the stop operation waits for the proactor thread.
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (server->state != IREE_HAL_REMOTE_SERVER_STATE_RUNNING) {
+    iree_hal_remote_server_state_t current_state = server->state;
+    iree_slim_mutex_unlock(&server->session_mutex);
+    iree_allocator_free(server->host_allocator, stop_operation);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "server must be in RUNNING state to stop "
+                            "(current state: %d)",
+                            (int)current_state);
+  }
+  server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPING;
+  server->stopped_callback = callback;
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  stop_operation->server = server;
+  iree_hal_remote_server_retain(server);
+  iree_async_operation_initialize(
+      &stop_operation->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      iree_hal_remote_server_stop_operation_complete, stop_operation);
+  status = iree_async_proactor_submit_one(server->proactor,
+                                          &stop_operation->nop.base);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&server->session_mutex);
+    IREE_ASSERT_EQ(server->state, IREE_HAL_REMOTE_SERVER_STATE_STOPPING);
+    server->state = IREE_HAL_REMOTE_SERVER_STATE_RUNNING;
+    memset(&server->stopped_callback, 0, sizeof(server->stopped_callback));
+    iree_slim_mutex_unlock(&server->session_mutex);
+    iree_allocator_free(server->host_allocator, stop_operation);
+    iree_hal_remote_server_release(server);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_remote_server_query_bound_address(

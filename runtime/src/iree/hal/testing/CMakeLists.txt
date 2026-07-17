@@ -11,43 +11,12 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    mock_executable
-  HDRS
-    "mock_executable.h"
-  SRCS
-    "mock_executable.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::hal::utils::device_spec_builder
-  TESTONLY
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    mock_executable_cache
-  HDRS
-    "mock_executable_cache.h"
-  SRCS
-    "mock_executable_cache.c"
-  DEPS
-    ::mock_executable
-    iree::base
-    iree::hal
-  TESTONLY
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     mock_device
   HDRS
     "mock_device.h"
   SRCS
     "mock_device.c"
   DEPS
-    ::mock_executable
     iree::base
     iree::hal
     iree::hal::utils::device_spec_builder

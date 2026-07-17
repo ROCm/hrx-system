@@ -45,11 +45,49 @@ iree_runtime_hal_cts_test_suite(
 endif()
 
 if(IREE_HAL_DRIVER_CUDA)
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "cuda"
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote_graph
+  ARGS
+    "--cuda_use_streams=false"
+  LABELS
+    "iree-build-requirement=runtime.hal.cuda"
+    "iree-run-requirement=runtime.resource.nvidia_gpu"
+    "runtime-resource=nvidia-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-cuda-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_CUDA)
 iree_runtime_hal_cts_test_suite(
   BACKENDS
     ::backends
   NAME
     stream
+  ARGS
+    "--cuda_use_streams=true"
+  LABELS
+    "iree-build-requirement=runtime.hal.cuda"
+    "iree-run-requirement=runtime.resource.nvidia_gpu"
+    "runtime-resource=nvidia-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-cuda-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_CUDA)
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "cuda"
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote_stream
   ARGS
     "--cuda_use_streams=true"
   LABELS

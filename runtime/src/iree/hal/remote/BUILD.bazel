@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:iree_hal_cts_test_suite.bzl", "iree_hal_cts_testdata")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -13,15 +13,14 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-iree_hal_cts_testdata(
+iree_c_embed_data(
+    name = "testdata_vmvx",
     testonly = True,
-    backend_name = "remote_local_task",
-    flags = ["--iree-hal-local-target-device-backends=vmvx"],
-    format_name = "vmvx",
-    format_string = '"vmvx-bytecode-fb"',
+    srcs = ["testdata/command_buffer_dispatch_test.bin"],
+    c_file_output = "testdata_vmvx.c",
+    flatten = True,
+    h_file_output = "testdata_vmvx.h",
     identifier = "iree_remote_testdata_vmvx",
-    target_device = "local",
-    testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
 )
 
 iree_runtime_cc_test(

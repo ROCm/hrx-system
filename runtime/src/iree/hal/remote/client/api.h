@@ -101,8 +101,12 @@ typedef enum iree_hal_remote_client_device_state_e {
   IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING = 1,
   // Connected and ready for operations.
   IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED = 2,
+  // Terminal deactivation is draining the network session.
+  IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING = 3,
+  // Network resources have drained and the device is safe to release.
+  IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED = 4,
   // Unrecoverable error. Device must be destroyed and recreated.
-  IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR = 3,
+  IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR = 5,
 } iree_hal_remote_client_device_state_t;
 
 // Callback fired when iree_hal_remote_client_device_connect() completes.
@@ -115,6 +119,15 @@ typedef struct iree_hal_remote_client_device_connected_callback_t {
   iree_hal_remote_client_device_connected_fn_t fn;
   void* user_data;
 } iree_hal_remote_client_device_connected_callback_t;
+
+// Callback fired after terminal device deactivation has drained the network
+// session and all carrier operations. The device is safe to release from this
+// callback and no later network callback will reference it.
+typedef void (*iree_hal_remote_client_device_deactivated_fn_t)(void* user_data);
+typedef struct iree_hal_remote_client_device_deactivated_callback_t {
+  iree_hal_remote_client_device_deactivated_fn_t fn;
+  void* user_data;
+} iree_hal_remote_client_device_deactivated_callback_t;
 
 // Callback fired when the device encounters an unrecoverable error after
 // connection (e.g., transport failure, GOAWAY from server).
@@ -230,6 +243,20 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
 IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
     iree_hal_device_t* device,
     iree_hal_remote_client_device_connected_callback_t callback);
+
+// Begins terminal deactivation of a remote client device.
+//
+// The callback fires exactly once after session callbacks have detached and
+// the connection and all endpoints have drained. Until it fires the caller
+// may release its device reference; the deactivation operation retains the
+// device internally. The device cannot reconnect after deactivation.
+//
+// Returns FAILED_PRECONDITION while connection is still being established or
+// after deactivation has already started. A device that has not connected is
+// deactivated synchronously.
+IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
+    iree_hal_device_t* device,
+    iree_hal_remote_client_device_deactivated_callback_t callback);
 
 // Returns the current connection state of the device.
 IREE_API_EXPORT iree_hal_remote_client_device_state_t

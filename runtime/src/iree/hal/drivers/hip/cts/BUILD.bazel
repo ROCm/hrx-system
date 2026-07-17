@@ -8,7 +8,11 @@
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
+load(
+    "//runtime/build_tools/bazel:hal_cts.bzl",
+    "iree_runtime_hal_cts_test_suite",
+    "iree_runtime_hal_remote_cts_test_suite",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -49,6 +53,13 @@ iree_runtime_hal_cts_test_suite(
     backends = ":backends",
 )
 
+iree_runtime_hal_remote_cts_test_suite(
+    name = "remote_stream",
+    args = ["--hip_use_streams=true"],
+    source_backend_name = "hip",
+    source_backends = ":backends",
+)
+
 iree_runtime_hal_cts_test_suite(
     name = "graph",
     args = [
@@ -56,4 +67,14 @@ iree_runtime_hal_cts_test_suite(
         "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*",
     ],
     backends = ":backends",
+)
+
+iree_runtime_hal_remote_cts_test_suite(
+    name = "remote_graph",
+    args = [
+        "--hip_use_streams=false",
+        "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*",
+    ],
+    source_backend_name = "hip",
+    source_backends = ":backends",
 )

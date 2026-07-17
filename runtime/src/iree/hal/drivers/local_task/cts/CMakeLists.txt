@@ -28,4 +28,13 @@ iree_runtime_hal_cts_test_suite(
     ::backends
 )
 
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "local_task"
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

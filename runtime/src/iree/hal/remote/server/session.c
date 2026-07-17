@@ -924,7 +924,7 @@ static void iree_hal_remote_server_send_success_advance(
     iree_status_ignore(send_status);
   } else {
     // Non-alloca: empty ADVANCE payload.
-    iree_async_span_list_t empty_payload = {NULL, 0};
+    iree_async_span_list_t empty_payload = iree_async_span_list_empty();
     iree_status_t send_status = iree_net_queue_channel_send_advance(
         completion->queue_channel, signal_frontier, empty_payload,
         /*operation_user_data=*/0);
@@ -1335,8 +1335,6 @@ static iree_status_t iree_hal_remote_server_enqueue_pending_queue_command(
     command->queue_channel = queue_channel;
     iree_net_queue_channel_retain(command->queue_channel);
 
-    command->lease = *lease;
-    memset(lease, 0, sizeof(*lease));
     command->wait_frontier = wait_frontier;
     command->signal_frontier = signal_frontier;
     command->command_data = command_data;
@@ -1369,12 +1367,17 @@ static iree_status_t iree_hal_remote_server_enqueue_pending_queue_command(
                                 "provisional resource 0x%016" PRIx64
                                 " failed before queue command arrived",
                                 provisional_id);
-    } else if (session_slot->provisional_map.pending_tails[index]) {
-      session_slot->provisional_map.pending_tails[index]->next = command;
-      session_slot->provisional_map.pending_tails[index] = command;
-      command = NULL;
     } else {
-      session_slot->provisional_map.pending_heads[index] = command;
+      // Transfer receive storage only after every operation that can reject
+      // the enqueue has succeeded. On failure the caller still owns |lease|
+      // and may use frontier or command pointers until its callback returns.
+      command->lease = *lease;
+      memset(lease, 0, sizeof(*lease));
+      if (session_slot->provisional_map.pending_tails[index]) {
+        session_slot->provisional_map.pending_tails[index]->next = command;
+      } else {
+        session_slot->provisional_map.pending_heads[index] = command;
+      }
       session_slot->provisional_map.pending_tails[index] = command;
       command = NULL;
     }
@@ -3382,6 +3385,17 @@ static bool iree_hal_remote_server_buffer_supports_scoped_mapping(
                            IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED);
 }
 
+// Imports writes from completed local queue operations before host access.
+// Command completions publish under |session_mutex| before sending ADVANCE.
+// A client may issue BUFFER_MAP after observing that ADVANCE, but the network
+// round trip alone is not a C memory synchronization edge when the client and
+// server share a process.
+static void iree_hal_remote_server_acquire_queue_completions(
+    iree_hal_remote_server_session_t* entry) {
+  iree_slim_mutex_lock(&entry->server->session_mutex);
+  iree_slim_mutex_unlock(&entry->server->session_mutex);
+}
+
 // Handles BUFFER_MAP: maps a buffer on the local device, reads the requested
 // region, and returns the data inline in the response. No persistent
 // server-side mapping state is created — the map/unmap is scoped to this
@@ -3409,6 +3423,8 @@ static iree_status_t iree_hal_remote_server_handle_buffer_map(
   }
   iree_hal_remote_resource_id_t buffer_id =
       iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+
+  iree_hal_remote_server_acquire_queue_completions(entry);
 
   // Look up the buffer in the resource table.
   iree_hal_buffer_t* buffer =
@@ -3711,16 +3727,51 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   const iree_hal_remote_executable_upload_request_t* request =
       (const iree_hal_remote_executable_upload_request_t*)body;
 
-  // Validate INLINE_DATA flag (bulk transfer not yet supported).
-  if (!(request->upload_flags & IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA)) {
+  if (IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
+          IREE_HAL_REMOTE_RESOURCE_TYPE_EXECUTABLE ||
+      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "EXECUTABLE_UPLOAD provisional id must have "
+                         "provisional EXECUTABLE type"));
+  }
+
+  // Bulk executable uploads are not implemented yet.
+  if (request->upload_flags != IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                          "EXECUTABLE_UPLOAD: only INLINE_DATA is supported"));
   }
+  if (request->bulk_transfer_id != 0) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "EXECUTABLE_UPLOAD inline request has a bulk transfer ID"));
+  }
 
-  // Validate data_length fits in iree_host_size_t (prevents silent truncation
-  // on 32-bit platforms where uint64_t data_length exceeds SIZE_MAX).
+  const iree_hal_executable_load_flags_t allowed_load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION |
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING |
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION;
+  if (request->load_flags & ~allowed_load_flags) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "EXECUTABLE_UPLOAD load flags contain unknown bits "
+                         "0x%08" PRIx32,
+                         request->load_flags & ~allowed_load_flags));
+  }
+
+  if (request->target_ordinal > IREE_HOST_SIZE_MAX) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "EXECUTABLE_UPLOAD target ordinal exceeds host "
+                         "capacity"));
+  }
   if (request->data_length > IREE_HOST_SIZE_MAX) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope,
@@ -3729,15 +3780,27 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
             "EXECUTABLE_UPLOAD data_length exceeds host capacity"));
   }
 
-  // Extract variable-length sections: format string, constants, data.
-  iree_host_size_t format_length = (iree_host_size_t)request->format_length;
+  iree_hal_remote_server_t* server = entry->server;
+  iree_hal_device_t* device = server->devices[0];
+  const iree_hal_device_executable_spec_t* executable_spec =
+      iree_hal_device_spec_executables(iree_hal_device_spec(device));
+  const iree_host_size_t target_ordinal =
+      (iree_host_size_t)request->target_ordinal;
+  if (target_ordinal >= executable_spec->target_count) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "EXECUTABLE_UPLOAD target ordinal %" PRIhsz
+                         " exceeds target count %" PRIhsz,
+                         target_ordinal, executable_spec->target_count));
+  }
+
+  // Extract specialization constants and inline artifact data.
   iree_host_size_t constants_offset = 0;
   iree_host_size_t data_offset = 0;
-  iree_host_size_t format_offset = 0;
   iree_host_size_t total_required = 0;
   iree_status_t layout_status = IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_remote_executable_upload_request_t), &total_required,
-      IREE_STRUCT_FIELD(format_length, uint8_t, &format_offset),
       IREE_STRUCT_FIELD_ALIGNED(request->constant_count, uint32_t, 8,
                                 &constants_offset),
       IREE_STRUCT_FIELD_ALIGNED((iree_host_size_t)request->data_length, uint8_t,
@@ -3752,24 +3815,21 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "EXECUTABLE_UPLOAD inline data truncated"));
   }
-  const char* format_chars = (const char*)(body + format_offset);
   const uint32_t* constants = (const uint32_t*)(body + constants_offset);
   const uint8_t* inline_data = body + data_offset;
 
-  // Build executable params.
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = iree_make_string_view(format_chars, format_length);
-  params.executable_data = iree_make_const_byte_span(
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.flags = (iree_hal_executable_load_flags_t)request->load_flags;
+  load_params.executable_data = iree_make_const_byte_span(
       inline_data, (iree_host_size_t)request->data_length);
-  params.constant_count = (iree_host_size_t)request->constant_count;
-  params.constants = constants;
+  load_params.constant_count = (iree_host_size_t)request->constant_count;
+  load_params.constants = constants;
 
-  // Load via the server's shared executable cache.
-  iree_hal_remote_server_t* server = entry->server;
   iree_hal_executable_t* executable = NULL;
-  iree_status_t status = iree_hal_executable_cache_prepare_executable(
-      server->executable_caches[0], &params, &executable);
+  iree_status_t status = iree_hal_device_load_executable(
+      device, (iree_hal_queue_affinity_t)request->queue_affinity,
+      &executable_spec->targets[target_ordinal], &load_params, &executable);
   if (!iree_status_is_ok(status)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, status);
@@ -3778,6 +3838,15 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   // Query function count from the loaded executable.
   iree_host_size_t function_count =
       iree_hal_executable_function_count(executable);
+  if (function_count > UINT32_MAX) {
+    iree_hal_executable_release(executable);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "EXECUTABLE_UPLOAD function count %" PRIhsz
+                         " exceeds wire limit %" PRIu32,
+                         function_count, UINT32_MAX));
+  }
 
   // Assign to the session's resource table.
   iree_hal_remote_resource_id_t resolved_id = 0;
@@ -3853,13 +3922,6 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_function(
                               " exceeds wire limit %" PRIu16,
                               info.name.size, UINT16_MAX);
   }
-  if (iree_status_is_ok(status) && info.constant_byte_length > UINT16_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "function constant byte length %" PRIu32
-                              " exceeds wire limit %" PRIu16,
-                              info.constant_byte_length, UINT16_MAX);
-  }
-
   if (!iree_status_is_ok(status)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, status);
@@ -3871,7 +3933,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_function(
   memcpy(response.workgroup_size, info.workgroup_size,
          sizeof(response.workgroup_size));
   response.occupancy_reserved = info.occupancy_info.reserved;
-  response.constant_count = (uint16_t)info.constant_byte_length;
+  response.constant_byte_length = info.constant_byte_length;
   response.binding_count = info.binding_count;
   response.parameter_count = info.parameter_count;
   response.name_length = (uint16_t)info.name.size;
@@ -3900,6 +3962,14 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   if (iree_status_is_ok(status)) {
     request =
         (const iree_hal_remote_executable_query_parameters_request_t*)body;
+    if (request->reserved[0] != 0 || request->reserved[1] != 0 ||
+        request->reserved[2] != 0) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "EXECUTABLE_QUERY_PARAMETERS request reserved field is nonzero");
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_lookup_executable(
         entry, request->executable_id, &executable);
   }
@@ -3933,9 +4003,20 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   }
 
   iree_host_size_t name_data_length = 0;
+  const iree_hal_executable_function_parameter_flags_t known_parameter_flags =
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET;
   for (iree_host_size_t i = 0; i < parameter_count && iree_status_is_ok(status);
        ++i) {
-    if (parameters[i].name.size > UINT16_MAX) {
+    if (parameters[i].type >
+        IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter has invalid type %" PRIu8,
+                                parameters[i].type);
+    } else if (iree_any_bit_set(parameters[i].flags, ~known_parameter_flags)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter has unsupported flags 0x%04" PRIx16,
+                                parameters[i].flags);
+    } else if (parameters[i].name.size > UINT16_MAX) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "parameter name length %" PRIhsz
                                 " exceeds wire limit %" PRIu16,
@@ -3992,6 +4073,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
     char* name_cursor = (char*)data_bytes + names_offset;
     for (iree_host_size_t i = 0; i < parameter_count; ++i) {
       wire_parameters[i].offset = parameters[i].offset;
+      wire_parameters[i].native_abi_offset = parameters[i].native_abi_offset;
       wire_parameters[i].flags = parameters[i].flags;
       wire_parameters[i].name_length = (uint16_t)parameters[i].name.size;
       wire_parameters[i].type = parameters[i].type;
@@ -4016,61 +4098,6 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   return iree_hal_remote_server_send_response_with_data(
       entry, envelope, IREE_STATUS_OK, &response, sizeof(response),
       data_storage, data_length);
-}
-
-static iree_status_t iree_hal_remote_server_handle_executable_lookup_function(
-    iree_hal_remote_server_session_t* entry,
-    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
-    iree_host_size_t body_length) {
-  iree_status_t status = iree_ok_status();
-  if (body_length <
-      sizeof(iree_hal_remote_executable_lookup_function_request_t)) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "EXECUTABLE_LOOKUP_FUNCTION body too small: %" PRIhsz " bytes",
-        body_length);
-  }
-
-  const iree_hal_remote_executable_lookup_function_request_t* request = NULL;
-  iree_host_size_t name_offset = 0;
-  iree_host_size_t required_length = 0;
-  if (iree_status_is_ok(status)) {
-    request = (const iree_hal_remote_executable_lookup_function_request_t*)body;
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(iree_hal_remote_executable_lookup_function_request_t),
-        &required_length,
-        IREE_STRUCT_FIELD(request->name_length, char, &name_offset));
-  }
-  if (iree_status_is_ok(status) && body_length < required_length) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "EXECUTABLE_LOOKUP_FUNCTION name truncated");
-  }
-
-  iree_hal_executable_t* executable = NULL;
-  iree_hal_executable_function_t function =
-      iree_hal_executable_function_invalid();
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_lookup_executable(
-        entry, request->executable_id, &executable);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_string_view_t name =
-        iree_make_string_view((const char*)body + name_offset,
-                              (iree_host_size_t)request->name_length);
-    status = iree_hal_executable_lookup_function_by_name(executable, name,
-                                                         &function);
-  }
-  if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-  }
-
-  iree_hal_remote_executable_lookup_function_response_t response;
-  memset(&response, 0, sizeof(response));
-  response.function_value = function.value;
-  return iree_hal_remote_server_send_response(
-      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
-      &response, sizeof(response));
 }
 
 static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
@@ -4109,6 +4136,87 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
   }
 
   iree_hal_executable_t* executable = NULL;
+  bool found = false;
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
+  iree_hal_executable_global_info_t global_info;
+  memset(&global_info, 0, sizeof(global_info));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_lookup_executable(
+        entry, request->executable_id, &executable);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t name =
+        iree_make_string_view((const char*)body + name_offset,
+                              (iree_host_size_t)request->name_length);
+    status = iree_hal_executable_try_lookup_global_by_name(executable, name,
+                                                           &found, &global);
+  }
+  if (iree_status_is_ok(status) && found) {
+    status = iree_hal_executable_global_info(executable, global, &global_info);
+  }
+  if (iree_status_is_ok(status) && found &&
+      !iree_hal_executable_global_is_valid(global)) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "EXECUTABLE_LOOKUP_GLOBAL returned an invalid global token");
+  }
+
+  iree_hal_remote_executable_lookup_global_response_t response;
+  memset(&response, 0, sizeof(response));
+  if (iree_status_is_ok(status) && found) {
+    response.byte_length = (uint64_t)global_info.byte_length;
+  }
+  if (iree_status_is_ok(status)) {
+    response.found = found ? 1u : 0u;
+  }
+
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
+}
+
+static iree_status_t iree_hal_remote_server_handle_executable_global_buffer(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  iree_status_t status = iree_ok_status();
+  if (body_length <
+      sizeof(iree_hal_remote_executable_global_buffer_request_t)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "EXECUTABLE_GLOBAL_BUFFER body too small: %" PRIhsz " bytes",
+        body_length);
+  }
+
+  const iree_hal_remote_executable_global_buffer_request_t* request = NULL;
+  iree_host_size_t name_offset = 0;
+  iree_host_size_t required_length = 0;
+  if (iree_status_is_ok(status)) {
+    request = (const iree_hal_remote_executable_global_buffer_request_t*)body;
+    if (request->reserved0 != 0 || request->reserved1 != 0) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "EXECUTABLE_GLOBAL_BUFFER request reserved field is nonzero");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_executable_global_buffer_request_t),
+        &required_length,
+        IREE_STRUCT_FIELD(request->name_length, char, &name_offset));
+  }
+  if (iree_status_is_ok(status) && body_length < required_length) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "EXECUTABLE_GLOBAL_BUFFER name truncated");
+  }
+
+  iree_hal_executable_t* executable = NULL;
+  bool found = false;
   iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   iree_hal_buffer_t* local_buffer = NULL;
   if (iree_status_is_ok(status)) {
@@ -4119,8 +4227,12 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
     iree_string_view_t name =
         iree_make_string_view((const char*)body + name_offset,
                               (iree_host_size_t)request->name_length);
+    status = iree_hal_executable_try_lookup_global_by_name(executable, name,
+                                                           &found, &global);
+  }
+  if (iree_status_is_ok(status) && !found) {
     status =
-        iree_hal_executable_lookup_global_by_name(executable, name, &global);
+        iree_make_status(IREE_STATUS_NOT_FOUND, "executable global not found");
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_global_buffer(
@@ -4130,7 +4242,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
   if (iree_status_is_ok(status) && !local_buffer) {
     status = iree_make_status(
         IREE_STATUS_INTERNAL,
-        "EXECUTABLE_LOOKUP_GLOBAL returned success without a buffer");
+        "EXECUTABLE_GLOBAL_BUFFER returned success without a buffer");
   }
 
   iree_hal_remote_resource_id_t resolved_id = 0;
@@ -4140,7 +4252,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
         local_buffer, &resolved_id);
   }
 
-  iree_hal_remote_executable_lookup_global_response_t response;
+  iree_hal_remote_executable_global_buffer_response_t response;
   memset(&response, 0, sizeof(response));
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_placement_t placement =
@@ -4156,66 +4268,10 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_global(
     response.placement_flags = placement.flags;
   }
 
-  iree_hal_buffer_release(local_buffer);
   if (!iree_status_is_ok(status)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, status);
   }
-
-  return iree_hal_remote_server_send_response(
-      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
-      &response, sizeof(response));
-}
-
-static iree_status_t
-iree_hal_remote_server_handle_executable_cache_query_format(
-    iree_hal_remote_server_session_t* entry,
-    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
-    iree_host_size_t body_length) {
-  iree_status_t status = iree_ok_status();
-  if (body_length <
-      sizeof(iree_hal_remote_executable_cache_query_format_request_t)) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "EXECUTABLE_CACHE_QUERY_FORMAT body too small: %" PRIhsz " bytes",
-        body_length);
-  }
-
-  const iree_hal_remote_executable_cache_query_format_request_t* request = NULL;
-  iree_host_size_t format_offset = 0;
-  iree_host_size_t required_length = 0;
-  if (iree_status_is_ok(status)) {
-    request =
-        (const iree_hal_remote_executable_cache_query_format_request_t*)body;
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(iree_hal_remote_executable_cache_query_format_request_t),
-        &required_length,
-        IREE_STRUCT_FIELD(request->format_length, char, &format_offset));
-  }
-  if (iree_status_is_ok(status) && body_length < required_length) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "EXECUTABLE_CACHE_QUERY_FORMAT format string truncated");
-  }
-
-  bool can_prepare = false;
-  if (iree_status_is_ok(status)) {
-    iree_string_view_t executable_format =
-        iree_make_string_view((const char*)body + format_offset,
-                              (iree_host_size_t)request->format_length);
-    can_prepare = iree_hal_executable_cache_can_prepare_format(
-        entry->server->executable_caches[0],
-        (iree_hal_executable_caching_mode_t)request->caching_mode,
-        executable_format);
-  }
-  if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(
-        entry->server->host_allocator, entry->session, envelope, status);
-  }
-
-  iree_hal_remote_executable_cache_query_format_response_t response;
-  memset(&response, 0, sizeof(response));
-  response.can_prepare = can_prepare ? 1u : 0u;
   return iree_hal_remote_server_send_response(
       entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
       &response, sizeof(response));
@@ -6254,9 +6310,14 @@ void iree_hal_remote_server_on_session_error(void* user_data,
 
 void iree_hal_remote_server_on_session_send_complete(
     void* user_data, uint64_t operation_user_data, iree_status_t status) {
-  (void)user_data;
   (void)operation_user_data;
-  iree_status_ignore(status);
+  iree_hal_remote_server_session_t* entry =
+      (iree_hal_remote_server_session_t*)user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_server_on_session_error(user_data, entry->session, status);
+  } else {
+    iree_status_free(status);
+  }
 }
 
 iree_status_t iree_hal_remote_server_on_control_data(
@@ -6340,14 +6401,11 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS:
       return iree_hal_remote_server_handle_executable_query_parameters(
           entry, envelope, body, body_length);
-    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_FUNCTION:
-      return iree_hal_remote_server_handle_executable_lookup_function(
-          entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_GLOBAL:
       return iree_hal_remote_server_handle_executable_lookup_global(
           entry, envelope, body, body_length);
-    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_CACHE_QUERY_FORMAT:
-      return iree_hal_remote_server_handle_executable_cache_query_format(
+    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_GLOBAL_BUFFER:
+      return iree_hal_remote_server_handle_executable_global_buffer(
           entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_EVENT_CREATE:
       return iree_hal_remote_server_handle_event_create(entry, envelope, body,

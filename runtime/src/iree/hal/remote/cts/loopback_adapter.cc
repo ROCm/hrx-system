@@ -6,13 +6,12 @@
 
 // Remote loopback adapter for HAL CTS backend registrations.
 //
-// Concrete HAL CTS packages own their driver registration, executable formats,
+// Concrete HAL CTS packages own their driver registration, executable targets,
 // hardware tags, and build guards. Linking this adapter into one of those CTS
 // packages derives a "remote_<backend>" CTS backend that wraps the concrete
 // backend behind a loopback remote server/client pair.
 
 #include <atomic>
-#include <cstdio>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,20 +31,12 @@
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/net/carrier/loopback/factory.h"
 #include "iree/net/session.h"
+#include "iree/testing/status_matchers.h"
 
 namespace iree::hal::cts {
 namespace {
 
 static constexpr uint32_t kAxisTableCapacity = 16;
-
-static void LogTeardownStatus(const char* context, iree_status_t status) {
-  if (!iree_status_is_ok(status)) {
-    std::fprintf(stderr, "%s: ", context);
-    iree_status_fprint(stderr, status);
-    std::fprintf(stderr, "\n");
-    iree_status_free(status);
-  }
-}
 
 static bool StringVectorContains(const std::vector<std::string>& values,
                                  const char* candidate) {
@@ -80,72 +71,35 @@ struct RemoteBackendContext {
 
   ~RemoteBackendContext() { Teardown(); }
 
-  // Phased teardown state. The server must be released on the proactor thread
-  // so session disconnect and carrier deactivation happen in the same context
-  // as completion processing.
-  struct TeardownState {
-    // Posted by the proactor message callback after each teardown phase.
-    iree_notification_t notification;
-    // Server transferred from the context to the proactor message callback.
-    iree_hal_remote_server_t* server;
-    // Last teardown phase completed by the proactor callback.
-    std::atomic<int32_t> phase;
-  };
-
   void Teardown() {
-    iree_async_proactor_t* proactor =
-        recv_pool ? iree_hal_remote_recv_pool_proactor(recv_pool) : nullptr;
-    if (proactor && server) {
-      TeardownState state;
+    if (server) {
+      struct StopState {
+        // Posted when the server has drained its listener and sessions.
+        iree_notification_t notification;
+        // Set before the stop callback posts |notification|.
+        std::atomic<bool> stopped;
+      } state;
       iree_notification_initialize(&state.notification);
-      state.server = server;
-      state.phase.store(0, std::memory_order_relaxed);
-      server = nullptr;
+      state.stopped.store(false, std::memory_order_relaxed);
 
-      iree_async_proactor_message_callback_t message_callback;
-      message_callback.fn = [](iree_async_proactor_t* proactor,
-                               uint64_t message_data, void* user_data) {
-        auto* state = static_cast<TeardownState*>(user_data);
-        if (message_data == 1) {
-          iree_hal_remote_server_release(state->server);
-          state->server = nullptr;
-        }
-        if (message_data == 2) {
-          iree_async_proactor_message_callback_t null_callback = {};
-          iree_async_proactor_set_message_callback(proactor, null_callback);
-        }
-        state->phase.store(static_cast<int32_t>(message_data),
-                           std::memory_order_release);
+      iree_hal_remote_server_stopped_callback_t callback;
+      callback.fn = [](void* user_data) {
+        auto* state = static_cast<StopState*>(user_data);
+        state->stopped.store(true, std::memory_order_release);
         iree_notification_post(&state->notification, IREE_ALL_WAITERS);
       };
-      message_callback.user_data = &state;
-      iree_async_proactor_set_message_callback(proactor, message_callback);
+      callback.user_data = &state;
 
-      auto phase1_reached = +[](void* user_data) -> bool {
-        auto* state = static_cast<TeardownState*>(user_data);
-        return state->phase.load(std::memory_order_acquire) >= 1;
-      };
-      auto phase2_reached = +[](void* user_data) -> bool {
-        auto* state = static_cast<TeardownState*>(user_data);
-        return state->phase.load(std::memory_order_acquire) >= 2;
-      };
-
-      iree_status_t status = iree_async_proactor_send_message(proactor, 1);
+      iree_status_t status = iree_hal_remote_server_stop(server, callback);
       if (iree_status_is_ok(status)) {
-        iree_notification_await(&state.notification, phase1_reached, &state,
+        auto server_stopped = +[](void* user_data) -> bool {
+          auto* state = static_cast<StopState*>(user_data);
+          return state->stopped.load(std::memory_order_acquire);
+        };
+        iree_notification_await(&state.notification, server_stopped, &state,
                                 iree_infinite_timeout());
-        status = iree_async_proactor_send_message(proactor, 2);
       }
-      if (iree_status_is_ok(status)) {
-        iree_notification_await(&state.notification, phase2_reached, &state,
-                                iree_infinite_timeout());
-      } else {
-        iree_async_proactor_message_callback_t null_callback = {};
-        iree_async_proactor_set_message_callback(proactor, null_callback);
-        LogTeardownStatus("remote CTS server teardown failed", status);
-      }
-      iree_hal_remote_server_release(state.server);
-      state.server = nullptr;
+      IREE_EXPECT_OK(status);
       iree_notification_deinitialize(&state.notification);
     }
 
@@ -190,14 +144,17 @@ class RemoteBackendEnvironment : public ::testing::Environment {
 };
 
 static RemoteBackendEnvironment* GetEnvironment() {
-  static RemoteBackendEnvironment* environment = [] {
-    auto* environment = new RemoteBackendEnvironment();
-    ::testing::AddGlobalTestEnvironment(
-        static_cast<::testing::Environment*>(environment));
-    return environment;
-  }();
+  static auto* environment = new RemoteBackendEnvironment();
   return environment;
 }
+
+// Register before test_main adds CtsBackendCacheEnvironment. GTest tears global
+// environments down in reverse registration order, ensuring cached remote
+// client devices are released before their server contexts.
+static bool remote_backend_environment_registered_ = [] {
+  ::testing::AddGlobalTestEnvironment(GetEnvironment());
+  return true;
+}();
 
 static iree_status_t CreateRemoteDevice(
     const iree_hal_device_create_params_t* create_params,

@@ -943,6 +943,36 @@ loom_link_module(
             converter.body,
         )
 
+    def test_runtime_hal_remote_cts_test_suite_converts_inputs(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions._iree_runtime_hal_remote_cts_test_suite(
+            source_backend_name="local_task",
+            source_backends=":backends",
+            testdata_libs=[":testdata"],
+            name="remote",
+            args=[
+                "$(location input.txt)",
+                "--flag=$(rootpath nested/input.bin)",
+            ],
+        )
+
+        self.assertIn("iree_runtime_hal_remote_cts_test_suite(", converter.body)
+        self.assertIn('    "local_task"', converter.body)
+        self.assertIn("    ::backends", converter.body)
+        self.assertIn("    ::testdata", converter.body)
+        self.assertIn('"${PROJECT_SOURCE_DIR}/pkg/input.txt"', converter.body)
+        self.assertIn(
+            '"--flag=${PROJECT_SOURCE_DIR}/pkg/nested/input.bin"',
+            converter.body,
+        )
+
     def test_execution_test_suite_converts_location_args_to_source_paths(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(

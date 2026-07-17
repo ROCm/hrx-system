@@ -9,21 +9,20 @@
 
 iree_add_all_subdirs()
 
-iree_hal_cts_testdata(
-  FORMAT_NAME
-    vmvx
-  TARGET_DEVICE
-    "local"
+iree_c_embed_data(
+  NAME
+    testdata_vmvx
+  SRCS
+    "testdata/command_buffer_dispatch_test.bin"
+  C_FILE_OUTPUT
+    "testdata_vmvx.c"
+  H_FILE_OUTPUT
+    "testdata_vmvx.h"
   IDENTIFIER
     "iree_remote_testdata_vmvx"
-  BACKEND_NAME
-    "remote_local_task"
-  FORMAT_STRING
-    [=["vmvx-bytecode-fb"]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
-  FLAGS
-    "--iree-hal-local-target-device-backends=vmvx"
+  TESTONLY
+  FLATTEN
+  PUBLIC
 )
 
 iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)

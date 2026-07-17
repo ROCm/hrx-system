@@ -54,11 +54,50 @@ iree_runtime_hal_cts_test_suite(
 endif()
 
 if(IREE_HAL_DRIVER_HIP)
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "hip"
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote_stream
+  ARGS
+    "--hip_use_streams=true"
+  LABELS
+    "iree-build-requirement=runtime.hal.hip"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-hip-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_HIP)
 iree_runtime_hal_cts_test_suite(
   BACKENDS
     ::backends
   NAME
     graph
+  ARGS
+    "--hip_use_streams=false"
+    "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*"
+  LABELS
+    "iree-build-requirement=runtime.hal.hip"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-hip-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_HIP)
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "hip"
+  SOURCE_BACKENDS
+    ::backends
+  NAME
+    remote_graph
   ARGS
     "--hip_use_streams=false"
     "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*"

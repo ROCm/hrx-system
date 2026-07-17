@@ -102,9 +102,8 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD = 0x0020,  // [epoch]
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_FUNCTION = 0x0021,
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS = 0x0022,
-  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_FUNCTION = 0x0023,
-  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_CACHE_QUERY_FORMAT = 0x0024,
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_GLOBAL = 0x0025,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_GLOBAL_BUFFER = 0x0026,
 
   // ── Command Buffer ──────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_COMMAND_BUFFER_UPLOAD = 0x0030,  // [epoch]
@@ -291,26 +290,32 @@ static_assert(sizeof(iree_hal_remote_event_create_response_t) == 8, "");
 // Executable messages
 //===----------------------------------------------------------------------===//
 
-// EXECUTABLE_UPLOAD request. Uploads a compiled executable blob. [epoch]
-// Data delivery controlled by upload_flags: either inline (data follows this
-// struct) or bulk (referenced by bulk_transfer_id, server defers processing
-// until the bulk transfer completes).
+// EXECUTABLE_UPLOAD request. Loads a native executable artifact. [epoch]
+//
+// |target_ordinal| indexes the immutable executable target table advertised
+// for device 0 during bootstrap. The server resolves the ordinal against its
+// local copy of the same device spec so the target passed to
+// iree_hal_device_load_executable is borrowed from that device.
+//
+// Data delivery is controlled by |upload_flags|: either inline (data follows
+// this struct) or bulk (referenced by |bulk_transfer_id|, with server
+// processing deferred until the bulk transfer completes).
 typedef struct iree_hal_remote_executable_upload_request_t {
   iree_hal_remote_resource_id_t provisional_id;  // PROVISIONAL=1
-  uint16_t format_length;     // Byte length of the format string.
-  uint16_t constant_count;    // Specialization constant count.
-  uint16_t upload_flags;      // IREE_HAL_REMOTE_UPLOAD_FLAG_*
-  uint16_t reserved;          // Must be 0.
+  uint64_t target_ordinal;    // Ordinal in the bootstrapped target table.
+  uint64_t queue_affinity;    // iree_hal_queue_affinity_t.
   uint64_t data_length;       // Byte count of executable data.
   uint64_t bulk_transfer_id;  // Valid when BULK_REFERENCE is set.
+  uint32_t load_flags;        // iree_hal_executable_load_flags_t.
+  uint16_t constant_count;    // Specialization constant count.
+  uint16_t upload_flags;      // IREE_HAL_REMOTE_UPLOAD_FLAG_*.
   // Followed by:
-  //   char format[format_length]  (padded to 8-byte alignment)
   //   uint32_t constants[constant_count]  (padded to 8-byte alignment)
   //   [if INLINE_DATA]: uint8_t data[data_length]
 } iree_hal_remote_executable_upload_request_t;
-static_assert(sizeof(iree_hal_remote_executable_upload_request_t) == 32, "");
+static_assert(sizeof(iree_hal_remote_executable_upload_request_t) == 48, "");
 static_assert(offsetof(iree_hal_remote_executable_upload_request_t,
-                       data_length) == 16,
+                       load_flags) == 40,
               "");
 
 // EXECUTABLE_UPLOAD response. Returns the resolved ID and function count.
@@ -338,11 +343,12 @@ typedef struct iree_hal_remote_executable_query_function_response_t {
   uint64_t flags;  // iree_hal_executable_function_flags_t
   uint32_t workgroup_size[3];
   int32_t occupancy_reserved;  // iree_hal_occupancy_info_t::reserved.
-  uint16_t constant_count;  // iree_hal_executable_function_info_t byte length.
+  uint32_t constant_byte_length;
   uint16_t binding_count;
   uint16_t parameter_count;
   uint16_t name_length;  // Byte length of the following function name.
-  uint32_t reserved[2];  // Must be 0.
+  uint16_t reserved0;    // Must be 0.
+  uint32_t reserved1;    // Must be 0.
   // Followed by:
   //   char name[name_length]
 } iree_hal_remote_executable_query_function_response_t;
@@ -366,13 +372,23 @@ static_assert(sizeof(iree_hal_remote_executable_query_parameters_request_t) ==
 // names are serialized out-of-line in the containing response so the struct is
 // pointer-free and stable across processes.
 typedef struct iree_hal_remote_executable_function_parameter_t {
+  // HAL dispatch byte offset or binding ordinal.
   uint16_t offset;
-  uint16_t flags;  // iree_hal_executable_function_parameter_flags_t
+  // Target ABI byte offset when the corresponding flag is set.
+  uint16_t native_abi_offset;
+  // iree_hal_executable_function_parameter_flags_t bitfield.
+  uint16_t flags;
+  // Parameter byte size.
+  uint16_t size;
+  // Byte length of the out-of-line parameter name.
   uint16_t name_length;
-  uint8_t type;  // iree_hal_executable_function_parameter_type_t
-  uint8_t size;
+  // iree_hal_executable_function_parameter_type_t value.
+  uint8_t type;
+  // Reserved for future protocol use and must be zero.
+  uint8_t reserved[5];
 } iree_hal_remote_executable_function_parameter_t;
-static_assert(sizeof(iree_hal_remote_executable_function_parameter_t) == 8, "");
+static_assert(sizeof(iree_hal_remote_executable_function_parameter_t) == 16,
+              "");
 
 // EXECUTABLE_QUERY_PARAMETERS response. Fixed parameter records are followed
 // by concatenated UTF-8 parameter name bytes in record order. Names are not
@@ -391,78 +407,54 @@ static_assert(sizeof(iree_hal_remote_executable_query_parameters_response_t) ==
                   8,
               "");
 
-// EXECUTABLE_LOOKUP_FUNCTION request. Looks up a function token by name.
-typedef struct iree_hal_remote_executable_lookup_function_request_t {
+// EXECUTABLE_LOOKUP_GLOBAL request. Looks up an executable global by name.
+typedef struct iree_hal_remote_executable_lookup_global_request_t {
   iree_hal_remote_resource_id_t executable_id;
-  uint16_t name_length;  // Byte length of the following function name.
+  uint16_t name_length;  // Byte length of the following global name.
   uint16_t reserved0;    // Must be 0.
   uint32_t reserved1;    // Must be 0.
   // Followed by:
   //   char name[name_length]
-} iree_hal_remote_executable_lookup_function_request_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_function_request_t) ==
-                  16,
+} iree_hal_remote_executable_lookup_global_request_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_global_request_t) == 16,
               "");
 
-// EXECUTABLE_LOOKUP_FUNCTION response. Returns the matching function token.
-typedef struct iree_hal_remote_executable_lookup_function_response_t {
-  uint64_t function_value;
-} iree_hal_remote_executable_lookup_function_response_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_function_response_t) ==
-                  8,
+// EXECUTABLE_LOOKUP_GLOBAL response.
+typedef struct iree_hal_remote_executable_lookup_global_response_t {
+  uint64_t byte_length;
+  uint32_t found;     // 0 if no global matched; otherwise 1.
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_executable_lookup_global_response_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_global_response_t) == 16,
               "");
 
-// EXECUTABLE_LOOKUP_GLOBAL request. Looks up an executable global by name for
-// the requested queue affinity. Empty queue affinity lets the server select an
-// implementation-defined valid device instance.
-typedef struct iree_hal_remote_executable_lookup_global_request_t {
+// EXECUTABLE_GLOBAL_BUFFER request. Resolves an executable global to the
+// buffer instance selected by |queue_affinity|.
+typedef struct iree_hal_remote_executable_global_buffer_request_t {
   iree_hal_remote_resource_id_t executable_id;
-  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t.
   uint16_t name_length;     // Byte length of the following global name.
   uint16_t reserved0;       // Must be 0.
   uint32_t reserved1;       // Must be 0.
   // Followed by:
   //   char name[name_length]
-} iree_hal_remote_executable_lookup_global_request_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_global_request_t) == 24,
+} iree_hal_remote_executable_global_buffer_request_t;
+static_assert(sizeof(iree_hal_remote_executable_global_buffer_request_t) == 24,
               "");
 
-// EXECUTABLE_LOOKUP_GLOBAL response. The returned resource ID refers to the
-// exact buffer alias returned by the server executable lookup; client proxies
-// must treat it as a zero-offset buffer of |byte_length| bytes rather than
-// reconstructing any server-local root allocation.
-typedef struct iree_hal_remote_executable_lookup_global_response_t {
+// EXECUTABLE_GLOBAL_BUFFER response. The resource ID refers to the exact
+// buffer alias returned by the server executable. Client proxies must treat it
+// as a zero-offset buffer of |byte_length| bytes instead of reconstructing any
+// server-local root allocation.
+typedef struct iree_hal_remote_executable_global_buffer_response_t {
   iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
   iree_hal_remote_buffer_params_t params;
   uint64_t byte_length;
   uint32_t placement_flags;  // iree_hal_buffer_placement_flags_t
   uint32_t reserved;         // Must be 0.
-} iree_hal_remote_executable_lookup_global_response_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_global_response_t) == 56,
+} iree_hal_remote_executable_global_buffer_response_t;
+static_assert(sizeof(iree_hal_remote_executable_global_buffer_response_t) == 56,
               "");
-
-// EXECUTABLE_CACHE_QUERY_FORMAT request. Queries whether the server-side
-// executable cache can prepare a format. This is a capability hint only:
-// EXECUTABLE_UPLOAD remains authoritative and may still reject malformed or
-// unsupported executable contents.
-typedef struct iree_hal_remote_executable_cache_query_format_request_t {
-  uint32_t caching_mode;   // iree_hal_executable_caching_mode_t
-  uint16_t format_length;  // Byte length of the following format string.
-  uint16_t reserved;       // Must be 0.
-  // Followed by:
-  //   char format[format_length]
-} iree_hal_remote_executable_cache_query_format_request_t;
-static_assert(sizeof(iree_hal_remote_executable_cache_query_format_request_t) ==
-                  8,
-              "");
-
-// EXECUTABLE_CACHE_QUERY_FORMAT response. Non-zero if the format is supported.
-typedef struct iree_hal_remote_executable_cache_query_format_response_t {
-  uint32_t can_prepare;
-  uint32_t reserved;  // Must be 0.
-} iree_hal_remote_executable_cache_query_format_response_t;
-static_assert(
-    sizeof(iree_hal_remote_executable_cache_query_format_response_t) == 8, "");
 
 //===----------------------------------------------------------------------===//
 // Command buffer messages

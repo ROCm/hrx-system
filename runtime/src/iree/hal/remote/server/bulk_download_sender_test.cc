@@ -186,6 +186,18 @@ struct MockCarrier {
   static void UnregisterBuffer(iree_net_carrier_t* carrier,
                                iree_net_remote_handle_t handle) {}
 
+  void CompletePendingSends() {
+    for (iree_host_size_t i = 0; i < sends.size(); ++i) {
+      CapturedSend& send = sends[i];
+      if (send.completed) continue;
+      send.completed = true;
+      base.callback.fn(base.callback.user_data,
+                       IREE_NET_CARRIER_COMPLETION_SEND, send.user_data,
+                       iree_ok_status(), send.data.size(),
+                       /*recv_lease=*/nullptr);
+    }
+  }
+
   static const iree_net_carrier_vtable_t kVtable;
 
   static std::unique_ptr<MockCarrier> Create() {
@@ -476,7 +488,7 @@ const iree_hal_device_vtable_t failing_queue_write_device_vtable = {
     /*.create_channel=*/nullptr,
     /*.create_command_buffer=*/nullptr,
     /*.create_event=*/nullptr,
-    /*.create_executable_cache=*/nullptr,
+    /*.load_executable=*/nullptr,
     /*.import_file=*/failing_queue_write_device_import_file,
     /*.create_semaphore=*/failing_queue_write_device_create_semaphore,
     /*.query_semaphore_compatibility=*/
@@ -561,6 +573,9 @@ class BulkDownloadSenderTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    carrier_->CompletePendingSends();
+    EXPECT_FALSE(iree_net_bulk_channel_has_pending_sends(bulk_channel_));
+    iree_net_bulk_channel_detach(bulk_channel_);
     iree_hal_remote_server_bulk_session_free(session_.bulk_session);
     session_.bulk_session = nullptr;
     iree_net_bulk_channel_release(bulk_channel_);

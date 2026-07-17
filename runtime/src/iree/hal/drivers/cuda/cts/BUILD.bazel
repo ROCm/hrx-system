@@ -7,7 +7,11 @@
 # Runtime-only CTS test binaries for the CUDA HAL driver.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
+load(
+    "//runtime/build_tools/bazel:hal_cts.bzl",
+    "iree_runtime_hal_cts_test_suite",
+    "iree_runtime_hal_remote_cts_test_suite",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -35,8 +39,22 @@ iree_runtime_hal_cts_test_suite(
     backends = ":backends",
 )
 
+iree_runtime_hal_remote_cts_test_suite(
+    name = "remote_graph",
+    args = ["--cuda_use_streams=false"],
+    source_backend_name = "cuda",
+    source_backends = ":backends",
+)
+
 iree_runtime_hal_cts_test_suite(
     name = "stream",
     args = ["--cuda_use_streams=true"],
     backends = ":backends",
+)
+
+iree_runtime_hal_remote_cts_test_suite(
+    name = "remote_stream",
+    args = ["--cuda_use_streams=true"],
+    source_backend_name = "cuda",
+    source_backends = ":backends",
 )

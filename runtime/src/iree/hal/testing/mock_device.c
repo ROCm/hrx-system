@@ -42,9 +42,14 @@ typedef struct iree_hal_mock_executable_parameter_metadata_t {
 } iree_hal_mock_executable_parameter_metadata_t;
 
 typedef struct iree_hal_mock_executable_t {
+  // Resource header for the executable interface.
   iree_hal_resource_t resource;
+  // Allocator used to release the executable and its global storage.
   iree_allocator_t host_allocator;
+  // Number of entries in the trailing function metadata arrays.
   iree_host_size_t function_count;
+  // Eight-byte global buffer borrowed by executable global queries.
+  iree_hal_buffer_t* global_buffer;
   // Function metadata records indexed by executable function ordinal.
   iree_hal_executable_function_info_t functions[];
 } iree_hal_mock_executable_t;
@@ -56,6 +61,21 @@ iree_hal_mock_executable_parameter_metadata(
       iree_hal_mock_executable_parameter_metadata_t*)(executable->functions +
                                                       executable
                                                           ->function_count);
+}
+
+typedef struct iree_hal_mock_executable_global_storage_t {
+  // Allocator used to release this aligned storage block.
+  iree_allocator_t host_allocator;
+  // Heap-buffer storage aligned for iree_hal_heap_buffer_wrap.
+  uint8_t data[];
+} iree_hal_mock_executable_global_storage_t;
+
+static void iree_hal_mock_executable_global_storage_release(
+    void* user_data, iree_hal_buffer_t* buffer) {
+  (void)buffer;
+  iree_hal_mock_executable_global_storage_t* storage =
+      (iree_hal_mock_executable_global_storage_t*)user_data;
+  iree_allocator_free_aligned(storage->host_allocator, storage);
 }
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable;
@@ -173,6 +193,36 @@ static iree_status_t iree_hal_mock_executable_create(
         };
   }
 
+  iree_hal_mock_executable_global_storage_t* global_storage = NULL;
+  iree_status_t status = iree_allocator_malloc_aligned(
+      host_allocator, sizeof(*global_storage) + sizeof(uint64_t),
+      IREE_HAL_HEAP_BUFFER_ALIGNMENT,
+      offsetof(iree_hal_mock_executable_global_storage_t, data),
+      (void**)&global_storage);
+  if (iree_status_is_ok(status)) {
+    global_storage->host_allocator = host_allocator;
+    iree_hal_buffer_release_callback_t release_callback = {
+        .fn = iree_hal_mock_executable_global_storage_release,
+        .user_data = global_storage,
+    };
+    status = iree_hal_heap_buffer_wrap(
+        iree_hal_buffer_placement_undefined(),
+        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+            IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+        IREE_HAL_MEMORY_ACCESS_ALL,
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+        sizeof(uint64_t),
+        iree_make_byte_span(global_storage->data, sizeof(uint64_t)),
+        release_callback, host_allocator, &executable->global_buffer);
+  }
+  if (!iree_status_is_ok(status)) {
+    if (global_storage && !executable->global_buffer) {
+      iree_allocator_free_aligned(host_allocator, global_storage);
+    }
+    iree_allocator_free(host_allocator, executable);
+    return status;
+  }
+
   *out_executable = (iree_hal_executable_t*)executable;
   return iree_ok_status();
 }
@@ -182,6 +232,7 @@ static void iree_hal_mock_executable_destroy(
   iree_hal_mock_executable_t* executable =
       iree_hal_mock_executable_cast(base_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
+  iree_hal_buffer_release(executable->global_buffer);
   iree_allocator_free(host_allocator, executable);
 }
 
@@ -258,9 +309,10 @@ static iree_status_t iree_hal_mock_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
     bool* out_found, iree_hal_executable_global_t* out_global) {
   (void)base_executable;
-  (void)name;
-  *out_found = false;
-  *out_global = iree_hal_executable_global_invalid();
+  *out_found = iree_string_view_equal(
+      name, IREE_SV(IREE_HAL_MOCK_EXECUTABLE_GLOBAL_NAME));
+  *out_global = *out_found ? iree_hal_executable_global_from_value(0)
+                           : iree_hal_executable_global_invalid();
   return iree_ok_status();
 }
 
@@ -268,19 +320,29 @@ static iree_status_t iree_hal_mock_executable_global_info(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info) {
   (void)base_executable;
-  (void)global;
   memset(out_info, 0, sizeof(*out_info));
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  if (global.value != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid mock executable global");
+  }
+  out_info->name = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_GLOBAL_NAME);
+  out_info->byte_length = sizeof(uint64_t);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_mock_executable_global_buffer(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
-  (void)base_executable;
-  (void)global;
   (void)queue_affinity;
+  iree_hal_mock_executable_t* executable =
+      iree_hal_mock_executable_cast(base_executable);
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  if (global.value != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid mock executable global");
+  }
+  *out_buffer = executable->global_buffer;
+  return iree_ok_status();
 }
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {

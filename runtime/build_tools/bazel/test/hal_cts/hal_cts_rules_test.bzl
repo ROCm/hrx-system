@@ -9,7 +9,11 @@
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
 load("//build_tools/bazel:executable.bzl", "IreeExecutableInfo")
-load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
+load(
+    "//runtime/build_tools/bazel:hal_cts.bzl",
+    "iree_runtime_hal_cts_test_suite",
+    "iree_runtime_hal_remote_cts_test_suite",
+)
 
 def _expect_value(env, values, expected_value):
     if expected_value not in values:
@@ -114,6 +118,82 @@ def _test_executable_suite_links_prebuilt_testdata_impl(env, target):
         "//runtime/src/iree/hal/cts/command_buffer:all_dispatch_tests",
     )
 
+def _test_remote_suite_links_source_and_adapter(name, **kwargs):
+    iree_runtime_hal_remote_cts_test_suite(
+        name = name + "_subject",
+        source_backend_name = "hal_cts_test",
+        source_backends = ":hal_cts_test_backends",
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_remote_suite_links_source_and_adapter_impl,
+        target = name + "_subject_backends",
+        **kwargs
+    )
+
+def _test_remote_suite_links_source_and_adapter_impl(env, target):
+    attrs = target[TestingAspectInfo].attrs
+    deps = [dep.label for dep in attrs.deps]
+    _expect_label(env, deps, "//runtime/build_tools/bazel/test/hal_cts:hal_cts_test_backends")
+    _expect_label(env, deps, "//runtime/src/iree/hal/remote/cts:loopback_adapter")
+    env.expect.that_bool(attrs.alwayslink).equals(True)
+
+def _test_remote_suite_filters_derived_backend(name, **kwargs):
+    iree_runtime_hal_remote_cts_test_suite(
+        name = name + "_subject",
+        args = ["--cts_fixture_flag=true"],
+        source_backend_name = "hal_cts_test",
+        source_backends = ":hal_cts_test_backends",
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_remote_suite_filters_derived_backend_impl,
+        target = name + "_subject_core_tests",
+        **kwargs
+    )
+
+def _test_remote_suite_filters_derived_backend_impl(env, target):
+    attrs = target[TestingAspectInfo].attrs
+    _expect_value(env, attrs.args, "--cts_fixture_flag=true")
+    _expect_value(env, attrs.args, "--cts_backend_filter=remote_hal_cts_test")
+    _expect_value(env, attrs.tags, "driver=remote")
+    _expect_value(env, attrs.tags, "wrapped-driver=hal_cts_test")
+
+def _test_remote_executable_suite_links_prebuilt_testdata(name, **kwargs):
+    iree_runtime_hal_remote_cts_test_suite(
+        name = name + "_subject",
+        source_backend_name = "hal_cts_test",
+        source_backends = ":hal_cts_test_backends",
+        tags = ["manual"],
+        testdata_libs = [":hal_cts_testdata"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_remote_executable_suite_links_prebuilt_testdata_impl,
+        target = name + "_subject_dispatch_tests_bin",
+        **kwargs
+    )
+
+def _test_remote_executable_suite_links_prebuilt_testdata_impl(env, target):
+    deps = [dep.label for dep in target[TestingAspectInfo].attrs.deps]
+    _expect_label(env, deps, "//runtime/build_tools/bazel/test/hal_cts:hal_cts_testdata")
+    _expect_label(
+        env,
+        deps,
+        "//runtime/build_tools/bazel/test/hal_cts:test_remote_executable_suite_links_prebuilt_testdata_subject_backends",
+    )
+
 def hal_cts_rules_test_suite(name):
     test_suite(
         name = name,
@@ -121,5 +201,8 @@ def hal_cts_rules_test_suite(name):
             _test_non_executable_suite_generates_wrapped_test,
             _test_non_executable_suite_links_base_cts_deps,
             _test_executable_suite_links_prebuilt_testdata,
+            _test_remote_suite_links_source_and_adapter,
+            _test_remote_suite_filters_derived_backend,
+            _test_remote_executable_suite_links_prebuilt_testdata,
         ],
     )

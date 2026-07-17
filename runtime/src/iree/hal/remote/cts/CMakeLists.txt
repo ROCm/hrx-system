@@ -28,6 +28,7 @@ iree_cc_library(
     iree::hal::remote::util::recv_pool
     iree::net::carrier::loopback::factory
     iree::net::session
+    iree::testing::gtest
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -35,4 +36,4 @@ iree_cc_library(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-iree_hal_remote_cts_flush_deferred_suites()
+iree_runtime_hal_remote_cts_flush_deferred_suites()

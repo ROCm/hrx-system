@@ -32,6 +32,9 @@ extern "C" {
 #define IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY "mock"
 #define IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY "metadata"
 
+// Stable eight-byte global exposed by metadata-only mock executables.
+#define IREE_HAL_MOCK_EXECUTABLE_GLOBAL_NAME "mock_global"
+
 // Options for creating a mock device.
 typedef struct iree_hal_mock_device_options_t {
   // Identifier returned by iree_hal_device_id(). The default mock spec uses

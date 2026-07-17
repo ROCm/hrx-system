@@ -14,7 +14,7 @@
 #include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
 #include "iree/hal/remote/client/event.h"
-#include "iree/hal/remote/client/executable_cache.h"
+#include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/client/file.h"
 #include "iree/hal/remote/client/queue.h"
 #include "iree/hal/remote/client/semaphore.h"
@@ -266,9 +266,9 @@ iree_hal_remote_client_device_exchange_queue_channel(
       iree_memory_order_acq_rel);
 }
 
-// Detaches the current queue channel from its endpoint without dropping the
-// device's owning reference. This keeps concurrent submitters that already
-// acquired the pointer on the hot path from racing channel destruction.
+// Closes queue channel admission without dropping the device's owning
+// reference. The object remains alive for callers that observed CONNECTED
+// before the terminal state transition.
 static void iree_hal_remote_client_device_detach_queue_channel(
     iree_hal_remote_client_device_t* device) {
   iree_net_queue_channel_t* queue_channel =
@@ -300,6 +300,9 @@ iree_hal_remote_client_device_exchange_bulk_channel(
       &device->bulk_session, new_bulk_channel);
 }
 
+// Closes bulk channel admission without dropping the device's owning
+// reference. The object remains alive for callers that observed CONNECTED
+// before the terminal state transition.
 static void iree_hal_remote_client_device_detach_bulk_channel(
     iree_hal_remote_client_device_t* device) {
   iree_net_bulk_channel_t* bulk_channel =
@@ -337,38 +340,33 @@ void iree_hal_remote_client_device_complete_connect(
   }
 }
 
-static void iree_hal_remote_client_device_destroy(
-    iree_hal_device_t* base_device) {
-  iree_hal_remote_client_device_t* device =
-      iree_hal_remote_client_device_cast(base_device);
-  iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Fail the remote queue axis to resolve any remaining frontier waiters.
-  // Typically a no-op (goaway/error already failed it), but handles the edge
-  // case where destroy is called without a prior disconnect.
-  if (iree_hal_remote_client_device_load_state(device) ==
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    iree_async_frontier_tracker_fail_axis(
-        device->frontier_tracker, device->remote_queue_axis,
-        iree_make_status(IREE_STATUS_CANCELLED,
-                         "device destroyed while connected"));
-  }
-
-  // Detach and release channels before session. Detach clears endpoint
-  // callbacks while the endpoint is still alive and zeroes endpoint references,
-  // preventing UAF if retained references later drop the last channel ref after
-  // the session is freed.
+// Releases the device-owned network graph during final destruction. The
+// session and all endpoints must already be deactivated or absent. Keeping the
+// graph retained until this point lets operations that raced a terminal device
+// state transition safely reach the closed transport submission gates.
+static void iree_hal_remote_client_device_release_network_graph(
+    iree_hal_remote_client_device_t* device) {
+  // Detach and release channels before the session. Deactivation has already
+  // drained their endpoints, so no callback can race this release.
   iree_hal_remote_client_device_release_bulk_channel(device);
   iree_hal_remote_client_device_release_queue_channel(device);
 
-  // Clear session before releasing to prevent re-entrancy.
+  // Clear the session before releasing to prevent re-entrancy.
   iree_net_session_t* session = device->session;
   device->session = NULL;
   device->session_carrier = NULL;
   device->file_registration_capabilities =
       IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
   iree_net_session_release(session);
+}
+
+static void iree_hal_remote_client_device_complete_destroy(
+    iree_hal_remote_client_device_t* device) {
+  iree_hal_device_t* base_device = (iree_hal_device_t*)device;
+  iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_remote_client_device_release_network_graph(device);
 
   iree_async_notification_release(device->queue_pool_notification);
   iree_hal_slab_provider_release(device->queue_slab_provider);
@@ -399,6 +397,112 @@ static void iree_hal_remote_client_device_destroy(
   iree_allocator_free(host_allocator, device);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_remote_client_device_on_session_deactivated(
+    void* user_data) {
+  iree_hal_remote_client_device_complete_destroy(
+      (iree_hal_remote_client_device_t*)user_data);
+}
+
+static void iree_hal_remote_client_device_complete_deactivate(
+    iree_hal_remote_client_device_t* device) {
+  // Session deactivation has drained the endpoints. Close channel admission
+  // and detach callbacks while retaining the objects until device destruction.
+  iree_hal_remote_client_device_detach_bulk_channel(device);
+  iree_hal_remote_client_device_detach_queue_channel(device);
+  iree_hal_remote_client_device_store_state(
+      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
+
+  iree_hal_remote_client_device_deactivated_callback_t callback =
+      device->deactivate_callback;
+  memset(&device->deactivate_callback, 0, sizeof(device->deactivate_callback));
+  callback.fn(callback.user_data);
+
+  // Balances the retain taken when deactivation began. The application may
+  // have released its final reference from the callback above.
+  iree_hal_device_release((iree_hal_device_t*)device);
+}
+
+static void iree_hal_remote_client_device_on_deactivate_session_deactivated(
+    void* user_data) {
+  iree_hal_remote_client_device_complete_deactivate(
+      (iree_hal_remote_client_device_t*)user_data);
+}
+
+static void iree_hal_remote_client_device_on_deactivate_callbacks_detached(
+    void* user_data) {
+  iree_hal_remote_client_device_t* device =
+      (iree_hal_remote_client_device_t*)user_data;
+  iree_net_session_deactivated_callback_t callback = {
+      .fn = iree_hal_remote_client_device_on_deactivate_session_deactivated,
+      .user_data = device,
+  };
+  iree_status_t status = iree_net_session_deactivate(device->session, callback);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+}
+
+static void iree_hal_remote_client_device_on_session_callbacks_detached(
+    void* user_data) {
+  iree_hal_remote_client_device_t* device =
+      (iree_hal_remote_client_device_t*)user_data;
+
+  if (device->connect_callback.fn) {
+    iree_hal_remote_client_device_complete_connect(
+        device,
+        iree_make_status(IREE_STATUS_CANCELLED, "remote device destroyed"));
+  }
+
+  iree_net_queue_channel_t* queue_channel =
+      (iree_net_queue_channel_t*)iree_atomic_load(&device->queue_channel,
+                                                  iree_memory_order_acquire);
+  iree_net_bulk_channel_t* bulk_channel =
+      iree_hal_remote_client_bulk_session_load_channel(&device->bulk_session);
+  if (!queue_channel && !bulk_channel) {
+    iree_hal_remote_client_device_complete_destroy(device);
+    return;
+  }
+
+  iree_net_session_deactivated_callback_t callback = {
+      .fn = iree_hal_remote_client_device_on_session_deactivated,
+      .user_data = device,
+  };
+  iree_status_t status = iree_net_session_deactivate(device->session, callback);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+}
+
+static void iree_hal_remote_client_device_destroy(
+    iree_hal_device_t* base_device) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  iree_hal_remote_client_device_state_t previous_state =
+      iree_hal_remote_client_device_load_state(device);
+  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    iree_async_frontier_tracker_fail_axis(
+        device->frontier_tracker, device->remote_queue_axis,
+        iree_make_status(IREE_STATUS_CANCELLED,
+                         "device destroyed while connected"));
+  }
+  iree_hal_remote_client_device_store_state(
+      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+
+  if (!device->session ||
+      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+    // Explicit deactivation already detached application callbacks and drained
+    // the connection. The retained network graph can be released directly.
+    iree_hal_remote_client_device_complete_destroy(device);
+    return;
+  }
+
+  // The session may have already admitted a callback carrying |device| while
+  // the final HAL reference was being released. Keep the device allocation
+  // alive until that callback returns and prevent any later callback from
+  // claiming the user data.
+  iree_net_session_callbacks_detached_callback_t callback = {
+      .fn = iree_hal_remote_client_device_on_session_callbacks_detached,
+      .user_data = device,
+  };
+  iree_net_session_detach_callbacks(device->session, callback);
 }
 
 static iree_string_view_t iree_hal_remote_client_device_id(
@@ -527,13 +631,16 @@ static iree_status_t iree_hal_remote_client_device_create_event(
                                              device->host_allocator, out_event);
 }
 
-static iree_status_t iree_hal_remote_client_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_remote_client_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  return iree_hal_remote_client_executable_cache_create(
-      device, identifier, device->host_allocator, out_executable_cache);
+  return iree_hal_remote_client_executable_load(
+      device, queue_affinity, target, load_params, device->host_allocator,
+      out_executable);
 }
 
 static iree_status_t iree_hal_remote_client_device_import_file(
@@ -542,6 +649,7 @@ static iree_status_t iree_hal_remote_client_device_import_file(
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
+  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
   return iree_hal_remote_client_file_import(device, queue_affinity, access,
                                             handle, flags, device->proactor,
                                             device->host_allocator, out_file);
@@ -1023,6 +1131,11 @@ static void iree_hal_remote_client_device_on_session_goaway(
 
   iree_hal_remote_client_device_state_t previous_state =
       iree_hal_remote_client_device_load_state(device);
+  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
+      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
   iree_hal_remote_client_device_store_state(
       device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED);
 
@@ -1041,17 +1154,10 @@ static void iree_hal_remote_client_device_on_session_goaway(
                          "server sent GOAWAY; remote queue axis failed"));
   }
 
-  // Detach while the endpoint is still alive to clear callbacks safely.
+  // Close channel admission while retaining the network graph. Callers that
+  // raced the state transition can safely observe the closed channels.
   iree_hal_remote_client_device_detach_bulk_channel(device);
   iree_hal_remote_client_device_detach_queue_channel(device);
-
-  // Clear session before releasing to prevent re-entrancy.
-  iree_net_session_t* device_session = device->session;
-  device->session = NULL;
-  device->session_carrier = NULL;
-  device->file_registration_capabilities =
-      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
-  iree_net_session_release(device_session);
 
   // If the connect callback is still pending (bootstrap or endpoint
   // provisioning has not completed), fire it with error so the application
@@ -1085,6 +1191,12 @@ static void iree_hal_remote_client_device_on_session_error(
 
   iree_hal_remote_client_device_state_t previous_state =
       iree_hal_remote_client_device_load_state(device);
+  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
+      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+    iree_status_free(status);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
   iree_hal_remote_client_device_store_state(
       device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
 
@@ -1098,16 +1210,10 @@ static void iree_hal_remote_client_device_on_session_error(
                                           iree_status_clone(status));
   }
 
+  // Close channel admission while retaining the network graph. Callers that
+  // raced the state transition can safely observe the closed channels.
   iree_hal_remote_client_device_detach_bulk_channel(device);
   iree_hal_remote_client_device_detach_queue_channel(device);
-
-  // Clear session before releasing to prevent re-entrancy.
-  iree_net_session_t* device_session = device->session;
-  device->session = NULL;
-  device->session_carrier = NULL;
-  device->file_registration_capabilities =
-      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
-  iree_net_session_release(device_session);
 
   // If the connect callback is still pending, fire it with the error so the
   // application does not hang. This covers errors during bootstrap and endpoint
@@ -1128,6 +1234,26 @@ static void iree_hal_remote_client_device_on_session_error(
   }
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_remote_client_device_on_session_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status) {
+  (void)operation_user_data;
+  iree_hal_remote_client_device_t* device =
+      (iree_hal_remote_client_device_t*)user_data;
+  iree_hal_remote_client_device_state_t state =
+      iree_hal_remote_client_device_load_state(device);
+  if (state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
+      state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+    iree_status_free(status);
+    return;
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_client_device_on_session_error(user_data, device->session,
+                                                   status);
+  } else {
+    iree_status_free(status);
+  }
 }
 
 // Wakes all pending RPCs with an error status. Called when the session
@@ -1597,6 +1723,8 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
       .on_goaway = iree_hal_remote_client_device_on_session_goaway,
       .on_error = iree_hal_remote_client_device_on_session_error,
       .on_control_data = iree_hal_remote_client_device_on_control_data,
+      .on_send_complete =
+          iree_hal_remote_client_device_on_session_send_complete,
       .user_data = device,
   };
 
@@ -1616,6 +1744,64 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
+    iree_hal_device_t* base_device,
+    iree_hal_remote_client_device_deactivated_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(base_device);
+  IREE_ASSERT_ARGUMENT(callback.fn);
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  iree_hal_device_retain(base_device);
+
+  int32_t expected = (int32_t)iree_hal_remote_client_device_load_state(device);
+  for (;;) {
+    if (expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING) {
+      iree_status_t status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "device connection must complete before deactivation");
+      iree_hal_device_release(base_device);
+      return status;
+    }
+    if (expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
+        expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+      iree_status_t status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "device deactivation already started");
+      iree_hal_device_release(base_device);
+      return status;
+    }
+    if (iree_atomic_compare_exchange_weak(
+            &device->state, &expected,
+            (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      break;
+    }
+  }
+
+  if (!device->session) {
+    iree_hal_remote_client_device_store_state(
+        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
+    callback.fn(callback.user_data);
+    iree_hal_device_release(base_device);
+    return iree_ok_status();
+  }
+
+  if (expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    iree_async_frontier_tracker_fail_axis(
+        device->frontier_tracker, device->remote_queue_axis,
+        iree_make_status(IREE_STATUS_CANCELLED, "remote device deactivated"));
+  }
+  iree_hal_remote_client_device_fail_pending_rpcs(device);
+
+  device->deactivate_callback = callback;
+  iree_net_session_callbacks_detached_callback_t detached_callback = {
+      .fn = iree_hal_remote_client_device_on_deactivate_callbacks_detached,
+      .user_data = device,
+  };
+  iree_net_session_detach_callbacks(device->session, detached_callback);
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_hal_remote_client_device_state_t
@@ -1642,8 +1828,7 @@ static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .create_command_buffer =
         iree_hal_remote_client_device_create_command_buffer,
     .create_event = iree_hal_remote_client_device_create_event,
-    .create_executable_cache =
-        iree_hal_remote_client_device_create_executable_cache,
+    .load_executable = iree_hal_remote_client_device_load_executable,
     .import_file = iree_hal_remote_client_device_import_file,
     .create_semaphore = iree_hal_remote_client_device_create_semaphore,
     .query_semaphore_compatibility =

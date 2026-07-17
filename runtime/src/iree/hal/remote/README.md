@@ -58,8 +58,8 @@ Server-side public API:
   remote server options, start/stop lifecycle, device exposure, topology, and
   file allow-list configuration.
 - [`runtime/src/iree/hal/remote/server/server.c`](runtime/src/iree/hal/remote/server/server.c):
-  listener setup, accepted session slots, local device retention, executable
-  cache setup, and server shutdown.
+  listener setup, accepted session slots, local device retention, bootstrap
+  device catalog construction, and server shutdown.
 - [`runtime/src/iree/hal/remote/server/session.c`](runtime/src/iree/hal/remote/server/session.c):
   control message handlers, queue command replay on the wrapped device,
   provisional resource resolution, and ordered `ADVANCE` emission.
@@ -179,8 +179,8 @@ The server-side lifecycle mirrors this:
 2. The caller constructs an `iree_net_session_topology_t` describing the local
    queue axes exposed to clients.
 3. `iree_hal_remote_server_create` retains the local devices, copies topology,
-   creates one executable cache per served device, and allocates bounded session
-   slots.
+   serializes their immutable device specs for bootstrap, and allocates bounded
+   session slots.
 4. `iree_hal_remote_server_start` creates a listener from the transport factory.
 5. Accepted connections become `iree_net_session_accept` sessions. After
    bootstrap, each session opens queue and bulk endpoints.
@@ -192,6 +192,14 @@ The net session owns graceful shutdown semantics. The remote HAL session code
 owns releasing HAL resources, failing pending queue signals, sending terminal
 `ADVANCE` frames where possible, and ensuring in-flight bulk transfers cannot
 outlive the channels and resources they reference.
+
+Executable loading uses the target table in the bootstrapped device spec.
+Clients select a target locally and send its stable table ordinal with the
+artifact, queue affinity, load flags, and specialization constants. The server
+resolves the ordinal against its own device spec and calls
+`iree_hal_device_load_executable` directly. Capability discovery therefore does
+not add a synchronous format-query round trip, and target-family compatibility
+remains owned by the local HAL backend.
 
 ## Ordering And Semaphores
 

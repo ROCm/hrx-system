@@ -60,7 +60,9 @@ iree_hal_remote_client_bulk_session_transfer_options_default(void) {
 }
 
 typedef struct iree_hal_remote_client_bulk_session_t {
-  // Published bulk channel, or 0 before the bulk endpoint opens.
+  // Published bulk channel, or 0 before the bulk endpoint opens. Once
+  // published, the object remains retained through terminal device
+  // deactivation and is released during final device destruction.
   iree_atomic_intptr_t channel;
 
   // Protects client-local transfer, chunk, and profile state.

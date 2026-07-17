@@ -13,7 +13,11 @@ backend-owned and remains outside this runtime composition rule.
 
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+load(
+    "//runtime/build_tools/bazel:cc.bzl",
+    "iree_runtime_cc_binary",
+    "iree_runtime_cc_library",
+)
 load("//runtime/requirements:package_policy.bzl", "apply_runtime_test_policy")
 
 _NON_EXECUTABLE_TEST_SUITES = [
@@ -163,3 +167,61 @@ def iree_runtime_hal_cts_test_suite(
                 target_attrs = split_attrs.target,
                 test_attrs = split_attrs.test,
             )
+
+def iree_runtime_hal_remote_cts_test_suite(
+        source_backend_name,
+        source_backends,
+        testdata_libs = None,
+        name = "remote",
+        args = None,
+        resource_group = None,
+        tags = None,
+        testonly = True,
+        **kwargs):
+    """Generates remote-loopback CTS tests for a concrete HAL backend.
+
+    The source backend package remains responsible for its backend registration,
+    executable testdata, runtime arguments, and hardware policy. This wrapper
+    composes those inputs with the remote loopback adapter and limits CTS
+    instantiation to the derived `remote_<source_backend_name>` backend.
+
+    Args:
+      source_backend_name: Concrete backend name registered with the CTS.
+      source_backends: Concrete backend registration library.
+      testdata_libs: Prebuilt executable testdata registration libraries.
+      name: Non-empty prefix for generated remote test targets.
+      args: Command-line arguments passed to each generated test.
+      resource_group: Local resource group used to serialize tests.
+      tags: Tags applied to generated tests.
+      testonly: Whether generated binaries and tests are test-only targets.
+      **kwargs: Common Bazel attributes forwarded to generated CTS targets.
+    """
+    if not name:
+        fail("iree_runtime_hal_remote_cts_test_suite: name must be non-empty")
+
+    adapter_backends = name + "_backends"
+    iree_runtime_cc_library(
+        name = adapter_backends,
+        testonly = testonly,
+        deps = [
+            source_backends,
+            "//runtime/src/iree/hal/remote/cts:loopback_adapter",
+        ],
+        alwayslink = True,
+    )
+
+    iree_runtime_hal_cts_test_suite(
+        name = name,
+        args = _normalize_list(args) + [
+            "--cts_backend_filter=remote_%s" % source_backend_name,
+        ],
+        backends = ":" + adapter_backends,
+        resource_group = resource_group,
+        tags = _normalize_list(tags) + [
+            "driver=remote",
+            "wrapped-driver=%s" % source_backend_name,
+        ],
+        testdata_libs = testdata_libs,
+        testonly = testonly,
+        **kwargs
+    )

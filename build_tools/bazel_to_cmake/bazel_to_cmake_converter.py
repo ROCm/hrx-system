@@ -2622,6 +2622,56 @@ class BuildFileFunctions(object):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
+    def _iree_runtime_hal_remote_cts_test_suite(
+        self,
+        source_backend_name,
+        source_backends,
+        testdata_libs=None,
+        name="remote",
+        args=None,
+        resource_group=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if not resource_group and tags:
+            for tag in tags:
+                if tag.startswith("resource_group:"):
+                    resource_group = tag[len("resource_group:") :]
+                    break
+
+        source_backend_name_block = self._convert_string_arg_block(
+            "SOURCE_BACKEND_NAME", source_backend_name
+        )
+        source_backends_block = self._convert_target_list_block(
+            "SOURCE_BACKENDS", [source_backends] if source_backends else None
+        )
+        testdata_libs_block = self._convert_target_list_block(
+            "TESTDATA_LIBS", testdata_libs
+        )
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        args_block = self._convert_string_list_block(
+            "ARGS", self._convert_location_args(args), sort=False
+        )
+        labels_block = self._convert_string_list_block("LABELS", tags)
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"iree_runtime_hal_remote_cts_test_suite(\n"
+            f"{source_backend_name_block}"
+            f"{source_backends_block}"
+            f"{testdata_libs_block}"
+            f"{name_block}"
+            f"{args_block}"
+            f"{labels_block}"
+            f"{resource_group_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def iree_flatbuffer_c_library(
         self,
         name,

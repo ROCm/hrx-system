@@ -453,4 +453,23 @@ iree_runtime_hal_cts_test_suite(
 )
 endif()
 
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_runtime_hal_remote_cts_test_suite(
+  SOURCE_BACKEND_NAME
+    "amdgpu"
+  SOURCE_BACKENDS
+    ::backends
+  TESTDATA_LIBS
+    ::testdata_amdgpu
+  NAME
+    remote
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

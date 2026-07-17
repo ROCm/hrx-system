@@ -25,6 +25,18 @@
 
 namespace {
 
+static iree_status_t PollProactorOnce(
+    iree_async_proactor_t* proactor,
+    iree_host_size_t* out_completed_count = nullptr) {
+  iree_status_t status = iree_async_proactor_poll(
+      proactor, iree_infinite_timeout(), out_completed_count);
+  if (iree_status_is_deadline_exceeded(status)) {
+    iree_status_free(status);
+    return iree_ok_status();
+  }
+  return status;
+}
+
 using iree::hal::remote::server::testing::MockCarrier;
 using iree::hal::remote::server::testing::MockEndpoint;
 using iree::hal::remote::server::testing::TestBufferPool;
@@ -66,22 +78,22 @@ class ServerLifecycleTest : public ::testing::Test {
     iree_hal_mock_device_options_t mock_options;
     iree_hal_mock_device_options_initialize(&mock_options);
     mock_options.identifier = IREE_SV("mock");
-    mock_options.executable_cache_enabled = true;
+    mock_options.executable_loading_enabled = true;
     IREE_ASSERT_OK(iree_hal_mock_device_create(
         &mock_options, iree_allocator_system(), &mock_device_));
   }
 
   void TearDown() override {
-    DrainProactor();
-    iree_hal_device_release(client_device_);
-    client_device_ = nullptr;
-    DrainProactor();
+    if (client_device_) {
+      DeactivateDeviceAndWait(client_device_);
+      iree_hal_device_release(client_device_);
+      client_device_ = nullptr;
+    }
     if (server_ && server_->state == IREE_HAL_REMOTE_SERVER_STATE_RUNNING) {
       StopServerAndWait();
     }
     iree_hal_remote_server_release(server_);
     server_ = nullptr;
-    DrainProactor();
     iree_hal_device_release(mock_device_);
     mock_device_ = nullptr;
     iree_net_transport_factory_release(factory_);
@@ -156,7 +168,7 @@ class ServerLifecycleTest : public ::testing::Test {
     }
 
     EXPECT_TRUE(PollUntil([&]() { return client_connect_fired_; }))
-        << "Client connect callback timed out";
+        << "Client connect callback did not fire";
     return client_connect_status_;
   }
 
@@ -195,35 +207,12 @@ class ServerLifecycleTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
   }
 
-  void DrainProactor() {
-    for (;;) {
-      iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(0), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-        break;
-      } else if (!iree_status_is_ok(status)) {
-        IREE_EXPECT_OK(status);
-        break;
-      }
-      if (completed == 0) break;
-    }
-  }
-
-  bool PollUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_deadline(deadline), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-        return condition();
-      } else if (!iree_status_is_ok(status)) {
-        IREE_EXPECT_OK(status);
+      iree::Status status(PollProactorOnce(proactor_, &completed));
+      if (!status.ok()) {
+        ADD_FAILURE() << status.ToString();
         return false;
       }
     }
@@ -233,7 +222,17 @@ class ServerLifecycleTest : public ::testing::Test {
   void StopServerAndWait() {
     RequestServerStop();
     ASSERT_TRUE(PollUntil([&]() { return server_stopped_; }))
-        << "Server stop timed out";
+        << "Server stop callback did not fire";
+  }
+
+  void DeactivateDeviceAndWait(iree_hal_device_t* device) {
+    bool deactivated = false;
+    iree_hal_remote_client_device_deactivated_callback_t callback = {
+        /*.fn=*/[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+        /*.user_data=*/&deactivated,
+    };
+    IREE_ASSERT_OK(iree_hal_remote_client_device_deactivate(device, callback));
+    ASSERT_TRUE(PollUntil([&]() { return deactivated; }));
   }
 
   static void OnClientConnected(void* user_data, iree_status_t status) {

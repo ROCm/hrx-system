@@ -5,7 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
+load(
+    "//runtime/build_tools/bazel:hal_cts.bzl",
+    "iree_runtime_hal_cts_test_suite",
+    "iree_runtime_hal_remote_cts_test_suite",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -27,4 +31,9 @@ iree_runtime_cc_library(
 
 iree_runtime_hal_cts_test_suite(
     backends = ":backends",
+)
+
+iree_runtime_hal_remote_cts_test_suite(
+    source_backend_name = "local_sync",
+    source_backends = ":backends",
 )

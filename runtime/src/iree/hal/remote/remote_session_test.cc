@@ -51,10 +51,82 @@
 
 namespace {
 
+static iree_status_t PollProactorOnce(
+    iree_async_proactor_t* proactor,
+    iree_host_size_t* out_completed_count = nullptr) {
+  iree_status_t status = iree_async_proactor_poll(
+      proactor, iree_infinite_timeout(), out_completed_count);
+  if (iree_status_is_deadline_exceeded(status)) {
+    iree_status_free(status);
+    return iree_ok_status();
+  }
+  return status;
+}
+
 iree_status_t WriteFileContents(iree_string_view_t path,
                                 iree_const_byte_span_t contents) {
   return iree_io_file_contents_write(path, contents, iree_allocator_system());
 }
+
+static const iree_hal_executable_target_t* FindExecutableTarget(
+    iree_hal_device_t* device, iree_string_view_t family,
+    iree_string_view_t target_key) {
+  const iree_hal_device_executable_spec_t* executable_spec =
+      iree_hal_device_spec_executables(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < executable_spec->target_count; ++i) {
+    const iree_hal_executable_target_t* target = &executable_spec->targets[i];
+    if (iree_string_view_equal(target->family, family) &&
+        iree_string_view_equal(target->target_key, target_key)) {
+      return target;
+    }
+  }
+  return nullptr;
+}
+
+static const iree_hal_executable_target_t* FirstExecutableTarget(
+    iree_hal_device_t* device) {
+  const iree_hal_device_executable_spec_t* executable_spec =
+      iree_hal_device_spec_executables(iree_hal_device_spec(device));
+  return executable_spec->target_count > 0 ? &executable_spec->targets[0]
+                                           : nullptr;
+}
+
+// Notification-backed completion used to join callbacks from proactor threads.
+class CompletionNotification {
+ public:
+  CompletionNotification() { iree_notification_initialize(&notification_); }
+
+  ~CompletionNotification() { iree_notification_deinitialize(&notification_); }
+
+  void Signal() {
+    completed_.store(true, std::memory_order_release);
+    iree_notification_post(&notification_, IREE_ALL_WAITERS);
+  }
+
+  bool Await() {
+    return iree_notification_await(&notification_, IsCompleted, this,
+                                   iree_infinite_timeout());
+  }
+
+ private:
+  static bool IsCompleted(void* user_data) {
+    auto* self = static_cast<CompletionNotification*>(user_data);
+    return self->completed_.load(std::memory_order_acquire);
+  }
+
+  // Notification posted after |completed_| is published.
+  iree_notification_t notification_;
+  // True once the joined callback has completed.
+  std::atomic<bool> completed_{false};
+};
+
+// Completion state for callbacks transferring a status code.
+struct StatusCompletion {
+  // Notification posted after |status_code| is published.
+  CompletionNotification notification;
+  // Status code transferred from the callback.
+  std::atomic<iree_status_code_t> status_code{IREE_STATUS_OK};
+};
 
 //===----------------------------------------------------------------------===//
 // Test fixture
@@ -92,22 +164,18 @@ class RemoteSessionTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Drain proactor to complete any accumulated work before teardown.
-    DrainProactor();
+    if (client_device_) {
+      DeactivateDeviceAndWait(client_device_);
+      iree_hal_device_release(client_device_);
+      client_device_ = nullptr;
+    }
 
-    iree_hal_device_release(client_device_);
-    client_device_ = nullptr;
-
-    // Drain after client device release. This completes the session's
-    // two-phase teardown: session_begin_teardown deactivates the connection's
-    // carriers, and the deactivation callbacks fire here on the proactor.
-    DrainProactor();
+    if (server_ && !server_stopped_) {
+      StopServerAndWait();
+    }
 
     iree_hal_remote_server_release(server_);
     server_ = nullptr;
-
-    // Drain after server release — server-side session teardowns.
-    DrainProactor();
 
     iree_hal_device_release(mock_device_);
     mock_device_ = nullptr;
@@ -128,42 +196,38 @@ class RemoteSessionTest : public ::testing::Test {
   // Polling helpers
   //===--------------------------------------------------------------------===//
 
-  // Polls the proactor until it has no more completions to process. Handles
-  // cascading work (one completion triggering another) by looping until a
-  // poll returns zero completions.
-  void DrainProactor() {
-    for (;;) {
-      iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(0), &completed);
-      iree_status_ignore(status);
-      if (completed == 0) break;
+  // Runs a synchronous HAL operation on a worker while this thread drives the
+  // runner-less proactor needed to complete its control RPCs.
+  template <typename Operation>
+  iree_status_t RunWhilePolling(Operation operation) {
+    iree::Status operation_status;
+    std::atomic<bool> operation_complete = false;
+    std::thread operation_thread([&]() {
+      operation_status = iree::Status(operation());
+      operation_complete.store(true, std::memory_order_release);
+      iree_async_proactor_wake(proactor_);
+    });
+
+    iree::Status poll_status;
+    while (!operation_complete.load(std::memory_order_acquire) &&
+           poll_status.ok()) {
+      poll_status = iree::Status(PollProactorOnce(proactor_));
     }
+    operation_thread.join();
+    return iree_status_join(operation_status.release(), poll_status.release());
   }
 
-  // Polls the proactor until |condition| returns true or the time budget
-  // expires. Returns true if the condition was met, false on timeout.
-  bool PollUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
+  // Polls the proactor until |condition| returns true.
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_deadline(deadline), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
+      iree::Status status(PollProactorOnce(proactor_, &completed));
+      if (!status.ok()) {
+        ADD_FAILURE() << status.ToString();
         return false;
       }
     }
     return true;
-  }
-
-  // Polls the proactor for the given duration (non-conditional drain).
-  void PollFor(iree_duration_t duration) {
-    PollUntil([&]() { return false; }, duration);
   }
 
   //===--------------------------------------------------------------------===//
@@ -247,7 +311,7 @@ class RemoteSessionTest : public ::testing::Test {
     }
 
     EXPECT_TRUE(PollUntil([&]() { return client_connect_fired_; }))
-        << "Client connect callback timed out";
+        << "Client connect callback did not fire";
     return client_connect_status_;
   }
 
@@ -259,7 +323,17 @@ class RemoteSessionTest : public ::testing::Test {
     callback.user_data = this;
     IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
     ASSERT_TRUE(PollUntil([&]() { return server_stopped_; }))
-        << "Server stop timed out";
+        << "Server stop callback did not fire";
+  }
+
+  void DeactivateDeviceAndWait(iree_hal_device_t* device) {
+    bool deactivated = false;
+    iree_hal_remote_client_device_deactivated_callback_t callback = {
+        /*.fn=*/[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+        /*.user_data=*/&deactivated,
+    };
+    IREE_ASSERT_OK(iree_hal_remote_client_device_deactivate(device, callback));
+    ASSERT_TRUE(PollUntil([&]() { return deactivated; }));
   }
 
   //===--------------------------------------------------------------------===//
@@ -356,6 +430,30 @@ TEST_F(RemoteSessionTest, ConnectFailsWhenServerMissing) {
   EXPECT_NE(ConnectAndWait(), IREE_STATUS_OK);
   EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+
+  DeactivateDeviceAndWait(client_device_);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
+  iree_hal_device_release(client_device_);
+  client_device_ = nullptr;
+}
+
+TEST_F(RemoteSessionTest, DeactivateWithoutConnectionCompletesSynchronously) {
+  CreateClientDevice();
+
+  bool deactivated = false;
+  iree_hal_remote_client_device_deactivated_callback_t callback = {
+      /*.fn=*/[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+      /*.user_data=*/&deactivated,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_remote_client_device_deactivate(client_device_, callback));
+
+  EXPECT_TRUE(deactivated);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
+  iree_hal_device_release(client_device_);
+  client_device_ = nullptr;
 }
 
 TEST_F(RemoteSessionTest, ConnectFailsWithInsufficientEndpointCapacity) {
@@ -391,6 +489,40 @@ TEST_F(RemoteSessionTest, ConnectSucceeds) {
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
 }
 
+TEST_F(RemoteSessionTest, DeactivateRetainsDeviceThroughCallback) {
+  CreateAndStartServer();
+  CreateClientDevice();
+  ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+
+  struct CallbackState {
+    // Device reference transferred from the fixture to the callback.
+    iree_hal_device_t* device;
+    // True after the callback releases the transferred reference.
+    bool fired;
+  } callback_state = {
+      /*.device=*/client_device_,
+      /*.fired=*/false,
+  };
+  client_device_ = nullptr;
+
+  iree_hal_remote_client_device_deactivated_callback_t callback = {
+      /*.fn=*/
+      [](void* user_data) {
+        auto* state = static_cast<CallbackState*>(user_data);
+        EXPECT_EQ(iree_hal_remote_client_device_state(state->device),
+                  IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
+        iree_hal_device_release(state->device);
+        state->device = nullptr;
+        state->fired = true;
+      },
+      /*.user_data=*/&callback_state,
+  };
+  IREE_ASSERT_OK(iree_hal_remote_client_device_deactivate(callback_state.device,
+                                                          callback));
+  ASSERT_TRUE(PollUntil([&]() { return callback_state.fired; }));
+  EXPECT_EQ(callback_state.device, nullptr);
+}
+
 TEST_F(RemoteSessionTest, ConnectAdvertisesServerDeviceSpec) {
   CreateAndStartServer();
   CreateClientDevice();
@@ -403,8 +535,135 @@ TEST_F(RemoteSessionTest, ConnectAdvertisesServerDeviceSpec) {
       iree_hal_device_spec(mock_device_);
   ASSERT_NE(client_spec, nullptr);
   ASSERT_NE(server_spec, nullptr);
-  EXPECT_EQ(iree_hal_device_spec_digest(client_spec),
-            iree_hal_device_spec_digest(server_spec));
+
+  iree_byte_span_t client_bytes = iree_byte_span_empty();
+  iree_byte_span_t server_bytes = iree_byte_span_empty();
+  IREE_ASSERT_OK(iree_hal_device_spec_serialize(
+      client_spec, iree_allocator_system(), &client_bytes));
+  IREE_ASSERT_OK(iree_hal_device_spec_serialize(
+      server_spec, iree_allocator_system(), &server_bytes));
+  ASSERT_EQ(client_bytes.data_length, server_bytes.data_length);
+  EXPECT_EQ(
+      memcmp(client_bytes.data, server_bytes.data, client_bytes.data_length),
+      0);
+  iree_allocator_free(iree_allocator_system(), server_bytes.data);
+  iree_allocator_free(iree_allocator_system(), client_bytes.data);
+}
+
+TEST_F(RemoteSessionTest, LoadsExecutableUsingAdvertisedTargetOrdinal) {
+  CreateAndStartServer();
+  CreateClientDevice();
+  ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+
+  const iree_hal_executable_target_t* target = FindExecutableTarget(
+      client_device_, IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY));
+  ASSERT_NE(target, nullptr);
+
+  // One metadata-only function record followed by its name.
+  static const uint8_t kExecutableData[] = {
+      0x01, 0x00, 0x00, 0x00,  // Function count.
+      0x02, 0x03, 0x01,        // Constants, bindings, and flags.
+      0x04, 0x02, 0x01,        // Workgroup size.
+      0x08,                    // Name length.
+      0x20,                    // Native ABI parameter offset.
+      0x10, 0x00,              // Parameter byte size.
+      'd',  'i',  's',  'p',  'a', 't', 'c', 'h',
+  };
+  static const uint32_t kConstants[] = {0x11223344u, 0x55667788u};
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data =
+      iree_make_const_byte_span(kExecutableData, sizeof(kExecutableData));
+  load_params.constant_count = IREE_ARRAYSIZE(kConstants);
+  load_params.constants = kConstants;
+
+  iree_hal_executable_t* executable = nullptr;
+  IREE_ASSERT_OK(RunWhilePolling([&]() {
+    return iree_hal_device_load_executable(client_device_,
+                                           IREE_HAL_QUEUE_AFFINITY_ANY, target,
+                                           &load_params, &executable);
+  }));
+  ASSERT_NE(executable, nullptr);
+  EXPECT_EQ(iree_hal_executable_function_count(executable), 1u);
+
+  iree_hal_executable_function_t function =
+      iree_hal_executable_function_invalid();
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("dispatch"), &function));
+  iree_hal_executable_function_info_t info;
+  IREE_ASSERT_OK(
+      iree_hal_executable_function_info(executable, function, &info));
+  EXPECT_TRUE(iree_string_view_equal(info.name, IREE_SV("dispatch")));
+  EXPECT_EQ(info.flags, IREE_HAL_EXECUTABLE_FUNCTION_FLAG_SEQUENTIAL);
+  EXPECT_EQ(info.constant_byte_length, 2u * sizeof(uint32_t));
+  EXPECT_EQ(info.binding_count, 3u);
+  EXPECT_EQ(info.parameter_count, 1u);
+  EXPECT_EQ(info.workgroup_size[0], 4u);
+  EXPECT_EQ(info.workgroup_size[1], 2u);
+  EXPECT_EQ(info.workgroup_size[2], 1u);
+
+  iree_hal_executable_function_parameter_t parameter;
+  IREE_ASSERT_OK(iree_hal_executable_function_parameters(
+      executable, function, /*capacity=*/1, &parameter));
+  EXPECT_EQ(parameter.type,
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_EQ(parameter.flags,
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET);
+  EXPECT_EQ(parameter.size, 0x10u);
+  EXPECT_EQ(parameter.offset, 0u);
+  EXPECT_EQ(parameter.native_abi_offset, 0x20u);
+  EXPECT_TRUE(iree_string_view_is_empty(parameter.name));
+
+  bool global_found = true;
+  iree_hal_executable_global_t global =
+      iree_hal_executable_global_from_value(0);
+  IREE_ASSERT_OK(RunWhilePolling([&]() {
+    return iree_hal_executable_try_lookup_global_by_name(
+        executable, IREE_SV("missing"), &global_found, &global);
+  }));
+  EXPECT_FALSE(global_found);
+  EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
+
+  IREE_ASSERT_OK(RunWhilePolling([&]() {
+    return iree_hal_executable_try_lookup_global_by_name(
+        executable, IREE_SV(IREE_HAL_MOCK_EXECUTABLE_GLOBAL_NAME),
+        &global_found, &global);
+  }));
+  ASSERT_TRUE(global_found);
+  ASSERT_TRUE(iree_hal_executable_global_is_valid(global));
+
+  iree_hal_executable_global_info_t global_info;
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_info(executable, global, &global_info));
+  EXPECT_TRUE(iree_string_view_equal(
+      global_info.name, IREE_SV(IREE_HAL_MOCK_EXECUTABLE_GLOBAL_NAME)));
+  EXPECT_EQ(global_info.byte_length, sizeof(uint64_t));
+
+  iree_hal_buffer_t* any_global_buffer = nullptr;
+  IREE_ASSERT_OK(RunWhilePolling([&]() {
+    return iree_hal_executable_global_buffer(
+        executable, global, IREE_HAL_QUEUE_AFFINITY_ANY, &any_global_buffer);
+  }));
+  ASSERT_NE(any_global_buffer, nullptr);
+  EXPECT_EQ(iree_hal_buffer_byte_length(any_global_buffer), sizeof(uint64_t));
+
+  iree_hal_buffer_t* cached_any_global_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_executable_global_buffer(executable, global,
+                                                   IREE_HAL_QUEUE_AFFINITY_ANY,
+                                                   &cached_any_global_buffer));
+  EXPECT_EQ(cached_any_global_buffer, any_global_buffer);
+
+  iree_hal_buffer_t* queue_global_buffer = nullptr;
+  IREE_ASSERT_OK(RunWhilePolling([&]() {
+    return iree_hal_executable_global_buffer(
+        executable, global, /*queue_affinity=*/1, &queue_global_buffer);
+  }));
+  ASSERT_NE(queue_global_buffer, nullptr);
+  EXPECT_NE(queue_global_buffer, any_global_buffer);
+  EXPECT_EQ(iree_hal_buffer_byte_length(queue_global_buffer), sizeof(uint64_t));
+
+  iree_hal_executable_release(executable);
 }
 
 TEST_F(RemoteSessionTest, ReusesSingleServerSlotAfterClientDisconnect) {
@@ -412,9 +671,9 @@ TEST_F(RemoteSessionTest, ReusesSingleServerSlotAfterClientDisconnect) {
   CreateClientDevice();
   ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
 
+  DeactivateDeviceAndWait(client_device_);
   iree_hal_device_release(client_device_);
   client_device_ = nullptr;
-  DrainProactor();
 
   CreateClientDevice();
   EXPECT_EQ(ConnectAndWait(), IREE_STATUS_OK);
@@ -430,14 +689,12 @@ TEST_F(RemoteSessionTest, ConnectThenGracefulShutdown) {
   // Stop the server. This sends GOAWAY to the client session.
   StopServerAndWait();
 
-  // The client should receive the GOAWAY and transition to DISCONNECTED or
-  // ERROR.
+  // GOAWAY is terminal for the device because its remote resource namespace
+  // and retained network graph cannot be reused by a second session.
   EXPECT_TRUE(PollUntil([&]() {
-    iree_hal_remote_client_device_state_t state =
-        iree_hal_remote_client_device_state(client_device_);
-    return state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED ||
-           state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR;
-  })) << "Client did not transition after server GOAWAY";
+    return iree_hal_remote_client_device_state(client_device_) ==
+           IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR;
+  })) << "Client did not enter the terminal error state after server GOAWAY";
 }
 
 TEST_F(RemoteSessionTest, DoubleConnectFails) {
@@ -575,7 +832,7 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
   IREE_ASSERT_OK(iree_hal_remote_client_device_connect(client_b, cb_b));
 
   ASSERT_TRUE(PollUntil([&]() { return ctx_a.fired && ctx_b.fired; }))
-      << "Multi-client connect timed out";
+      << "Multi-client connect callbacks did not fire";
 
   EXPECT_EQ(ctx_a.status, IREE_STATUS_OK);
   EXPECT_EQ(ctx_b.status, IREE_STATUS_OK);
@@ -584,14 +841,11 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
   EXPECT_EQ(iree_hal_remote_client_device_state(client_b),
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
 
-  // Clean shutdown.
-  StopServerAndWait();
-  DrainProactor();
-
+  DeactivateDeviceAndWait(client_b);
   iree_hal_device_release(client_b);
-  DrainProactor();
+  DeactivateDeviceAndWait(client_a);
   iree_hal_device_release(client_a);
-  DrainProactor();
+  StopServerAndWait();
 }
 
 //===----------------------------------------------------------------------===//
@@ -603,7 +857,7 @@ TEST_F(RemoteSessionTest, QueueOpsFailWhenDisconnected) {
   CreateClientDevice();
 
   // Queue operations should fail with FAILED_PRECONDITION before connecting.
-  iree_hal_semaphore_list_t empty_list = {0, nullptr, nullptr};
+  iree_hal_semaphore_list_t empty_list = iree_hal_semaphore_list_empty();
   iree_hal_buffer_t* buffer = nullptr;
   iree_hal_buffer_params_t buffer_params = {0};
   buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
@@ -689,39 +943,19 @@ class RemoteBufferTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Release client device and server ON THE PROACTOR THREAD by sending a
-    // message. This is critical: carrier_deactivate and its cascading work
-    // (peer disconnect notifications, session error handling) must run on the
-    // same thread that processes carrier completions. Releasing from the main
-    // thread while the proactor thread is running causes data races on carrier
-    // state. The message fires during poll(), which also processes all the
-    // cascading completions (disconnect NOPs, deactivation callbacks) in the
-    // same or subsequent iterations.
-    teardown_phase_.store(0, std::memory_order_relaxed);
-    teardown_client_device_ = client_device_;
-    client_device_ = nullptr;
-    teardown_server_ = server_;
-    server_ = nullptr;
+    if (client_device_) {
+      DeactivateClientDeviceAndWait();
+      iree_hal_device_release(client_device_);
+      client_device_ = nullptr;
+    }
+    if (server_) {
+      StopServerAndWait();
+      iree_hal_remote_server_release(server_);
+      server_ = nullptr;
+    }
 
-    iree_async_proactor_message_callback_t msg_callback;
-    msg_callback.fn = OnTeardownMessage;
-    msg_callback.user_data = this;
-    iree_async_proactor_set_message_callback(proactor_, msg_callback);
-
-    // Phase 1: release client device and server on proactor thread.
-    IREE_ASSERT_OK(iree_async_proactor_send_message(proactor_, 1));
-    ASSERT_TRUE(WaitUntil([&]() { return teardown_phase_.load() >= 1; }))
-        << "Teardown phase 1 timed out";
-
-    // Phase 2: flush cascading work (disconnect notifications, session errors,
-    // server-side teardown). The proactor's poll drain loop handles most of
-    // this within a single poll() call, but a second message guarantees any
-    // work deferred to the next iteration is also processed.
-    IREE_ASSERT_OK(iree_async_proactor_send_message(proactor_, 2));
-    ASSERT_TRUE(WaitUntil([&]() { return teardown_phase_.load() >= 2; }))
-        << "Teardown phase 2 timed out";
-
-    // Stop and join the proactor thread. All session/carrier teardown is done.
+    // Client deactivation and server stop join all transport callbacks before
+    // the polling thread exits.
     if (proactor_thread_) {
       iree_async_proactor_thread_request_stop(proactor_thread_);
       IREE_ASSERT_OK(iree_async_proactor_thread_join(proactor_thread_,
@@ -756,14 +990,31 @@ class RemoteBufferTest : public ::testing::Test {
     proactor_ = nullptr;
   }
 
-  bool WaitUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
-    while (!condition()) {
-      if (iree_time_now() >= deadline) return false;
-      std::this_thread::yield();
-    }
-    return true;
+  void DeactivateClientDeviceAndWait() {
+    CompletionNotification completion;
+    iree_hal_remote_client_device_deactivated_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data) {
+          static_cast<CompletionNotification*>(user_data)->Signal();
+        },
+        /*.user_data=*/&completion,
+    };
+    IREE_ASSERT_OK(
+        iree_hal_remote_client_device_deactivate(client_device_, callback));
+    ASSERT_TRUE(completion.Await());
+  }
+
+  void StopServerAndWait() {
+    CompletionNotification completion;
+    iree_hal_remote_server_stopped_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data) {
+          static_cast<CompletionNotification*>(user_data)->Signal();
+        },
+        /*.user_data=*/&completion,
+    };
+    IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
+    ASSERT_TRUE(completion.Await());
   }
 
   void CreateLocalTaskDevice() {
@@ -912,54 +1163,33 @@ class RemoteBufferTest : public ::testing::Test {
   }
 
   iree_status_code_t ConnectAndWait() {
-    client_connect_fired_ = false;
-    client_connect_status_ = IREE_STATUS_OK;
-
-    iree_hal_remote_client_device_connected_callback_t callback;
-    callback.fn = OnClientConnected;
-    callback.user_data = this;
+    StatusCompletion completion;
+    iree_hal_remote_client_device_connected_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data, iree_status_t status) {
+          auto* completion = static_cast<StatusCompletion*>(user_data);
+          completion->status_code.store(iree_status_code(status),
+                                        std::memory_order_relaxed);
+          iree_status_free(status);
+          completion->notification.Signal();
+        },
+        /*.user_data=*/&completion,
+    };
 
     iree_status_t connect_status =
         iree_hal_remote_client_device_connect(client_device_, callback);
     if (!iree_status_is_ok(connect_status)) {
       iree_status_code_t code = iree_status_code(connect_status);
-      iree_status_ignore(connect_status);
+      iree_status_free(connect_status);
       return code;
     }
 
-    EXPECT_TRUE(WaitUntil([&]() { return client_connect_fired_.load(); }))
-        << "Client connect callback timed out";
-    return client_connect_status_.load();
-  }
-
-  static void OnClientConnected(void* user_data, iree_status_t status) {
-    auto* self = static_cast<RemoteBufferTest*>(user_data);
-    self->client_connect_fired_ = true;
-    self->client_connect_status_ = iree_status_code(status);
-    iree_status_ignore(status);
+    EXPECT_TRUE(completion.notification.Await());
+    return completion.status_code.load(std::memory_order_relaxed);
   }
 
   static void OnClientError(void* user_data, iree_status_t status) {
     iree_status_ignore(status);
-  }
-
-  // Proactor message callback for phased teardown. Runs on the proactor
-  // thread so carrier_deactivate and all cascading work execute without
-  // races against completion processing.
-  static void OnTeardownMessage(iree_async_proactor_t* proactor,
-                                uint64_t message_data, void* user_data) {
-    (void)proactor;
-    auto* self = static_cast<RemoteBufferTest*>(user_data);
-    if (message_data == 1) {
-      // Phase 1: release client device and server.
-      iree_hal_device_release(self->teardown_client_device_);
-      self->teardown_client_device_ = nullptr;
-      iree_hal_remote_server_release(self->teardown_server_);
-      self->teardown_server_ = nullptr;
-    }
-    // Each message completion advances the phase counter.
-    self->teardown_phase_.store(static_cast<int32_t>(message_data),
-                                std::memory_order_release);
   }
 
   // Shared infrastructure.
@@ -984,14 +1214,30 @@ class RemoteBufferTest : public ::testing::Test {
 
   // Client side.
   iree_hal_device_t* client_device_ = nullptr;
-  std::atomic<bool> client_connect_fired_{false};
-  std::atomic<iree_status_code_t> client_connect_status_{IREE_STATUS_OK};
-
-  // Teardown state: objects moved here before message-based release.
-  iree_hal_device_t* teardown_client_device_ = nullptr;
-  iree_hal_remote_server_t* teardown_server_ = nullptr;
-  std::atomic<int32_t> teardown_phase_{0};
 };
+
+TEST_F(RemoteBufferTest, DeactivateKeepsLateResourceCleanupSafe) {
+  iree_hal_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_event_create(client_device_,
+                                       IREE_HAL_QUEUE_AFFINITY_ANY,
+                                       IREE_HAL_EVENT_FLAG_NONE, &event));
+
+  iree_hal_file_t* file = nullptr;
+  IREE_ASSERT_OK(iree_hal_remote_client_device_open_file(
+      client_device_, IREE_SV("server://read"), IREE_HAL_MEMORY_ACCESS_READ,
+      iree_allocator_system(), &file));
+
+  DeactivateClientDeviceAndWait();
+
+  // Child resources may outlive terminal device deactivation. Their cleanup
+  // paths reach the retired queue and control channels, which must remain alive
+  // and reject the late sends through their closed admission gates.
+  iree_hal_event_release(event);
+  iree_hal_file_release(file);
+
+  iree_hal_device_release(client_device_);
+  client_device_ = nullptr;
+}
 
 #if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
 
@@ -1038,8 +1284,16 @@ class RemoteShmFileRegistrationTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    ReleaseClientDeviceOnProactor();
-    ReleaseServerOnProactor();
+    if (client_device_) {
+      DeactivateClientDeviceAndWait();
+      iree_hal_device_release(client_device_);
+      client_device_ = nullptr;
+    }
+    if (server_) {
+      StopServerAndWait();
+      iree_hal_remote_server_release(server_);
+      server_ = nullptr;
+    }
 
     StopProactorThread(&client_proactor_thread_);
     StopProactorThread(&server_proactor_thread_);
@@ -1205,82 +1459,57 @@ class RemoteShmFileRegistrationTest : public ::testing::Test {
     }
   }
 
-  bool WaitUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
-    bool condition_met = condition();
-    while (!condition_met && iree_time_now() < deadline) {
-      std::this_thread::yield();
-      condition_met = condition();
-    }
-    return condition_met;
-  }
-
   iree_status_code_t ConnectAndWait() {
-    client_connect_fired_.store(false, std::memory_order_relaxed);
-    client_connect_status_.store(IREE_STATUS_OK, std::memory_order_relaxed);
-
-    iree_hal_remote_client_device_connected_callback_t callback;
-    callback.fn = OnClientConnected;
-    callback.user_data = this;
+    StatusCompletion completion;
+    iree_hal_remote_client_device_connected_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data, iree_status_t status) {
+          auto* completion = static_cast<StatusCompletion*>(user_data);
+          completion->status_code.store(iree_status_code(status),
+                                        std::memory_order_relaxed);
+          iree_status_free(status);
+          completion->notification.Signal();
+        },
+        /*.user_data=*/&completion,
+    };
 
     iree_status_t connect_status =
         iree_hal_remote_client_device_connect(client_device_, callback);
     iree_status_code_t code = iree_status_code(connect_status);
     if (!iree_status_is_ok(connect_status)) {
-      iree_status_ignore(connect_status);
+      iree_status_free(connect_status);
     } else {
-      EXPECT_TRUE(WaitUntil([&]() { return client_connect_fired_.load(); }))
-          << "Client connect callback timed out";
-      code = client_connect_status_.load();
+      EXPECT_TRUE(completion.notification.Await());
+      code = completion.status_code.load(std::memory_order_relaxed);
     }
     return code;
   }
 
-  void ReleaseClientDeviceOnProactor() {
-    if (client_device_) {
-      teardown_client_device_ = client_device_;
-      client_device_ = nullptr;
-      client_teardown_phase_.store(0, std::memory_order_relaxed);
-
-      iree_async_proactor_message_callback_t callback;
-      callback.fn = OnClientTeardownMessage;
-      callback.user_data = this;
-      iree_async_proactor_set_message_callback(client_proactor_, callback);
-
-      IREE_ASSERT_OK(iree_async_proactor_send_message(client_proactor_, 1));
-      ASSERT_TRUE(WaitUntil([&]() {
-        return client_teardown_phase_.load() >= 1;
-      })) << "Client teardown timed out";
-
-      IREE_ASSERT_OK(iree_async_proactor_send_message(client_proactor_, 2));
-      ASSERT_TRUE(WaitUntil([&]() {
-        return client_teardown_phase_.load() >= 2;
-      })) << "Client teardown drain timed out";
-    }
+  void DeactivateClientDeviceAndWait() {
+    CompletionNotification completion;
+    iree_hal_remote_client_device_deactivated_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data) {
+          static_cast<CompletionNotification*>(user_data)->Signal();
+        },
+        /*.user_data=*/&completion,
+    };
+    IREE_ASSERT_OK(
+        iree_hal_remote_client_device_deactivate(client_device_, callback));
+    ASSERT_TRUE(completion.Await());
   }
 
-  void ReleaseServerOnProactor() {
-    if (server_) {
-      teardown_server_ = server_;
-      server_ = nullptr;
-      server_teardown_phase_.store(0, std::memory_order_relaxed);
-
-      iree_async_proactor_message_callback_t callback;
-      callback.fn = OnServerTeardownMessage;
-      callback.user_data = this;
-      iree_async_proactor_set_message_callback(server_proactor_, callback);
-
-      IREE_ASSERT_OK(iree_async_proactor_send_message(server_proactor_, 1));
-      ASSERT_TRUE(WaitUntil([&]() {
-        return server_teardown_phase_.load() >= 1;
-      })) << "Server teardown timed out";
-
-      IREE_ASSERT_OK(iree_async_proactor_send_message(server_proactor_, 2));
-      ASSERT_TRUE(WaitUntil([&]() {
-        return server_teardown_phase_.load() >= 2;
-      })) << "Server teardown drain timed out";
-    }
+  void StopServerAndWait() {
+    CompletionNotification completion;
+    iree_hal_remote_server_stopped_callback_t callback = {
+        /*.fn=*/
+        [](void* user_data) {
+          static_cast<CompletionNotification*>(user_data)->Signal();
+        },
+        /*.user_data=*/&completion,
+    };
+    IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
+    ASSERT_TRUE(completion.Await());
   }
 
   static void StopProactorThread(iree_async_proactor_thread_t** thread) {
@@ -1294,84 +1523,43 @@ class RemoteShmFileRegistrationTest : public ::testing::Test {
     }
   }
 
-  static void OnClientConnected(void* user_data, iree_status_t status) {
-    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
-    self->client_connect_fired_.store(true, std::memory_order_relaxed);
-    self->client_connect_status_.store(iree_status_code(status),
-                                       std::memory_order_relaxed);
-    iree_status_ignore(status);
-  }
-
   static void OnClientError(void* user_data, iree_status_t status) {
-    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
-    self->client_error_fired_.store(true, std::memory_order_relaxed);
-    self->client_error_status_.store(iree_status_code(status),
-                                     std::memory_order_relaxed);
+    (void)user_data;
     iree_status_ignore(status);
   }
 
-  static void OnClientTeardownMessage(iree_async_proactor_t* proactor,
-                                      uint64_t message_data, void* user_data) {
-    (void)proactor;
-    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
-    if (message_data == 1 && self->teardown_client_device_) {
-      iree_hal_device_release(self->teardown_client_device_);
-      self->teardown_client_device_ = nullptr;
-    }
-    self->client_teardown_phase_.store((int32_t)message_data,
-                                       std::memory_order_release);
-  }
+  // Server I/O proactor.
+  iree_async_proactor_t* server_proactor_ = nullptr;
+  // Client I/O proactor.
+  iree_async_proactor_t* client_proactor_ = nullptr;
+  // Polling thread for |server_proactor_|.
+  iree_async_proactor_thread_t* server_proactor_thread_ = nullptr;
+  // Polling thread for |client_proactor_|.
+  iree_async_proactor_thread_t* client_proactor_thread_ = nullptr;
+  // Server receive buffers.
+  iree_hal_remote_recv_pool_t* server_recv_pool_ = nullptr;
+  // Client receive buffers.
+  iree_hal_remote_recv_pool_t* client_recv_pool_ = nullptr;
+  // Server queue frontier tracker.
+  iree_async_frontier_tracker_t* server_tracker_ = nullptr;
 
-  static void OnServerTeardownMessage(iree_async_proactor_t* proactor,
-                                      uint64_t message_data, void* user_data) {
-    (void)proactor;
-    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
-    if (message_data == 1 && self->teardown_server_) {
-      iree_hal_remote_server_release(self->teardown_server_);
-      self->teardown_server_ = nullptr;
-    }
-    self->server_teardown_phase_.store((int32_t)message_data,
-                                       std::memory_order_release);
-  }
+  // Shared SHM transport factory.
+  iree_net_transport_factory_t* factory_ = nullptr;
+  // Short Unix socket path.
+  std::string socket_path_;
+  // Transport address derived from |socket_path_|.
+  std::string server_address_;
 
-  iree_async_proactor_t* server_proactor_ = nullptr;  // Server I/O proactor.
-  iree_async_proactor_t* client_proactor_ = nullptr;  // Client I/O proactor.
-  iree_async_proactor_thread_t* server_proactor_thread_ =
-      nullptr;  // Polling thread for server_proactor_.
-  iree_async_proactor_thread_t* client_proactor_thread_ =
-      nullptr;  // Polling thread for client_proactor_.
-  iree_hal_remote_recv_pool_t* server_recv_pool_ =
-      nullptr;  // Server receive buffers.
-  iree_hal_remote_recv_pool_t* client_recv_pool_ =
-      nullptr;  // Client receive buffers.
-  iree_async_frontier_tracker_t* server_tracker_ =
-      nullptr;  // Server queue frontier tracker.
-
-  iree_net_transport_factory_t* factory_ =
-      nullptr;                  // Shared SHM transport factory.
-  std::string socket_path_;     // Short /tmp Unix socket path.
-  std::string server_address_;  // "unix:" address for socket_path_.
-
-  iree_hal_driver_t* local_task_driver_ = nullptr;  // Server target driver.
-  iree_hal_device_t* local_task_device_ = nullptr;  // Server target device.
-  iree_hal_device_group_t* local_task_device_group_ =
-      nullptr;                                  // Server target device group.
-  iree_hal_remote_server_t* server_ = nullptr;  // Remote HAL server.
-  iree_hal_device_t* client_device_ = nullptr;  // Remote HAL client device.
-
-  std::atomic<bool> client_connect_fired_{false};  // Connect callback flag.
-  std::atomic<iree_status_code_t> client_connect_status_{
-      IREE_STATUS_OK};  // Connect callback status code.
-  std::atomic<bool> client_error_fired_{false};  // Async client error flag.
-  std::atomic<iree_status_code_t> client_error_status_{
-      IREE_STATUS_OK};  // Async client error status code.
-
-  iree_hal_device_t* teardown_client_device_ =
-      nullptr;  // Client released on client_proactor_.
-  iree_hal_remote_server_t* teardown_server_ =
-      nullptr;  // Server released on server_proactor_.
-  std::atomic<int32_t> client_teardown_phase_{0};  // Client teardown progress.
-  std::atomic<int32_t> server_teardown_phase_{0};  // Server teardown progress.
+  // Server target driver.
+  iree_hal_driver_t* local_task_driver_ = nullptr;
+  // Server target device.
+  iree_hal_device_t* local_task_device_ = nullptr;
+  // Queue frontier group for |local_task_device_|.
+  iree_hal_device_group_t* local_task_device_group_ = nullptr;
+  // Remote HAL server.
+  iree_hal_remote_server_t* server_ = nullptr;
+  // Remote HAL client device.
+  iree_hal_device_t* client_device_ = nullptr;
 };
 
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
@@ -2730,26 +2918,22 @@ TEST_F(RemoteBufferTest, QueueDeallocaOrdering) {
 // Executable upload and dispatch tests
 //===----------------------------------------------------------------------===//
 
-TEST_F(RemoteBufferTest, ExecutableUploadIncompatibleFormat) {
-  // The local-task server doesn't support "mock" format — verify the RPC
-  // round-trips correctly and returns INCOMPATIBLE rather than hanging.
-  iree_hal_executable_cache_t* cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      client_device_, iree_make_cstring_view("test-cache"), &cache));
+TEST_F(RemoteBufferTest, ExecutableUploadRejectsMalformedData) {
+  const iree_hal_executable_target_t* target =
+      FirstExecutableTarget(client_device_);
+  ASSERT_NE(target, nullptr);
 
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = iree_make_cstring_view("mock");
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
   uint8_t fake_binary[] = {0xDE, 0xAD, 0xBE, 0xEF};
-  params.executable_data =
+  load_params.executable_data =
       iree_make_const_byte_span(fake_binary, sizeof(fake_binary));
 
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        iree_hal_executable_cache_prepare_executable(
-                            cache, &params, &executable));
-
-  iree_hal_executable_cache_release(cache);
+                        iree_hal_device_load_executable(
+                            client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target,
+                            &load_params, &executable));
 }
 
 // Looks up a compiled binary in the embedded VMVX testdata TOC by filename.
@@ -2764,28 +2948,23 @@ static iree_const_byte_span_t LookupTestdata(const char* filename) {
 }
 
 TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
-  // Upload VMVX executable (the abs(x) dispatch kernel from CTS testdata).
-  iree_hal_executable_cache_t* cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      client_device_, iree_make_cstring_view("test-cache"), &cache));
-
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
-  if (binary.data_length == 0) {
-    GTEST_SKIP() << "VMVX dispatch testdata is not available";
-  }
+  ASSERT_GT(binary.data_length, 0u);
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format =
-      iree_make_cstring_view("vmvx-bytecode-fb");
-  executable_params.executable_data = binary;
+  const iree_hal_executable_target_t* target = FindExecutableTarget(
+      client_device_, IREE_SV("ireevm"), IREE_SV("bytecode"));
+  if (!target) {
+    GTEST_SKIP() << "VMVX executable loading is not enabled";
+  }
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = binary;
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-      cache, &executable_params, &executable));
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
+      &executable));
 
   // Allocate input and output buffers (2 floats each).
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
@@ -2858,7 +3037,6 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(cache);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2866,28 +3044,23 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
-  // Upload VMVX executable.
-  iree_hal_executable_cache_t* cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      client_device_, iree_make_cstring_view("test-cache"), &cache));
-
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
-  if (binary.data_length == 0) {
-    GTEST_SKIP() << "VMVX dispatch testdata is not available";
-  }
+  ASSERT_GT(binary.data_length, 0u);
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format =
-      iree_make_cstring_view("vmvx-bytecode-fb");
-  executable_params.executable_data = binary;
+  const iree_hal_executable_target_t* target = FindExecutableTarget(
+      client_device_, IREE_SV("ireevm"), IREE_SV("bytecode"));
+  if (!target) {
+    GTEST_SKIP() << "VMVX executable loading is not enabled";
+  }
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = binary;
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-      cache, &executable_params, &executable));
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, target, &load_params,
+      &executable));
 
   // Allocate input and output buffers.
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
@@ -2982,7 +3155,6 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(cache);
 }
 
 TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {

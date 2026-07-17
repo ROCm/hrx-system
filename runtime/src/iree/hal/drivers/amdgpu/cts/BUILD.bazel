@@ -10,7 +10,11 @@ load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
-load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
+load(
+    "//runtime/build_tools/bazel:hal_cts.bzl",
+    "iree_runtime_hal_cts_test_suite",
+    "iree_runtime_hal_remote_cts_test_suite",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -312,5 +316,11 @@ iree_runtime_cc_test(
 
 iree_runtime_hal_cts_test_suite(
     backends = ":backends",
+    testdata_libs = [":testdata_amdgpu"],
+)
+
+iree_runtime_hal_remote_cts_test_suite(
+    source_backend_name = "amdgpu",
+    source_backends = ":backends",
     testdata_libs = [":testdata_amdgpu"],
 )

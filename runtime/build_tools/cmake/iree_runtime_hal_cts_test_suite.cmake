@@ -104,3 +104,223 @@ function(iree_runtime_hal_cts_test_suite)
     endforeach()
   endif()
 endfunction()
+
+# Creates CTS test binaries for a concrete HAL backend wrapped by the remote
+# loopback adapter. Calls made before the adapter target is declared are
+# retained and emitted from the remote CTS package once that target exists.
+#
+# Parameters:
+#   SOURCE_BACKEND_NAME: Concrete backend name registered with the CTS.
+#   SOURCE_BACKENDS: Concrete backend registration library targets.
+#   TESTDATA_LIBS: Prebuilt executable artifact registration libraries.
+#   NAME: Non-empty prefix for generated remote test binary names.
+#   ARGS: Runtime arguments passed to all generated test binaries.
+#   LABELS: Test labels used for filtering.
+#   RESOURCE_GROUP: Optional shared resource group.
+function(_iree_runtime_hal_remote_cts_defer_test_suite)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "SOURCE_BACKEND_NAME;NAME;RESOURCE_GROUP"
+    "SOURCE_BACKENDS;TESTDATA_LIBS;ARGS;LABELS"
+    ${ARGN}
+  )
+
+  get_property(
+    _DEFERRED_COUNT GLOBAL
+    PROPERTY IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_COUNT
+  )
+  if(NOT _DEFERRED_COUNT)
+    set(_DEFERRED_COUNT 0)
+  endif()
+  math(EXPR _DEFERRED_INDEX "${_DEFERRED_COUNT} + 1")
+  set_property(
+    GLOBAL PROPERTY IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_COUNT
+    "${_DEFERRED_INDEX}"
+  )
+
+  iree_package_ns(_DEFERRED_PACKAGE_NS)
+  set(_SOURCE_BACKENDS)
+  foreach(_BACKEND ${_RULE_SOURCE_BACKENDS})
+    string(
+      REGEX REPLACE "^::" "${_DEFERRED_PACKAGE_NS}::" _FULL_BACKEND
+      "${_BACKEND}"
+    )
+    list(APPEND _SOURCE_BACKENDS "${_FULL_BACKEND}")
+  endforeach()
+  set(_TESTDATA_LIBS)
+  foreach(_LIB ${_RULE_TESTDATA_LIBS})
+    string(
+      REGEX REPLACE "^::" "${_DEFERRED_PACKAGE_NS}::" _FULL_LIB
+      "${_LIB}"
+    )
+    list(APPEND _TESTDATA_LIBS "${_FULL_LIB}")
+  endforeach()
+
+  set(_PROPERTY_PREFIX
+    "IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_${_DEFERRED_INDEX}"
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_SOURCE_BACKEND_NAME"
+    "${_RULE_SOURCE_BACKEND_NAME}"
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_SOURCE_BACKENDS"
+    ${_SOURCE_BACKENDS}
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_TESTDATA_LIBS"
+    ${_TESTDATA_LIBS}
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_NAME" "${_RULE_NAME}"
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_ARGS" ${_RULE_ARGS}
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_LABELS" ${_RULE_LABELS}
+  )
+  set_property(
+    GLOBAL PROPERTY "${_PROPERTY_PREFIX}_RESOURCE_GROUP"
+    "${_RULE_RESOURCE_GROUP}"
+  )
+endfunction()
+
+function(_iree_runtime_hal_remote_cts_emit_test_suite)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "SOURCE_BACKEND_NAME;NAME;RESOURCE_GROUP"
+    "SOURCE_BACKENDS;TESTDATA_LIBS;ARGS;LABELS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_SOURCE_BACKEND_NAME)
+    message(SEND_ERROR
+      "iree_runtime_hal_remote_cts_test_suite requires SOURCE_BACKEND_NAME"
+    )
+  endif()
+  if(NOT _RULE_SOURCE_BACKENDS)
+    message(SEND_ERROR
+      "iree_runtime_hal_remote_cts_test_suite requires SOURCE_BACKENDS"
+    )
+  endif()
+  if(NOT _RULE_NAME)
+    message(SEND_ERROR
+      "iree_runtime_hal_remote_cts_test_suite requires a non-empty NAME"
+    )
+  endif()
+
+  iree_package_ns(_PACKAGE_NS)
+  set(_SOURCE_BACKENDS)
+  foreach(_BACKEND ${_RULE_SOURCE_BACKENDS})
+    string(
+      REGEX REPLACE "^::" "${_PACKAGE_NS}::" _FULL_BACKEND "${_BACKEND}"
+    )
+    list(APPEND _SOURCE_BACKENDS "${_FULL_BACKEND}")
+  endforeach()
+
+  set(_ADAPTER_BACKENDS "${_RULE_NAME}_backends")
+  iree_cc_library(
+    NAME
+      "${_ADAPTER_BACKENDS}"
+    DEPS
+      ${_SOURCE_BACKENDS}
+      iree::hal::remote::cts::loopback_adapter
+    TESTONLY
+    ALWAYSLINK
+    PUBLIC
+  )
+
+  iree_runtime_hal_cts_test_suite(
+    BACKENDS
+      "::${_ADAPTER_BACKENDS}"
+    TESTDATA_LIBS
+      ${_RULE_TESTDATA_LIBS}
+    NAME
+      "${_RULE_NAME}"
+    ARGS
+      ${_RULE_ARGS}
+      "--cts_backend_filter=remote_${_RULE_SOURCE_BACKEND_NAME}"
+    LABELS
+      ${_RULE_LABELS}
+      "driver=remote"
+      "wrapped-driver=${_RULE_SOURCE_BACKEND_NAME}"
+    RESOURCE_GROUP
+      "${_RULE_RESOURCE_GROUP}"
+  )
+endfunction()
+
+function(iree_runtime_hal_remote_cts_test_suite)
+  if(NOT IREE_BUILD_TESTS)
+    return()
+  endif()
+
+  if(NOT TARGET iree::hal::remote::cts::loopback_adapter)
+    _iree_runtime_hal_remote_cts_defer_test_suite(${ARGN})
+    return()
+  endif()
+
+  _iree_runtime_hal_remote_cts_emit_test_suite(${ARGN})
+endfunction()
+
+function(iree_runtime_hal_remote_cts_flush_deferred_suites)
+  if(NOT IREE_BUILD_TESTS)
+    return()
+  endif()
+
+  if(NOT TARGET iree::hal::remote::cts::loopback_adapter)
+    message(SEND_ERROR
+      "iree_runtime_hal_remote_cts_flush_deferred_suites requires "
+      "iree::hal::remote::cts::loopback_adapter"
+    )
+  endif()
+
+  get_property(
+    _DEFERRED_COUNT GLOBAL
+    PROPERTY IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_COUNT
+  )
+  if(NOT _DEFERRED_COUNT)
+    return()
+  endif()
+
+  foreach(_DEFERRED_INDEX RANGE 1 ${_DEFERRED_COUNT})
+    set(_PROPERTY_PREFIX
+      "IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_${_DEFERRED_INDEX}"
+    )
+    foreach(
+      _PROPERTY
+      SOURCE_BACKEND_NAME
+      SOURCE_BACKENDS
+      TESTDATA_LIBS
+      NAME
+      ARGS
+      LABELS
+      RESOURCE_GROUP
+    )
+      get_property(
+        _${_PROPERTY} GLOBAL PROPERTY "${_PROPERTY_PREFIX}_${_PROPERTY}"
+      )
+    endforeach()
+
+    _iree_runtime_hal_remote_cts_emit_test_suite(
+      SOURCE_BACKEND_NAME
+        "${_SOURCE_BACKEND_NAME}"
+      SOURCE_BACKENDS
+        ${_SOURCE_BACKENDS}
+      TESTDATA_LIBS
+        ${_TESTDATA_LIBS}
+      NAME
+        "${_NAME}_${_SOURCE_BACKEND_NAME}"
+      ARGS
+        ${_ARGS}
+      LABELS
+        ${_LABELS}
+      RESOURCE_GROUP
+        "${_RESOURCE_GROUP}"
+    )
+  endforeach()
+
+  set_property(GLOBAL PROPERTY IREE_RUNTIME_HAL_REMOTE_CTS_DEFERRED_COUNT 0)
+endfunction()
