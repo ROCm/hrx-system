@@ -179,6 +179,37 @@ TEST_P(ShutdownTest, Shutdown_Both) {
   iree_async_socket_release(listener);
 }
 
+// Sending from a socket whose local write direction is shut down fails on the
+// first operation. This checks the local shutdown contract directly instead
+// of relying on eventual peer-side TCP error propagation.
+TEST_P(ShutdownTest, Shutdown_BothRejectsLocalSend) {
+  iree_async_socket_t* client = nullptr;
+  iree_async_socket_t* server = nullptr;
+  iree_async_socket_t* listener = nullptr;
+  EstablishConnection(&client, &server, &listener);
+
+  IREE_ASSERT_OK(
+      iree_async_socket_shutdown(client, IREE_ASYNC_SOCKET_SHUTDOWN_BOTH));
+
+  const char* message = "Sending after local shutdown";
+  iree_async_span_t send_span =
+      iree_async_span_from_ptr((void*)message, strlen(message));
+  iree_async_socket_send_operation_t send_op;
+  CompletionTracker send_tracker;
+  InitSendOperation(&send_op, client, &send_span, 1,
+                    IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
+                    CompletionTracker::Callback, &send_tracker);
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
+
+  PollUntil(/*min_completions=*/1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        send_tracker.ConsumeStatus());
+
+  iree_async_socket_release(server);
+  iree_async_socket_release(client);
+  iree_async_socket_release(listener);
+}
+
 // Shutdown on unconnected socket fails with FAILED_PRECONDITION.
 TEST_P(ShutdownTest, Shutdown_Unconnected) {
   iree_async_socket_t* socket = nullptr;
@@ -380,9 +411,7 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
   // Submit a recv to force the kernel to process the RST. On loopback,
   // LINGER_ZERO RST is delivered synchronously within close(), so by this
   // point the server socket's kernel buffer already has the RST queued.
-  // readv() fails immediately with ECONNRESET, setting sticky failure on the
-  // socket. All subsequent eager sends then hit the sticky failure check and
-  // fail without attempting writev().
+  // readv() fails with ECONNRESET and records sticky failure on the socket.
   {
     char rst_probe_buffer[1] = {0};
     iree_async_span_t rst_probe_span =
@@ -394,41 +423,25 @@ TEST_P(ResetTest, Reset_CloseWithUnreadData) {
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(proactor_, &rst_probe_op.base));
     PollUntil(/*min_completions=*/1);
-    iree_status_ignore(rst_probe_tracker.ConsumeStatus());
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          rst_probe_tracker.ConsumeStatus());
   }
 
-  // Server tries to send more data. The socket has sticky failure from the
-  // recv above, so each eager send fails immediately.
+  // The socket has sticky failure from the recv above, so the next send fails
+  // without depending on another TCP round trip. Backends may preserve the
+  // reset status or report the corresponding local broken-pipe status.
   const char* more_data = "Sending after RST";
   iree_async_span_t more_span =
       iree_async_span_from_ptr((void*)more_data, strlen(more_data));
+  iree_async_socket_send_operation_t send2_op;
+  CompletionTracker send2_tracker;
+  InitSendOperation(&send2_op, server, &more_span, 1,
+                    IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
+                    CompletionTracker::Callback, &send2_tracker);
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send2_op.base));
 
-  bool got_error = false;
-  for (int i = 0; i < 10 && !got_error; ++i) {
-    iree_async_socket_send_operation_t send2_op;
-    CompletionTracker send2_tracker;
-    InitSendOperation(&send2_op, server, &more_span, 1,
-                      IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
-                      CompletionTracker::Callback, &send2_tracker);
-
-    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send2_op.base));
-
-    PollUntil(/*min_completions=*/1);
-
-    if (!iree_status_is_ok(send2_tracker.last_status)) {
-      got_error = true;
-      // ECONNRESET maps to UNAVAILABLE, EPIPE maps to FAILED_PRECONDITION.
-      iree_status_t status = send2_tracker.ConsumeStatus();
-      if (!iree_status_is_unavailable(status) &&
-          !iree_status_is_failed_precondition(status)) {
-        IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
-      } else {
-        iree_status_ignore(status);
-      }
-    }
-  }
-
-  EXPECT_TRUE(got_error) << "Expected error after peer closed with unread data";
+  PollUntil(/*min_completions=*/1);
+  IREE_EXPECT_NOT_OK(send2_tracker.ConsumeStatus());
 
   iree_async_socket_release(server);
   iree_async_socket_release(listener);
@@ -472,59 +485,6 @@ TEST_P(ResetTest, Reset_RecvAfterPeerClose) {
                           recv_tracker.ConsumeStatus());
   }
 
-  iree_async_socket_release(server);
-  iree_async_socket_release(listener);
-}
-
-// Attempting to send on a socket after the peer has gracefully closed should
-// eventually result in an error (EPIPE/ECONNRESET).
-TEST_P(ResetTest, Reset_SendAfterPeerShutdown) {
-  iree_async_socket_t* client = nullptr;
-  iree_async_socket_t* server = nullptr;
-  iree_async_socket_t* listener = nullptr;
-  EstablishConnection(&client, &server, &listener);
-
-  // Client does graceful shutdown of write direction.
-  IREE_ASSERT_OK(
-      iree_async_socket_shutdown(client, IREE_ASYNC_SOCKET_SHUTDOWN_BOTH));
-
-  // Server tries to send data to a client that has shut down.
-  // First sends may succeed (kernel buffers), but eventually should fail.
-  const char* message = "Sending to shut-down peer";
-  iree_async_span_t send_span =
-      iree_async_span_from_ptr((void*)message, strlen(message));
-
-  bool got_error = false;
-  for (int i = 0; i < 10 && !got_error; ++i) {
-    iree_async_socket_send_operation_t send_op;
-    CompletionTracker send_tracker;
-    InitSendOperation(&send_op, server, &send_span, 1,
-                      IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
-                      CompletionTracker::Callback, &send_tracker);
-
-    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
-
-    PollUntil(/*min_completions=*/1);
-
-    if (!iree_status_is_ok(send_tracker.last_status)) {
-      got_error = true;
-      // EPIPE (broken pipe) maps to FAILED_PRECONDITION.
-      // ECONNRESET maps to UNAVAILABLE.
-      iree_status_t status = send_tracker.ConsumeStatus();
-      if (!iree_status_is_failed_precondition(status) &&
-          !iree_status_is_unavailable(status)) {
-        IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
-      } else {
-        iree_status_ignore(status);
-      }
-    }
-  }
-
-  // TCP may buffer several sends before returning an error, but it should
-  // eventually fail. If all 10 sends succeeded, that's unexpected but not
-  // necessarily wrong (depends on kernel buffering).
-
-  iree_async_socket_release(client);
   iree_async_socket_release(server);
   iree_async_socket_release(listener);
 }

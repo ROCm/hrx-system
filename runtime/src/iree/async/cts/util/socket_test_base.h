@@ -154,7 +154,7 @@ class SocketTestBase : public CtsTestBase<BaseType> {
   // Releases a socket with LINGER_ZERO (forcing RST instead of FIN) and
   // submits a recv on the peer to detect the RST and set sticky failure.
   // After this call, |peer_socket| has sticky failure set and any subsequent
-  // send operations will fail immediately via the eager-send sticky check.
+  // send operations will fail without waiting for another TCP round trip.
   //
   // Accepted sockets inherit the default linger behavior (graceful FIN on
   // close). When a test needs deterministic error detection after closing one
@@ -193,7 +193,7 @@ class SocketTestBase : public CtsTestBase<BaseType> {
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(this->proactor_, &rst_probe_op.base));
     this->PollUntil(/*min_completions=*/1);
-    iree_status_ignore(rst_probe_tracker.ConsumeStatus());
+    IREE_EXPECT_NOT_OK(rst_probe_tracker.ConsumeStatus());
   }
 
   // Receives up to |expected_length| bytes into |buffer|, returning actual

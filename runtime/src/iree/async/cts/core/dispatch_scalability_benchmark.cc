@@ -199,7 +199,8 @@ static void BM_DispatchAmongIdleHandlers(::benchmark::State& state,
     iree_async_notification_signal(ctx->active_source, 1);
 
     if (!PollUntilEpochAdvances(ctx->proactor, ctx->active_sink, observed)) {
-      state.SkipWithError("Active relay dispatch timed out");
+      state.SkipWithError(
+          "Proactor polling failed before active relay dispatch");
       DestroyIdleHandlerContext(ctx);
       return;
     }
@@ -325,7 +326,7 @@ static void BM_RelayDispatchScalability(::benchmark::State& state,
     iree_async_notification_signal(ctx->sources[target_index], 1);
 
     if (!PollUntilEpochAdvances(ctx->proactor, ctx->sink, observed)) {
-      state.SkipWithError("Relay dispatch timed out");
+      state.SkipWithError("Proactor polling failed before relay dispatch");
       DestroyRelayScalabilityContext(ctx);
       return;
     }
