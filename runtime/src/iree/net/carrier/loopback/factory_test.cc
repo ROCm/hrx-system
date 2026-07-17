@@ -46,16 +46,11 @@ class LoopbackFactoryTest : public ::testing::Test {
   }
 
   template <typename Fn>
-  void PollUntil(Fn condition, int max_polls = 100) {
-    for (int i = 0; i < max_polls && !condition(); ++i) {
+  void PollUntil(Fn condition) {
+    while (!condition()) {
       iree_host_size_t count = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), &count);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        IREE_ASSERT_OK(status);
-      }
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
     }
   }
 
@@ -66,7 +61,6 @@ class LoopbackFactoryTest : public ::testing::Test {
         {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
          &stopped}));
     PollUntil([&]() { return stopped; });
-    ASSERT_TRUE(stopped) << "Listener stop timed out";
   }
 
   iree_async_proactor_t* proactor_ = nullptr;

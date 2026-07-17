@@ -26,8 +26,8 @@
 // Opcodes:
 //   0x0: SEND_TO_SERVER       - Send from client. Low nibble = size class.
 //   0x1: SEND_TO_CLIENT       - Send from server. Low nibble = size class.
-//   0x2: POLL_SHORT           - Poll with 10ms timeout.
-//   0x3: POLL_LONG            - Poll with 100ms timeout.
+//   0x2: POLL                 - Perform one nonblocking progress poll.
+//   0x3: POLL                 - (alias)
 //   0x4: QUERY_BUDGET_CLIENT  - Query client send budget.
 //   0x5: QUERY_BUDGET_SERVER  - Query server send budget.
 //   0x6: INJECT_ERROR_CLIENT  - Next client recv returns INTERNAL.
@@ -38,8 +38,8 @@
 //   0xB: RELEASE_SERVER       - Release all retained server leases.
 //   0xC: DEACTIVATE_CLIENT    - Deactivate client (one-shot).
 //   0xD: DEACTIVATE_SERVER    - Deactivate server (one-shot).
-//   0xE: POLL_SHORT           - (alias)
-//   0xF: POLL_SHORT           - (alias)
+//   0xE: POLL                 - (alias)
+//   0xF: POLL                 - (alias)
 //
 // Size classes (low nibble for send opcodes):
 //   0:    0 bytes (empty send, should be rejected).
@@ -74,8 +74,8 @@ static CarrierPairFactory g_factory;
 enum FuzzOpcode : uint8_t {
   kSendToServer = 0x0,
   kSendToClient = 0x1,
-  kPollShort = 0x2,
-  kPollLong = 0x3,
+  kPoll = 0x2,
+  kPollAlias0 = 0x3,
   kQueryBudgetClient = 0x4,
   kQueryBudgetServer = 0x5,
   kInjectErrorClient = 0x6,
@@ -118,12 +118,15 @@ static void FuzzSend(iree_net_carrier_t* carrier, const uint8_t* data,
 // Poll helpers
 //===----------------------------------------------------------------------===//
 
-static void PollOnce(iree_async_proactor_t* proactor,
-                     iree_duration_t timeout_ms) {
+static void PollOnce(iree_async_proactor_t* proactor) {
   iree_host_size_t completed = 0;
-  iree_status_t status = iree_async_proactor_poll(
-      proactor, iree_make_timeout_ms(timeout_ms), &completed);
-  iree_status_ignore(status);
+  iree_status_t status =
+      iree_async_proactor_poll(proactor, iree_immediate_timeout(), &completed);
+  if (iree_status_is_deadline_exceeded(status)) {
+    iree_status_free(status);
+  } else if (!iree_status_is_ok(status)) {
+    iree_status_abort(status);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -203,13 +206,11 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
         break;
       }
 
-      case kPollShort:
+      case kPoll:
+      case kPollAlias0:
       case kPollAlias1:
       case kPollAlias2:
-        if (!concurrent) PollOnce(pair.proactor, 10);
-        break;
-      case kPollLong:
-        if (!concurrent) PollOnce(pair.proactor, 100);
+        if (!concurrent) PollOnce(pair.proactor);
         break;
 
       case kQueryBudgetClient:
@@ -252,8 +253,7 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
               pair.client, callback, &client_deactivate_done);
           iree_status_ignore(deactivate_status);
           client_deactivated = true;
-          // Give the deactivation a chance to complete.
-          if (!concurrent) PollOnce(pair.proactor, 10);
+          if (!concurrent) PollOnce(pair.proactor);
         }
         break;
 
@@ -267,7 +267,7 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
               pair.server, callback, &server_deactivate_done);
           iree_status_ignore(deactivate_status);
           server_deactivated = true;
-          if (!concurrent) PollOnce(pair.proactor, 10);
+          if (!concurrent) PollOnce(pair.proactor);
         }
         break;
     }
@@ -275,7 +275,7 @@ static void RunFuzzScenario(CarrierPair& pair, const uint8_t* data,
     // Auto-poll: drive completions periodically to prevent total starvation.
     ++operation_count;
     if (!concurrent && (operation_count % auto_poll_interval == 0)) {
-      PollOnce(pair.proactor, 1);
+      PollOnce(pair.proactor);
     }
   }
 

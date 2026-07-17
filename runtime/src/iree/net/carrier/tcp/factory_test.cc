@@ -70,18 +70,13 @@ class TcpFactoryTest : public ::testing::Test {
   }
 
   template <typename Fn>
-  bool PollUntil(Fn condition, int max_polls = 200) {
-    for (int i = 0; i < max_polls && !condition(); ++i) {
+  bool PollUntil(Fn condition) {
+    while (!condition()) {
       iree_host_size_t count = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        IREE_CHECK_OK(status);
-      }
+      IREE_CHECK_OK(
+          iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
     }
-    return condition();
+    return true;
   }
 
   struct ListenerInfo {
@@ -334,20 +329,6 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
   IREE_ASSERT_OK(iree_net_message_endpoint_send(server_future_endpoint.endpoint,
                                                 &early_send));
 
-  for (int i = 0; i < 5 && !client_control_capture.error_fired; ++i) {
-    iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
-  ASSERT_FALSE(client_control_capture.error_fired)
-      << "Early future-stream frame caused control stream error "
-      << client_control_capture.error_code;
-
   EndpointResult client_future_endpoint;
   IREE_ASSERT_OK(iree_net_connection_open_endpoint(
       client_connection, {TrackEndpointReady, &client_future_endpoint}));
@@ -364,6 +345,9 @@ TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
   ASSERT_TRUE(PollUntil([&]() { return client_future_capture.message_fired; }))
       << "Queued future-stream frame was not delivered";
   EXPECT_EQ(client_future_capture.message, early_payload);
+  ASSERT_FALSE(client_control_capture.error_fired)
+      << "Early future-stream frame caused control stream error "
+      << client_control_capture.error_code;
 
   DeactivateResult client_deactivated;
   DeactivateResult server_deactivated;

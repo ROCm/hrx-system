@@ -23,9 +23,6 @@
 
 namespace iree::net::carrier::cts {
 
-// Default timeout for poll operations (5 seconds).
-static constexpr iree_duration_t kDefaultPollBudget = 5000 * 1000000LL;
-
 // Base context for carrier benchmarks.
 // Manages carrier pair lifetime and provides completion tracking.
 struct BenchmarkContext {
@@ -65,22 +62,16 @@ struct BenchmarkContext {
     last_status_code = IREE_STATUS_OK;
   }
 
-  // Spin poll until expected completions received.
-  bool SpinPollUntilComplete(int expected_sends, int expected_recvs,
-                             iree_duration_t budget_ns = kDefaultPollBudget) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  // Polls until the expected completions are received.
+  bool SpinPollUntilComplete(int expected_sends, int expected_recvs) {
     while (send_completions.load(std::memory_order_acquire) < expected_sends ||
            recv_completions.load(std::memory_order_acquire) < expected_recvs) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor, iree_immediate_timeout(), &count);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+      iree_status_t status = PollProactorOnce(proactor, &count);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         return false;
       }
-      iree_status_ignore(status);
     }
     return last_status_code == IREE_STATUS_OK;
   }

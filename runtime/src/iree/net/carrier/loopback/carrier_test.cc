@@ -12,7 +12,11 @@
 #include "iree/net/carrier/loopback/carrier.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <functional>
+#include <mutex>
+#include <thread>
 
 #include "iree/async/proactor_platform.h"
 #include "iree/net/carrier.h"
@@ -48,35 +52,24 @@ class LoopbackCarrierTest : public ::testing::Test {
 
   void DeactivateAndDrain(iree_net_carrier_t* carrier) {
     iree_net_carrier_state_t state = iree_net_carrier_state(carrier);
+    if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
     if (state == IREE_NET_CARRIER_STATE_CREATED ||
-        state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      return;
+        state == IREE_NET_CARRIER_STATE_ACTIVE) {
+      IREE_ASSERT_OK(iree_net_carrier_deactivate(carrier, nullptr, nullptr));
     }
-    if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      iree_status_t status =
-          iree_net_carrier_deactivate(carrier, nullptr, nullptr);
-      iree_status_ignore(status);
-    }
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1000);
     while (iree_net_carrier_state(carrier) !=
            IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      if (iree_time_now() >= deadline) break;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(10), &completed);
-      iree_status_ignore(status);
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          proactor_, iree_infinite_timeout(), &completed));
     }
   }
 
-  void PollUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
+  void PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline) break;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(10), &completed);
-      iree_status_ignore(status);
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          proactor_, iree_infinite_timeout(), &completed));
     }
   }
 
@@ -144,9 +137,8 @@ TEST_F(LoopbackCarrierTest, InFlightSendReportsErrorOnPeerDeparture) {
   params.flags = IREE_NET_SEND_FLAG_NONE;
   IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
 
-  // Deactivate the server (peer) BEFORE polling. The NOP is queued but
-  // hasn't fired yet. Deactivation clears client->peer, so the NOP
-  // completion will see peer==NULL.
+  // Deactivate the server (peer) BEFORE polling. The NOP is queued but has not
+  // fired yet. Deactivation detaches the server, so delivery is rejected.
   std::atomic<bool> deactivated{false};
   IREE_ASSERT_OK(iree_net_carrier_deactivate(
       server_, [](void* ud) { *static_cast<std::atomic<bool>*>(ud) = true; },
@@ -164,6 +156,111 @@ TEST_F(LoopbackCarrierTest, InFlightSendReportsErrorOnPeerDeparture) {
 
   // Ensure deactivation completes before TearDown.
   PollUntil([&] { return deactivated.load(); });
+}
+
+TEST_F(LoopbackCarrierTest, SendBeforePeerActivation) {
+  struct ReceiveState {
+    std::atomic<int> count{0};
+    std::atomic<bool> payload_matches{false};
+  } receive_state;
+
+  IREE_ASSERT_OK(iree_net_loopback_carrier_create_pair(
+      proactor_, /*callback=*/{}, iree_allocator_system(), &client_, &server_));
+
+  iree_net_carrier_set_recv_handler(
+      client_, {/*fn=*/NullRecvHandler, /*user_data=*/nullptr});
+  iree_net_carrier_set_recv_handler(
+      server_, {/*fn=*/[](void* user_data, iree_async_span_t data,
+                          iree_async_buffer_lease_t* /*lease*/) {
+                  auto* state = static_cast<ReceiveState*>(user_data);
+                  constexpr char kExpected[] = "bootstrap";
+                  state->payload_matches.store(
+                      data.length == sizeof(kExpected) - 1 &&
+                          memcmp(iree_async_span_ptr(data), kExpected,
+                                 sizeof(kExpected) - 1) == 0,
+                      std::memory_order_release);
+                  state->count.fetch_add(1, std::memory_order_release);
+                  return iree_ok_status();
+                },
+                /*user_data=*/&receive_state});
+  IREE_ASSERT_OK(iree_net_carrier_activate(client_));
+
+  const char message[] = "bootstrap";
+  iree_async_span_t span =
+      iree_async_span_from_ptr(const_cast<char*>(message), sizeof(message) - 1);
+  iree_net_send_params_t params = {};
+  params.data = {/*values=*/&span, /*count=*/1};
+  IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
+
+  IREE_ASSERT_OK(iree_net_carrier_activate(server_));
+  PollUntil(
+      [&] { return receive_state.count.load(std::memory_order_acquire); });
+
+  EXPECT_TRUE(receive_state.payload_matches.load(std::memory_order_acquire));
+}
+
+TEST_F(LoopbackCarrierTest, DeactivationWaitsForAcceptedReceive) {
+  struct ReceiveState {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool entered = false;
+    bool release = false;
+  } receive_state;
+
+  IREE_ASSERT_OK(iree_net_loopback_carrier_create_pair(
+      proactor_, /*callback=*/{}, iree_allocator_system(), &client_, &server_));
+
+  iree_net_carrier_set_recv_handler(
+      client_, {/*fn=*/NullRecvHandler, /*user_data=*/nullptr});
+  iree_net_carrier_set_recv_handler(
+      server_, {/*fn=*/[](void* user_data, iree_async_span_t /*data*/,
+                          iree_async_buffer_lease_t* /*lease*/) {
+                  auto* state = static_cast<ReceiveState*>(user_data);
+                  std::unique_lock<std::mutex> lock(state->mutex);
+                  state->entered = true;
+                  state->condition.notify_all();
+                  state->condition.wait(lock, [&] { return state->release; });
+                  return iree_ok_status();
+                },
+                /*user_data=*/&receive_state});
+  IREE_ASSERT_OK(iree_net_carrier_activate(client_));
+  IREE_ASSERT_OK(iree_net_carrier_activate(server_));
+
+  const char* message = "receive blocks during deactivation";
+  iree_async_span_t span =
+      iree_async_span_from_ptr(const_cast<char*>(message), strlen(message));
+  iree_net_send_params_t params = {};
+  params.data = {/*values=*/&span, /*count=*/1};
+  IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
+
+  std::thread poll_thread([&] {
+    IREE_EXPECT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                            /*out_completed_count=*/nullptr));
+  });
+
+  {
+    std::unique_lock<std::mutex> lock(receive_state.mutex);
+    receive_state.condition.wait(lock, [&] { return receive_state.entered; });
+  }
+
+  std::atomic<bool> deactivated{false};
+  IREE_ASSERT_OK(iree_net_carrier_deactivate(
+      server_,
+      [](void* user_data) {
+        static_cast<std::atomic<bool>*>(user_data)->store(
+            true, std::memory_order_release);
+      },
+      &deactivated));
+  EXPECT_FALSE(deactivated.load(std::memory_order_acquire));
+
+  {
+    std::lock_guard<std::mutex> lock(receive_state.mutex);
+    receive_state.release = true;
+  }
+  receive_state.condition.notify_all();
+  poll_thread.join();
+
+  EXPECT_TRUE(deactivated.load(std::memory_order_acquire));
 }
 
 }  // namespace

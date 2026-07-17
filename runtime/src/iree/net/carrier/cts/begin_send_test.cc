@@ -209,21 +209,21 @@ TEST_P(BeginSendTest, AfterShutdown) {
   if (!iree_status_is_ok(status)) {
     // Synchronous rejection (e.g. SHM checks shutdown under tx_lock).
     EXPECT_TRUE(iree_status_is_failed_precondition(status));
-    iree_status_ignore(status);
+    iree_status_free(status);
   } else {
     // Async carriers (TCP) may accept the reservation but fail at send time.
     // Commit the data and let the proactor handle the failure.
     memset(ptr, 0x42, 16);
     iree_status_t commit_status = iree_net_carrier_commit_send(client_, handle);
     if (!iree_status_is_ok(commit_status)) {
-      iree_status_ignore(commit_status);
-    } else {
-      PollOnce();
+      iree_status_free(commit_status);
     }
   }
 
-  // Drain any pending events.
-  PollOnce();
+  // Carrier deactivation is the completion barrier for begin/commit sends,
+  // which intentionally have no per-operation completion callback.
+  DeactivateAndDrain(client_, proactor_);
+  DeactivateAndDrain(server_, proactor_);
 
   // The server must not have received the post-shutdown data.
   EXPECT_EQ(server_capture.total_bytes.load(), 0u);
@@ -550,12 +550,24 @@ TEST_P(BeginSendTest, DeactivationDuringReservation) {
       },
       &deactivation_completed));
 
-  // Poll a few times — deactivation should NOT complete yet.
-  for (int i = 0; i < 5; ++i) {
-    PollOnce();
-    EXPECT_FALSE(deactivation_completed.load())
-        << "Deactivation completed while reservation was outstanding";
-  }
+  // Submit an independent progress marker after deactivation. Once it has
+  // completed the proactor has had an opportunity to process the drain, but
+  // the outstanding reservation must still hold its completion callback.
+  bool progress_marker_completed = false;
+  iree_async_nop_operation_t progress_marker = {};
+  progress_marker.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+  progress_marker.base.completion_fn =
+      [](void* user_data, iree_async_operation_t*, iree_status_t status,
+         iree_async_completion_flags_t) {
+        iree_status_free(status);
+        *static_cast<bool*>(user_data) = true;
+      };
+  progress_marker.base.user_data = &progress_marker_completed;
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &progress_marker.base));
+  ASSERT_TRUE(PollUntil([&] { return progress_marker_completed; }));
+  EXPECT_FALSE(deactivation_completed.load())
+      << "Deactivation completed while reservation was outstanding";
 
   // Abort the reservation.
   iree_net_carrier_abort_send(client_, handle);
@@ -593,6 +605,10 @@ TEST_P(BeginSendTest, OutOfOrderCommit) {
   const iree_host_size_t kTotalExpected = kPayloadSize * kIterations * 2;
 
   for (int i = 0; i < kIterations; ++i) {
+    ASSERT_TRUE(PollUntil([&] {
+      return iree_net_carrier_query_send_budget(client_).slots >= 2;
+    }));
+
     // Reserve A (even value).
     uint32_t value_a = (uint32_t)(i * 2);
     void* ptr_a = nullptr;
@@ -616,10 +632,6 @@ TEST_P(BeginSendTest, OutOfOrderCommit) {
     // Commit B first, then A — out of reservation order.
     IREE_ASSERT_OK(iree_net_carrier_commit_send(client_, handle_b));
     IREE_ASSERT_OK(iree_net_carrier_commit_send(client_, handle_a));
-
-    // Poll to let carriers with bounded in-flight state drain between
-    // iterations.
-    PollOnce();
   }
 
   // Wait for all messages to arrive.

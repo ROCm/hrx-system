@@ -406,7 +406,7 @@ TEST_F(FrameSenderTest, ReusesContextPoolAcrossCompletedSends) {
   const uint8_t header_data[] = {0x01};
   iree_const_byte_span_t header =
       iree_make_const_byte_span(header_data, sizeof(header_data));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   for (int i = 0; i < 128; ++i) {
     IREE_ASSERT_OK(iree_net_frame_sender_send(&sender, header, payload, i));
@@ -428,7 +428,7 @@ TEST_F(FrameSenderTest, SendWithEmptyPayload) {
   const uint8_t header_data[] = {0x01, 0x02, 0x03, 0x04};
   iree_const_byte_span_t header =
       iree_make_const_byte_span(header_data, sizeof(header_data));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 42));
 
@@ -484,7 +484,7 @@ TEST_F(FrameSenderTest, SmallHeadersDoNotLeasePoolBuffers) {
   const uint8_t header_data[] = {0x01, 0x02};
   iree_const_byte_span_t header =
       iree_make_const_byte_span(header_data, sizeof(header_data));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 1));
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 2));
@@ -628,7 +628,7 @@ TEST_F(FrameSenderTest, SendLargeHeaderPoolExhausted) {
       IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY + 1, 0x01);
   iree_const_byte_span_t header =
       iree_make_const_byte_span(header_data.data(), header_data.size());
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   // Pool has 4 buffers. Send 4 large-header frames to exhaust it.
   for (int i = 0; i < 4; ++i) {
@@ -655,7 +655,7 @@ TEST_F(FrameSenderTest, SendCarrierBackpressure) {
   const uint8_t header_data[] = {0x01};
   iree_const_byte_span_t header =
       iree_make_const_byte_span(header_data, sizeof(header_data));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -674,7 +674,7 @@ TEST_F(FrameSenderTest, SendHeaderExceedsPoolBuffer) {
       IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY + 1, 0xAA);
   iree_const_byte_span_t header =
       iree_make_const_byte_span(large_header.data(), large_header.size());
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
@@ -786,7 +786,7 @@ TEST_F(FrameSenderTest, SendDoesNotAutoFlush) {
   const uint8_t header[] = {0xAA, 0xBB};
   iree_const_byte_span_t send_header =
       iree_make_const_byte_span(header, sizeof(header));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, send_header, payload, 0));
 
@@ -812,7 +812,7 @@ TEST_F(FrameSenderTest, ExplicitFlushThenSendMaintainsOrder) {
   const uint8_t header[] = {0xAA, 0xBB};
   iree_const_byte_span_t send_header =
       iree_make_const_byte_span(header, sizeof(header));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, send_header, payload, 2));
 
@@ -840,7 +840,7 @@ TEST_F(FrameSenderTest, CompletionReleasesBufferAndFiresCallback) {
   const uint8_t header[] = {0x01};
   iree_const_byte_span_t send_header =
       iree_make_const_byte_span(header, sizeof(header));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(
       iree_net_frame_sender_send(&sender_, send_header, payload, 123));
@@ -862,7 +862,7 @@ TEST_F(FrameSenderTest, CompletionWithError) {
   const uint8_t header[] = {0x01};
   iree_const_byte_span_t send_header =
       iree_make_const_byte_span(header, sizeof(header));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
 
   IREE_ASSERT_OK(
       iree_net_frame_sender_send(&sender_, send_header, payload, 456));
@@ -892,7 +892,7 @@ TEST_F(FrameSenderTest, MultipleInFlightSends) {
     const uint8_t header[] = {static_cast<uint8_t>(i)};
     iree_const_byte_span_t send_header =
         iree_make_const_byte_span(header, sizeof(header));
-    iree_async_span_list_t payload = {nullptr, 0};
+    iree_async_span_list_t payload = iree_async_span_list_empty();
     IREE_ASSERT_OK(
         iree_net_frame_sender_send(&sender_, send_header, payload, i));
   }
@@ -937,7 +937,7 @@ TEST_F(FrameSenderTest, HasPendingAndPendingCount) {
   const uint8_t header[] = {0x01};
   iree_const_byte_span_t send_header =
       iree_make_const_byte_span(header, sizeof(header));
-  iree_async_span_list_t payload = {nullptr, 0};
+  iree_async_span_list_t payload = iree_async_span_list_empty();
   IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, send_header, payload, 0));
 
   EXPECT_TRUE(iree_net_frame_sender_has_pending(&sender_));

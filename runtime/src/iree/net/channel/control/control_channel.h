@@ -134,17 +134,30 @@ typedef void (*iree_net_control_channel_on_pong_fn_t)(
 typedef void (*iree_net_control_channel_on_transport_error_fn_t)(
     void* user_data, iree_status_t status);
 
-// Called when a send_data operation completes (payload buffers are released).
+// Called when a send_data or send_data_copy operation completes (payload
+// buffers are released).
 //
 // |operation_user_data| echoes the value from the send_data call, allowing
 // callers to identify which send completed and release associated resources.
 // |status| indicates success or failure of the send.
 //
-// This callback only fires for send_data operations (which use zero-copy
-// payload delivery). Small control sends (ping, goaway, error) copy data
-// synchronously and do not fire this callback.
+// This callback only fires for application DATA sends. Small protocol sends
+// (ping, goaway, error) do not fire this callback.
 typedef void (*iree_net_control_channel_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
+
+// Per-send completion overriding the channel's default completion callback.
+//
+// This is used by protocol layers sharing a control channel with application
+// DATA traffic. The callback owns |status| and fires exactly once for an
+// accepted send.
+typedef struct iree_net_control_channel_send_completion_t {
+  // Function invoked when the send completes.
+  iree_net_control_channel_on_send_complete_fn_t fn;
+
+  // Opaque value passed to |fn|.
+  void* user_data;
+} iree_net_control_channel_send_completion_t;
 
 // Called when a previously backpressured send may make progress.
 //
@@ -177,7 +190,7 @@ typedef struct iree_net_control_channel_callbacks_t {
   // Optional callback for transport errors.
   iree_net_control_channel_on_transport_error_fn_t on_transport_error;
 
-  // Optional callback for send completions.
+  // Completion callback required when using the default DATA send APIs.
   iree_net_control_channel_on_send_complete_fn_t on_send_complete;
 
   // Optional callback for send readiness after transport backpressure.
@@ -289,10 +302,22 @@ iree_net_control_channel_state_t iree_net_control_channel_state(
 // correlation. Callers typically use this to identify the buffer to free.
 //
 // Requires OPERATIONAL state. Returns FAILED_PRECONDITION in CREATED,
-// DRAINING, or ERROR. On non-OK return, on_send_complete is NOT called.
+// DRAINING, or ERROR. The channel's on_send_complete callback must be
+// configured. On non-OK return, on_send_complete is NOT called.
 iree_status_t iree_net_control_channel_send_data(
     iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);
+
+// Sends a zero-copy DATA frame with a per-send completion callback.
+//
+// This has the same payload ownership and state requirements as
+// iree_net_control_channel_send_data() but routes completion to |completion|
+// instead of the callback configured on the channel. |completion.fn| is
+// required and owns the terminal |status| passed to it.
+iree_status_t iree_net_control_channel_send_data_with_completion(
+    iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data,
+    iree_net_control_channel_send_completion_t completion);
 
 // Sends a DATA frame with payload copied before returning.
 //
@@ -302,7 +327,8 @@ iree_status_t iree_net_control_channel_send_data(
 // on_send_complete fires.
 //
 // Requires OPERATIONAL state. Returns FAILED_PRECONDITION in CREATED,
-// DRAINING, or ERROR. On non-OK return, on_send_complete is NOT called.
+// DRAINING, or ERROR. The channel's on_send_complete callback must be
+// configured. On non-OK return, on_send_complete is NOT called.
 iree_status_t iree_net_control_channel_send_data_copy(
     iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);

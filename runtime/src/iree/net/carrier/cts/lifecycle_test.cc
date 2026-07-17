@@ -167,17 +167,9 @@ TEST_P(LifecycleTest, ProactorReuse) {
   IREE_ASSERT_OK(iree_net_carrier_send(pair2.client, &params2));
 
   // Poll on the shared proactor for the second pair's recv.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
   while (server_capture2.total_bytes.load() < 2) {
-    ASSERT_LT(iree_time_now(), deadline) << "Timed out waiting for recv";
     iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        shared_proactor, iree_make_timeout_ms(100), &completed);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
+    IREE_ASSERT_OK(PollProactorOnce(shared_proactor, &completed));
   }
   EXPECT_GE(received2.size(), 2u);
 

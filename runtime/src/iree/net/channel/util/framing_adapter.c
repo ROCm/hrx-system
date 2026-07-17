@@ -18,13 +18,9 @@ struct iree_net_framing_adapter_t {
   // Message handlers (set_callbacks for atomic handoff).
   iree_net_message_endpoint_callbacks_t callbacks;
 
-  // Deactivate callback (set during deactivate).
-  struct {
-    iree_net_message_endpoint_deactivate_fn_t fn;
-    void* user_data;
-  } deactivate_callback;
+  // Coordinates endpoint and connection deactivation requests.
+  iree_net_endpoint_lifecycle_t lifecycle;
 
-  bool activated;
   iree_allocator_t host_allocator;
 
   // Embedded frame accumulator with FAM for internal buffer - must be last.
@@ -79,9 +75,7 @@ static iree_status_t iree_net_framing_adapter_on_recv(
 
 static void iree_net_framing_adapter_on_carrier_deactivated(void* user_data) {
   iree_net_framing_adapter_t* adapter = (iree_net_framing_adapter_t*)user_data;
-  if (adapter->deactivate_callback.fn) {
-    adapter->deactivate_callback.fn(adapter->deactivate_callback.user_data);
-  }
+  iree_net_endpoint_lifecycle_complete_deactivation(&adapter->lifecycle);
 }
 
 static void iree_net_framing_adapter_set_callbacks(
@@ -96,11 +90,8 @@ static iree_status_t iree_net_framing_adapter_activate(void* self) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callbacks must be set before activate");
   }
-  if (adapter->activated) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "adapter already activated");
-  }
-
+  IREE_RETURN_IF_ERROR(
+      iree_net_endpoint_lifecycle_activate(&adapter->lifecycle));
   iree_net_carrier_recv_handler_t recv_handler = {
       .fn = iree_net_framing_adapter_on_recv,
       .user_data = adapter,
@@ -108,8 +99,8 @@ static iree_status_t iree_net_framing_adapter_activate(void* self) {
   iree_net_carrier_set_recv_handler(adapter->carrier, recv_handler);
 
   iree_status_t status = iree_net_carrier_activate(adapter->carrier);
-  if (iree_status_is_ok(status)) {
-    adapter->activated = true;
+  if (!iree_status_is_ok(status)) {
+    iree_net_endpoint_lifecycle_rollback_activation(&adapter->lifecycle);
   }
   return status;
 }
@@ -118,11 +109,18 @@ static iree_status_t iree_net_framing_adapter_deactivate(
     void* self, iree_net_message_endpoint_deactivate_fn_t callback,
     void* user_data) {
   iree_net_framing_adapter_t* adapter = (iree_net_framing_adapter_t*)self;
-  adapter->deactivate_callback.fn = callback;
-  adapter->deactivate_callback.user_data = user_data;
-  return iree_net_carrier_deactivate(
-      adapter->carrier, iree_net_framing_adapter_on_carrier_deactivated,
-      adapter);
+  iree_net_endpoint_lifecycle_actions_t actions =
+      IREE_NET_ENDPOINT_LIFECYCLE_ACTION_NONE;
+  IREE_RETURN_IF_ERROR(iree_net_endpoint_lifecycle_request_deactivation(
+      &adapter->lifecycle, callback, user_data, &actions));
+  if (iree_any_bit_set(actions,
+                       IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+    iree_status_t status = iree_net_carrier_deactivate(
+        adapter->carrier, iree_net_framing_adapter_on_carrier_deactivated,
+        adapter);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_net_framing_adapter_send(
@@ -212,6 +210,7 @@ iree_status_t iree_net_framing_adapter_allocate(
   adapter->host_allocator = host_allocator;
   adapter->carrier = carrier;
   adapter->reassembly_pool = reassembly_pool;
+  iree_net_endpoint_lifecycle_initialize(&adapter->lifecycle);
 
   iree_net_frame_complete_callback_t on_frame_complete = {
       .fn = iree_net_framing_adapter_on_frame_complete,
@@ -233,10 +232,28 @@ void iree_net_framing_adapter_free(iree_net_framing_adapter_t* adapter) {
   if (!adapter) return;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t allocator = adapter->host_allocator;
+  iree_net_endpoint_lifecycle_deinitialize(&adapter->lifecycle);
   iree_net_frame_accumulator_deinitialize(&adapter->accumulator);
   iree_net_carrier_release(adapter->carrier);
   iree_allocator_free(allocator, adapter);
   IREE_TRACE_ZONE_END(z0);
+}
+
+void iree_net_framing_adapter_join_deactivation(
+    iree_net_framing_adapter_t* adapter,
+    iree_net_endpoint_deactivation_barrier_t* barrier) {
+  IREE_ASSERT_ARGUMENT(adapter);
+  IREE_ASSERT_ARGUMENT(barrier);
+  iree_net_endpoint_lifecycle_actions_t actions =
+      iree_net_endpoint_lifecycle_join_deactivation(&adapter->lifecycle,
+                                                    barrier);
+  if (iree_any_bit_set(actions,
+                       IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+    iree_status_t status = iree_net_carrier_deactivate(
+        adapter->carrier, iree_net_framing_adapter_on_carrier_deactivated,
+        adapter);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
+  }
 }
 
 iree_net_message_endpoint_t iree_net_framing_adapter_as_endpoint(

@@ -3039,7 +3039,9 @@ static iree_status_t iree_net_rdma_carrier_wait_for_memory_window_bind(
     iree_host_size_t completed_count = 0;
     iree_status_t poll_status = iree_async_proactor_poll(
         carrier->proactor, iree_infinite_timeout(), &completed_count);
-    if (!iree_status_is_ok(poll_status)) {
+    if (iree_status_is_deadline_exceeded(poll_status)) {
+      iree_status_free(poll_status);
+    } else if (!iree_status_is_ok(poll_status)) {
       status = iree_status_join(status, poll_status);
     }
   }

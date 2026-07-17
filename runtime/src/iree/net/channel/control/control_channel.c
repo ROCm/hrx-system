@@ -38,6 +38,10 @@ struct iree_net_control_channel_t {
 typedef struct iree_net_control_send_context_t {
   // Application-provided completion value forwarded to on_send_complete.
   uint64_t operation_user_data;
+
+  // Completion invoked after context-owned storage has been released.
+  iree_net_control_channel_send_completion_t completion;
+
   // Optional heap buffer kept alive until the send completion fires.
   void* owned_buffer;
 } iree_net_control_send_context_t;
@@ -60,13 +64,30 @@ static void iree_net_control_channel_set_state(
                     iree_memory_order_release);
 }
 
+// Transitions the channel to ERROR and transfers |status| to the application.
+static void iree_net_control_channel_fail(iree_net_control_channel_t* channel,
+                                          iree_status_t status) {
+  iree_net_control_channel_set_state(channel,
+                                     IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
+  if (channel->callbacks.on_transport_error) {
+    channel->callbacks.on_transport_error(channel->callbacks.user_data, status);
+  } else {
+    // The ERROR state is the caller-visible record when no diagnostic sink is
+    // installed.
+    iree_status_free(status);
+  }
+}
+
 static iree_status_t iree_net_control_send_context_allocate(
     iree_net_control_channel_t* channel, uint64_t operation_user_data,
-    void* owned_buffer, iree_net_control_send_context_t** out_context) {
+    iree_net_control_channel_send_completion_t completion, void* owned_buffer,
+    iree_net_control_send_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(completion.fn);
   iree_net_control_send_context_t* context = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       channel->host_allocator, sizeof(*context), (void**)&context));
   context->operation_user_data = operation_user_data;
+  context->completion = completion;
   context->owned_buffer = owned_buffer;
   *out_context = context;
   return iree_ok_status();
@@ -108,14 +129,19 @@ static void iree_net_control_channel_on_sender_complete(
       (iree_net_control_channel_t*)callback_user_data;
   iree_net_control_send_context_t* context =
       (iree_net_control_send_context_t*)(uintptr_t)operation_user_data;
-  uint64_t user_operation_user_data =
-      context ? context->operation_user_data : operation_user_data;
+  IREE_ASSERT(context, "control send completed without a context");
+  uint64_t user_operation_user_data = context->operation_user_data;
+  iree_net_control_channel_send_completion_t completion = context->completion;
   iree_net_control_send_context_free(channel, context);
-  if (channel->callbacks.on_send_complete) {
-    channel->callbacks.on_send_complete(channel->callbacks.user_data,
-                                        user_operation_user_data, status);
-  } else {
-    iree_status_ignore(status);
+  completion.fn(completion.user_data, user_operation_user_data, status);
+}
+
+static void iree_net_control_channel_on_internal_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status) {
+  (void)operation_user_data;
+  iree_net_control_channel_t* channel = (iree_net_control_channel_t*)user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_channel_fail(channel, status);
   }
 }
 
@@ -218,18 +244,32 @@ static iree_status_t iree_net_control_channel_handle_ping(
 
   // Queue and flush. The batch buffer copy protects against the recv buffer
   // dying when this callback returns.
-  iree_status_t status = iree_net_frame_sender_queue(
-      &channel->sender, iree_make_const_byte_span(pong_buffer, offset));
+  iree_net_control_send_context_t* context = NULL;
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_control_channel_on_internal_send_complete,
+      .user_data = channel,
+  };
+  iree_status_t status = iree_net_control_send_context_allocate(
+      channel, /*operation_user_data=*/0, completion,
+      /*owned_buffer=*/NULL, &context);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_frame_sender_queue(
+        &channel->sender, iree_make_const_byte_span(pong_buffer, offset));
+  }
   if (iree_status_is_ok(status)) {
     status = iree_net_frame_sender_flush(&channel->sender,
-                                         /*operation_user_data=*/0);
+                                         (uint64_t)(uintptr_t)context);
   }
-
-  // Best-effort: if the PONG send fails (backpressure, transport error), the
-  // peer will detect liveness timeout and retry or close. Propagating the
-  // error to the recv path would incorrectly kill the channel.
-  iree_status_ignore(status);
-  return iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
+  }
+  if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
+    // Auto-PONG is an opportunistic liveness response. Backpressure means this
+    // response is omitted; the peer can retry without poisoning the channel.
+    iree_status_free(status);
+    status = iree_ok_status();
+  }
+  return status;
 }
 
 // Handles a received PONG frame by extracting the optional responder timestamp
@@ -378,15 +418,7 @@ static iree_status_t iree_net_control_channel_on_message(
 static void iree_net_control_channel_on_endpoint_error(void* user_data,
                                                        iree_status_t status) {
   iree_net_control_channel_t* channel = (iree_net_control_channel_t*)user_data;
-
-  iree_net_control_channel_set_state(channel,
-                                     IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
-
-  if (channel->callbacks.on_transport_error) {
-    channel->callbacks.on_transport_error(channel->callbacks.user_data, status);
-  } else {
-    iree_status_ignore(status);
-  }
+  iree_net_control_channel_fail(channel, status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -542,6 +574,24 @@ iree_status_t iree_net_control_channel_send_data(
     iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data) {
   IREE_ASSERT_ARGUMENT(channel);
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = channel->callbacks.on_send_complete,
+      .user_data = channel->callbacks.user_data,
+  };
+  if (!completion.fn) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "DATA sends require an on_send_complete callback");
+  }
+  return iree_net_control_channel_send_data_with_completion(
+      channel, flags, payload, operation_user_data, completion);
+}
+
+iree_status_t iree_net_control_channel_send_data_with_completion(
+    iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data,
+    iree_net_control_channel_send_completion_t completion) {
+  IREE_ASSERT_ARGUMENT(channel);
+  IREE_ASSERT_ARGUMENT(completion.fn);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_net_control_channel_state_t state =
@@ -562,7 +612,8 @@ iree_status_t iree_net_control_channel_send_data(
   iree_net_control_send_context_t* context = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_net_control_send_context_allocate(
-              channel, operation_user_data, /*owned_buffer=*/NULL, &context));
+              channel, operation_user_data, completion,
+              /*owned_buffer=*/NULL, &context));
 
   iree_status_t status = iree_net_frame_sender_send(
       &channel->sender,
@@ -582,13 +633,29 @@ iree_status_t iree_net_control_channel_send_data_copy(
   IREE_ASSERT_ARGUMENT(channel);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = channel->callbacks.on_send_complete,
+      .user_data = channel->callbacks.user_data,
+  };
+
   iree_net_control_channel_state_t state =
       iree_net_control_channel_load_state(channel);
   iree_status_t status = iree_ok_status();
-  if (state != IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL) {
+  if (!completion.fn) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "DATA sends require an on_send_complete callback");
+  } else if (state != IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL) {
     status =
         iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                          "cannot send DATA: channel state is %d", (int)state);
+  }
+
+  iree_net_control_send_context_t* context = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_control_send_context_allocate(
+        channel, operation_user_data, completion, /*owned_buffer=*/NULL,
+        &context);
   }
 
   iree_net_control_frame_header_t header;
@@ -598,7 +665,10 @@ iree_status_t iree_net_control_channel_send_data_copy(
     status = iree_net_frame_sender_send_copy(
         &channel->sender,
         iree_make_const_byte_span((const uint8_t*)&header, sizeof(header)),
-        payload, operation_user_data);
+        payload, (uint64_t)(uintptr_t)context);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -628,9 +698,14 @@ iree_status_t iree_net_control_channel_send_ping(
       payload.data_length);
 
   iree_net_control_send_context_t* context = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_net_control_send_context_allocate(
-                                            channel, /*operation_user_data=*/0,
-                                            /*owned_buffer=*/NULL, &context));
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_control_channel_on_internal_send_complete,
+      .user_data = channel,
+  };
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_net_control_send_context_allocate(
+              channel, /*operation_user_data=*/0, completion,
+              /*owned_buffer=*/NULL, &context));
 
   iree_status_t status = iree_net_frame_sender_queue(
       &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
@@ -673,9 +748,14 @@ iree_status_t iree_net_control_channel_send_goaway(
       sizeof(goaway_payload), message.data, message.size);
 
   iree_net_control_send_context_t* context = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_net_control_send_context_allocate(
-                                            channel, /*operation_user_data=*/0,
-                                            /*owned_buffer=*/NULL, &context));
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_control_channel_on_internal_send_complete,
+      .user_data = channel,
+  };
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_net_control_send_context_allocate(
+              channel, /*operation_user_data=*/0, completion,
+              /*owned_buffer=*/NULL, &context));
 
   iree_status_t status = iree_net_frame_sender_queue(
       &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
@@ -703,11 +783,11 @@ iree_status_t iree_net_control_channel_send_error(
       iree_net_control_channel_load_state(channel);
   if (state == IREE_NET_CONTROL_CHANNEL_STATE_ERROR ||
       state == IREE_NET_CONTROL_CHANNEL_STATE_CREATED) {
-    iree_status_ignore(error_status);
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cannot send ERROR: channel state is %d",
-                            (int)state);
+    return iree_status_join(
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "cannot send ERROR: channel state is %d", (int)state),
+        error_status);
   }
 
   // Compute status wire size.
@@ -718,19 +798,22 @@ iree_status_t iree_net_control_channel_send_error(
   iree_status_t status = iree_allocator_malloc(
       channel->host_allocator, status_wire_size, (void**)&status_wire_buffer);
   if (!iree_status_is_ok(status)) {
-    iree_status_ignore(error_status);
     IREE_TRACE_ZONE_END(z0);
-    return status;
+    return iree_status_join(status, error_status);
   }
 
   iree_net_control_send_context_t* context = NULL;
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_control_channel_on_internal_send_complete,
+      .user_data = channel,
+  };
   status = iree_net_control_send_context_allocate(
-      channel, /*operation_user_data=*/0, status_wire_buffer, &context);
+      channel, /*operation_user_data=*/0, completion, status_wire_buffer,
+      &context);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(channel->host_allocator, status_wire_buffer);
-    iree_status_ignore(error_status);
     IREE_TRACE_ZONE_END(z0);
-    return status;
+    return iree_status_join(status, error_status);
   }
 
   // Serialize the control frame header.
@@ -741,8 +824,6 @@ iree_status_t iree_net_control_channel_send_error(
   // Serialize the status_wire blob into the frame payload.
   status = iree_net_status_wire_serialize(
       error_status, iree_make_byte_span(status_wire_buffer, status_wire_size));
-  iree_status_ignore(error_status);
-  error_status = iree_ok_status();
 
   if (iree_status_is_ok(status)) {
     iree_async_span_t status_span =
@@ -754,8 +835,13 @@ iree_status_t iree_net_control_channel_send_error(
         payload, (uint64_t)(uintptr_t)context);
   }
   if (iree_status_is_ok(status)) {
+    iree_status_free(error_status);
+    error_status = iree_ok_status();
     iree_net_control_channel_set_state(channel,
                                        IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
+  } else {
+    status = iree_status_join(status, error_status);
+    error_status = iree_ok_status();
   }
 
   if (!iree_status_is_ok(status)) {

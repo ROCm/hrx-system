@@ -29,6 +29,23 @@ typedef struct iree_net_loopback_file_transfer_t {
   iree_io_file_handle_t* file_handle;
 } iree_net_loopback_file_transfer_t;
 
+typedef struct iree_net_loopback_carrier_t iree_net_loopback_carrier_t;
+
+// Shared synchronization and endpoint registry for a carrier pair.
+typedef struct iree_net_loopback_pair_t {
+  // Serializes endpoint attachment and disconnect-handler updates.
+  iree_slim_mutex_t mutex;
+
+  // Number of carrier objects that still reference this pair.
+  iree_atomic_int32_t remaining_carrier_count;
+
+  // Allocator used for this pair object.
+  iree_allocator_t host_allocator;
+
+  // Weak carrier pointers cleared before each carrier can be destroyed.
+  iree_net_loopback_carrier_t* carriers[2];
+} iree_net_loopback_pair_t;
+
 // A pending send operation awaiting delivery during the next poll() cycle. The
 // trailing storage contains the payload copied from send() or written by
 // begin_send() before commit_send().
@@ -37,7 +54,7 @@ typedef struct iree_net_loopback_pending_send_t {
   struct iree_net_loopback_pending_send_t* next;
 
   // Carrier that owns the send. Retained until the send completes or aborts.
-  struct iree_net_loopback_carrier_t* carrier;
+  iree_net_loopback_carrier_t* carrier;
 
   // Data to deliver to the peer's recv handler when the drain NOP completes.
   // Points into trailing storage.
@@ -60,12 +77,18 @@ static_assert(offsetof(iree_net_loopback_pending_send_t, storage) %
                   0,
               "loopback message storage must satisfy carrier alignment");
 
-typedef struct iree_net_loopback_carrier_t {
+struct iree_net_loopback_carrier_t {
   // Base carrier (must be first for safe upcasting).
   iree_net_carrier_t base;
 
   // Proactor for async delivery via NOP operations. Retained.
   iree_async_proactor_t* proactor;
+
+  // Shared registry coordinating this carrier with its peer.
+  iree_net_loopback_pair_t* pair;
+
+  // Index of this carrier in pair->carriers.
+  uint8_t pair_index;
 
   // Guards send_queue_head, send_queue_tail, and send_drain_scheduled.
   iree_slim_mutex_t send_queue_mutex;
@@ -82,10 +105,6 @@ typedef struct iree_net_loopback_carrier_t {
   // True while send_drain_nop is submitted or its callback is draining sends.
   // The carrier is retained for this interval.
   bool send_drain_scheduled;
-
-  // Peer carrier (the other end of the pair). Not retained.
-  // Set at pair creation, cleared on deactivate or peer destruction.
-  struct iree_net_loopback_carrier_t* peer;
 
   // True if shutdown() was called (future sends fail).
   bool shutdown_initiated;
@@ -115,7 +134,7 @@ typedef struct iree_net_loopback_carrier_t {
 
   // Pending file handles exported by this carrier and not yet imported.
   iree_net_loopback_file_transfer_t* pending_file_transfers;
-} iree_net_loopback_carrier_t;
+};
 
 static inline iree_net_loopback_carrier_t* iree_net_loopback_carrier_cast(
     iree_net_carrier_t* base_carrier) {
@@ -139,22 +158,117 @@ static void iree_net_loopback_carrier_send_drain_completion(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags);
 
+static uint8_t iree_net_loopback_carrier_peer_index(
+    const iree_net_loopback_carrier_t* carrier) {
+  return carrier->pair_index == 0 ? 1 : 0;
+}
+
+static void iree_net_loopback_pair_release(iree_net_loopback_pair_t* pair) {
+  if (iree_atomic_fetch_sub(&pair->remaining_carrier_count, 1,
+                            iree_memory_order_acq_rel) != 1) {
+    return;
+  }
+  iree_allocator_t host_allocator = pair->host_allocator;
+  iree_slim_mutex_deinitialize(&pair->mutex);
+  iree_allocator_free(host_allocator, pair);
+}
+
+// Attempts to retain a carrier published through its pair's weak registry.
+// The pair mutex must be held so that destruction cannot free the carrier while
+// its zero reference count is observed.
+static bool iree_net_loopback_carrier_try_retain(
+    iree_net_loopback_carrier_t* carrier) {
+  int32_t expected_count = iree_atomic_ref_count_load(&carrier->base.ref_count);
+  while (expected_count > 0) {
+    IREE_ASSERT_LT(expected_count, INT32_MAX);
+    if (IREE_UNLIKELY(expected_count == INT32_MAX)) return false;
+    if (iree_atomic_compare_exchange_weak(
+            &carrier->base.ref_count, &expected_count, expected_count + 1,
+            iree_memory_order_relaxed, iree_memory_order_relaxed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Retains an attached peer while the pair mutex proves it cannot detach.
+static iree_net_loopback_carrier_t*
+iree_net_loopback_carrier_retain_attached_peer_locked(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_net_loopback_carrier_t* peer =
+      carrier->pair->carriers[iree_net_loopback_carrier_peer_index(carrier)];
+  return peer && iree_net_loopback_carrier_try_retain(peer) ? peer : NULL;
+}
+
+static iree_net_loopback_carrier_t*
+iree_net_loopback_carrier_retain_attached_peer(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_slim_mutex_lock(&carrier->pair->mutex);
+  iree_net_loopback_carrier_t* peer =
+      iree_net_loopback_carrier_retain_attached_peer_locked(carrier);
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+  return peer;
+}
+
+static bool iree_net_loopback_carrier_has_attached_peer(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_slim_mutex_lock(&carrier->pair->mutex);
+  bool has_attached_peer =
+      carrier->pair->carriers[iree_net_loopback_carrier_peer_index(carrier)] !=
+      NULL;
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+  return has_attached_peer;
+}
+
+// Claims one receive operation on an active peer before it can detach.
+static iree_net_loopback_carrier_t*
+iree_net_loopback_carrier_begin_peer_receive(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_slim_mutex_lock(&carrier->pair->mutex);
+  iree_net_loopback_carrier_t* peer =
+      carrier->pair->carriers[iree_net_loopback_carrier_peer_index(carrier)];
+  if (!peer ||
+      iree_net_carrier_state(&peer->base) != IREE_NET_CARRIER_STATE_ACTIVE ||
+      !iree_net_loopback_carrier_try_retain(peer)) {
+    peer = NULL;
+  }
+  if (peer) {
+    iree_atomic_fetch_add(&peer->base.pending_operations, 1,
+                          iree_memory_order_acq_rel);
+  }
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+  return peer;
+}
+
 // Checks if deactivation has completed and invokes callback if so.
 // Called after every pending_operations decrement.
 static void iree_net_loopback_carrier_maybe_complete_deactivation(
     iree_net_loopback_carrier_t* carrier) {
-  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
-  if (state != IREE_NET_CARRIER_STATE_DRAINING) return;
-
-  int32_t pending = iree_atomic_load(&carrier->base.pending_operations,
-                                     iree_memory_order_acquire);
-  if (pending > 0) return;
-
-  iree_net_carrier_set_state(&carrier->base,
-                             IREE_NET_CARRIER_STATE_DEACTIVATED);
-  if (carrier->deactivate_callback.fn) {
-    carrier->deactivate_callback.fn(carrier->deactivate_callback.user_data);
+  iree_net_carrier_deactivate_callback_fn_t callback = NULL;
+  void* callback_user_data = NULL;
+  iree_slim_mutex_lock(&carrier->pair->mutex);
+  if (iree_net_carrier_state(&carrier->base) ==
+          IREE_NET_CARRIER_STATE_DRAINING &&
+      iree_atomic_load(&carrier->base.pending_operations,
+                       iree_memory_order_acquire) == 0) {
+    iree_net_carrier_set_state(&carrier->base,
+                               IREE_NET_CARRIER_STATE_DEACTIVATED);
+    callback = carrier->deactivate_callback.fn;
+    callback_user_data = carrier->deactivate_callback.user_data;
+    carrier->deactivate_callback.fn = NULL;
+    carrier->deactivate_callback.user_data = NULL;
   }
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+  if (callback) callback(callback_user_data);
+}
+
+static void iree_net_loopback_carrier_end_peer_receive(
+    iree_net_loopback_carrier_t* peer) {
+  if (!peer) return;
+  iree_atomic_fetch_sub(&peer->base.pending_operations, 1,
+                        iree_memory_order_release);
+  iree_net_loopback_carrier_maybe_complete_deactivation(peer);
+  iree_net_carrier_release(&peer->base);
 }
 
 static void iree_net_loopback_carrier_release_file_transfers(
@@ -210,44 +324,33 @@ static void iree_net_loopback_carrier_disconnect_notify_completion(
   iree_net_loopback_carrier_t* peer = notify->peer;
   iree_allocator_free(peer->base.host_allocator, notify);
 
-  // Fire the handler if the peer hasn't already been deactivated.
+  // Fire the handler only while the peer is still accepting callbacks.
   iree_net_carrier_state_t state = iree_net_carrier_state(&peer->base);
-  if (state != IREE_NET_CARRIER_STATE_DEACTIVATED &&
+  if (state == IREE_NET_CARRIER_STATE_ACTIVE &&
       peer->peer_disconnect_handler.fn) {
     peer->peer_disconnect_handler.fn(
         peer->peer_disconnect_handler.user_data,
         iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected"));
   }
 
-  iree_net_carrier_release(&peer->base);
+  iree_net_loopback_carrier_end_peer_receive(peer);
 }
 
-// Notifies the surviving peer that this carrier is departing. Submits a NOP
-// to deliver the notification asynchronously. Must be called BEFORE clearing
-// the peer link (carrier->peer).
+// Notifies a retained peer with an active receive-operation claim.
 static void iree_net_loopback_carrier_notify_peer_disconnect(
-    iree_net_loopback_carrier_t* carrier) {
-  iree_net_loopback_carrier_t* peer = carrier->peer;
-  if (!peer || !peer->peer_disconnect_handler.fn) return;
-
-  // Don't notify if peer is already shutting down.
-  iree_net_carrier_state_t peer_state = iree_net_carrier_state(&peer->base);
-  if (peer_state == IREE_NET_CARRIER_STATE_DEACTIVATED) return;
-
+    iree_net_loopback_carrier_t* peer) {
   iree_net_loopback_disconnect_notify_t* notify = NULL;
   iree_status_t status = iree_allocator_malloc(
       peer->base.host_allocator, sizeof(*notify), (void**)&notify);
   if (iree_status_is_ok(status)) {
     memset(notify, 0, sizeof(*notify));
     notify->peer = peer;
-    iree_net_carrier_retain(&peer->base);
     iree_async_operation_initialize(
         &notify->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
         IREE_ASYNC_OPERATION_FLAG_NONE,
         iree_net_loopback_carrier_disconnect_notify_completion, notify);
     status = iree_async_proactor_submit_one(peer->proactor, &notify->nop.base);
     if (!iree_status_is_ok(status)) {
-      iree_net_carrier_release(&peer->base);
       iree_allocator_free(peer->base.host_allocator, notify);
     }
   }
@@ -255,10 +358,35 @@ static void iree_net_loopback_carrier_notify_peer_disconnect(
     // Synchronous fallback on OOM or submit failure. Safe because the handler
     // operates on the surviving peer, not the carrier being torn down.
     iree_status_ignore(status);
-    peer->peer_disconnect_handler.fn(
-        peer->peer_disconnect_handler.user_data,
-        iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected"));
+    if (iree_net_carrier_state(&peer->base) == IREE_NET_CARRIER_STATE_ACTIVE &&
+        peer->peer_disconnect_handler.fn) {
+      peer->peer_disconnect_handler.fn(
+          peer->peer_disconnect_handler.user_data,
+          iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected"));
+    }
+    iree_net_loopback_carrier_end_peer_receive(peer);
   }
+}
+
+// Detaches this carrier and claims a notification operation on an active peer.
+// The pair mutex must be held.
+static iree_net_loopback_carrier_t* iree_net_loopback_carrier_detach_locked(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_net_loopback_pair_t* pair = carrier->pair;
+  if (pair->carriers[carrier->pair_index] != carrier) return NULL;
+  pair->carriers[carrier->pair_index] = NULL;
+
+  iree_net_loopback_carrier_t* peer =
+      pair->carriers[iree_net_loopback_carrier_peer_index(carrier)];
+  if (!peer ||
+      iree_net_carrier_state(&peer->base) != IREE_NET_CARRIER_STATE_ACTIVE ||
+      !peer->peer_disconnect_handler.fn) {
+    return NULL;
+  }
+  if (!iree_net_loopback_carrier_try_retain(peer)) return NULL;
+  iree_atomic_fetch_add(&peer->base.pending_operations, 1,
+                        iree_memory_order_acq_rel);
+  return peer;
 }
 
 static iree_status_t iree_net_loopback_pending_send_allocate(
@@ -304,6 +432,7 @@ static iree_status_t iree_net_loopback_carrier_begin_send_operation(
                         iree_memory_order_acq_rel);
 
   iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -313,9 +442,12 @@ static iree_status_t iree_net_loopback_carrier_begin_send_operation(
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "carrier has been shut down for sending");
   }
-  if (iree_status_is_ok(status) && !carrier->peer) {
+  iree_net_loopback_carrier_t* peer =
+      carrier->pair->carriers[iree_net_loopback_carrier_peer_index(carrier)];
+  if (iree_status_is_ok(status) && !peer) {
     status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
   }
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
   if (iree_status_is_ok(status)) {
     iree_atomic_fetch_add(&carrier->sends_in_flight, 1,
                           iree_memory_order_acq_rel);
@@ -396,22 +528,20 @@ static iree_net_loopback_pending_send_t* iree_net_loopback_pending_send_pop(
 static void iree_net_loopback_pending_send_deliver(
     iree_net_loopback_pending_send_t* pending_send) {
   iree_net_loopback_carrier_t* carrier = pending_send->carrier;
-  // Deliver data to peer's recv handler if peer is still alive and active.
+  // Claim the peer immediately before delivery. A queued send is not accepted
+  // by the destination until this claim succeeds; deactivation either detaches
+  // the peer before the claim or waits for the receive callback to return.
+  //
+  // Deliver data to the peer's recv handler if the peer is still active.
   // If the peer departed between send() and this completion (deactivated or
   // destroyed while the send was queued), report an error through the sender's
   // completion callback. This mirrors TCP/SHM carriers where the OS reports
   // EPIPE/ECONNRESET when the peer closes the connection.
   //
-  // The recv handler may trigger peer destruction (e.g., GOAWAY processing
-  // destroys the peer's session, which deactivates and releases the peer
-  // carrier). Retain the peer so the statistics update below doesn't access
-  // freed memory.
   iree_status_t delivery_status = iree_ok_status();
-  iree_net_loopback_carrier_t* peer = carrier->peer;
-  if (peer) iree_net_carrier_retain(&peer->base);
-  if (peer &&
-      iree_net_carrier_state(&peer->base) == IREE_NET_CARRIER_STATE_ACTIVE &&
-      peer->base.recv_handler.fn) {
+  iree_net_loopback_carrier_t* peer =
+      iree_net_loopback_carrier_begin_peer_receive(carrier);
+  if (peer && peer->base.recv_handler.fn) {
     delivery_status = peer->base.recv_handler.fn(
         peer->base.recv_handler.user_data, pending_send->delivery_span, NULL);
   } else {
@@ -431,9 +561,6 @@ static void iree_net_loopback_pending_send_deliver(
     }
   }
 
-  // Release peer ref acquired above.
-  if (peer) iree_net_carrier_release(&peer->base);
-
   // Fire sender's send completion callback if set.
   if (pending_send->notify_completion && carrier->base.callback.fn) {
     carrier->base.callback.fn(carrier->base.callback.user_data,
@@ -444,6 +571,7 @@ static void iree_net_loopback_pending_send_deliver(
     iree_status_ignore(delivery_status);
   }
 
+  iree_net_loopback_carrier_end_peer_receive(peer);
   iree_net_loopback_carrier_end_send_operation(carrier);
   iree_net_loopback_pending_send_free(pending_send);
 }
@@ -506,16 +634,14 @@ static void iree_net_loopback_carrier_destroy(
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   IREE_ASSERT(state == IREE_NET_CARRIER_STATE_DEACTIVATED ||
               state == IREE_NET_CARRIER_STATE_CREATED);
+  IREE_ASSERT(iree_net_carrier_pending_count(base_carrier) == 0);
 
-  // Notify surviving peer before clearing the link. This delivers a transport
-  // error to the peer's session so it can transition to ERROR state and be
-  // cleaned up by the server.
-  iree_net_loopback_carrier_notify_peer_disconnect(carrier);
-
-  // Clear peer link if still set (peer may have already been destroyed).
-  if (carrier->peer) {
-    carrier->peer->peer = NULL;
-    carrier->peer = NULL;
+  iree_slim_mutex_lock(&carrier->pair->mutex);
+  iree_net_loopback_carrier_t* peer_to_notify =
+      iree_net_loopback_carrier_detach_locked(carrier);
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+  if (peer_to_notify) {
+    iree_net_loopback_carrier_notify_peer_disconnect(peer_to_notify);
   }
 
   // Release proactor reference.
@@ -527,22 +653,31 @@ static void iree_net_loopback_carrier_destroy(
 
   // Free carrier memory.
   iree_allocator_t allocator = carrier->base.host_allocator;
+  iree_net_loopback_pair_t* pair = carrier->pair;
   iree_allocator_free(allocator, carrier);
+  iree_net_loopback_pair_release(pair);
   IREE_TRACE_ZONE_END(z0);
 }
 
 static void iree_net_loopback_carrier_set_recv_handler(
     iree_net_carrier_t* base_carrier, iree_net_carrier_recv_handler_t handler) {
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   base_carrier->recv_handler = handler;
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
 }
 
 static iree_status_t iree_net_loopback_carrier_activate(
     iree_net_carrier_t* base_carrier) {
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Verify state is CREATED.
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_CREATED) {
+    iree_slim_mutex_unlock(&carrier->pair->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in CREATED state to activate");
@@ -550,6 +685,7 @@ static iree_status_t iree_net_loopback_carrier_activate(
 
   // Verify recv handler is set.
   if (!base_carrier->recv_handler.fn) {
+    iree_slim_mutex_unlock(&carrier->pair->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "recv handler must be set before activation");
@@ -557,6 +693,7 @@ static iree_status_t iree_net_loopback_carrier_activate(
 
   // Transition to ACTIVE state.
   iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_ACTIVE);
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -569,10 +706,15 @@ static iree_status_t iree_net_loopback_carrier_deactivate(
       iree_net_loopback_carrier_cast(base_carrier);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Verify state is ACTIVE or CREATED.
+  iree_net_loopback_carrier_t* peer_to_notify = NULL;
+  iree_net_carrier_deactivate_callback_fn_t synchronous_callback = NULL;
+  void* synchronous_callback_user_data = NULL;
+  bool completed_synchronously = false;
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE &&
       state != IREE_NET_CARRIER_STATE_CREATED) {
+    iree_slim_mutex_unlock(&carrier->pair->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -582,31 +724,34 @@ static iree_status_t iree_net_loopback_carrier_deactivate(
   // Store callback for deferred invocation when all operations drain.
   carrier->deactivate_callback.fn = callback;
   carrier->deactivate_callback.user_data = user_data;
-
-  // Notify surviving peer before clearing the link. This delivers a transport
-  // error so the peer's session can detect the disconnect.
-  iree_net_loopback_carrier_notify_peer_disconnect(carrier);
-
-  // Clear peer link so in-flight NOP completions skip delivery and new sends
-  // fail immediately.
-  if (carrier->peer) {
-    carrier->peer->peer = NULL;
-    carrier->peer = NULL;
-  }
+  peer_to_notify = iree_net_loopback_carrier_detach_locked(carrier);
 
   // If never activated, transition directly to DEACTIVATED.
   if (state == IREE_NET_CARRIER_STATE_CREATED) {
     iree_net_carrier_set_state(base_carrier,
                                IREE_NET_CARRIER_STATE_DEACTIVATED);
-    if (callback) callback(user_data);
+    synchronous_callback = carrier->deactivate_callback.fn;
+    synchronous_callback_user_data = carrier->deactivate_callback.user_data;
+    carrier->deactivate_callback.fn = NULL;
+    carrier->deactivate_callback.user_data = NULL;
+    completed_synchronously = true;
+  } else {
+    iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
+  }
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
+
+  if (peer_to_notify) {
+    iree_net_loopback_carrier_notify_peer_disconnect(peer_to_notify);
+  }
+  if (synchronous_callback) {
+    synchronous_callback(synchronous_callback_user_data);
+  }
+  if (completed_synchronously) {
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  // Transition to DRAINING. In-flight NOP completions will check this state.
-  iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
-
-  // If no pending operations, complete immediately.
+  // Active carriers complete after accepted sends and receives have drained.
   iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
 
   IREE_TRACE_ZONE_END(z0);
@@ -619,7 +764,7 @@ iree_net_loopback_carrier_query_send_budget(iree_net_carrier_t* base_carrier) {
       iree_net_loopback_carrier_cast(base_carrier);
 
   // If peer is gone, no budget available.
-  if (!carrier->peer) {
+  if (!iree_net_loopback_carrier_has_attached_peer(carrier)) {
     iree_net_carrier_send_budget_t budget = {0, 0};
     return budget;
   }
@@ -798,7 +943,8 @@ static iree_status_t iree_net_loopback_carrier_query_file_handle_transfer(
                             "file support has been compiled out of this "
                             "binary; set IREE_FILE_IO_ENABLE=1 to include it");
 #endif  // !IREE_FILE_IO_ENABLE
-  if (iree_status_is_ok(status) && !carrier->peer) {
+  if (iree_status_is_ok(status) &&
+      !iree_net_loopback_carrier_has_attached_peer(carrier)) {
     status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
   }
   if (iree_status_is_ok(status) &&
@@ -842,7 +988,8 @@ static iree_status_t iree_net_loopback_carrier_export_file_handle(
         "loopback file transfer payload length must be %" PRIhsz " bytes",
         (iree_host_size_t)sizeof(iree_net_loopback_file_transfer_payload_t));
   }
-  if (iree_status_is_ok(status) && !carrier->peer) {
+  if (iree_status_is_ok(status) &&
+      !iree_net_loopback_carrier_has_attached_peer(carrier)) {
     status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
   }
   if (iree_status_is_ok(status) &&
@@ -910,8 +1057,12 @@ static iree_status_t iree_net_loopback_carrier_import_file_handle(
         "loopback file transfer payload length must be %" PRIhsz " bytes",
         (iree_host_size_t)sizeof(payload));
   }
-  if (iree_status_is_ok(status) && !carrier->peer) {
-    status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+  iree_net_loopback_carrier_t* peer = NULL;
+  if (iree_status_is_ok(status)) {
+    peer = iree_net_loopback_carrier_retain_attached_peer(carrier);
+    if (!peer) {
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+    }
   }
   if (iree_status_is_ok(status)) {
     memcpy(&payload, transfer_payload.data, sizeof(payload));
@@ -920,9 +1071,8 @@ static iree_status_t iree_net_loopback_carrier_import_file_handle(
   iree_net_loopback_file_transfer_t* transfer = NULL;
   iree_allocator_t transfer_allocator = carrier->base.host_allocator;
   if (iree_status_is_ok(status)) {
-    transfer_allocator = carrier->peer->base.host_allocator;
-    transfer =
-        iree_net_loopback_carrier_take_file_transfer(carrier->peer, payload.id);
+    transfer_allocator = peer->base.host_allocator;
+    transfer = iree_net_loopback_carrier_take_file_transfer(peer, payload.id);
     if (!transfer) {
       status = iree_make_status(IREE_STATUS_NOT_FOUND,
                                 "loopback file transfer token not found");
@@ -936,6 +1086,7 @@ static iree_status_t iree_net_loopback_carrier_import_file_handle(
     iree_io_file_handle_release(transfer->file_handle);
     iree_allocator_free(transfer_allocator, transfer);
   }
+  iree_net_carrier_release(peer ? &peer->base : NULL);
   return status;
 }
 
@@ -972,15 +1123,17 @@ static iree_status_t iree_net_loopback_carrier_shutdown(
   iree_net_loopback_carrier_t* carrier =
       iree_net_loopback_carrier_cast(base_carrier);
 
-  // Verify state is ACTIVE.
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
+    iree_slim_mutex_unlock(&carrier->pair->mutex);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier must be in ACTIVE state to shutdown");
   }
 
   // Mark shutdown initiated — future sends will fail.
   carrier->shutdown_initiated = true;
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
 
   return iree_ok_status();
 }
@@ -1015,6 +1168,7 @@ static const iree_net_carrier_vtable_t iree_net_loopback_carrier_vtable = {
 // Initializes a single loopback carrier.
 static void iree_net_loopback_carrier_init(
     iree_net_loopback_carrier_t* carrier, iree_async_proactor_t* proactor,
+    iree_net_loopback_pair_t* pair, uint8_t pair_index,
     iree_net_carrier_capabilities_t capabilities,
     iree_net_carrier_callback_t callback, iree_allocator_t host_allocator) {
   memset(carrier, 0, sizeof(*carrier));
@@ -1024,6 +1178,8 @@ static void iree_net_loopback_carrier_init(
                               callback, host_allocator, &carrier->base);
   carrier->proactor = proactor;
   iree_async_proactor_retain(proactor);
+  carrier->pair = pair;
+  carrier->pair_index = pair_index;
   carrier->shutdown_initiated = false;
   iree_slim_mutex_initialize(&carrier->send_queue_mutex);
   iree_slim_mutex_initialize(&carrier->file_transfer_mutex);
@@ -1035,7 +1191,9 @@ IREE_API_EXPORT void iree_net_loopback_carrier_set_peer_disconnect_handler(
     iree_net_loopback_carrier_disconnect_handler_t handler) {
   iree_net_loopback_carrier_t* carrier =
       iree_net_loopback_carrier_cast(base_carrier);
+  iree_slim_mutex_lock(&carrier->pair->mutex);
   carrier->peer_disconnect_handler = handler;
+  iree_slim_mutex_unlock(&carrier->pair->mutex);
 }
 
 IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
@@ -1049,11 +1207,16 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
   *out_client = NULL;
   *out_server = NULL;
 
-  // Allocate both carriers.
+  // Allocate the shared pair and both carriers.
+  iree_net_loopback_pair_t* pair = NULL;
   iree_net_loopback_carrier_t* client = NULL;
   iree_net_loopback_carrier_t* server = NULL;
   iree_status_t status =
-      iree_allocator_malloc(host_allocator, sizeof(*client), (void**)&client);
+      iree_allocator_malloc(host_allocator, sizeof(*pair), (void**)&pair);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(host_allocator, sizeof(*client), (void**)&client);
+  }
   if (iree_status_is_ok(status)) {
     status =
         iree_allocator_malloc(host_allocator, sizeof(*server), (void**)&server);
@@ -1074,21 +1237,25 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
 #endif  // IREE_PLATFORM_WINDOWS
 #endif  // IREE_FILE_IO_ENABLE
 
-    // Initialize both carriers.
-    iree_net_loopback_carrier_init(client, proactor, capabilities, callback,
-                                   host_allocator);
-    iree_net_loopback_carrier_init(server, proactor, capabilities, callback,
-                                   host_allocator);
+    memset(pair, 0, sizeof(*pair));
+    iree_slim_mutex_initialize(&pair->mutex);
+    iree_atomic_store(&pair->remaining_carrier_count, 2,
+                      iree_memory_order_relaxed);
+    pair->host_allocator = host_allocator;
 
-    // Set up peer links.
-    client->peer = server;
-    server->peer = client;
+    // Initialize both carriers and publish them in the pair registry.
+    iree_net_loopback_carrier_init(client, proactor, pair, 0, capabilities,
+                                   callback, host_allocator);
+    iree_net_loopback_carrier_init(server, proactor, pair, 1, capabilities,
+                                   callback, host_allocator);
+    pair->carriers[0] = client;
+    pair->carriers[1] = server;
 
     *out_client = &client->base;
     *out_server = &server->base;
   } else {
-    // Cleanup on allocation failure. Carriers are initialized only after both
-    // allocations succeed, so there is no proactor reference to release here.
+    // Carriers are initialized only after all allocations succeed.
+    iree_allocator_free(host_allocator, pair);
     iree_allocator_free(host_allocator, client);
     iree_allocator_free(host_allocator, server);
   }

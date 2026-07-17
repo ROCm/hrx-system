@@ -199,7 +199,9 @@ TEST_P(BackpressureTest, RecvLeaseBackpressure) {
   LeaseHoldingCapture server_capture;
   ActivateBoth(MakeNullRecvHandler(), server_capture.AsHandler());
 
-  // Send 128KB in 4KB chunks, polling after each send to drive completions.
+  // Submit until receive-buffer pressure closes admission. The send storage is
+  // stable for the entire test, so every accepted operation remains valid
+  // while the receiver deliberately holds its leases.
   const iree_host_size_t kTotalSize = 128 * 1024;
   const iree_host_size_t kChunkSize = 4096;
   std::vector<uint8_t> send_data(kTotalSize);
@@ -207,28 +209,25 @@ TEST_P(BackpressureTest, RecvLeaseBackpressure) {
     send_data[i] = static_cast<uint8_t>(i & 0xFF);
   }
 
-  for (iree_host_size_t offset = 0; offset < kTotalSize; offset += kChunkSize) {
-    iree_host_size_t length = std::min(kChunkSize, kTotalSize - offset);
+  iree_host_size_t submitted_size = 0;
+  for (; submitted_size < kTotalSize; submitted_size += kChunkSize) {
+    iree_host_size_t length = std::min(kChunkSize, kTotalSize - submitted_size);
     iree_async_span_t span =
-        iree_async_span_from_ptr(&send_data[offset], length);
+        iree_async_span_from_ptr(&send_data[submitted_size], length);
     iree_net_send_params_t params = {};
     params.data.values = &span;
     params.data.count = 1;
     params.flags = IREE_NET_SEND_FLAG_NONE;
-    IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
-    iree_host_size_t completed = 0;
-    iree_status_t poll_status = iree_async_proactor_poll(
-        proactor_, iree_make_timeout_ms(100), &completed);
-    if (!iree_status_is_deadline_exceeded(poll_status)) {
-      IREE_ASSERT_OK(poll_status);
-    } else {
-      iree_status_ignore(poll_status);
+    iree_status_t status = iree_net_carrier_send(client_, &params);
+    if (iree_status_is_resource_exhausted(status)) {
+      iree_status_free(status);
+      break;
     }
+    IREE_ASSERT_OK(status);
   }
 
   // The receiver should have gotten at least some data.
-  PollUntil([&] { return server_capture.total_bytes.load() > 0; },
-            iree_make_duration_ms(5000));
+  PollUntil([&] { return server_capture.total_bytes.load() > 0; });
   iree_host_size_t stall_point = server_capture.total_bytes.load();
   ASSERT_GT(stall_point, 0u) << "No data received at all";
 
@@ -236,12 +235,24 @@ TEST_P(BackpressureTest, RecvLeaseBackpressure) {
   server_capture.release_immediately.store(true, std::memory_order_release);
   server_capture.ReleaseAll();
 
+  // Resume from the first send that admission rejected. Receive leases are
+  // now recycled immediately, so each retry waits on transport progress.
+  for (; submitted_size < kTotalSize; submitted_size += kChunkSize) {
+    iree_host_size_t length = std::min(kChunkSize, kTotalSize - submitted_size);
+    iree_async_span_t span =
+        iree_async_span_from_ptr(&send_data[submitted_size], length);
+    iree_net_send_params_t params = {};
+    params.data.values = &span;
+    params.data.count = 1;
+    IREE_ASSERT_OK(SendWhenReady(client_, &params));
+  }
+
   // All remaining data should arrive now that buffers are available again.
-  ASSERT_TRUE(
-      PollUntil([&] { return server_capture.total_bytes.load() >= kTotalSize; },
-                iree_make_duration_ms(10000)))
-      << "Stalled after " << server_capture.total_bytes.load() << " of "
-      << kTotalSize << " bytes (stall point was " << stall_point << ")";
+  ASSERT_TRUE(PollUntil([&] {
+    return server_capture.total_bytes.load() >= kTotalSize;
+  })) << "Stalled after "
+      << server_capture.total_bytes.load() << " of " << kTotalSize
+      << " bytes (stall point was " << stall_point << ")";
 
   // Verify data integrity across the stall/resume cycle.
   ASSERT_EQ(server_capture.data.size(), kTotalSize);

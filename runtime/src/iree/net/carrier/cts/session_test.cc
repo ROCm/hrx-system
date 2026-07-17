@@ -20,8 +20,12 @@
 // Registered with the "factory" tag — only instantiated for backends that
 // provide factory-level fields in their BackendInfo.
 
+#include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "iree/net/bootstrap.h"
@@ -74,6 +78,43 @@ static iree::StatusOr<iree_async_buffer_pool_t*> CreateHeaderPool() {
   if (!iree_status_is_ok(status)) return iree::Status(std::move(status));
   return pool;
 }
+
+// Holds an application callback open while another thread detaches it.
+class CallbackGate {
+ public:
+  static void Wait(void* user_data) {
+    auto* self = static_cast<CallbackGate*>(user_data);
+    std::unique_lock<std::mutex> lock(self->mutex_);
+    self->entered_ = true;
+    self->condition_.notify_all();
+    self->condition_.wait(lock, [&]() { return self->released_; });
+  }
+
+  void NotifyPollFinished() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    poll_finished_ = true;
+    condition_.notify_all();
+  }
+
+  bool WaitUntilEntered() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&]() { return entered_ || poll_finished_; });
+    return entered_;
+  }
+
+  void Release() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    released_ = true;
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool entered_ = false;
+  bool released_ = false;
+  bool poll_finished_ = false;
+};
 
 using SessionTest = SessionTestBase;
 
@@ -206,7 +247,6 @@ TEST_P(SessionTest, RequiredCapabilitiesRejectMissingPeerSupport) {
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
-  client_options.bootstrap_timeout_ns = iree_make_duration_ms(200);
 
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
@@ -224,12 +264,10 @@ TEST_P(SessionTest, RequiredCapabilitiesRejectMissingPeerSupport) {
   EXPECT_EQ(server_callbacks_.error_code, IREE_STATUS_UNAVAILABLE);
   EXPECT_FALSE(server_callbacks_.ready_fired);
 
-  PollUntil(
-      [&]() {
-        return iree_net_session_state(client_session_) !=
-               IREE_NET_SESSION_STATE_BOOTSTRAPPING;
-      },
-      iree_make_duration_ms(500));
+  ASSERT_TRUE(PollUntil([&]() {
+    return iree_net_session_state(client_session_) !=
+           IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+  }));
 }
 
 //===----------------------------------------------------------------------===//
@@ -238,20 +276,49 @@ TEST_P(SessionTest, RequiredCapabilitiesRejectMissingPeerSupport) {
 
 TEST_P(SessionTest, ControlDataClientToServer) {
   EstablishDefaultSessionPair();
+  EXPECT_EQ(client_callbacks_.send_complete_count, 0u);
+  EXPECT_EQ(server_callbacks_.send_complete_count, 0u);
 
   const char* message = "hello server";
   iree_async_span_t span =
       iree_async_span_from_ptr((void*)message, strlen(message));
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
-  IREE_ASSERT_OK(
-      iree_net_session_send_control_data(client_session_, 0, span_list, 0));
+  IREE_ASSERT_OK(iree_net_session_send_control_data(
+      client_session_, 0, span_list, UINT64_C(0xD00DFEED12345678)));
 
-  ASSERT_TRUE(PollUntil([&]() { return server_callbacks_.control_data_fired; }))
-      << "Server never received control data";
+  ASSERT_TRUE(PollUntil([&]() {
+    return server_callbacks_.control_data_fired &&
+           client_callbacks_.send_complete_count == 1;
+  })) << "Server never received control data";
 
   EXPECT_EQ(std::string(server_callbacks_.control_data.begin(),
                         server_callbacks_.control_data.end()),
             "hello server");
+  EXPECT_EQ(client_callbacks_.send_operation_user_data,
+            UINT64_C(0xD00DFEED12345678));
+  EXPECT_EQ(client_callbacks_.send_status_code, IREE_STATUS_OK);
+}
+
+TEST_P(SessionTest, CopiedControlDataCompletesWithOpaqueUserData) {
+  EstablishDefaultSessionPair();
+
+  const char* message = "copied control data";
+  iree_async_span_t span =
+      iree_async_span_from_ptr((void*)message, strlen(message));
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  IREE_ASSERT_OK(iree_net_session_send_control_data_copy(
+      client_session_, 0, span_list, UINT64_C(0xF0E1D2C3B4A59687)));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return server_callbacks_.control_data_fired &&
+           client_callbacks_.send_complete_count == 1;
+  }));
+  EXPECT_EQ(client_callbacks_.send_operation_user_data,
+            UINT64_C(0xF0E1D2C3B4A59687));
+  EXPECT_EQ(client_callbacks_.send_status_code, IREE_STATUS_OK);
+  EXPECT_EQ(std::string(server_callbacks_.control_data.begin(),
+                        server_callbacks_.control_data.end()),
+            message);
 }
 
 TEST_P(SessionTest, ControlDataServerToClient) {
@@ -303,6 +370,141 @@ TEST_P(SessionTest, ControlDataBidirectional) {
   EXPECT_EQ(std::string(client_callbacks_.control_data.begin(),
                         client_callbacks_.control_data.end()),
             "pong");
+}
+
+TEST_P(SessionTest, DetachCallbacksWaitsForActiveCallback) {
+  CallbackGate callback_gate;
+  client_callbacks_.control_data_hook = CallbackGate::Wait;
+  client_callbacks_.control_data_hook_user_data = &callback_gate;
+  EstablishDefaultSessionPair();
+
+  const char* message = "hold callback";
+  iree_async_span_t span =
+      iree_async_span_from_ptr((void*)message, strlen(message));
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  IREE_ASSERT_OK(
+      iree_net_session_send_control_data(server_session_, 0, span_list, 0));
+
+  std::atomic<bool> detach_complete = false;
+  bool callback_entered = false;
+  bool detach_completed_early = false;
+  std::thread detach_thread([&]() {
+    callback_entered = callback_gate.WaitUntilEntered();
+    iree_net_session_detach_callbacks(
+        client_session_, {[](void* user_data) {
+                            static_cast<std::atomic<bool>*>(user_data)->store(
+                                true, std::memory_order_release);
+                          },
+                          &detach_complete});
+    detach_completed_early =
+        callback_entered && detach_complete.load(std::memory_order_acquire);
+    callback_gate.Release();
+  });
+
+  iree_status_t poll_status = iree_ok_status();
+  while (iree_status_is_ok(poll_status) &&
+         !detach_complete.load(std::memory_order_acquire)) {
+    iree_host_size_t completed = 0;
+    poll_status = PollProactorOnce(proactor_, &completed);
+  }
+  if (!iree_status_is_ok(poll_status)) callback_gate.NotifyPollFinished();
+  detach_thread.join();
+
+  IREE_ASSERT_OK(poll_status);
+  ASSERT_TRUE(callback_entered);
+  EXPECT_FALSE(detach_completed_early);
+  EXPECT_TRUE(detach_complete.load(std::memory_order_acquire));
+}
+
+TEST_P(SessionTest, DetachCallbacksWaitsForPendingEndpointCallback) {
+  EstablishDefaultSessionPair();
+
+  struct CallbackState {
+    int next_order = 0;
+    int endpoint_order = -1;
+    int detach_order = -1;
+    iree_status_code_t endpoint_status = IREE_STATUS_UNKNOWN;
+  } callback_state;
+
+  IREE_ASSERT_OK(iree_net_session_open_endpoint(
+      client_session_, {[](void* user_data, iree_status_t status,
+                           iree_net_message_endpoint_t endpoint) {
+                          auto* state = static_cast<CallbackState*>(user_data);
+                          state->endpoint_order = state->next_order++;
+                          state->endpoint_status = iree_status_code(status);
+                          iree_status_ignore(status);
+                          (void)endpoint;
+                        },
+                        &callback_state}));
+  iree_net_session_detach_callbacks(
+      client_session_, {[](void* user_data) {
+                          auto* state = static_cast<CallbackState*>(user_data);
+                          state->detach_order = state->next_order++;
+                        },
+                        &callback_state});
+
+  EXPECT_EQ(callback_state.detach_order, -1);
+  ASSERT_TRUE(PollUntil([&]() { return callback_state.detach_order >= 0; }));
+  EXPECT_EQ(callback_state.endpoint_status, IREE_STATUS_OK);
+  EXPECT_EQ(callback_state.endpoint_order, 0);
+  EXPECT_EQ(callback_state.detach_order, 1);
+}
+
+TEST_P(SessionTest, DeactivateDrainsConnection) {
+  EstablishDefaultSessionPair();
+
+  bool deactivated = false;
+  DeactivateSession(
+      client_session_, client_deactivation_,
+      {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+       &deactivated});
+
+  EXPECT_EQ(iree_net_session_state(client_session_),
+            IREE_NET_SESSION_STATE_DRAINING);
+  ASSERT_TRUE(PollUntil([&]() { return deactivated; }));
+
+  const char* message = "after deactivation";
+  iree_async_span_t span =
+      iree_async_span_from_ptr((void*)message, strlen(message));
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_session_send_control_data(client_session_, 0, span_list, 0));
+}
+
+TEST_P(SessionTest, DeactivateWaitsForPendingEndpointCallback) {
+  EstablishDefaultSessionPair();
+
+  struct CallbackState {
+    int next_order = 0;
+    int endpoint_order = -1;
+    int deactivate_order = -1;
+    iree_status_code_t endpoint_status = IREE_STATUS_UNKNOWN;
+  } callback_state;
+
+  IREE_ASSERT_OK(iree_net_session_open_endpoint(
+      client_session_, {[](void* user_data, iree_status_t status,
+                           iree_net_message_endpoint_t endpoint) {
+                          auto* state = static_cast<CallbackState*>(user_data);
+                          state->endpoint_order = state->next_order++;
+                          state->endpoint_status = iree_status_code(status);
+                          iree_status_ignore(status);
+                          (void)endpoint;
+                        },
+                        &callback_state}));
+  DeactivateSession(client_session_, client_deactivation_,
+                    {[](void* user_data) {
+                       auto* state = static_cast<CallbackState*>(user_data);
+                       state->deactivate_order = state->next_order++;
+                     },
+                     &callback_state});
+
+  EXPECT_EQ(callback_state.deactivate_order, -1);
+  ASSERT_TRUE(
+      PollUntil([&]() { return callback_state.deactivate_order >= 0; }));
+  EXPECT_EQ(callback_state.endpoint_status, IREE_STATUS_OK);
+  EXPECT_EQ(callback_state.endpoint_order, 0);
+  EXPECT_EQ(callback_state.deactivate_order, 1);
 }
 
 //===----------------------------------------------------------------------===//
@@ -921,13 +1123,10 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
   IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
                             ResolveConnectAddress(bind_str, listener_));
 
-  // Client uses a wrong protocol version — the server will reject the HELLO.
-  // Short bootstrap timeout so the client's timer expires during TearDown
-  // rather than leaking (the client never receives a HELLO_ACK).
+  // Client uses a wrong protocol version — the server rejects the HELLO.
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.protocol_version = 999;
-  client_options.bootstrap_timeout_ns = iree_make_duration_ms(500);
 
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
@@ -948,11 +1147,6 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
 
   // The server should NOT have reached OPERATIONAL.
   EXPECT_FALSE(server_callbacks_.ready_fired);
-
-  // Drain carrier operations before TearDown releases sessions. SHM carriers
-  // process send completions asynchronously via wake events — the client's
-  // HELLO send completion may still be in-flight when the error fires.
-  PollUntil([&]() { return false; }, iree_make_duration_ms(200));
 }
 
 // After a session enters ERROR state, all operations return
@@ -1000,13 +1194,10 @@ TEST_P(SessionTest, OperationsFailInErrorState) {
   IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
                             ResolveConnectAddress(bind_str, listener_));
 
-  // Client with wrong protocol version forces server into ERROR state.
-  // Short bootstrap timeout so the client's timer expires during TearDown
-  // rather than leaking (the client never receives a HELLO_ACK).
+  // Client with wrong protocol version forces both peers into ERROR state.
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.protocol_version = 999;
-  client_options.bootstrap_timeout_ns = iree_make_duration_ms(500);
 
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
@@ -1041,9 +1232,6 @@ TEST_P(SessionTest, OperationsFailInErrorState) {
       IREE_STATUS_FAILED_PRECONDITION,
       iree_net_session_open_endpoint(
           server_session_, {EndpointReadyResult::Callback, &endpoint_result}));
-
-  // Drain carrier operations before TearDown releases sessions.
-  PollUntil([&]() { return false; }, iree_make_duration_ms(200));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1225,10 +1413,11 @@ TEST_P(SessionTest, ClientErrorsWhenServerNeverResponds) {
   IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
                             ResolveConnectAddress(bind_str, listener_));
 
-  // Short bootstrap timeout so the test doesn't wait 10 seconds.
+  // This test exercises the bootstrap timeout itself. A one-second deadline
+  // leaves instrumented CI enough scheduling headroom after connection setup.
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
-  client_options.bootstrap_timeout_ns = iree_make_duration_ms(200);
+  client_options.bootstrap_timeout_ns = iree_make_duration_ms(1000);
 
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
@@ -1255,19 +1444,26 @@ TEST_P(SessionTest, ClientErrorsWhenServerNeverResponds) {
       << "Expected UNAVAILABLE or DEADLINE_EXCEEDED, got "
       << client_callbacks_.error_code;
 
-  // Release the held server connection.
+  // Deactivate the held server connection and wait for every carrier operation
+  // before releasing it.
+  bool held_connection_deactivated = false;
+  iree_net_connection_deactivate(
+      held_connection_ctx.connection,
+      {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+       &held_connection_deactivated});
+  ASSERT_TRUE(PollUntil([&]() { return held_connection_deactivated; }));
   iree_net_connection_release(held_connection_ctx.connection);
   held_connection_ctx.connection = nullptr;
-
-  // Drain any pending operations before TearDown.
-  PollUntil([&]() { return false; }, iree_make_duration_ms(100));
 }
 
 // Normal bootstrap cancels the timer — verify no DEADLINE_EXCEEDED error fires
 // after a successful session establishment.
 TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
-  // Use a very short timeout (50ms). If the cancel path were broken, this
-  // timer would fire during the test and transition the session to ERROR.
+  // This test intentionally observes elapsed time because timer cancellation
+  // is the behavior under test. A one-second bootstrap window leaves enough
+  // room for instrumented CI bootstrap while keeping the test bounded by its
+  // own explicit verification timer.
+  iree_duration_t bootstrap_timeout = iree_make_duration_ms(1000);
   iree_async_axis_t client_axes[] = {0x0100};
   uint64_t client_epochs[] = {0};
   iree_net_session_topology_t client_topo = {};
@@ -1295,6 +1491,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
     SessionCallbackTracker* callbacks = nullptr;
     iree_net_session_t** out_session = nullptr;
     iree_net_session_topology_t server_topology = {};
+    iree_duration_t bootstrap_timeout = 0;
     iree::Status status;
     bool fired = false;
   } accept_ctx;
@@ -1303,6 +1500,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
   accept_ctx.callbacks = &server_callbacks_;
   accept_ctx.out_session = &server_session_;
   accept_ctx.server_topology = server_topo;
+  accept_ctx.bootstrap_timeout = bootstrap_timeout;
 
   IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
       factory_, bind_addr, proactor_, recv_pool_,
@@ -1316,7 +1514,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
               iree_net_session_options_default();
           server_options.local_topology = ctx->server_topology;
           server_options.session_id = 42;
-          server_options.bootstrap_timeout_ns = iree_make_duration_ms(50);
+          server_options.bootstrap_timeout_ns = ctx->bootstrap_timeout;
 
           ctx->status = iree::Status(iree_net_session_accept(
               connection, ctx->proactor, ctx->tracker, &server_options,
@@ -1335,7 +1533,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.local_topology = client_topo;
-  client_options.bootstrap_timeout_ns = iree_make_duration_ms(50);
+  client_options.bootstrap_timeout_ns = bootstrap_timeout;
 
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
@@ -1350,9 +1548,30 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
   })) << "Bootstrap timed out";
   IREE_ASSERT_OK(accept_ctx.status);
 
-  // Wait an extra 200ms — well past the 50ms bootstrap timeout. If the
-  // timer cancel is broken, it would fire here and transition to ERROR.
-  PollUntil([&]() { return false; }, iree_make_duration_ms(200));
+  // Wait for a separate proactor timer started after readiness. By the time it
+  // fires, each bootstrap timer's original deadline has necessarily passed.
+  struct VerificationTimerState {
+    bool completed = false;
+    iree_status_code_t status_code = IREE_STATUS_OK;
+  } verification_timer_state;
+  iree_async_timer_operation_t verification_timer;
+  memset(&verification_timer, 0, sizeof(verification_timer));
+  iree_async_operation_initialize(
+      &verification_timer.base, IREE_ASYNC_OPERATION_TYPE_TIMER,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      [](void* user_data, iree_async_operation_t*, iree_status_t status,
+         iree_async_completion_flags_t) {
+        auto* state = static_cast<VerificationTimerState*>(user_data);
+        state->status_code = iree_status_code(status);
+        iree_status_free(status);
+        state->completed = true;
+      },
+      &verification_timer_state);
+  verification_timer.deadline_ns = iree_time_now() + bootstrap_timeout;
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &verification_timer.base));
+  ASSERT_TRUE(PollUntil([&]() { return verification_timer_state.completed; }));
+  EXPECT_EQ(verification_timer_state.status_code, IREE_STATUS_OK);
 
   // Both sessions should still be OPERATIONAL (no spurious timeout).
   EXPECT_EQ(iree_net_session_state(client_session_),

@@ -225,6 +225,107 @@ TEST_P(FactoryTest, OpenEndpointFirst) {
   iree_net_listener_free(pair.listener);
 }
 
+TEST_P(FactoryTest, ConnectionJoinsEndpointDeactivation) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
+
+  EndpointReadyResult client_endpoint_result;
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      pair.client, {EndpointReadyResult::Callback, &client_endpoint_result}));
+  EndpointReadyResult server_endpoint_result;
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      pair.server, {EndpointReadyResult::Callback, &server_endpoint_result}));
+  EndpointReadyResult client_second_endpoint_result;
+  EndpointReadyResult server_second_endpoint_result;
+  bool use_second_endpoint =
+      iree_net_connection_max_endpoint_count(pair.client) >= 2 &&
+      iree_net_connection_max_endpoint_count(pair.server) >= 2;
+  if (use_second_endpoint) {
+    IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+        pair.client,
+        {EndpointReadyResult::Callback, &client_second_endpoint_result}));
+    IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+        pair.server,
+        {EndpointReadyResult::Callback, &server_second_endpoint_result}));
+  }
+  ASSERT_TRUE(PollUntil([&]() {
+    return client_endpoint_result.fired && server_endpoint_result.fired &&
+           (!use_second_endpoint || (client_second_endpoint_result.fired &&
+                                     server_second_endpoint_result.fired));
+  }));
+
+  auto callbacks = iree_net_message_endpoint_callbacks_t{
+      [](void*, iree_const_byte_span_t, iree_async_buffer_lease_t*)
+          -> iree_status_t { return iree_ok_status(); },
+      [](void*, iree_status_t status) { iree_status_ignore(status); }, nullptr};
+  iree_net_message_endpoint_set_callbacks(client_endpoint_result.endpoint,
+                                          callbacks);
+  iree_net_message_endpoint_set_callbacks(server_endpoint_result.endpoint,
+                                          callbacks);
+  if (use_second_endpoint) {
+    iree_net_message_endpoint_set_callbacks(
+        client_second_endpoint_result.endpoint, callbacks);
+    iree_net_message_endpoint_set_callbacks(
+        server_second_endpoint_result.endpoint, callbacks);
+  }
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(client_endpoint_result.endpoint));
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(server_endpoint_result.endpoint));
+  if (use_second_endpoint) {
+    IREE_ASSERT_OK(iree_net_message_endpoint_activate(
+        client_second_endpoint_result.endpoint));
+    IREE_ASSERT_OK(iree_net_message_endpoint_activate(
+        server_second_endpoint_result.endpoint));
+  }
+
+  // Keep a direct-write reservation pending so endpoint deactivation cannot
+  // finish before connection deactivation joins it. Aborting after both
+  // requests retires the operation without publishing a frame to the peer.
+  void* send_ptr = nullptr;
+  iree_net_carrier_send_handle_t send_handle = 0;
+  IREE_ASSERT_OK(iree_net_message_endpoint_begin_send(
+      client_endpoint_result.endpoint, /*size=*/16, &send_ptr, &send_handle));
+
+  int endpoint_deactivate_count = 0;
+  IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+      client_endpoint_result.endpoint,
+      [](void* user_data) { ++*static_cast<int*>(user_data); },
+      &endpoint_deactivate_count));
+
+  struct ConnectionDeactivateResult {
+    int callback_count = 0;
+    iree_net_connection_t* connection = nullptr;
+
+    static void Callback(void* user_data) {
+      auto* result = static_cast<ConnectionDeactivateResult*>(user_data);
+      ++result->callback_count;
+      iree_net_connection_release(result->connection);
+    }
+  } client_deactivate{0, pair.client}, server_deactivate{0, pair.server};
+  iree_net_connection_deactivate(
+      pair.client, {ConnectionDeactivateResult::Callback, &client_deactivate});
+  iree_net_message_endpoint_abort_send(client_endpoint_result.endpoint,
+                                       send_handle);
+
+  while (endpoint_deactivate_count == 0 ||
+         client_deactivate.callback_count == 0) {
+    iree_host_size_t completion_count = 0;
+    IREE_ASSERT_OK(PollProactorOnce(proactor_, &completion_count));
+  }
+  iree_net_connection_deactivate(
+      pair.server, {ConnectionDeactivateResult::Callback, &server_deactivate});
+  while (server_deactivate.callback_count == 0) {
+    iree_host_size_t completion_count = 0;
+    IREE_ASSERT_OK(PollProactorOnce(proactor_, &completion_count));
+  }
+  EXPECT_EQ(endpoint_deactivate_count, 1);
+  EXPECT_EQ(client_deactivate.callback_count, 1);
+  EXPECT_EQ(server_deactivate.callback_count, 1);
+
+  StopAndWait(pair.listener);
+  iree_net_listener_free(pair.listener);
+}
+
 TEST_P(FactoryTest, ConnectionReleaseWithoutEndpoint) {
   // Create a connection but never open_endpoint — the transport stack should be
   // released when the connection is destroyed. ASan/LSan catch leaks.

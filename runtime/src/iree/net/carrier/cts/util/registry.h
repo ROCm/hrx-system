@@ -281,6 +281,23 @@ inline iree_net_carrier_recv_handler_t MakeNullRecvHandler() {
   return {NullRecvHandler, nullptr};
 }
 
+// Polls without imposing a local deadline on valid asynchronous work.
+//
+// Proactors may return DEADLINE_EXCEEDED even for an infinite caller timeout
+// when an internal nonblocking progress pass or wake produces no completion.
+// That is a no-progress result, not a failure of the operation being joined.
+inline iree_status_t PollProactorOnce(
+    iree_async_proactor_t* proactor,
+    iree_host_size_t* out_completed_count = nullptr) {
+  iree_status_t status = iree_async_proactor_poll(
+      proactor, iree_infinite_timeout(), out_completed_count);
+  if (iree_status_is_deadline_exceeded(status)) {
+    iree_status_free(status);
+    return iree_ok_status();
+  }
+  return status;
+}
+
 // Deactivates a carrier and polls the proactor until draining completes.
 // Safe to call on carriers in any state:
 //   CREATED/DEACTIVATED: returns immediately.
@@ -297,28 +314,29 @@ inline void DeactivateAndDrain(iree_net_carrier_t* carrier,
     return;
   }
 
+  bool deactivated = false;
+
   // Only initiate deactivation from ACTIVE state. If already DRAINING (a
-  // previous deactivate call is in progress), skip straight to polling.
+  // previous deactivate call is in progress), its original callback owns the
+  // completion edge and the state transition below is our join point.
   if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_status_t status =
-        iree_net_carrier_deactivate(carrier, nullptr, nullptr);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
-      return;
-    }
+    iree::Status status(iree_net_carrier_deactivate(
+        carrier, [](void* user_data) { *static_cast<bool*>(user_data) = true; },
+        &deactivated));
+    ASSERT_TRUE(status.ok()) << status.ToString();
   }
 
-  // Poll until the carrier reaches DEACTIVATED (all pending operations
-  // drained).
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1000);
-  while (iree_net_carrier_state(carrier) !=
-         IREE_NET_CARRIER_STATE_DEACTIVATED) {
-    if (iree_time_now() >= deadline) break;
+  // Poll until the carrier reports that every operation has drained. The
+  // outer test harness diagnoses a broken lifecycle as a hang; a local
+  // deadline would turn slow but valid work into a flaky teardown.
+  while (!deactivated && iree_net_carrier_state(carrier) !=
+                             IREE_NET_CARRIER_STATE_DEACTIVATED) {
     iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor, iree_make_timeout_ms(10), &completed);
-    iree_status_ignore(status);
+    iree::Status status(PollProactorOnce(proactor, &completed));
+    ASSERT_TRUE(status.ok()) << status.ToString();
   }
+  EXPECT_EQ(iree_net_carrier_state(carrier),
+            IREE_NET_CARRIER_STATE_DEACTIVATED);
 }
 
 //===----------------------------------------------------------------------===//

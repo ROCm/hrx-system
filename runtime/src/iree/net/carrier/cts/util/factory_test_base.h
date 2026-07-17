@@ -151,20 +151,14 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
   // Polling helpers
   //===--------------------------------------------------------------------===//
 
-  // Polls the proactor until |condition| returns true or the time budget
-  // expires. Returns true if the condition was met, false on timeout.
-  bool PollUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline = iree_time_now() + budget;
+  // Polls the proactor until |condition| returns true. The outer test harness
+  // owns hang detection for valid asynchronous work.
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_deadline(deadline), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
+      iree::Status status(PollProactorOnce(proactor_, &completed));
+      if (!status.ok()) {
+        ADD_FAILURE() << status.ToString();
         return false;
       }
     }
@@ -202,11 +196,7 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
         {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
          &stopped});
     if (iree_status_is_ok(status)) {
-      bool stopped_in_time = PollUntil([&]() { return stopped; });
-      if (!stopped_in_time) {
-        status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                  "listener stop timed out");
-      }
+      PollUntil([&]() { return stopped; });
     }
     return status;
   }

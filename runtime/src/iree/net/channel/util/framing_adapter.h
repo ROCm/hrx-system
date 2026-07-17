@@ -54,6 +54,7 @@
 #include "iree/base/api.h"
 #include "iree/net/carrier.h"
 #include "iree/net/channel/util/frame_accumulator.h"
+#include "iree/net/endpoint_lifecycle.h"
 #include "iree/net/message_endpoint.h"
 
 #ifdef __cplusplus
@@ -89,6 +90,16 @@ iree_status_t iree_net_framing_adapter_allocate(
 // The adapter must be deactivated before freeing. Freeing an active adapter is
 // a programming error and triggers an assertion failure.
 void iree_net_framing_adapter_free(iree_net_framing_adapter_t* adapter);
+
+// Joins connection deactivation to this adapter's carrier drain.
+//
+// Starts carrier deactivation when the adapter is ACTIVE, joins an endpoint-
+// initiated drain when it is DRAINING, and does nothing when it is CREATED or
+// DEACTIVATED. The caller must initialize and commit |barrier| around all
+// endpoint joins owned by the connection.
+void iree_net_framing_adapter_join_deactivation(
+    iree_net_framing_adapter_t* adapter,
+    iree_net_endpoint_deactivation_barrier_t* barrier);
 
 // Returns a borrowed message_endpoint view into this adapter.
 //

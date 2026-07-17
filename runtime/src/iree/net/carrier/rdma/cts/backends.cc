@@ -338,22 +338,11 @@ iree_status_t QueryListenerPort(iree_net_listener_t* listener,
 }
 
 iree_status_t PollUntil(iree_async_proactor_t* proactor,
-                        const std::function<bool()>& condition,
-                        const char* description) {
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
+                        const std::function<bool()>& condition) {
   while (!condition()) {
-    if (iree_time_now() >= deadline) {
-      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED, "%s timed out",
-                              description);
-    }
     iree_host_size_t completed_count = 0;
-    iree_status_t poll_status = iree_async_proactor_poll(
-        proactor, iree_make_deadline(deadline), &completed_count);
-    iree::Status consumed_status(std::move(poll_status));
-    if (consumed_status.code() == iree::StatusCode::kDeadlineExceeded) {
-      continue;
-    }
-    if (!consumed_status.ok()) return std::move(consumed_status);
+    iree_status_t poll_status = PollProactorOnce(proactor, &completed_count);
+    if (!iree_status_is_ok(poll_status)) return poll_status;
   }
   return iree_ok_status();
 }
@@ -373,8 +362,7 @@ iree_status_t StopAndFreeListener(iree_async_proactor_t* proactor,
                  },
                  &stop_state});
   if (iree_status_is_ok(status)) {
-    status = PollUntil(
-        proactor, [&]() { return stop_state.fired; }, "RDMA listener stop");
+    status = PollUntil(proactor, [&]() { return stop_state.fired; });
   }
   if (iree_status_is_ok(status)) {
     iree_net_listener_free(listener);
@@ -561,13 +549,10 @@ iree_status_t ProbeRdmaCtsConnection() {
     }
   }
   if (iree_status_is_ok(status)) {
-    status = PollUntil(
-        proactor,
-        [&]() {
-          return connection_state.completion_count.load(
-                     std::memory_order_acquire) >= 2;
-        },
-        "RDMA CTS availability connect");
+    status = PollUntil(proactor, [&]() {
+      return connection_state.completion_count.load(
+                 std::memory_order_acquire) >= 2;
+    });
   }
   if (iree_status_is_ok(status) && !connection_state.accept_status.ok()) {
     status = std::move(connection_state.accept_status);
@@ -676,17 +661,13 @@ static iree::StatusOr<CarrierPair> CreateRdmaCarrierPair(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = PollUntil(
-        proactor,
-        [&]() {
-          int completion_count =
-              connection_state.completion_count.load(std::memory_order_acquire);
-          return completion_count >= 2 ||
-                 (completion_count >= 1 &&
-                  (!connection_state.accept_status.ok() ||
-                   !connection_state.connect_status.ok()));
-        },
-        "RDMA connect");
+    status = PollUntil(proactor, [&]() {
+      int completion_count =
+          connection_state.completion_count.load(std::memory_order_acquire);
+      return completion_count >= 2 ||
+             (completion_count >= 1 && (!connection_state.accept_status.ok() ||
+                                        !connection_state.connect_status.ok()));
+    });
   }
   if (iree_status_is_ok(status) && !connection_state.accept_status.ok()) {
     status = std::move(connection_state.accept_status);

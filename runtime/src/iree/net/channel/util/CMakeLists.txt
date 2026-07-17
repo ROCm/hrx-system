@@ -56,6 +56,7 @@ iree_cc_library(
     iree::async
     iree::base
     iree::net::carrier
+    iree::net::endpoint_lifecycle
     iree::net::message_endpoint
   PUBLIC
 )

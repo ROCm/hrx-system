@@ -183,22 +183,13 @@ static iree::StatusOr<CarrierPair> CreateTcpCarrierPairImpl(
       iree_async_proactor_submit_one(proactor, &connect_op.base));
 
   // Poll until both connect and accept complete.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
   while (conn_state.completions.load(std::memory_order_acquire) < 2) {
-    if (iree_time_now() >= deadline) {
-      iree_async_socket_release(client_socket);
-      return iree::Status(iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                           "TCP connection timed out"));
-    }
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor, iree_make_timeout_ms(100), &count);
-    if (!iree_status_is_ok(status) &&
-        !iree_status_is_deadline_exceeded(status)) {
+    iree_status_t status = PollProactorOnce(proactor, &count);
+    if (!iree_status_is_ok(status)) {
       iree_async_socket_release(client_socket);
       return iree::Status(std::move(status));
     }
-    iree_status_ignore(status);
   }
 
   // Check connection results.

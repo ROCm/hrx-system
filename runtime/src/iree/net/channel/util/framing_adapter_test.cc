@@ -338,6 +338,11 @@ class FramingAdapterTest : public ::testing::Test {
 
   void TearDown() override {
     if (adapter_) {
+      if (iree_net_carrier_state(&mock_carrier_->base) ==
+          IREE_NET_CARRIER_STATE_ACTIVE) {
+        IREE_ASSERT_OK(iree_net_message_endpoint_deactivate(
+            endpoint_, /*callback=*/nullptr, /*user_data=*/nullptr));
+      }
       iree_net_framing_adapter_free(adapter_);
       adapter_ = nullptr;
     }

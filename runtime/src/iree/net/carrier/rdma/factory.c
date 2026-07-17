@@ -18,6 +18,7 @@
 #include "iree/net/carrier/rdma/endpoint_data.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/connection.h"
+#include "iree/net/endpoint_lifecycle.h"
 #include "iree/net/message_endpoint.h"
 
 //===----------------------------------------------------------------------===//
@@ -196,7 +197,6 @@ typedef struct iree_net_rdma_connection_t iree_net_rdma_connection_t;
 typedef uint8_t iree_net_rdma_endpoint_flags_t;
 enum iree_net_rdma_endpoint_flag_bits_e {
   IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED = 1u << 0,
-  IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE = 1u << 1,
 };
 
 typedef struct iree_net_rdma_endpoint_t {
@@ -215,11 +215,8 @@ typedef struct iree_net_rdma_endpoint_t {
   // Message and error callbacks installed by the endpoint consumer.
   iree_net_message_endpoint_callbacks_t callbacks;
 
-  // Deactivation callback stored while the carrier drains.
-  iree_net_message_endpoint_deactivate_fn_t deactivate_callback;
-
-  // User data passed to deactivate_callback.
-  void* deactivate_user_data;
+  // Coordinates endpoint and connection deactivation requests.
+  iree_net_endpoint_lifecycle_t lifecycle;
 
   // Zero-based endpoint slot index in the owning connection.
   uint32_t endpoint_index;
@@ -245,10 +242,7 @@ static iree_status_t iree_net_rdma_endpoint_on_recv(
 
 static void iree_net_rdma_endpoint_carrier_deactivated(void* user_data) {
   iree_net_rdma_endpoint_t* endpoint = (iree_net_rdma_endpoint_t*)user_data;
-  endpoint->flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE;
-  if (endpoint->deactivate_callback) {
-    endpoint->deactivate_callback(endpoint->deactivate_user_data);
-  }
+  iree_net_endpoint_lifecycle_complete_deactivation(&endpoint->lifecycle);
 }
 
 static void iree_net_rdma_endpoint_set_callbacks(
@@ -263,6 +257,8 @@ static iree_status_t iree_net_rdma_endpoint_activate(void* self) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callbacks must be set before activation");
   }
+  IREE_RETURN_IF_ERROR(
+      iree_net_endpoint_lifecycle_activate(&endpoint->lifecycle));
 
   iree_net_carrier_t* carrier = endpoint->carrier;
   iree_net_carrier_set_recv_handler(carrier,
@@ -278,8 +274,8 @@ static iree_status_t iree_net_rdma_endpoint_activate(void* self) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "carrier is not activatable");
   }
-  if (iree_status_is_ok(status)) {
-    endpoint->flags |= IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE;
+  if (!iree_status_is_ok(status)) {
+    iree_net_endpoint_lifecycle_rollback_activation(&endpoint->lifecycle);
   }
   return status;
 }
@@ -288,14 +284,18 @@ static iree_status_t iree_net_rdma_endpoint_deactivate(
     void* self, iree_net_message_endpoint_deactivate_fn_t callback,
     void* user_data) {
   iree_net_rdma_endpoint_t* endpoint = (iree_net_rdma_endpoint_t*)self;
-  if (!iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "endpoint not active");
+  iree_net_endpoint_lifecycle_actions_t actions =
+      IREE_NET_ENDPOINT_LIFECYCLE_ACTION_NONE;
+  IREE_RETURN_IF_ERROR(iree_net_endpoint_lifecycle_request_deactivation(
+      &endpoint->lifecycle, callback, user_data, &actions));
+  if (iree_any_bit_set(actions,
+                       IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+    iree_status_t status = iree_net_carrier_deactivate(
+        endpoint->carrier, iree_net_rdma_endpoint_carrier_deactivated,
+        endpoint);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
   }
-  endpoint->deactivate_callback = callback;
-  endpoint->deactivate_user_data = user_data;
-  return iree_net_carrier_deactivate(
-      endpoint->carrier, iree_net_rdma_endpoint_carrier_deactivated, endpoint);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_net_rdma_endpoint_send(
@@ -351,16 +351,6 @@ static const iree_net_message_endpoint_vtable_t iree_net_rdma_endpoint_vtable =
 // Connection
 //===----------------------------------------------------------------------===//
 
-// Embedded drain context for connection deactivation. Shared across all
-// endpoint carriers; the last carrier to drain fires the outer callback.
-typedef struct iree_net_rdma_connection_drain_t {
-  // Number of active endpoint carriers still draining.
-  iree_atomic_int32_t remaining_endpoint_count;
-
-  // User callback invoked when the last active endpoint carrier drains.
-  iree_net_connection_deactivate_callback_t callback;
-} iree_net_rdma_connection_drain_t;
-
 struct iree_net_rdma_connection_t {
   // Base connection; must be first for vtable dispatch.
   iree_net_connection_t base;
@@ -377,8 +367,8 @@ struct iree_net_rdma_connection_t {
   // Number of endpoint slots already reserved by open_endpoint.
   uint32_t allocated_endpoint_count;
 
-  // Embedded drain context used by connection-level deactivation.
-  iree_net_rdma_connection_drain_t drain;
+  // Joins endpoint drains during connection deactivation.
+  iree_net_endpoint_deactivation_barrier_t deactivation_barrier;
 
   // Flexible array of endpoint slots owned by this connection.
   iree_net_rdma_endpoint_t endpoints[];
@@ -528,51 +518,31 @@ static void iree_net_rdma_connection_carrier_completion(
   }
 }
 
-static void iree_net_rdma_connection_endpoint_drained(void* user_data) {
-  iree_net_rdma_endpoint_t* endpoint = (iree_net_rdma_endpoint_t*)user_data;
-  endpoint->flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE;
-  iree_net_rdma_connection_drain_t* drain = &endpoint->connection->drain;
-  if (iree_atomic_fetch_sub(&drain->remaining_endpoint_count, 1,
-                            iree_memory_order_acq_rel) == 1) {
-    drain->callback.fn(drain->callback.user_data);
-  }
-}
-
 static void iree_net_rdma_connection_deactivate(
     iree_net_connection_t* base_connection,
     iree_net_connection_deactivate_callback_t callback) {
   iree_net_rdma_connection_t* connection =
       (iree_net_rdma_connection_t*)base_connection;
-  uint32_t active_endpoint_count = 0;
-  for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
-    iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
-    if (iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
-      ++active_endpoint_count;
-    }
-  }
-
-  if (active_endpoint_count == 0) {
-    callback.fn(callback.user_data);
-    return;
-  }
-
-  iree_net_rdma_connection_drain_t* drain = &connection->drain;
-  iree_atomic_store(&drain->remaining_endpoint_count,
-                    (int32_t)active_endpoint_count, iree_memory_order_relaxed);
-  drain->callback = callback;
-
   iree_net_connection_retain(base_connection);
+  iree_net_endpoint_deactivation_barrier_initialize(
+      callback, &connection->deactivation_barrier);
   for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
     iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
-    if (iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
+    iree_net_endpoint_lifecycle_actions_t actions =
+        iree_net_endpoint_lifecycle_join_deactivation(
+            &endpoint->lifecycle, &connection->deactivation_barrier);
+    if (iree_any_bit_set(
+            actions, IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
       iree_status_t status = iree_net_carrier_deactivate(
-          endpoint->carrier, iree_net_rdma_connection_endpoint_drained,
+          endpoint->carrier, iree_net_rdma_endpoint_carrier_deactivated,
           endpoint);
       if (!iree_status_is_ok(status)) {
         iree_status_abort(status);
       }
     }
   }
+  iree_net_endpoint_deactivation_barrier_commit(
+      &connection->deactivation_barrier);
   iree_net_connection_release(base_connection);
 }
 
@@ -583,11 +553,7 @@ static void iree_net_rdma_connection_destroy(
   iree_allocator_t host_allocator = connection->base.host_allocator;
   for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
     iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
-    IREE_ASSERT(
-        !iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE),
-        "connection destroyed with active endpoint at slot %u; call "
-        "iree_net_connection_deactivate before releasing",
-        (unsigned)i);
+    iree_net_endpoint_lifecycle_deinitialize(&endpoint->lifecycle);
     iree_net_carrier_release(endpoint->carrier);
   }
   iree_net_rdma_cm_channel_release(connection->cm_channel);
@@ -720,6 +686,7 @@ static iree_status_t iree_net_rdma_connection_create(
       endpoint->connection = connection;
       endpoint->carrier = carriers[i];
       endpoint->endpoint_index = i;
+      iree_net_endpoint_lifecycle_initialize(&endpoint->lifecycle);
       carriers[i]->callback.fn = iree_net_rdma_connection_carrier_completion;
       carriers[i]->callback.user_data = endpoint;
       carriers[i] = NULL;

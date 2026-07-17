@@ -49,9 +49,7 @@ TEST_P(ErrorHandlingTest, RecvHandlerErrorDoesNotCrash) {
   iree_async_span_t span;
   auto params = MakeSendParams(msg, strlen(msg), &span);
 
-  // Send may succeed or fail depending on implementation.
-  iree_status_t status = iree_net_carrier_send(client_, &params);
-  iree_status_ignore(status);
+  IREE_ASSERT_OK(SendWhenReady(client_, &params));
 
   // Poll to process any async completions.
   PollUntil([&] { return error_ctx.call_count.load() > 0; });
@@ -66,36 +64,19 @@ TEST_P(ErrorHandlingTest, RecvHandlerErrorDoesNotCrash) {
               state == IREE_NET_CARRIER_STATE_DEACTIVATED);
 }
 
-// Send after peer deactivation should fail gracefully.
-TEST_P(ErrorHandlingTest, SendAfterPeerDeactivateFails) {
-  std::vector<uint8_t> server_received;
-  RecvCapture server_capture(&server_received);
+// Send after local deactivation must fail synchronously. Peer deactivation is
+// not a transport synchronization edge: a stream or shared-memory sender may
+// successfully hand bytes to the transport before observing peer closure.
+TEST_P(ErrorHandlingTest, SendAfterDeactivateFails) {
+  ActivateBoth(MakeNullRecvHandler(), MakeNullRecvHandler());
+  DeactivateAndDrain(client_, proactor_);
 
-  ActivateBoth(MakeNullRecvHandler(), server_capture.AsHandler());
-
-  // Deactivate the server (peer).
-  std::atomic<bool> deactivated{false};
-  auto callback = [](void* ud) { *static_cast<std::atomic<bool>*>(ud) = true; };
-  IREE_ASSERT_OK(iree_net_carrier_deactivate(server_, callback, &deactivated));
-
-  // Poll until deactivation completes.
-  ASSERT_TRUE(PollUntil([&] { return deactivated.load(); }));
-
-  // Now try to send from client to deactivated server.
   const char* msg = "to deactivated peer";
   iree_async_span_t span;
   auto params = MakeSendParams(msg, strlen(msg), &span);
-
-  // Send should fail (peer is gone).
   iree_status_t status = iree_net_carrier_send(client_, &params);
-
-  // Failure may occur at send time or asynchronously during completion.
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  } else {
-    // If send succeeded, poll for completion - it should eventually fail.
-    PollOnce();
-  }
+  EXPECT_TRUE(iree_status_is_failed_precondition(status));
+  iree_status_free(status);
 }
 
 // After shutdown, send must not deliver data to the peer. The carrier can
@@ -104,6 +85,8 @@ TEST_P(ErrorHandlingTest, SendAfterPeerDeactivateFails) {
 TEST_P(ErrorHandlingTest, SendAfterShutdownFails) {
   std::vector<uint8_t> server_received;
   RecvCapture server_capture(&server_received);
+  SendCompletionTracker client_completions;
+  client_->callback = client_completions.AsCallback();
 
   ActivateBoth(MakeNullRecvHandler(), server_capture.AsHandler());
 
@@ -112,19 +95,22 @@ TEST_P(ErrorHandlingTest, SendAfterShutdownFails) {
   const char* msg = "after shutdown";
   iree_async_span_t span;
   auto params = MakeSendParams(msg, strlen(msg), &span);
-  iree_status_t status = iree_net_carrier_send(client_, &params);
-  if (!iree_status_is_ok(status)) {
+  iree::Status status(iree_net_carrier_send(client_, &params));
+  if (!status.ok()) {
     // Synchronous rejection (e.g. SHM's EOS marker prevents ring writes).
-    EXPECT_TRUE(iree_status_is_failed_precondition(status));
-    iree_status_ignore(status);
+    EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
   } else {
     // Async carriers (TCP) may accept the submission but fail at completion.
-    // Poll to let the proactor process the failure.
-    PollOnce();
+    ASSERT_TRUE(
+        PollUntil([&] { return client_completions.call_count.load() == 1; }));
+    iree::Status completion_status(client_completions.ConsumeStatus());
+    EXPECT_FALSE(completion_status.ok());
   }
 
-  // Drain any pending events so the server processes everything available.
-  PollOnce();
+  // Deactivation is the transport barrier proving no accepted receive remains
+  // able to reach the peer handler.
+  DeactivateAndDrain(client_, proactor_);
+  DeactivateAndDrain(server_, proactor_);
 
   // The server must not have received the post-shutdown data.
   EXPECT_EQ(server_capture.total_bytes.load(), 0u);
@@ -142,12 +128,19 @@ TEST_P(ErrorHandlingTest, RapidSendsToErrorHandler) {
   iree_async_span_t span;
   auto params = MakeSendParams(msg, strlen(msg), &span);
 
-  // Send multiple times rapidly.
+  // Send multiple times rapidly. Once the error handler's failure begins
+  // transport teardown, later sends may be rejected synchronously.
+  int accepted_count = 0;
   for (int i = 0; i < 10; ++i) {
     iree_status_t status = iree_net_carrier_send(client_, &params);
-    iree_status_ignore(status);
-    PollOnce();
+    if (iree_status_is_ok(status)) {
+      ++accepted_count;
+    } else {
+      iree_status_free(status);
+      break;
+    }
   }
+  ASSERT_GT(accepted_count, 0);
 
   // Poll to drain completions.
   PollUntil([&] { return error_ctx.call_count.load() >= 1; });

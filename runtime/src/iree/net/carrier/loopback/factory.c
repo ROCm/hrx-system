@@ -13,6 +13,7 @@
 #include "iree/net/carrier/loopback/carrier.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/connection.h"
+#include "iree/net/endpoint_lifecycle.h"
 #include "iree/net/message_endpoint.h"
 
 //===----------------------------------------------------------------------===//
@@ -48,12 +49,8 @@ typedef struct iree_net_loopback_endpoint_adapter_t {
   iree_async_buffer_pool_t* recv_pool;
   // Message and error handlers from the endpoint consumer.
   iree_net_message_endpoint_callbacks_t callbacks;
-  // Deactivation callback.
-  struct {
-    iree_net_message_endpoint_deactivate_fn_t fn;
-    void* user_data;
-  } deactivate;
-  bool activated;
+  // Coordinates endpoint and connection deactivation requests.
+  iree_net_endpoint_lifecycle_t lifecycle;
 } iree_net_loopback_endpoint_adapter_t;
 
 // Carrier recv handler that bridges NULL lease to valid lease.
@@ -94,10 +91,7 @@ static iree_status_t iree_net_loopback_endpoint_on_recv(
 static void iree_net_loopback_endpoint_carrier_deactivated(void* user_data) {
   iree_net_loopback_endpoint_adapter_t* adapter =
       (iree_net_loopback_endpoint_adapter_t*)user_data;
-  adapter->activated = false;
-  if (adapter->deactivate.fn) {
-    adapter->deactivate.fn(adapter->deactivate.user_data);
-  }
+  iree_net_endpoint_lifecycle_complete_deactivation(&adapter->lifecycle);
 }
 
 // Carrier error callback forwarded to endpoint consumer.
@@ -126,6 +120,8 @@ static iree_status_t iree_net_loopback_endpoint_activate(void* self) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callbacks must be set before activation");
   }
+  IREE_RETURN_IF_ERROR(
+      iree_net_endpoint_lifecycle_activate(&adapter->lifecycle));
   // Set carrier recv handler to our bridge function.
   iree_net_carrier_set_recv_handler(
       adapter->carrier, (iree_net_carrier_recv_handler_t){
@@ -142,8 +138,11 @@ static iree_status_t iree_net_loopback_endpoint_activate(void* self) {
                             .fn = iree_net_loopback_endpoint_carrier_error,
                             .user_data = adapter,
                         });
-  adapter->activated = true;
-  return iree_net_carrier_activate(adapter->carrier);
+  iree_status_t status = iree_net_carrier_activate(adapter->carrier);
+  if (!iree_status_is_ok(status)) {
+    iree_net_endpoint_lifecycle_rollback_activation(&adapter->lifecycle);
+  }
+  return status;
 }
 
 static iree_status_t iree_net_loopback_endpoint_deactivate(
@@ -151,15 +150,18 @@ static iree_status_t iree_net_loopback_endpoint_deactivate(
     void* user_data) {
   iree_net_loopback_endpoint_adapter_t* adapter =
       (iree_net_loopback_endpoint_adapter_t*)self;
-  if (!adapter->activated) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "endpoint not active");
+  iree_net_endpoint_lifecycle_actions_t actions =
+      IREE_NET_ENDPOINT_LIFECYCLE_ACTION_NONE;
+  IREE_RETURN_IF_ERROR(iree_net_endpoint_lifecycle_request_deactivation(
+      &adapter->lifecycle, callback, user_data, &actions));
+  if (iree_any_bit_set(actions,
+                       IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+    iree_status_t status = iree_net_carrier_deactivate(
+        adapter->carrier, iree_net_loopback_endpoint_carrier_deactivated,
+        adapter);
+    if (!iree_status_is_ok(status)) iree_status_abort(status);
   }
-  adapter->deactivate.fn = callback;
-  adapter->deactivate.user_data = user_data;
-  return iree_net_carrier_deactivate(
-      adapter->carrier, iree_net_loopback_endpoint_carrier_deactivated,
-      adapter);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_net_loopback_endpoint_send(
@@ -227,6 +229,7 @@ static iree_status_t iree_net_loopback_endpoint_adapter_allocate(
   memset(adapter, 0, sizeof(*adapter));
   adapter->carrier = carrier;
   adapter->recv_pool = recv_pool;
+  iree_net_endpoint_lifecycle_initialize(&adapter->lifecycle);
   *out_adapter = adapter;
   return iree_ok_status();
 }
@@ -240,6 +243,7 @@ static void iree_net_loopback_endpoint_adapter_free(
   // would be a use-after-free.
   iree_net_loopback_carrier_set_peer_disconnect_handler(
       adapter->carrier, (iree_net_loopback_carrier_disconnect_handler_t){0});
+  iree_net_endpoint_lifecycle_deinitialize(&adapter->lifecycle);
   iree_net_carrier_release(adapter->carrier);
   iree_allocator_free(host_allocator, adapter);
 }
@@ -257,14 +261,6 @@ typedef struct iree_net_loopback_endpoint_slot_t {
   iree_net_loopback_endpoint_adapter_t* adapter;
 } iree_net_loopback_endpoint_slot_t;
 
-// Embedded drain context for connection deactivation. Shared across all
-// carriers in the connection; the last carrier to drain fires the outer
-// callback. Pre-allocated so deactivation is infallible.
-typedef struct iree_net_loopback_connection_drain_t {
-  iree_atomic_int32_t remaining;
-  iree_net_connection_deactivate_callback_t callback;
-} iree_net_loopback_connection_drain_t;
-
 typedef struct iree_net_loopback_connection_t {
   iree_net_connection_t base;
   iree_async_proactor_t* proactor;
@@ -273,8 +269,8 @@ typedef struct iree_net_loopback_connection_t {
   iree_async_buffer_pool_t* recv_pool;
   uint16_t max_endpoint_count;
   uint16_t allocated_endpoint_count;
-  // Embedded drain context for deactivation (used once).
-  iree_net_loopback_connection_drain_t drain;
+  // Joins endpoint drains during connection deactivation.
+  iree_net_endpoint_deactivation_barrier_t deactivation_barrier;
   // FAM: one slot per endpoint, sized by max_endpoint_count.
   iree_net_loopback_endpoint_slot_t endpoints[];
 } iree_net_loopback_connection_t;
@@ -310,37 +306,11 @@ static iree_status_t iree_net_loopback_connection_create(
   return iree_ok_status();
 }
 
-// Per-carrier deactivation callback. Fires when one carrier has drained.
-static void iree_net_loopback_connection_carrier_drained(void* user_data) {
-  iree_net_loopback_connection_drain_t* drain =
-      (iree_net_loopback_connection_drain_t*)user_data;
-  if (iree_atomic_fetch_sub(&drain->remaining, 1, iree_memory_order_acq_rel) ==
-      1) {
-    // Last carrier drained — fire outer callback.
-    drain->callback.fn(drain->callback.user_data);
-  }
-}
-
 static void iree_net_loopback_connection_deactivate(
     iree_net_connection_t* base_connection,
     iree_net_connection_deactivate_callback_t callback) {
   iree_net_loopback_connection_t* connection =
       (iree_net_loopback_connection_t*)base_connection;
-
-  // Count active adapters that need deactivation.
-  uint16_t active_count = 0;
-  for (uint16_t i = 0; i < connection->max_endpoint_count; ++i) {
-    iree_net_loopback_endpoint_slot_t* slot = &connection->endpoints[i];
-    if (slot->adapter && slot->adapter->activated) {
-      ++active_count;
-    }
-  }
-
-  if (active_count == 0) {
-    // No active carriers — complete synchronously.
-    callback.fn(callback.user_data);
-    return;
-  }
 
   // Retain the connection for the duration of carrier deactivation. Carrier
   // deactivation callbacks may fire synchronously and the outer callback may
@@ -348,30 +318,31 @@ static void iree_net_loopback_connection_deactivate(
   // its endpoint slots.
   iree_net_connection_retain(base_connection);
 
-  // Initialize the embedded drain context.
-  iree_net_loopback_connection_drain_t* drain = &connection->drain;
-  iree_atomic_store(&drain->remaining, (int32_t)active_count,
-                    iree_memory_order_relaxed);
-  drain->callback = callback;
+  iree_net_endpoint_deactivation_barrier_initialize(
+      callback, &connection->deactivation_barrier);
 
-  // Deactivate each active carrier. The per-carrier callback decrements the
-  // counter; the last one to complete fires the outer callback.
+  // Join endpoint-initiated drains and start any carrier not already draining.
   for (uint16_t i = 0; i < connection->max_endpoint_count; ++i) {
     iree_net_loopback_endpoint_slot_t* slot = &connection->endpoints[i];
-    if (slot->adapter && slot->adapter->activated) {
-      slot->adapter->activated = false;
+    if (slot->adapter) {
+      iree_net_endpoint_lifecycle_actions_t actions =
+          iree_net_endpoint_lifecycle_join_deactivation(
+              &slot->adapter->lifecycle, &connection->deactivation_barrier);
+      if (!iree_any_bit_set(
+              actions, IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+        continue;
+      }
       iree_status_t status = iree_net_carrier_deactivate(
-          slot->adapter->carrier, iree_net_loopback_connection_carrier_drained,
-          drain);
+          slot->adapter->carrier,
+          iree_net_loopback_endpoint_carrier_deactivated, slot->adapter);
       if (!iree_status_is_ok(status)) {
-        // Deactivation failed (should not happen for loopback carriers).
-        // Count this carrier as drained to avoid hanging.
-        iree_status_ignore(status);
-        iree_net_loopback_connection_carrier_drained(drain);
+        iree_status_abort(status);
       }
     }
   }
 
+  iree_net_endpoint_deactivation_barrier_commit(
+      &connection->deactivation_barrier);
   iree_net_connection_release(base_connection);
 }
 
@@ -383,13 +354,6 @@ static void iree_net_loopback_connection_destroy(
   for (uint16_t i = 0; i < connection->max_endpoint_count; ++i) {
     iree_net_loopback_endpoint_slot_t* slot = &connection->endpoints[i];
     if (slot->adapter) {
-      // Adapter's carrier must be deactivated (or never activated) before
-      // release. Active carriers may have pending NOP operations in the
-      // proactor that reference carrier state.
-      IREE_ASSERT(!slot->adapter->activated,
-                  "connection destroyed with active adapter at slot %u; "
-                  "call iree_net_connection_deactivate before releasing",
-                  (unsigned)i);
       iree_net_loopback_endpoint_adapter_free(slot->adapter, host_allocator);
     } else {
       // Carrier not yet consumed by an adapter.

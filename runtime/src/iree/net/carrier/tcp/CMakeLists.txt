@@ -52,6 +52,7 @@ iree_cc_library(
     iree::net::channel::util::frame_sender
     iree::net::channel::util::framing_adapter
     iree::net::connection
+    iree::net::endpoint_lifecycle
     iree::net::message_endpoint
     iree::net::transport_factory
   PUBLIC

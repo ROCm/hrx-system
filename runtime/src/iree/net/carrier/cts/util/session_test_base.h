@@ -67,6 +67,17 @@ struct SessionCallbackTracker {
   std::vector<uint8_t> control_data;
   iree_net_control_frame_flags_t control_data_flags = 0;
 
+  // Optional hook invoked from on_control_data after capturing the payload.
+  void (*control_data_hook)(void* user_data) = nullptr;
+
+  // User data passed to |control_data_hook|.
+  void* control_data_hook_user_data = nullptr;
+
+  // on_send_complete results.
+  uint32_t send_complete_count = 0;
+  uint64_t send_operation_user_data = 0;
+  iree_status_code_t send_status_code = IREE_STATUS_OK;
+
   // Builds a callbacks struct that routes all callbacks to this tracker.
   iree_net_session_callbacks_t MakeCallbacks() {
     iree_net_session_callbacks_t callbacks;
@@ -75,6 +86,7 @@ struct SessionCallbackTracker {
     callbacks.on_goaway = OnGoaway;
     callbacks.on_error = OnError;
     callbacks.on_control_data = OnControlData;
+    callbacks.on_send_complete = OnSendComplete;
     callbacks.user_data = this;
     return callbacks;
   }
@@ -118,7 +130,19 @@ struct SessionCallbackTracker {
     self->control_data_flags = flags;
     self->control_data.insert(self->control_data.end(), payload.data,
                               payload.data + payload.data_length);
+    if (self->control_data_hook) {
+      self->control_data_hook(self->control_data_hook_user_data);
+    }
     return iree_ok_status();
+  }
+
+  static void OnSendComplete(void* user_data, uint64_t operation_user_data,
+                             iree_status_t status) {
+    auto* self = static_cast<SessionCallbackTracker*>(user_data);
+    ++self->send_complete_count;
+    self->send_operation_user_data = operation_user_data;
+    self->send_status_code = iree_status_code(status);
+    iree_status_free(status);
   }
 };
 
@@ -129,6 +153,37 @@ struct SessionCallbackTracker {
 class SessionTestBase : public FactoryTestBase {
  protected:
   static constexpr uint32_t kAxisTableCapacity = 16;
+
+  struct SessionDeactivationState {
+    bool requested = false;
+    bool completed = false;
+    iree_net_session_deactivated_callback_t chained_callback = {};
+  };
+
+  static void OnSessionDeactivated(void* user_data) {
+    auto* state = static_cast<SessionDeactivationState*>(user_data);
+    state->completed = true;
+    if (state->chained_callback.fn) {
+      state->chained_callback.fn(state->chained_callback.user_data);
+    }
+  }
+
+  void DeactivateSession(
+      iree_net_session_t* session, SessionDeactivationState& state,
+      iree_net_session_deactivated_callback_t chained_callback = {}) {
+    if (!session || state.requested) return;
+    state.requested = true;
+    state.chained_callback = chained_callback;
+    IREE_ASSERT_OK(
+        iree_net_session_deactivate(session, {OnSessionDeactivated, &state}));
+  }
+
+  void PollUntilComplete(std::function<bool()> condition) {
+    while (!condition()) {
+      iree_host_size_t completed = 0;
+      IREE_ASSERT_OK(PollProactorOnce(proactor_, &completed));
+    }
+  }
 
   void SetUp() override {
     FactoryTestBase::SetUp();
@@ -143,38 +198,29 @@ class SessionTestBase : public FactoryTestBase {
   }
 
   void TearDown() override {
-    // Sessions in BOOTSTRAPPING have pending async callbacks that reference
-    // the session as user_data. Poll until bootstrap completes or fails
-    // before releasing, otherwise the pending callbacks cause UAF.
-    PollUntil(
-        [&]() {
-          bool client_done =
-              !client_session_ || iree_net_session_state(client_session_) !=
-                                      IREE_NET_SESSION_STATE_BOOTSTRAPPING;
-          bool server_done =
-              !server_session_ || iree_net_session_state(server_session_) !=
-                                      IREE_NET_SESSION_STATE_BOOTSTRAPPING;
-          return client_done && server_done;
-        },
-        iree_make_duration_ms(2000));
+    // Let bootstrap reach a terminal state before requesting transport drain.
+    PollUntilComplete([&]() {
+      bool client_done =
+          !client_session_ || iree_net_session_state(client_session_) !=
+                                  IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+      bool server_done =
+          !server_session_ || iree_net_session_state(server_session_) !=
+                                  IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+      return client_done && server_done;
+    });
 
-    // Drain pending proactor operations before releasing sessions. Sessions
-    // in DRAINING or OPERATIONAL state may have in-flight carrier NOPs (from
-    // GOAWAY sends, control data, etc.) that reference the carrier as
-    // user_data. Releasing the session destroys the carrier; if any NOPs are
-    // still in the io_uring CQ, the proactor will UAF on them. A brief poll
-    // window lets those NOPs complete while the carrier is still alive.
-    PollUntil([&]() { return false; }, iree_make_duration_ms(100));
+    DeactivateSession(server_session_, server_deactivation_);
+    DeactivateSession(client_session_, client_deactivation_);
+    PollUntilComplete([&]() {
+      bool client_done = !client_session_ || client_deactivation_.completed;
+      bool server_done = !server_session_ || server_deactivation_.completed;
+      return client_done && server_done;
+    });
 
     iree_net_session_release(server_session_);
     server_session_ = nullptr;
     iree_net_session_release(client_session_);
     client_session_ = nullptr;
-
-    // Second drain: process async cleanup from session/connection teardown.
-    // Releasing sessions may trigger deactivation callbacks, listener stop
-    // notifications, etc. that need a poll cycle to fire.
-    PollUntil([&]() { return false; }, iree_make_duration_ms(100));
 
     if (listener_) {
       StopAndWait(listener_);
@@ -314,6 +360,8 @@ class SessionTestBase : public FactoryTestBase {
 
   iree_net_session_t* client_session_ = nullptr;
   iree_net_session_t* server_session_ = nullptr;
+  SessionDeactivationState client_deactivation_;
+  SessionDeactivationState server_deactivation_;
   iree_net_listener_t* listener_ = nullptr;
 };
 

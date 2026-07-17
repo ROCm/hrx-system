@@ -399,7 +399,10 @@ static iree_host_size_t iree_net_shm_carrier_progress(void* user_data) {
   iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
     iree_net_shm_carrier_progress_stop(carrier);
-    return 0;
+    // on_remove may complete deactivation and invoke an external callback.
+    // Count the removal as progress so proactor_poll returns instead of
+    // blocking after the final progress entry disappears.
+    return 1;
   }
 
   iree_host_size_t completions = 0;
@@ -782,17 +785,12 @@ static iree_status_t iree_net_shm_carrier_deactivate(
     return iree_ok_status();
   }
 
-  // Signal the shared_wake notification to force the scan callback to fire.
-  // The scan will call drain_from_wake, which observes DRAINING state, cancels
-  // remaining completions, and triggers deactivation completion.
+  // Publish DRAINING and wake the poll thread. In sleep mode the shared-wake
+  // scan removes the carrier; in poll mode the progress callback observes the
+  // state on its next iteration. Signaling unconditionally avoids reading the
+  // proactor-owned polling mode from an arbitrary deactivation caller thread.
   iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
-  if (carrier->polling.active) {
-    // In poll mode: progress callback will observe DRAINING on next iteration.
-    // No signal needed — it runs every poll() cycle.
-  } else {
-    // In sleep mode: signal shared_wake to trigger scan.
-    iree_async_notification_signal(carrier->shared_wake->notification, 1);
-  }
+  iree_async_notification_signal(carrier->shared_wake->notification, 1);
   iree_net_shm_carrier_maybe_complete_deactivation(carrier);
 
   IREE_TRACE_ZONE_END(z0);

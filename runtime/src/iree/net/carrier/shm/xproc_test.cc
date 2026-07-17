@@ -18,9 +18,6 @@
 // actually works when the fd/handle passing, SHM mapping, and notification
 // primitives cross the process boundary.
 //
-// Under thread sanitizer (TSAN), each child process carries ~10-15x overhead.
-// Timeouts are scaled accordingly to avoid false failures.
-//
 // Platform channels:
 //   POSIX:   Unix domain socket in the temp directory.
 //   Windows: Named pipe (\\.\pipe\<name>) derived from the temp directory.
@@ -62,13 +59,17 @@
 
 namespace {
 
-// Cross-process tests spawn child processes that both carry sanitizer overhead.
-// TSAN adds ~10-15x latency per process, so round-trip timeouts must scale.
-#if defined(IREE_SANITIZER_THREAD)
-static constexpr int64_t kPollTimeoutMs = 30000;
-#else
-static constexpr int64_t kPollTimeoutMs = 5000;
-#endif
+static iree_status_t PollProactorOnce(
+    iree_async_proactor_t* proactor,
+    iree_host_size_t* out_completed_count = nullptr) {
+  iree_status_t status = iree_async_proactor_poll(
+      proactor, iree_infinite_timeout(), out_completed_count);
+  if (iree_status_is_deadline_exceeded(status)) {
+    iree_status_free(status);
+    return iree_ok_status();
+  }
+  return status;
+}
 
 //===----------------------------------------------------------------------===//
 // Error reporting for child processes
@@ -190,7 +191,7 @@ struct XProcContext {
     context->completion_count.fetch_add(1, std::memory_order_relaxed);
     context->completion_bytes.fetch_add(bytes_transferred,
                                         std::memory_order_relaxed);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   iree_net_carrier_callback_t AsCallback() {
@@ -208,18 +209,16 @@ struct XProcContext {
     return {NullRecvFn, nullptr};
   }
 
-  // Polls the proactor until |condition| returns true or timeout expires.
-  bool PollUntil(std::function<bool()> condition,
-                 int64_t timeout_ms = kPollTimeoutMs) {
-    iree_time_t deadline_ns =
-        iree_time_now() + iree_make_duration_ms(timeout_ms);
-    iree_timeout_t timeout = iree_make_deadline(deadline_ns);
+  // Polls the proactor until |condition| returns true.
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline_ns) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor, timeout, &completed);
-      iree_status_ignore(status);
+      iree_status_t status = PollProactorOnce(proactor, &completed);
+      if (!iree_status_is_ok(status)) {
+        iree_status_fprint(stderr, status);
+        iree_status_free(status);
+        return false;
+      }
     }
     return true;
   }
@@ -232,22 +231,19 @@ struct XProcContext {
         state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
       return;
     }
+    bool deactivated = false;
     if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      iree_status_t status =
-          iree_net_carrier_deactivate(carrier, nullptr, nullptr);
-      if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
-        return;
-      }
+      iree_status_t status = iree_net_carrier_deactivate(
+          carrier,
+          [](void* user_data) { *static_cast<bool*>(user_data) = true; },
+          &deactivated);
+      if (!iree_status_is_ok(status)) iree_status_abort(status);
     }
-    iree_time_t deadline_ns = iree_time_now() + iree_make_duration_ms(5000);
-    while (iree_net_carrier_state(carrier) !=
-           IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      if (iree_time_now() >= deadline_ns) break;
+    while (!deactivated && iree_net_carrier_state(carrier) !=
+                               IREE_NET_CARRIER_STATE_DEACTIVATED) {
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor, iree_make_timeout_ms(100), &completed);
-      iree_status_ignore(status);
+      iree_status_t status = PollProactorOnce(proactor, &completed);
+      if (!iree_status_is_ok(status)) iree_status_abort(status);
     }
   }
 };
@@ -332,19 +328,13 @@ struct FactoryXProcContext {
                                        &factory);
   }
 
-  bool PollUntil(std::function<bool()> condition,
-                 int64_t timeout_ms = kPollTimeoutMs) {
-    iree_time_t deadline_ns =
-        iree_time_now() + iree_make_duration_ms(timeout_ms);
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline_ns) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor, iree_make_deadline(deadline_ns), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
+      iree_status_t status = PollProactorOnce(proactor, &completed);
+      if (!iree_status_is_ok(status)) {
+        iree_status_fprint(stderr, status);
+        iree_status_free(status);
         return false;
       }
     }
@@ -536,14 +526,7 @@ static iree_status_t ServerAcceptAndHandshake(
     DWORD error = GetLastError();
     if (error == ERROR_IO_PENDING) {
       // Normal case: waiting for client. Block until it arrives.
-      DWORD wait_result = WaitForSingleObject(event, 30000);
-      if (wait_result == WAIT_TIMEOUT) {
-        CancelIoEx(context->pipe_handle, &overlapped);
-        WaitForSingleObject(event, INFINITE);
-        CloseHandle(event);
-        return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                "timed out waiting for client connection");
-      }
+      DWORD wait_result = WaitForSingleObject(event, INFINITE);
       if (wait_result != WAIT_OBJECT_0) {
         CloseHandle(event);
         return iree_make_status(IREE_STATUS_INTERNAL,

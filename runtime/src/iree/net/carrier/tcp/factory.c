@@ -15,6 +15,7 @@
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/channel/util/framing_adapter.h"
 #include "iree/net/connection.h"
+#include "iree/net/endpoint_lifecycle.h"
 #include "iree/net/message_endpoint.h"
 
 //===----------------------------------------------------------------------===//
@@ -54,11 +55,8 @@ typedef struct iree_net_tcp_stream_t {
   iree_net_tcp_connection_t* connection;
   // Message and error handlers set by the endpoint consumer.
   iree_net_message_endpoint_callbacks_t callbacks;
-  // Deactivation callback for this stream.
-  struct {
-    iree_net_message_endpoint_deactivate_fn_t fn;
-    void* user_data;
-  } deactivate;
+  // Coordinates stream and connection deactivation requests.
+  iree_net_endpoint_lifecycle_t lifecycle;
   // Frames received before this stream was activated locally.
   iree_net_tcp_pending_frame_t* pending_head;
   // Tail pointer for O(1) pending frame append.
@@ -68,12 +66,6 @@ typedef struct iree_net_tcp_stream_t {
   // Whether this stream is actively receiving frames.
   bool active;
 } iree_net_tcp_stream_t;
-
-// Embedded drain context for connection deactivation. Pre-allocated in the
-// connection struct so deactivation is infallible.
-typedef struct iree_net_tcp_connection_drain_t {
-  iree_net_connection_deactivate_callback_t callback;
-} iree_net_tcp_connection_drain_t;
 
 // TCP connection with a flexible-length stream table.
 //
@@ -97,8 +89,8 @@ typedef struct iree_net_tcp_connection_t {
   uint16_t max_stream_count;
   uint16_t allocated_stream_count;
   uint16_t activated_stream_count;
-  // Embedded drain context for deactivation (used once).
-  iree_net_tcp_connection_drain_t drain;
+  // Joins stream and carrier drains during connection deactivation.
+  iree_net_endpoint_deactivation_barrier_t deactivation_barrier;
   // FAM: one slot per stream, sized by max_endpoint_count.
   iree_net_tcp_stream_t streams[];
 } iree_net_tcp_connection_t;
@@ -384,9 +376,9 @@ static iree_status_t iree_net_tcp_stream_activate(void* self) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callbacks must be set before activation");
   }
-  stream->active = true;
+  IREE_RETURN_IF_ERROR(
+      iree_net_endpoint_lifecycle_activate(&stream->lifecycle));
   bool first_activation = (connection->activated_stream_count == 0);
-  ++connection->activated_stream_count;
 
   // First stream activation triggers the underlying adapter activation.
   iree_status_t status = iree_ok_status();
@@ -394,7 +386,11 @@ static iree_status_t iree_net_tcp_stream_activate(void* self) {
     status = iree_net_message_endpoint_activate(connection->shared_endpoint);
   }
   if (iree_status_is_ok(status)) {
+    stream->active = true;
+    ++connection->activated_stream_count;
     status = iree_net_tcp_stream_deliver_pending_frames(stream);
+  } else {
+    iree_net_endpoint_lifecycle_rollback_activation(&stream->lifecycle);
   }
   return status;
 }
@@ -406,14 +402,16 @@ static void iree_net_tcp_stream_deactivate_nop_complete(
   iree_net_tcp_stream_deactivate_context_t* context =
       (iree_net_tcp_stream_deactivate_context_t*)user_data;
   iree_net_tcp_stream_t* stream = context->stream;
-  iree_net_message_endpoint_deactivate_fn_t callback = stream->deactivate.fn;
-  void* callback_user_data = stream->deactivate.user_data;
   iree_allocator_t host_allocator = context->host_allocator;
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
   iree_allocator_free(host_allocator, context);
-  if (callback) {
-    callback(callback_user_data);
-  }
+  iree_net_endpoint_lifecycle_complete_deactivation(&stream->lifecycle);
+}
+
+// Completes the last stream after the shared framing adapter has drained.
+static void iree_net_tcp_stream_shared_endpoint_deactivated(void* user_data) {
+  iree_net_tcp_stream_t* stream = (iree_net_tcp_stream_t*)user_data;
+  iree_net_endpoint_lifecycle_complete_deactivation(&stream->lifecycle);
 }
 
 static iree_status_t iree_net_tcp_stream_deactivate(
@@ -425,35 +423,45 @@ static iree_status_t iree_net_tcp_stream_deactivate(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "stream not active");
   }
+  bool requires_deferred_callback = connection->activated_stream_count > 1;
+  iree_net_tcp_stream_deactivate_context_t* context = NULL;
+  iree_allocator_t host_allocator = connection->base.host_allocator;
+  if (requires_deferred_callback) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*context),
+                                               (void**)&context));
+    memset(context, 0, sizeof(*context));
+    context->stream = stream;
+    context->host_allocator = host_allocator;
+  }
+
+  iree_net_endpoint_lifecycle_actions_t actions =
+      IREE_NET_ENDPOINT_LIFECYCLE_ACTION_NONE;
+  iree_status_t status = iree_net_endpoint_lifecycle_request_deactivation(
+      &stream->lifecycle, callback, user_data, &actions);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, context);
+    return status;
+  }
   stream->active = false;
-  stream->deactivate.fn = callback;
-  stream->deactivate.user_data = user_data;
   --connection->activated_stream_count;
 
   // Last stream deactivation triggers the underlying adapter deactivation.
   if (connection->activated_stream_count == 0) {
-    return iree_net_message_endpoint_deactivate(connection->shared_endpoint,
-                                                callback, user_data);
+    return iree_net_message_endpoint_deactivate(
+        connection->shared_endpoint,
+        iree_net_tcp_stream_shared_endpoint_deactivated, stream);
   }
 
   // Non-last: deliver callback asynchronously via NOP.
-  // We heap-allocate a NOP context since the stream struct has no room for an
-  // inline operation and the stream may be reused.
-  iree_allocator_t host_allocator = connection->base.host_allocator;
-  iree_net_tcp_stream_deactivate_context_t* context = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*context),
-                                             (void**)&context));
-  memset(context, 0, sizeof(*context));
-  context->stream = stream;
-  context->host_allocator = host_allocator;
   iree_async_operation_initialize(
       &context->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
       IREE_ASYNC_OPERATION_FLAG_NONE,
       iree_net_tcp_stream_deactivate_nop_complete, context);
-  iree_status_t status =
+  status =
       iree_async_proactor_submit_one(connection->proactor, &context->nop.base);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(host_allocator, context);
+    iree_net_endpoint_lifecycle_complete_deactivation(&stream->lifecycle);
   }
   return status;
 }
@@ -584,48 +592,39 @@ static const iree_net_message_endpoint_vtable_t
 
 static const iree_net_connection_vtable_t iree_net_tcp_connection_vtable;
 
-// Deactivation callback trampoline: fires the connection-level callback from
-// the framing adapter's endpoint deactivation callback.
-static void iree_net_tcp_connection_adapter_deactivated(void* user_data) {
-  iree_net_tcp_connection_drain_t* drain =
-      (iree_net_tcp_connection_drain_t*)user_data;
-  drain->callback.fn(drain->callback.user_data);
-}
-
 static void iree_net_tcp_connection_deactivate(
     iree_net_connection_t* base_connection,
     iree_net_connection_deactivate_callback_t callback) {
   iree_net_tcp_connection_t* connection =
       (iree_net_tcp_connection_t*)base_connection;
 
-  // If no streams were ever activated, the adapter was never activated and the
-  // carrier has no pending operations. Complete synchronously.
-  if (connection->activated_stream_count == 0) {
-    callback.fn(callback.user_data);
-    return;
-  }
+  iree_net_connection_retain(base_connection);
+  iree_net_endpoint_deactivation_barrier_initialize(
+      callback, &connection->deactivation_barrier);
 
-  // Store callback in the embedded drain context.
-  connection->drain.callback = callback;
-
-  // Mark all streams as inactive and deactivate the shared endpoint, which
-  // deactivates the underlying carrier through the framing adapter.
+  // Join stream-level callbacks before joining the shared carrier drain. Any
+  // active stream has no independent work to drain; its lifetime remains held
+  // by the shared framing adapter barrier entry.
   for (uint16_t i = 0; i < connection->max_stream_count; ++i) {
-    connection->streams[i].active = false;
-    iree_net_tcp_stream_clear_pending_frames(&connection->streams[i],
+    iree_net_tcp_stream_t* stream = &connection->streams[i];
+    iree_net_endpoint_lifecycle_actions_t actions =
+        iree_net_endpoint_lifecycle_join_deactivation(
+            &stream->lifecycle, &connection->deactivation_barrier);
+    stream->active = false;
+    iree_net_tcp_stream_clear_pending_frames(stream,
                                              connection->base.host_allocator);
+    if (iree_any_bit_set(
+            actions, IREE_NET_ENDPOINT_LIFECYCLE_ACTION_BEGIN_DEACTIVATION)) {
+      iree_net_endpoint_lifecycle_complete_deactivation(&stream->lifecycle);
+    }
   }
   connection->activated_stream_count = 0;
 
-  iree_status_t status = iree_net_message_endpoint_deactivate(
-      connection->shared_endpoint, iree_net_tcp_connection_adapter_deactivated,
-      &connection->drain);
-  if (!iree_status_is_ok(status)) {
-    // Endpoint deactivation failed (proactor-level failure). Complete
-    // synchronously — the caller must be able to proceed with teardown.
-    iree_status_ignore(status);
-    connection->drain.callback.fn(connection->drain.callback.user_data);
-  }
+  iree_net_framing_adapter_join_deactivation(connection->adapter,
+                                             &connection->deactivation_barrier);
+  iree_net_endpoint_deactivation_barrier_commit(
+      &connection->deactivation_barrier);
+  iree_net_connection_release(base_connection);
 }
 
 static void iree_net_tcp_connection_destroy(
@@ -639,8 +638,9 @@ static void iree_net_tcp_connection_destroy(
               (unsigned)connection->activated_stream_count);
   // Adapter owns the carrier — freeing it releases both.
   for (uint16_t i = 0; i < connection->max_stream_count; ++i) {
-    iree_net_tcp_stream_clear_pending_frames(&connection->streams[i],
-                                             host_allocator);
+    iree_net_tcp_stream_t* stream = &connection->streams[i];
+    iree_net_tcp_stream_clear_pending_frames(stream, host_allocator);
+    iree_net_endpoint_lifecycle_deinitialize(&stream->lifecycle);
   }
   if (connection->adapter) {
     iree_net_framing_adapter_free(connection->adapter);
@@ -684,6 +684,7 @@ static iree_status_t iree_net_tcp_connection_create(
     // Initialize stream back-pointers.
     for (uint16_t i = 0; i < max_stream_count; ++i) {
       connection->streams[i].connection = connection;
+      iree_net_endpoint_lifecycle_initialize(&connection->streams[i].lifecycle);
     }
 
     // Create TCP carrier from connected socket.

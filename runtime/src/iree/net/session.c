@@ -15,6 +15,7 @@
 #include "iree/async/region.h"
 #include "iree/async/semaphore.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/control/control_channel.h"
 #include "iree/net/channel/util/frame_sender.h"
@@ -103,6 +104,21 @@ typedef enum iree_net_session_bootstrap_phase_e {
   IREE_NET_SESSION_BOOTSTRAP_WAITING_HELLO = 3,
 } iree_net_session_bootstrap_phase_t;
 
+// Retains an application endpoint-ready callback through async dispatch.
+typedef struct iree_net_session_endpoint_callback_t {
+  // Session retained until the endpoint callback returns.
+  iree_net_session_t* session;
+
+  // Application callback admitted before endpoint submission.
+  iree_net_endpoint_ready_callback_t callback;
+} iree_net_session_endpoint_callback_t;
+
+typedef enum iree_net_session_submission_kind_e {
+  IREE_NET_SESSION_SUBMISSION_ENDPOINT = 0,
+  IREE_NET_SESSION_SUBMISSION_DATA_SEND = 1,
+  IREE_NET_SESSION_SUBMISSION_SHUTDOWN = 2,
+} iree_net_session_submission_kind_t;
+
 //===----------------------------------------------------------------------===//
 // iree_net_session_t
 //===----------------------------------------------------------------------===//
@@ -118,7 +134,49 @@ struct iree_net_session_t {
   iree_atomic_int32_t state;
 
   // Application callbacks.
+  // Protected by |callback_mutex|.
   iree_net_session_callbacks_t callbacks;
+
+  // Serializes application callback admission, transport submission, and
+  // connection deactivation.
+  iree_slim_mutex_t callback_mutex;
+
+  // Number of application callbacks admitted and not yet returned.
+  // Protected by |callback_mutex|.
+  uint32_t callback_count;
+
+  // Number of admitted transport calls that have not returned from their
+  // synchronous submission boundary.
+  // Protected by |callback_mutex|.
+  uint32_t transport_submission_count;
+
+  // True after application callback detachment begins.
+  // Protected by |callback_mutex|.
+  bool callbacks_detached;
+
+  // Completion pending until |callback_count| reaches zero.
+  // Protected by |callback_mutex|.
+  iree_net_session_callbacks_detached_callback_t detach_callback;
+
+  // True after connection deactivation has claimed the submission gate.
+  // Protected by |callback_mutex|.
+  bool connection_deactivation_requested;
+
+  // True after connection deactivation was submitted to the connection.
+  // Protected by |callback_mutex|.
+  bool connection_deactivation_submitted;
+
+  // True after the connection and all endpoints have drained.
+  // Protected by |callback_mutex|.
+  bool connection_deactivated;
+
+  // True when the final reference was released during connection drain.
+  // Protected by |callback_mutex|.
+  bool destroy_after_deactivation;
+
+  // Application completion pending for explicit session deactivation.
+  // Protected by |callback_mutex|.
+  iree_net_session_deactivated_callback_t deactivated_callback;
 
   // Protocol version offered or accepted during bootstrap.
   uint32_t protocol_version;
@@ -145,12 +203,6 @@ struct iree_net_session_t {
 
   // Header pool for the control channel's frame_sender (owned by session).
   iree_async_buffer_pool_t* control_header_pool;
-
-  // Number of bootstrap sends (HELLO, HELLO_ACK) still in flight.
-  // When completions arrive and this is nonzero, the operation_user_data is a
-  // malloc'd buffer pointer that must be freed. After bootstrap, this is 0
-  // and all completions are forwarded to the application callback.
-  uint32_t bootstrap_sends_in_flight;
 
   // Frontier tracker retained for remote axis registration and cleanup.
   iree_async_frontier_tracker_t* frontier_tracker;
@@ -193,6 +245,75 @@ struct iree_net_session_t {
   // Negotiated capabilities (set during bootstrap).
   iree_net_bootstrap_capabilities_t negotiated_capabilities;
 };
+
+// Claims a snapshot of the application callback set. Detachment prevents new
+// claims while allowing callbacks already admitted to finish against their
+// snapshot.
+static bool iree_net_session_begin_callback(
+    iree_net_session_t* session, iree_net_session_callbacks_t* out_callbacks) {
+  iree_slim_mutex_lock(&session->callback_mutex);
+  bool callback_active = !session->callbacks_detached;
+  if (callback_active) {
+    ++session->callback_count;
+    *out_callbacks = session->callbacks;
+  } else {
+    memset(out_callbacks, 0, sizeof(*out_callbacks));
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  return callback_active;
+}
+
+// Releases an admitted application callback. The detach completion is taken
+// under the mutex and invoked afterward because it may release the session and
+// its callback target.
+static void iree_net_session_end_callback(iree_net_session_t* session) {
+  iree_net_session_callbacks_detached_callback_t detach_callback = {0};
+  iree_net_session_deactivated_callback_t deactivated_callback = {0};
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(session->callback_count > 0);
+  --session->callback_count;
+  if (session->callback_count == 0) {
+    if (session->callbacks_detached) {
+      memset(&session->callbacks, 0, sizeof(session->callbacks));
+      if (session->detach_callback.fn) {
+        detach_callback = session->detach_callback;
+        memset(&session->detach_callback, 0, sizeof(session->detach_callback));
+      }
+    }
+    if (session->connection_deactivated) {
+      if (session->deactivated_callback.fn) {
+        deactivated_callback = session->deactivated_callback;
+        memset(&session->deactivated_callback, 0,
+               sizeof(session->deactivated_callback));
+      } else {
+        IREE_ASSERT(!session->destroy_after_deactivation,
+                    "implicit session teardown completed before its final "
+                    "application callback returned");
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  if (deactivated_callback.fn) {
+    deactivated_callback.fn(deactivated_callback.user_data);
+  }
+  if (detach_callback.fn) {
+    detach_callback.fn(detach_callback.user_data);
+  }
+}
+
+static void iree_net_session_on_application_endpoint_ready(
+    void* user_data, iree_status_t status,
+    iree_net_message_endpoint_t endpoint) {
+  iree_net_session_endpoint_callback_t* context =
+      (iree_net_session_endpoint_callback_t*)user_data;
+  iree_net_session_t* session = context->session;
+  iree_net_endpoint_ready_callback_t callback = context->callback;
+  iree_allocator_free(session->host_allocator, context);
+
+  callback.fn(callback.user_data, status, endpoint);
+  iree_net_session_end_callback(session);
+  iree_net_session_release(session);
+}
 
 static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session);
 static void iree_net_session_fail(iree_net_session_t* session,
@@ -412,8 +533,14 @@ static void iree_net_session_fail(iree_net_session_t* session,
   // than hanging indefinitely.
   iree_net_session_cleanup_remote_axes(session);
 
-  if (session->callbacks.on_error) {
-    session->callbacks.on_error(session->callbacks.user_data, session, status);
+  iree_net_session_callbacks_t callbacks;
+  if (iree_net_session_begin_callback(session, &callbacks)) {
+    if (callbacks.on_error) {
+      callbacks.on_error(callbacks.user_data, session, status);
+    } else {
+      iree_status_ignore(status);
+    }
+    iree_net_session_end_callback(session);
   } else {
     iree_status_ignore(status);
   }
@@ -515,6 +642,18 @@ static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session) {
 // Bootstrap message construction and parsing
 //===----------------------------------------------------------------------===//
 
+static void iree_net_session_on_bootstrap_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status) {
+  iree_net_session_t* session = (iree_net_session_t*)user_data;
+  void* buffer = (void*)(uintptr_t)operation_user_data;
+  iree_allocator_free(session->host_allocator, buffer);
+  if (!iree_status_is_ok(status)) {
+    iree_net_session_fail(
+        session,
+        iree_status_annotate(status, IREE_SV("bootstrap send failed")));
+  }
+}
+
 // Builds and sends a HELLO message on the control channel.
 static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -554,25 +693,20 @@ static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
            session->local_application_data_length);
   }
 
-  // Send with zero-copy payload. The buffer must remain valid until the
-  // on_send_complete callback fires. We pass the buffer pointer as
-  // operation_user_data so the completion handler can free it.
-  //
-  // Increment bootstrap_sends_in_flight BEFORE the send call because
-  // synchronous-completion carriers (loopback, shm) fire the completion
-  // callback during send_data, before this function returns. If we
-  // incremented after, the completion handler would see count==0 and
-  // misroute the completion to the application callback.
-  session->bootstrap_sends_in_flight++;
+  // Send with zero-copy payload and a protocol-owned completion. Application
+  // DATA may begin as soon as the peer's response arrives, before this send's
+  // completion, so bootstrap traffic must not share the application callback.
   iree_async_span_t span = iree_async_span_from_ptr(buffer, payload_size);
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
-  iree_status_t status = iree_net_control_channel_send_data(
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_session_on_bootstrap_send_complete,
+      .user_data = session,
+  };
+  iree_status_t status = iree_net_control_channel_send_data_with_completion(
       session->control_channel, IREE_NET_CONTROL_DATA_FLAG_NONE, span_list,
-      (uint64_t)(uintptr_t)buffer);
+      (uint64_t)(uintptr_t)buffer, completion);
 
   if (!iree_status_is_ok(status)) {
-    // Send failed synchronously — callback won't fire. Free buffer now.
-    session->bootstrap_sends_in_flight--;
     iree_allocator_free(session->host_allocator, buffer);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -620,19 +754,60 @@ static iree_status_t iree_net_session_send_hello_ack(
            session->local_application_data_length);
   }
 
-  // Send with zero-copy payload. Buffer is freed on completion.
-  // Increment before send — see send_hello comment for rationale.
-  session->bootstrap_sends_in_flight++;
+  // Send with zero-copy payload and a protocol-owned completion.
   iree_async_span_t span = iree_async_span_from_ptr(buffer, payload_size);
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
-  iree_status_t status = iree_net_control_channel_send_data(
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_session_on_bootstrap_send_complete,
+      .user_data = session,
+  };
+  iree_status_t status = iree_net_control_channel_send_data_with_completion(
       session->control_channel, IREE_NET_CONTROL_DATA_FLAG_NONE, span_list,
-      (uint64_t)(uintptr_t)buffer);
+      (uint64_t)(uintptr_t)buffer, completion);
 
   if (!iree_status_is_ok(status)) {
-    session->bootstrap_sends_in_flight--;
     iree_allocator_free(session->host_allocator, buffer);
   }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+// Sends a bootstrap rejection carrying the stable status code. Detailed local
+// diagnostics may contain host paths or other private data, so the wire reason
+// is limited to the canonical status-code name.
+static iree_status_t iree_net_session_send_reject(
+    iree_net_session_t* session, iree_status_code_t reason_code) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_string_view_t reason =
+      iree_make_cstring_view(iree_status_code_string(reason_code));
+  iree_host_size_t payload_size =
+      sizeof(iree_net_bootstrap_reject_t) + reason.size;
+
+  uint8_t* buffer = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(session->host_allocator, payload_size,
+                                (void**)&buffer));
+  memset(buffer, 0, payload_size);
+
+  iree_net_bootstrap_reject_t* reject = (iree_net_bootstrap_reject_t*)buffer;
+  reject->header.type = IREE_NET_BOOTSTRAP_TYPE_REJECT;
+  reject->reason_code = (uint32_t)reason_code;
+  memcpy(buffer + sizeof(*reject), reason.data, reason.size);
+
+  iree_async_span_t span = iree_async_span_from_ptr(buffer, payload_size);
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  iree_net_control_channel_send_completion_t completion = {
+      .fn = iree_net_session_on_bootstrap_send_complete,
+      .user_data = session,
+  };
+  iree_status_t status = iree_net_control_channel_send_data_with_completion(
+      session->control_channel, IREE_NET_CONTROL_DATA_FLAG_NONE, span_list,
+      (uint64_t)(uintptr_t)buffer, completion);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(session->host_allocator, buffer);
+  }
+
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -675,8 +850,11 @@ static void iree_net_session_complete_bootstrap(
   remote_topology.machine_index = session->remote_machine_index;
   remote_topology.session_epoch = session->remote_session_epoch;
 
-  session->callbacks.on_ready(session->callbacks.user_data, session,
-                              &remote_topology);
+  iree_net_session_callbacks_t callbacks;
+  if (iree_net_session_begin_callback(session, &callbacks)) {
+    callbacks.on_ready(callbacks.user_data, session, &remote_topology);
+    iree_net_session_end_callback(session);
+  }
 }
 
 // Handles a received HELLO (server side).
@@ -859,37 +1037,39 @@ static iree_status_t iree_net_session_handle_reject(
 // Control channel DATA handler. During bootstrap, parses bootstrap messages.
 // After bootstrap, forwards to the application's on_control_data handler.
 //
-// Retains the session for the duration of the callback to protect against
-// use-after-free if application callbacks release the session.
+// The connection drain keeps the session allocation alive through callbacks
+// accepted before teardown, including callbacks that begin after the owning
+// reference reaches zero.
 static iree_status_t iree_net_session_on_data(
     void* user_data, iree_net_control_frame_flags_t flags,
     iree_const_byte_span_t payload, iree_async_buffer_lease_t* lease) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
 
   iree_status_t status = iree_ok_status();
   iree_net_session_state_t state = iree_net_session_load_state(session);
 
   if (state == IREE_NET_SESSION_STATE_OPERATIONAL ||
       state == IREE_NET_SESSION_STATE_DRAINING) {
-    // Forward to application handler (on_control_data is required; validated
-    // at session creation).
-    IREE_ASSERT(session->callbacks.on_control_data);
-    status = session->callbacks.on_control_data(session->callbacks.user_data,
-                                                flags, payload, lease);
-    iree_net_session_release(session);
+    iree_net_session_callbacks_t callbacks;
+    if (iree_net_session_begin_callback(session, &callbacks)) {
+      // on_control_data is required and validated at session creation.
+      status =
+          callbacks.on_control_data(callbacks.user_data, flags, payload, lease);
+      iree_net_session_end_callback(session);
+    } else {
+      status =
+          iree_make_status(IREE_STATUS_CANCELLED, "session callbacks detached");
+    }
     return status;
   }
 
   if (state != IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
-    iree_net_session_release(session);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "session in terminal state %d", (int)state);
   }
 
   // Parse bootstrap message header.
   if (payload.data_length < sizeof(iree_net_bootstrap_header_t)) {
-    iree_net_session_release(session);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bootstrap message too short: %" PRIhsz " bytes",
                             payload.data_length);
@@ -901,7 +1081,6 @@ static iree_status_t iree_net_session_on_data(
   // Validate reserved fields.
   if (header.reserved0[0] != 0 || header.reserved0[1] != 0 ||
       header.reserved0[2] != 0 || header.reserved1 != 0) {
-    iree_net_session_release(session);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bootstrap header reserved fields must be 0");
   }
@@ -924,91 +1103,89 @@ static iree_status_t iree_net_session_on_data(
   }
 
   // Route bootstrap failures through fail() so the session transitions to
-  // ERROR state directly with the specific error reason (REJECT reason,
-  // validation error, send failure). Without this, errors would bubble up
-  // through the control channel → carrier → transport error path, losing
-  // the original diagnostic and leaving the session stuck in BOOTSTRAPPING
-  // until the transport error callback fires.
+  // ERROR with the specific local diagnostic. A server also sends the peer a
+  // REJECT before entering ERROR; otherwise the client has no protocol edge to
+  // distinguish rejection from a peer that has stopped making progress.
   if (!iree_status_is_ok(status)) {
+    if (session->role == IREE_NET_SESSION_ROLE_SERVER) {
+      iree_status_code_t reason_code = iree_status_code(status);
+      iree_status_t reject_status =
+          iree_net_session_send_reject(session, reason_code);
+      if (!iree_status_is_ok(reject_status)) {
+        status = iree_status_join(
+            status,
+            iree_status_annotate(
+                reject_status, IREE_SV("failed to send bootstrap rejection")));
+      }
+    }
     iree_net_session_fail(session, status);
     status = iree_ok_status();
   }
 
-  iree_net_session_release(session);
   return status;
 }
 
 // Control channel GOAWAY handler.
-// Retains the session to protect against re-entrant release from callbacks.
 static void iree_net_session_on_goaway(void* user_data, uint32_t reason_code,
                                        iree_string_view_t message) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
 
   iree_net_session_set_state(session, IREE_NET_SESSION_STATE_DRAINING);
 
   // Clean up remote axes (fail them in tracker, release proxy semaphores).
   iree_net_session_cleanup_remote_axes(session);
 
-  if (session->callbacks.on_goaway) {
-    session->callbacks.on_goaway(session->callbacks.user_data, session,
-                                 reason_code, message);
+  iree_net_session_callbacks_t callbacks;
+  if (iree_net_session_begin_callback(session, &callbacks)) {
+    if (callbacks.on_goaway) {
+      callbacks.on_goaway(callbacks.user_data, session, reason_code, message);
+    }
+    iree_net_session_end_callback(session);
   }
-
-  iree_net_session_release(session);
 }
 
 // Control channel ERROR handler.
-// Retains the session to protect against re-entrant release from on_error.
 static void iree_net_session_on_control_error(void* user_data,
                                               iree_status_t status) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
   iree_net_session_fail(session, status);
-  iree_net_session_release(session);
 }
 
-// Control channel send completion handler.
-// Routes bootstrap buffer frees vs application send_complete callbacks.
+// Control channel application DATA send completion handler.
 static void iree_net_session_on_send_complete(void* user_data,
                                               uint64_t operation_user_data,
                                               iree_status_t status) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  if (session->bootstrap_sends_in_flight > 0) {
-    // Bootstrap send (HELLO or HELLO_ACK): operation_user_data is the
-    // malloc'd buffer pointer. Free it now that the send has completed.
-    session->bootstrap_sends_in_flight--;
-    void* buffer = (void*)(uintptr_t)operation_user_data;
-    iree_allocator_free(session->host_allocator, buffer);
-    iree_status_ignore(status);
-  } else if (session->callbacks.on_send_complete) {
-    // Application send: forward to session callback.
-    session->callbacks.on_send_complete(session->callbacks.user_data,
-                                        operation_user_data, status);
-  } else {
-    iree_status_ignore(status);
-  }
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(session->callback_count > 0,
+              "unadmitted application send completed");
+  iree_net_session_callbacks_t callbacks = session->callbacks;
+  IREE_ASSERT(callbacks.on_send_complete,
+              "accepted DATA send has no completion callback");
+  iree_slim_mutex_unlock(&session->callback_mutex);
+
+  callbacks.on_send_complete(callbacks.user_data, operation_user_data, status);
+  iree_net_session_end_callback(session);
 }
 
 static void iree_net_session_on_send_ready(void* user_data) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
-  if (session->callbacks.on_send_ready) {
-    session->callbacks.on_send_ready(session->callbacks.user_data, session);
+  iree_net_session_callbacks_t callbacks;
+  if (iree_net_session_begin_callback(session, &callbacks)) {
+    if (callbacks.on_send_ready) {
+      callbacks.on_send_ready(callbacks.user_data, session);
+    }
+    iree_net_session_end_callback(session);
   }
-  iree_net_session_release(session);
 }
 
 // Control channel transport error handler.
-// Retains the session to protect against re-entrant release from on_error.
 static void iree_net_session_on_transport_error(void* user_data,
                                                 iree_status_t status) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
   iree_net_session_fail(
       session,
       iree_status_annotate(status, IREE_SV("control channel transport error")));
-  iree_net_session_release(session);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1017,12 +1194,11 @@ static void iree_net_session_on_transport_error(void* user_data,
 
 // Called when the control endpoint is ready. Creates the control channel,
 // activates it, and begins the bootstrap protocol.
-// Retains the session to protect against re-entrant release from on_error.
+// Consumes the session reference transferred to the endpoint callback.
 static void iree_net_session_on_control_endpoint_ready(
     void* user_data, iree_status_t status,
     iree_net_message_endpoint_t endpoint) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
 
   if (!iree_status_is_ok(status)) {
     iree_net_session_fail(
@@ -1113,11 +1289,10 @@ static void iree_net_session_on_control_endpoint_ready(
 }
 
 // Called when factory.connect() completes (client path only).
-// Retains the session to protect against re-entrant release from on_error.
+// Consumes the session reference transferred to the connect callback.
 static void iree_net_session_on_connect(void* user_data, iree_status_t status,
                                         iree_net_connection_t* connection) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_retain(session);
 
   if (!iree_status_is_ok(status)) {
     iree_net_session_fail(
@@ -1152,15 +1327,20 @@ static void iree_net_session_on_connect(void* user_data, iree_status_t status,
 
   // Open the control endpoint.
   session->bootstrap_phase = IREE_NET_SESSION_BOOTSTRAP_OPENING_CONTROL;
+  iree_net_session_t* endpoint_session = session;
   iree_net_endpoint_ready_callback_t endpoint_callback = {
       .fn = iree_net_session_on_control_endpoint_ready,
-      .user_data = session,
+      .user_data = endpoint_session,
   };
+  iree_net_session_retain(endpoint_session);
   status = iree_net_connection_open_endpoint(connection, endpoint_callback);
   if (!iree_status_is_ok(status)) {
+    // Synchronous submission failure means the endpoint callback will not
+    // consume its transferred reference.
     iree_net_session_fail(
         session, iree_status_annotate(
                      status, IREE_SV("failed to open control endpoint")));
+    iree_net_session_release(endpoint_session);
   }
 
   iree_net_session_release(session);
@@ -1239,6 +1419,7 @@ static iree_status_t iree_net_session_create_common(
 
   iree_atomic_ref_count_init(&session->ref_count);
   session->host_allocator = host_allocator;
+  iree_slim_mutex_initialize(&session->callback_mutex);
   session->role = role;
   session->bootstrap_phase = (role == IREE_NET_SESSION_ROLE_CLIENT)
                                  ? IREE_NET_SESSION_BOOTSTRAP_CONNECTING
@@ -1321,6 +1502,12 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
   iree_async_frontier_tracker_release(session->frontier_tracker);
   iree_async_proactor_release(session->proactor);
 
+  IREE_ASSERT(session->callback_count == 0);
+  IREE_ASSERT(session->transport_submission_count == 0);
+  IREE_ASSERT(!session->detach_callback.fn);
+  IREE_ASSERT(!session->deactivated_callback.fn);
+  iree_slim_mutex_deinitialize(&session->callback_mutex);
+
   // Free server address storage (client path only).
   if (session->server_address_storage) {
     iree_allocator_free(session->host_allocator,
@@ -1337,7 +1524,108 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
 // session.
 static void iree_net_session_on_connection_deactivated(void* user_data) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
-  iree_net_session_complete_teardown(session);
+  iree_net_session_deactivated_callback_t callback = {0};
+  bool complete_teardown = false;
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(session->connection_deactivation_requested);
+  IREE_ASSERT(session->connection_deactivation_submitted);
+  IREE_ASSERT(!session->connection_deactivated);
+  session->connection_deactivated = true;
+  if (session->callback_count == 0) {
+    if (session->deactivated_callback.fn) {
+      callback = session->deactivated_callback;
+      memset(&session->deactivated_callback, 0,
+             sizeof(session->deactivated_callback));
+    } else if (session->destroy_after_deactivation) {
+      complete_teardown = true;
+    }
+  } else {
+    IREE_ASSERT(!session->destroy_after_deactivation,
+                "implicit session teardown completed with active callbacks");
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+
+  if (callback.fn) {
+    callback.fn(callback.user_data);
+  } else if (complete_teardown) {
+    iree_net_session_complete_teardown(session);
+  }
+}
+
+// Claims the connection deactivation submission once all calls admitted before
+// the request have crossed their synchronous transport submission boundary.
+// The caller must hold |callback_mutex|.
+static bool iree_net_session_prepare_connection_deactivation_locked(
+    iree_net_session_t* session) {
+  if (!session->connection_deactivation_requested ||
+      session->connection_deactivation_submitted ||
+      session->transport_submission_count != 0) {
+    return false;
+  }
+  IREE_ASSERT(session->connection);
+  session->connection_deactivation_submitted = true;
+  return true;
+}
+
+// Submits a previously claimed connection drain. The callback may run
+// synchronously and release |session|, so callers must not touch it afterward.
+static void iree_net_session_submit_connection_deactivation(
+    iree_net_session_t* session) {
+  iree_net_connection_deactivate_callback_t callback = {
+      .fn = iree_net_session_on_connection_deactivated,
+      .user_data = session,
+  };
+  iree_net_connection_deactivate(session->connection, callback);
+}
+
+static iree_status_t iree_net_session_begin_transport_submission(
+    iree_net_session_t* session,
+    iree_net_session_submission_kind_t submission_kind) {
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&session->callback_mutex);
+  iree_net_session_state_t state = iree_net_session_load_state(session);
+  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "session state %d does not accept application submissions", (int)state);
+  } else if (submission_kind != IREE_NET_SESSION_SUBMISSION_SHUTDOWN &&
+             session->callbacks_detached) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "session callbacks are detached");
+  } else if (session->connection_deactivation_requested) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "session connection is deactivating");
+  } else if (submission_kind == IREE_NET_SESSION_SUBMISSION_DATA_SEND &&
+             !session->callbacks.on_send_complete) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "DATA sends require an on_send_complete callback");
+  } else {
+    if (submission_kind == IREE_NET_SESSION_SUBMISSION_SHUTDOWN) {
+      iree_net_session_set_state(session, IREE_NET_SESSION_STATE_DRAINING);
+    }
+    if (submission_kind != IREE_NET_SESSION_SUBMISSION_SHUTDOWN) {
+      ++session->callback_count;
+    }
+    ++session->transport_submission_count;
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  return status;
+}
+
+// Releases the synchronous submission gate. This may start a deferred
+// connection drain whose callback destroys |session|.
+static void iree_net_session_end_transport_submission(
+    iree_net_session_t* session) {
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(session->transport_submission_count > 0);
+  --session->transport_submission_count;
+  bool submit_deactivation =
+      iree_net_session_prepare_connection_deactivation_locked(session);
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  if (submit_deactivation) {
+    iree_net_session_submit_connection_deactivation(session);
+  }
 }
 
 // Begins tearing down the session. Called from the last session_release().
@@ -1361,23 +1649,41 @@ static void iree_net_session_begin_teardown(iree_net_session_t* session) {
   // Clean up remote axes and proxy semaphores.
   iree_net_session_cleanup_remote_axes(session);
 
+  bool complete_synchronously = false;
+  bool begin_connection_deactivation = false;
+  bool wait_for_transport_submission = false;
+  iree_slim_mutex_lock(&session->callback_mutex);
+  if (!session->connection || session->connection_deactivated) {
+    complete_synchronously = true;
+  } else {
+    IREE_ASSERT(!session->deactivated_callback.fn,
+                "final session reference released before explicit "
+                "deactivation completed");
+    IREE_ASSERT(!session->connection_deactivation_requested,
+                "session teardown started more than once");
+    session->connection_deactivation_requested = true;
+    session->destroy_after_deactivation = true;
+    begin_connection_deactivation =
+        iree_net_session_prepare_connection_deactivation_locked(session);
+    wait_for_transport_submission = !begin_connection_deactivation;
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+
   // Deactivate the connection's carriers before releasing. This ensures all
   // pending proactor operations (NOPs, sends) complete before we free the
   // carrier memory they reference.
-  if (session->connection) {
-    iree_net_connection_deactivate_callback_t callback = {
-        .fn = iree_net_session_on_connection_deactivated,
-        .user_data = session,
-    };
-    // Deactivation is infallible (drain context is pre-allocated in the
-    // connection struct). The callback fires when all carriers have drained
-    // (or synchronously if no carriers are active).
-    iree_net_connection_deactivate(session->connection, callback);
+  if (begin_connection_deactivation) {
+    iree_net_session_submit_connection_deactivation(session);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
 
-  // No connection — complete synchronously.
+  if (wait_for_transport_submission) {
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  IREE_ASSERT(complete_synchronously);
   IREE_TRACE_ZONE_END(z0);
   iree_net_session_complete_teardown(session);
 }
@@ -1397,7 +1703,9 @@ IREE_API_EXPORT iree_status_t iree_net_session_connect(
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(recv_pool);
   IREE_ASSERT_ARGUMENT(frontier_tracker);
+  IREE_ASSERT_ARGUMENT(out_session);
   IREE_TRACE_ZONE_BEGIN(z0);
+  *out_session = NULL;
 
   iree_net_session_t* session = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -1432,34 +1740,48 @@ IREE_API_EXPORT iree_status_t iree_net_session_connect(
         session->server_address_storage, server_address.size);
   }
 
-  // Start the bootstrap timeout timer before any async operations. If the
-  // timer fails, no async callbacks are in flight and we can destroy cleanly.
+  // Publish the session before any async submission. A fast transport may
+  // execute callbacks on another proactor thread before this function returns.
+  // Hold a function reference so those callbacks may release the caller's
+  // published reference without invalidating setup still in progress here.
+  *out_session = session;
+  iree_net_session_t* function_session = session;
+  iree_net_session_retain(function_session);
+
+  // Start the bootstrap timeout timer before any other async operations.
   iree_status_t status = iree_net_session_start_bootstrap_timer(
       session, session->bootstrap_timeout_ns);
   if (!iree_status_is_ok(status)) {
-    iree_net_session_begin_teardown(session);
+    *out_session = NULL;
+    iree_net_session_release(function_session);
+    iree_net_session_release(session);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
 
-  // Begin async connect. The connect callback fires asynchronously (deferred
-  // NOP), so the timer is guaranteed to be running when bootstrap begins.
+  // Transfer a reference to the async connect callback. The callback may
+  // arrive after the timeout reference and caller reference have been released.
+  iree_net_session_t* connect_session = session;
+  iree_net_session_retain(connect_session);
   status = iree_net_transport_factory_connect(
       factory, session->server_address, proactor, recv_pool,
-      iree_net_session_on_connect, session);
+      iree_net_session_on_connect, connect_session);
   if (!iree_status_is_ok(status)) {
+    // Synchronous submission failure means the connect callback will not
+    // consume its transferred reference.
     // Timer is in flight (holds a ref), so we cannot destroy the session.
     // Fail it instead — the timer callback will see ERROR/CANCELLED and
     // release its ref. The caller releases theirs after on_error fires.
     iree_net_session_fail(
         session,
         iree_status_annotate(status, IREE_SV("failed to connect to server")));
-    *out_session = session;
+    iree_net_session_release(connect_session);
+    iree_net_session_release(function_session);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  *out_session = session;
+  iree_net_session_release(function_session);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -1473,6 +1795,8 @@ IREE_API_EXPORT iree_status_t iree_net_session_accept(
   IREE_ASSERT_ARGUMENT(connection);
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(frontier_tracker);
+  IREE_ASSERT_ARGUMENT(out_session);
+  *out_session = NULL;
   if (!options->session_id) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1508,34 +1832,47 @@ IREE_API_EXPORT iree_status_t iree_net_session_accept(
         IREE_SV("connection endpoint capacity is insufficient"));
   }
 
-  // Start the bootstrap timeout timer before any async operations.
+  // Publish the session before any async submission and retain it until this
+  // function returns. Endpoint callbacks may run concurrently on the proactor.
+  *out_session = session;
+  iree_net_session_t* function_session = session;
+  iree_net_session_retain(function_session);
+
+  // Start the bootstrap timeout timer before any other async operations.
   iree_status_t status = iree_net_session_start_bootstrap_timer(
       session, session->bootstrap_timeout_ns);
   if (!iree_status_is_ok(status)) {
-    iree_net_session_begin_teardown(session);
+    *out_session = NULL;
+    iree_net_session_release(function_session);
+    iree_net_session_release(session);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
 
   // Open control endpoint to begin bootstrap.
+  iree_net_session_t* endpoint_session = session;
   iree_net_endpoint_ready_callback_t endpoint_callback = {
       .fn = iree_net_session_on_control_endpoint_ready,
-      .user_data = session,
+      .user_data = endpoint_session,
   };
+  iree_net_session_retain(endpoint_session);
   status = iree_net_connection_open_endpoint(connection, endpoint_callback);
   if (!iree_status_is_ok(status)) {
+    // Synchronous submission failure means the endpoint callback will not
+    // consume its transferred reference.
     // Endpoint open failed. The timer is in flight (holds a ref), so we
     // can't destroy the session. Fail it — the timer callback will release
     // its ref, and the caller releases theirs after on_error fires.
     iree_net_session_fail(
         session, iree_status_annotate(
                      status, IREE_SV("failed to open control endpoint")));
-    *out_session = session;
+    iree_net_session_release(endpoint_session);
+    iree_net_session_release(function_session);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  *out_session = session;
+  iree_net_session_release(function_session);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -1554,6 +1891,77 @@ IREE_API_EXPORT void iree_net_session_release(iree_net_session_t* session) {
   if (iree_atomic_ref_count_dec(&session->ref_count) == 1) {
     iree_net_session_begin_teardown(session);
   }
+}
+
+IREE_API_EXPORT void iree_net_session_detach_callbacks(
+    iree_net_session_t* session,
+    iree_net_session_callbacks_detached_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(session);
+  IREE_ASSERT_ARGUMENT(callback.fn);
+
+  bool complete_synchronously = false;
+  iree_slim_mutex_lock(&session->callback_mutex);
+  IREE_ASSERT(!session->callbacks_detached,
+              "session callbacks detached more than once");
+  session->callbacks_detached = true;
+  if (session->callback_count == 0) {
+    memset(&session->callbacks, 0, sizeof(session->callbacks));
+    complete_synchronously = true;
+  } else {
+    session->detach_callback = callback;
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+
+  if (complete_synchronously) {
+    callback.fn(callback.user_data);
+  }
+}
+
+IREE_API_EXPORT iree_status_t
+iree_net_session_deactivate(iree_net_session_t* session,
+                            iree_net_session_deactivated_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(session);
+  IREE_ASSERT_ARGUMENT(callback.fn);
+
+  bool request_accepted = false;
+  bool complete_synchronously = false;
+  bool submit_connection_deactivation = false;
+  iree_net_session_state_t state = IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+  iree_slim_mutex_lock(&session->callback_mutex);
+  state = iree_net_session_load_state(session);
+  if (!session->connection && !session->connection_deactivation_requested) {
+    session->connection_deactivation_requested = true;
+    request_accepted = true;
+    complete_synchronously = true;
+  } else if (state != IREE_NET_SESSION_STATE_BOOTSTRAPPING &&
+             session->connection &&
+             !session->connection_deactivation_requested) {
+    session->connection_deactivation_requested = true;
+    session->deactivated_callback = callback;
+    if (state == IREE_NET_SESSION_STATE_OPERATIONAL) {
+      iree_net_session_set_state(session, IREE_NET_SESSION_STATE_DRAINING);
+    }
+    request_accepted = true;
+    submit_connection_deactivation =
+        iree_net_session_prepare_connection_deactivation_locked(session);
+  }
+  iree_slim_mutex_unlock(&session->callback_mutex);
+  if (!request_accepted) {
+    if (state == IREE_NET_SESSION_STATE_BOOTSTRAPPING) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "session connection bootstrap must complete before deactivation");
+    }
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "session deactivation already started");
+  }
+
+  if (complete_synchronously) {
+    callback.fn(callback.user_data);
+  } else if (submit_connection_deactivation) {
+    iree_net_session_submit_connection_deactivation(session);
+  }
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_net_session_state_t
@@ -1582,47 +1990,64 @@ IREE_API_EXPORT iree_net_carrier_t* iree_net_session_carrier(
 IREE_API_EXPORT iree_status_t iree_net_session_open_endpoint(
     iree_net_session_t* session, iree_net_endpoint_ready_callback_t callback) {
   IREE_ASSERT_ARGUMENT(session);
-  iree_net_session_state_t state = iree_net_session_load_state(session);
-  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cannot open endpoint: session state is %d (need OPERATIONAL)",
-        (int)state);
+  IREE_ASSERT_ARGUMENT(callback.fn);
+
+  iree_net_session_endpoint_callback_t* context = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      session->host_allocator, sizeof(*context), (void**)&context));
+
+  iree_status_t status = iree_net_session_begin_transport_submission(
+      session, IREE_NET_SESSION_SUBMISSION_ENDPOINT);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(session->host_allocator, context);
+    return status;
   }
-  return iree_net_connection_open_endpoint(session->connection, callback);
+
+  context->session = session;
+  context->callback = callback;
+  iree_net_session_retain(session);
+  iree_net_endpoint_ready_callback_t retained_callback = {
+      .fn = iree_net_session_on_application_endpoint_ready,
+      .user_data = context,
+  };
+  status =
+      iree_net_connection_open_endpoint(session->connection, retained_callback);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(session->host_allocator, context);
+    iree_net_session_end_callback(session);
+    iree_net_session_release(session);
+  }
+  iree_net_session_end_transport_submission(session);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data) {
   IREE_ASSERT_ARGUMENT(session);
-  iree_net_session_state_t state = iree_net_session_load_state(session);
-  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cannot send control data: session state is %d (need OPERATIONAL)",
-        (int)state);
+  IREE_RETURN_IF_ERROR(iree_net_session_begin_transport_submission(
+      session, IREE_NET_SESSION_SUBMISSION_DATA_SEND));
+  iree_status_t status = iree_net_control_channel_send_data(
+      session->control_channel, flags, payload, operation_user_data);
+  if (!iree_status_is_ok(status)) {
+    iree_net_session_end_callback(session);
   }
-  return iree_net_control_channel_send_data(session->control_channel, flags,
-                                            payload, operation_user_data);
+  iree_net_session_end_transport_submission(session);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_net_session_send_control_data_copy(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data) {
   IREE_ASSERT_ARGUMENT(session);
-  iree_net_session_state_t state = iree_net_session_load_state(session);
-  iree_status_t status = iree_ok_status();
-  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cannot send control data: session state is %d (need OPERATIONAL)",
-        (int)state);
+  IREE_RETURN_IF_ERROR(iree_net_session_begin_transport_submission(
+      session, IREE_NET_SESSION_SUBMISSION_DATA_SEND));
+  iree_status_t status = iree_net_control_channel_send_data_copy(
+      session->control_channel, flags, payload, operation_user_data);
+  if (!iree_status_is_ok(status)) {
+    iree_net_session_end_callback(session);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_control_channel_send_data_copy(
-        session->control_channel, flags, payload, operation_user_data);
-  }
+  iree_net_session_end_transport_submission(session);
   return status;
 }
 
@@ -1630,21 +2055,14 @@ IREE_API_EXPORT iree_status_t
 iree_net_session_shutdown(iree_net_session_t* session, uint32_t reason_code,
                           iree_string_view_t message) {
   IREE_ASSERT_ARGUMENT(session);
-  iree_net_session_state_t state = iree_net_session_load_state(session);
-  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cannot shutdown: session state is %d (need OPERATIONAL)", (int)state);
-  }
+  IREE_RETURN_IF_ERROR(iree_net_session_begin_transport_submission(
+      session, IREE_NET_SESSION_SUBMISSION_SHUTDOWN));
 
   iree_status_t status = iree_net_control_channel_send_goaway(
       session->control_channel, reason_code, message);
-  if (!iree_status_is_ok(status)) return status;
 
-  iree_net_session_set_state(session, IREE_NET_SESSION_STATE_DRAINING);
-
-  // Clean up remote axes proactively — our side is shutting down.
+  // Clean up remote axes proactively once shutdown has claimed the session.
   iree_net_session_cleanup_remote_axes(session);
-
-  return iree_ok_status();
+  iree_net_session_end_transport_submission(session);
+  return status;
 }

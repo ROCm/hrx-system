@@ -161,22 +161,23 @@ class ShmCarrierTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_net_carrier_activate(server_));
   }
 
-  bool PollUntil(std::function<bool()> condition,
-                 iree_duration_t budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline_ns = iree_time_now() + budget;
-    iree_timeout_t timeout = iree_make_deadline(deadline_ns);
+  iree_status_t PollOnce(iree_host_size_t* out_completed_count) {
+    iree_status_t status = iree_async_proactor_poll(
+        proactor_, iree_infinite_timeout(), out_completed_count);
+    if (iree_status_is_deadline_exceeded(status)) {
+      iree_status_free(status);
+      return iree_ok_status();
+    }
+    return status;
+  }
+
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline_ns) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, timeout, &completed);
-      if (!iree_status_is_deadline_exceeded(status)) {
-        if (!iree_status_is_ok(status)) {
-          iree_status_ignore(status);
-          return false;
-        }
-      } else {
-        iree_status_ignore(status);
+      iree::Status status(PollOnce(&completed));
+      if (!status.ok()) {
+        ADD_FAILURE() << status.ToString();
+        return false;
       }
     }
     return true;
@@ -188,27 +189,20 @@ class ShmCarrierTest : public ::testing::Test {
         state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
       return;
     }
+    bool deactivated = false;
     if (state == IREE_NET_CARRIER_STATE_ACTIVE) {
-      iree_status_t status =
-          iree_net_carrier_deactivate(carrier, nullptr, nullptr);
-      if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
-        return;
-      }
+      IREE_ASSERT_OK(iree_net_carrier_deactivate(
+          carrier,
+          [](void* user_data) { *static_cast<bool*>(user_data) = true; },
+          &deactivated));
     }
-    iree_time_t deadline_ns = iree_time_now() + iree_make_duration_ms(5000);
-    while (iree_net_carrier_state(carrier) !=
-           IREE_NET_CARRIER_STATE_DEACTIVATED) {
-      if (iree_time_now() >= deadline_ns) break;
+    while (!deactivated && iree_net_carrier_state(carrier) !=
+                               IREE_NET_CARRIER_STATE_DEACTIVATED) {
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(100), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        iree_status_ignore(status);
-      }
+      IREE_ASSERT_OK(PollOnce(&completed));
     }
+    EXPECT_EQ(iree_net_carrier_state(carrier),
+              IREE_NET_CARRIER_STATE_DEACTIVATED);
   }
 
   iree_async_proactor_t* proactor_ = nullptr;

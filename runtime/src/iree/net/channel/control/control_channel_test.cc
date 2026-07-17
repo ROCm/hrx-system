@@ -374,17 +374,13 @@ struct TestContext {
 
   static void OnError(void* user_data, iree_status_t status) {
     TestContext* ctx = static_cast<TestContext*>(user_data);
+    iree::Status owned_status(std::move(status));
     ErrorRecord record;
-    record.status_code = iree_status_code(status);
-    iree_string_view_t message = iree_status_message(status);
+    record.status_code = iree_status_code(owned_status.get());
+    iree_string_view_t message = iree_status_message(owned_status.get());
     record.message.assign(message.data, message.size);
-    char format_buffer[1024];
-    iree_host_size_t format_length = 0;
-    iree_status_format(status, sizeof(format_buffer), format_buffer,
-                       &format_length);
-    record.formatted.assign(format_buffer, format_length);
+    record.formatted = owned_status.ToString();
     ctx->error_records.push_back(std::move(record));
-    iree_status_ignore(status);
   }
 
   static void OnPong(void* user_data, iree_const_byte_span_t payload,
@@ -900,23 +896,19 @@ TEST_F(ControlChannelTest, StructuredErrorRoundTrip) {
   IREE_ASSERT_OK(iree_net_status_wire_deserialize(
       iree_make_const_byte_span(payload.data(), payload.size()),
       &deserialized));
-  EXPECT_EQ(iree_status_code(deserialized), IREE_STATUS_RESOURCE_EXHAUSTED);
+  iree::Status owned_status(std::move(deserialized));
+  EXPECT_EQ(iree_status_code(owned_status.get()),
+            IREE_STATUS_RESOURCE_EXHAUSTED);
 
   // The primary message should survive.
-  iree_string_view_t message = iree_status_message(deserialized);
+  iree_string_view_t message = iree_status_message(owned_status.get());
   EXPECT_EQ(std::string(message.data, message.size), "device OOM");
 
   // The full formatted output should include annotations.
-  char format_buffer[1024];
-  iree_host_size_t format_length = 0;
-  iree_status_format(deserialized, sizeof(format_buffer), format_buffer,
-                     &format_length);
-  std::string formatted(format_buffer, format_length);
+  std::string formatted = owned_status.ToString();
   EXPECT_NE(formatted.find("device OOM"), std::string::npos);
   EXPECT_NE(formatted.find("allocating command buffer"), std::string::npos);
   EXPECT_NE(formatted.find("during queue_execute"), std::string::npos);
-
-  iree_status_ignore(deserialized);
 }
 
 // Verifies that injecting a structured ERROR frame with annotations delivers
@@ -1091,6 +1083,21 @@ TEST_F(ControlChannelTest, SendDataInOperational) {
   EXPECT_EQ(ctx_.send_completes[0].status_code, IREE_STATUS_OK);
 }
 
+TEST_F(ControlChannelTest, SendDataCopyPreservesOpaqueCompletionData) {
+  CreateAndActivate();
+  std::vector<uint8_t> payload = {0x10, 0x20, 0x30};
+  iree_async_span_t span =
+      iree_async_span_from_ptr(payload.data(), payload.size());
+  iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
+  IREE_ASSERT_OK(iree_net_control_channel_send_data_copy(
+      channel_, 0, span_list, UINT64_C(0xF0E1D2C3B4A59687)));
+
+  ASSERT_EQ(ctx_.send_completes.size(), 1u);
+  EXPECT_EQ(ctx_.send_completes[0].operation_user_data,
+            UINT64_C(0xF0E1D2C3B4A59687));
+  EXPECT_EQ(ctx_.send_completes[0].status_code, IREE_STATUS_OK);
+}
+
 TEST_F(ControlChannelTest, SendDataInDrainingFails) {
   CreateAndActivate();
   IREE_ASSERT_OK(iree_net_control_channel_send_goaway(
@@ -1120,6 +1127,7 @@ TEST_F(ControlChannelTest, SendPingInOperational) {
   EXPECT_EQ(iree_net_control_frame_header_type(header),
             IREE_NET_CONTROL_FRAME_TYPE_PING);
   EXPECT_EQ(CapturedPayload(mock_carrier_->sends[0]), payload);
+  EXPECT_TRUE(ctx_.send_completes.empty());
 }
 
 TEST_F(ControlChannelTest, SendPingInDrainingFails) {

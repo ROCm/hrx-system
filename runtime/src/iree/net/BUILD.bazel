@@ -59,6 +59,19 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "endpoint_lifecycle",
+    srcs = ["endpoint_lifecycle.c"],
+    hdrs = ["endpoint_lifecycle.h"],
+    deps = [
+        ":connection",
+        ":message_endpoint",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "connection",
     hdrs = ["connection.h"],
     deps = [
@@ -87,6 +100,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/net/channel/control:control_channel",
         "//runtime/src/iree/net/channel/control:frame",
         "//runtime/src/iree/net/channel/util:frame_sender",
@@ -125,6 +139,16 @@ iree_runtime_cc_library(
 #===------------------------------------------------------------------------===#
 # Tests
 #===------------------------------------------------------------------------===#
+
+iree_runtime_cc_test(
+    name = "endpoint_lifecycle_test",
+    srcs = ["endpoint_lifecycle_test.cc"],
+    deps = [
+        ":endpoint_lifecycle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
 
 iree_runtime_cc_test(
     name = "transport_registry_test",

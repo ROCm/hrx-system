@@ -13,7 +13,7 @@
 // Key design:
 //   - Fresh carrier pair per test via SetUp/TearDown (no state leakage)
 //   - Capability-gated GTEST_SKIP instead of external EXCLUDED_TESTS lists
-//   - Time-budgeted polling prevents slow-CI flakiness
+//   - Completion-driven polling leaves hang detection to the test harness
 //   - Link-time composition: test suites + backends linked together
 
 #ifndef IREE_NET_CARRIER_CTS_UTIL_TEST_BASE_H_
@@ -196,62 +196,52 @@ class CarrierTestBase : public BaseType {
   // Polling helpers
   //===--------------------------------------------------------------------===//
 
-  // Poll until condition is true or budget expires. Returns true if condition
-  // became true, false on timeout.
-  bool PollUntil(std::function<bool()> condition,
-                 iree_duration_t total_budget = iree_make_duration_ms(5000)) {
-    iree_time_t deadline_ns = iree_time_now() + total_budget;
-    iree_timeout_t timeout = iree_make_deadline(deadline_ns);
+  // Polls until |condition| is true. The outer test harness owns hang
+  // detection; valid asynchronous work has no local wall-clock deadline.
+  bool PollUntil(std::function<bool()> condition) {
     while (!condition()) {
-      if (iree_time_now() >= deadline_ns) return false;
       iree_host_size_t completed = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, timeout, &completed);
-      if (!iree_status_is_deadline_exceeded(status)) {
-        if (!iree_status_is_ok(status)) {
-          iree_status_ignore(status);
-          return false;
-        }
-      } else {
-        iree_status_ignore(status);
+      iree::Status status(PollProactorOnce(proactor_, &completed));
+      if (!status.ok()) {
+        ADD_FAILURE() << status.ToString();
+        return false;
       }
     }
     return true;
   }
 
-  // Poll for at least N completions within budget.
-  void PollCompletions(
-      iree_host_size_t min_completions,
-      iree_duration_t total_budget = iree_make_duration_ms(5000)) {
+  // Polls for at least |min_completions| proactor completions.
+  void PollCompletions(iree_host_size_t min_completions) {
     iree_host_size_t total = 0;
-    iree_time_t deadline_ns = iree_time_now() + total_budget;
-    iree_timeout_t timeout = iree_make_deadline(deadline_ns);
     while (total < min_completions) {
-      if (iree_time_now() >= deadline_ns) break;
       iree_host_size_t completed = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, timeout, &completed);
-      if (!iree_status_is_deadline_exceeded(status)) {
-        IREE_ASSERT_OK(status);
-      } else {
-        iree_status_ignore(status);
-      }
+      IREE_ASSERT_OK(PollProactorOnce(proactor_, &completed));
       total += completed;
     }
-    ASSERT_GE(total, min_completions)
-        << "Expected at least " << min_completions << " completions but got "
-        << total << " within budget";
   }
 
-  // Convenience: poll once with a short timeout.
-  void PollOnce() {
-    iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor_, iree_make_timeout_ms(100), &completed);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
+  // Submits |params| once carrier send admission is available.
+  iree_status_t SendWhenReady(iree_net_carrier_t* carrier,
+                              const iree_net_send_params_t* params) {
+    for (;;) {
+      iree_status_t status = iree_net_carrier_send(carrier, params);
+      if (!iree_status_is_resource_exhausted(status)) return status;
+      iree_status_free(status);
+      IREE_RETURN_IF_ERROR(PollProactorOnce(proactor_));
+    }
+  }
+
+  // Reserves a send buffer once carrier send admission is available.
+  iree_status_t BeginSendWhenReady(iree_net_carrier_t* carrier,
+                                   iree_host_size_t data_length,
+                                   void** out_data,
+                                   iree_net_carrier_send_handle_t* out_handle) {
+    for (;;) {
+      iree_status_t status = iree_net_carrier_begin_send(carrier, data_length,
+                                                         out_data, out_handle);
+      if (!iree_status_is_resource_exhausted(status)) return status;
+      iree_status_free(status);
+      IREE_RETURN_IF_ERROR(PollProactorOnce(proactor_));
     }
   }
 

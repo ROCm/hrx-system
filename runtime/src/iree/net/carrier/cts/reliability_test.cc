@@ -53,17 +53,16 @@ TEST_P(ReliabilityTest, LargeTransferIntegrity) {
     params.data.values = &span;
     params.data.count = 1;
     params.flags = IREE_NET_SEND_FLAG_NONE;
-    IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
-    PollOnce();
+    IREE_ASSERT_OK(SendWhenReady(client_, &params));
   }
 
   // Wait for all data to arrive.
-  ASSERT_TRUE(
-      PollUntil([&] { return server_capture.total_bytes.load() >= kSize; },
-                iree_make_duration_ms(10000)))
-      << "Stalled after " << server_capture.total_bytes.load() << " of "
-      << kSize << " bytes (" << (server_capture.total_bytes.load() / 1024)
-      << "KB / " << (kSize / 1024) << "KB)";
+  ASSERT_TRUE(PollUntil([&] {
+    return server_capture.total_bytes.load() >= kSize;
+  })) << "Stalled after "
+      << server_capture.total_bytes.load() << " of " << kSize << " bytes ("
+      << (server_capture.total_bytes.load() / 1024) << "KB / " << (kSize / 1024)
+      << "KB)";
 
   // Verify data integrity.
   ASSERT_EQ(server_received.size(), kSize);
@@ -107,19 +106,13 @@ TEST_P(ReliabilityTest, MessageOrdering) {
     params.data.values = &span;
     params.data.count = 1;
     params.flags = IREE_NET_SEND_FLAG_NONE;
-    IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
-
-    // Poll occasionally to avoid exhausting send budget.
-    if (i % 10 == 9) {
-      PollOnce();
-    }
+    IREE_ASSERT_OK(SendWhenReady(client_, &params));
   }
 
   // Wait for all messages.
   const size_t expected_size = kMessageCount * 3;
   ASSERT_TRUE(PollUntil(
-      [&] { return server_capture.total_bytes.load() >= expected_size; },
-      iree_make_duration_ms(10000)));
+      [&] { return server_capture.total_bytes.load() >= expected_size; }));
 
   ASSERT_EQ(server_received.size(), expected_size);
 
@@ -164,25 +157,21 @@ TEST_P(ReliabilityTest, BidirectionalLargeTransfer) {
     iree_net_send_params_t params_to_server = {};
     params_to_server.data.values = &span_to_server;
     params_to_server.data.count = 1;
-    IREE_ASSERT_OK(iree_net_carrier_send(client_, &params_to_server));
+    IREE_ASSERT_OK(SendWhenReady(client_, &params_to_server));
 
     iree_async_span_t span_to_client =
         iree_async_span_from_ptr(&to_client[offset], len);
     iree_net_send_params_t params_to_client = {};
     params_to_client.data.values = &span_to_client;
     params_to_client.data.count = 1;
-    IREE_ASSERT_OK(iree_net_carrier_send(server_, &params_to_client));
-
-    PollOnce();
+    IREE_ASSERT_OK(SendWhenReady(server_, &params_to_client));
   }
 
   // Wait for both sides.
-  ASSERT_TRUE(PollUntil(
-      [&] {
-        return server_capture.total_bytes.load() >= kSize &&
-               client_capture.total_bytes.load() >= kSize;
-      },
-      iree_make_duration_ms(10000)));
+  ASSERT_TRUE(PollUntil([&] {
+    return server_capture.total_bytes.load() >= kSize &&
+           client_capture.total_bytes.load() >= kSize;
+  }));
 
   // Verify both directions.
   ASSERT_EQ(server_received.size(), kSize);
@@ -216,26 +205,12 @@ TEST_P(ReliabilityTest, SmallMessageStress) {
     iree_net_send_params_t params = {};
     params.data.values = &span;
     params.data.count = 1;
-    iree_status_code_t send_status_code = IREE_STATUS_RESOURCE_EXHAUSTED;
-    ASSERT_TRUE(PollUntil([&] {
-      iree_status_t status = iree_net_carrier_send(client_, &params);
-      send_status_code = iree_status_code(status);
-      iree_status_ignore(status);
-      return send_status_code != IREE_STATUS_RESOURCE_EXHAUSTED;
-    })) << "send did not become admissible for message "
-        << i;
-    EXPECT_EQ(send_status_code, IREE_STATUS_OK);
-
-    // Poll frequently to avoid exhausting send budget.
-    if (i % 20 == 19) {
-      PollOnce();
-    }
+    IREE_ASSERT_OK(SendWhenReady(client_, &params));
   }
 
   // Wait for all bytes.
   ASSERT_TRUE(PollUntil(
-      [&] { return server_capture.total_bytes.load() >= kMessageCount; },
-      iree_make_duration_ms(10000)));
+      [&] { return server_capture.total_bytes.load() >= kMessageCount; }));
 
   EXPECT_EQ(server_received.size(), static_cast<size_t>(kMessageCount));
 }

@@ -125,20 +125,10 @@ class TcpCarrierTest : public ::testing::Test {
 
     // Poll until both complete.
     int completions = 0;
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
     while (completions < 2) {
-      if (iree_time_now() >= deadline) {
-        FAIL() << "Timeout waiting for connection";
-        return;
-      }
       iree_host_size_t count = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(100), &count);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        IREE_ASSERT_OK(status);
-      }
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
       completions += (int)count;
     }
 
@@ -216,19 +206,11 @@ static void DeactivateAndWait(iree_async_proactor_t* proactor,
   DeactivateContext deactivate_ctx;
   IREE_ASSERT_OK(iree_net_carrier_deactivate(carrier, TestDeactivateCallback,
                                              &deactivate_ctx));
-  int polls = 0;
-  while (!deactivate_ctx.completed && polls < 100) {
+  while (!deactivate_ctx.completed) {
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-    ++polls;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor, iree_infinite_timeout(), &count));
   }
-  ASSERT_TRUE(deactivate_ctx.completed) << "Deactivation timed out";
 }
 
 // Recv handler that returns an error.
@@ -319,19 +301,12 @@ TEST_F(TcpCarrierTest, CommitSendQueuesWhenSubmitBackpressures) {
   }
 
   iree_host_size_t expected_bytes = kPayloadSize * kSendCount;
-  int polls = 0;
-  while (polls < 100 && (iree_host_size_t)iree_atomic_load(
-                            &carrier->bytes_sent, iree_memory_order_relaxed) <
-                            expected_bytes) {
+  while ((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
+                                            iree_memory_order_relaxed) <
+         expected_bytes) {
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-    ++polls;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
   }
   EXPECT_GE((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
                                                iree_memory_order_relaxed),
@@ -402,19 +377,12 @@ TEST_F(TcpCarrierTest, QueuedSendRetainsRegisteredRegion) {
   EXPECT_EQ(destroy_count.load(), 0);
 
   iree_host_size_t expected_bytes = kPayloadSize * (kBackpressureSendCount + 1);
-  int polls = 0;
-  while (polls < 100 && (iree_host_size_t)iree_atomic_load(
-                            &carrier->bytes_sent, iree_memory_order_relaxed) <
-                            expected_bytes) {
+  while ((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
+                                            iree_memory_order_relaxed) <
+         expected_bytes) {
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-    ++polls;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
   }
   EXPECT_GE((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
                                                iree_memory_order_relaxed),
@@ -545,17 +513,10 @@ TEST_F(TcpCarrierTest, GracefulShutdown) {
   recv_op.buffers = iree_async_span_list_make(&recv_span, 1);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  int polls = 0;
-  while (!shutdown_ctx.recv_complete && polls < 100) {
+  while (!shutdown_ctx.recv_complete) {
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-    ++polls;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
   }
 
   EXPECT_TRUE(shutdown_ctx.recv_complete);
@@ -595,20 +556,10 @@ TEST_F(TcpCarrierTest, ShutdownThenSendFails) {
   params.data = iree_async_span_list_make(&span, 1);
 
   iree_status_t send_status = iree_net_carrier_send(carrier, &params);
-  iree_status_ignore(send_status);
+  iree_status_free(send_status);
 
-  // Poll to process any completions.
-  for (int i = 0; i < 10; ++i) {
-    iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
-
+  // Deactivation is the completion barrier for any send accepted before the
+  // shutdown state became visible to the transport.
   DeactivateAndWait(proactor_, carrier);
   iree_net_carrier_release(carrier);
   iree_async_socket_release(client);
@@ -653,17 +604,10 @@ TEST_F(TcpCarrierTest, StickyErrorClonedCorrectly) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Poll until error is captured.
-  int polls = 0;
-  while (error_count == 0 && polls < 100) {
+  while (error_count == 0) {
     iree_host_size_t count = 0;
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-    ++polls;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
   }
 
   // Get multiple copies of the sticky error — each should be independent.
@@ -728,15 +672,10 @@ TEST_F(TcpCarrierTest, RapidConnectDisconnect) {
     send_op.buffers = iree_async_span_list_make(&span, 1);
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
-    for (int i = 0; i < 5; ++i) {
+    while (!recv_ctx.handler_called) {
       iree_host_size_t count = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, iree_make_timeout_ms(20), &count);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        IREE_ASSERT_OK(status);
-      }
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count));
     }
 
     DeactivateAndWait(proactor_, carrier);

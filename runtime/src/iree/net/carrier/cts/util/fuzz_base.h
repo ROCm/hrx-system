@@ -116,6 +116,7 @@ struct PollThread {
 
   void Stop() {
     stop.store(true, std::memory_order_release);
+    iree_async_proactor_wake(proactor);
     if (thread.joinable()) thread.join();
   }
 
@@ -123,9 +124,10 @@ struct PollThread {
   void Run() {
     while (!stop.load(std::memory_order_acquire)) {
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor, iree_make_timeout_ms(10), &completed);
-      iree_status_ignore(status);
+      iree_status_t status = PollProactorOnce(proactor, &completed);
+      if (!iree_status_is_ok(status)) {
+        iree_status_abort(status);
+      }
     }
   }
 };

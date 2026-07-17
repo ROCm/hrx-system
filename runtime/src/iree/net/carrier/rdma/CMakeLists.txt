@@ -609,6 +609,7 @@ iree_cc_library(
     iree::base::internal::csprng
     iree::net::channel::util::frame_sender
     iree::net::connection
+    iree::net::endpoint_lifecycle
     iree::net::message_endpoint
     iree::net::transport_factory
     iree::third_party::rdma_core_headers

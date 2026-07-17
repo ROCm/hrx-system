@@ -46,6 +46,22 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    endpoint_lifecycle
+  HDRS
+    "endpoint_lifecycle.h"
+  SRCS
+    "endpoint_lifecycle.c"
+  DEPS
+    ::connection
+    ::message_endpoint
+    iree::base
+    iree::base::internal
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     connection
   HDRS
     "connection.h"
@@ -80,6 +96,7 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::internal
+    iree::base::threading
     iree::net::channel::control::control_channel
     iree::net::channel::control::frame
     iree::net::channel::util::frame_sender
@@ -121,6 +138,17 @@ iree_cc_library(
     iree::base
     iree::base::threading
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    endpoint_lifecycle_test
+  SRCS
+    "endpoint_lifecycle_test.cc"
+  DEPS
+    ::endpoint_lifecycle
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

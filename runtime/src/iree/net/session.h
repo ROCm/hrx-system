@@ -184,17 +184,16 @@ typedef iree_status_t (*iree_net_session_on_control_data_fn_t)(
     void* user_data, iree_net_control_frame_flags_t flags,
     iree_const_byte_span_t payload, iree_async_buffer_lease_t* lease);
 
-// Called when a send_control_data operation completes (payload buffers are
-// released).
+// Called when a send_control_data or send_control_data_copy operation
+// completes (payload buffers are released).
 //
 // |operation_user_data| echoes the value from the send_control_data call,
 // allowing callers to identify which send completed and release associated
 // resources.
 // |status| indicates success or failure of the send.
 //
-// This callback only fires for application sends via
-// iree_net_session_send_control_data(). Internal bootstrap sends (HELLO,
-// HELLO_ACK) are managed by the session and do not fire this callback.
+// This callback only fires for application sends. Internal bootstrap sends
+// (HELLO, HELLO_ACK) are managed by the session and do not fire this callback.
 typedef void (*iree_net_session_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
 
@@ -227,7 +226,7 @@ typedef struct iree_net_session_callbacks_t {
   // Required callback for post-bootstrap control DATA frames.
   iree_net_session_on_control_data_fn_t on_control_data;
 
-  // Optional callback for control DATA send completions.
+  // Completion callback required when using either control DATA send API.
   iree_net_session_on_send_complete_fn_t on_send_complete;
 
   // Optional callback for send readiness after transport backpressure.
@@ -236,6 +235,32 @@ typedef struct iree_net_session_callbacks_t {
   // User data passed as the first argument to each callback.
   void* user_data;
 } iree_net_session_callbacks_t;
+
+// Called after application callbacks have been detached from a session.
+// No session callback using the detached user data is executing or can begin
+// once this callback fires.
+typedef void (*iree_net_session_callbacks_detached_fn_t)(void* user_data);
+
+// Bundled callback fired when session callback detachment completes.
+typedef struct iree_net_session_callbacks_detached_callback_t {
+  // Required callback function.
+  iree_net_session_callbacks_detached_fn_t fn;
+
+  // User data passed to |fn|.
+  void* user_data;
+} iree_net_session_callbacks_detached_callback_t;
+
+// Called after the session connection and all endpoints have deactivated.
+typedef void (*iree_net_session_deactivated_fn_t)(void* user_data);
+
+// Bundled callback fired when session transport deactivation completes.
+typedef struct iree_net_session_deactivated_callback_t {
+  // Required callback function.
+  iree_net_session_deactivated_fn_t fn;
+
+  // User data passed to |fn|.
+  void* user_data;
+} iree_net_session_deactivated_callback_t;
 
 //===----------------------------------------------------------------------===//
 // Options
@@ -351,6 +376,39 @@ IREE_API_EXPORT void iree_net_session_retain(iree_net_session_t* session);
 // released. NULL-safe.
 IREE_API_EXPORT void iree_net_session_release(iree_net_session_t* session);
 
+// Detaches all application callbacks from the session.
+//
+// No new application callback is admitted after this call claims the callback
+// set. Callbacks already executing, accepted DATA send completions, and
+// endpoint-ready callbacks awaiting dispatch are allowed to finish. |callback|
+// fires exactly once after all such callbacks return and may fire synchronously
+// when none are active. The detached callback user data may be released from
+// |callback|.
+//
+// The caller must retain |session| until |callback| fires. Session protocol and
+// transport teardown may continue after callbacks are detached. This operation
+// must be issued exactly once for a session.
+IREE_API_EXPORT void iree_net_session_detach_callbacks(
+    iree_net_session_t* session,
+    iree_net_session_callbacks_detached_callback_t callback);
+
+// Deactivates the session connection and every endpoint it owns.
+//
+// The deactivation request closes the transport submission gate before
+// draining. Calls already admitted cross their submission boundary first, and
+// their callbacks are allowed to finish. |callback| fires exactly once after
+// the control and application endpoints have drained and may fire synchronously
+// when no endpoint is active.
+//
+// An actively bootstrapping connection cannot be deactivated. A failed session
+// that never acquired a connection completes deactivation synchronously. The
+// caller must retain |session| until |callback| fires. This operation must be
+// issued exactly once. Releasing the final session reference without calling
+// this function performs the same drain implicitly before destruction.
+IREE_API_EXPORT iree_status_t
+iree_net_session_deactivate(iree_net_session_t* session,
+                            iree_net_session_deactivated_callback_t callback);
+
 // Returns the current session state (atomic, any-thread safe).
 //
 // By the time the caller acts on the result, the state may have changed on
@@ -397,7 +455,8 @@ IREE_API_EXPORT iree_status_t iree_net_session_open_endpoint(
 // Callers typically use this to track which buffers to free on completion.
 //
 // Requires OPERATIONAL state. Returns FAILED_PRECONDITION in BOOTSTRAPPING
-// or terminal states. On non-OK return, on_send_complete is NOT called.
+// or terminal states. |callbacks.on_send_complete| must be configured. On
+// non-OK return, on_send_complete is NOT called.
 IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);
@@ -409,7 +468,8 @@ IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
 // payloads should use iree_net_session_send_control_data() to avoid copying.
 //
 // Requires OPERATIONAL state. Returns FAILED_PRECONDITION in BOOTSTRAPPING
-// or terminal states. On non-OK return, on_send_complete is NOT called.
+// or terminal states. |callbacks.on_send_complete| must be configured. On
+// non-OK return, on_send_complete is NOT called.
 IREE_API_EXPORT iree_status_t iree_net_session_send_control_data_copy(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);

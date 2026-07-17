@@ -40,17 +40,16 @@ struct ThroughputRecvState {
   iree_net_carrier_recv_handler_t AsHandler() { return {Handler, this}; }
 };
 
-// Polls the proactor with a short timeout. Returns false if a fatal error
-// occurs (not deadline exceeded, which is expected).
+// Polls the proactor once. Returns false only for a fatal proactor error.
 static bool PollOnce(iree_async_proactor_t* proactor, iree_timeout_t timeout) {
   iree_host_size_t completed = 0;
   iree_status_t status =
       iree_async_proactor_poll(proactor, timeout, &completed);
   if (iree_status_is_ok(status) || iree_status_is_deadline_exceeded(status)) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     return true;
   }
-  iree_status_ignore(status);
+  iree_status_free(status);
   return false;
 }
 
@@ -96,7 +95,7 @@ static void BM_Throughput(::benchmark::State& state,
     // naturally paces the sender to the receiver's consumption rate once the
     // pipeline fills.
     while (iree_net_carrier_query_send_budget(ctx->client).slots == 0) {
-      if (!PollOnce(ctx->proactor, iree_make_timeout_ms(100))) {
+      if (!PollOnce(ctx->proactor, iree_infinite_timeout())) {
         state.SkipWithError("Poll failed during backpressure");
         send_error = true;
         break;
@@ -123,14 +122,12 @@ static void BM_Throughput(::benchmark::State& state,
   // the transport lifecycle honest before teardown.
   {
     int64_t expected_bytes = state.iterations() * message_size;
-    iree_time_t deadline = iree_time_now() + kDefaultPollBudget;
     while (recv_state.bytes_received.load(std::memory_order_acquire) <
            expected_bytes) {
-      if (iree_time_now() >= deadline) {
-        state.SkipWithError("Drain timeout");
+      if (!PollOnce(ctx->proactor, iree_infinite_timeout())) {
+        state.SkipWithError("Poll failed while awaiting receive completion");
         break;
       }
-      PollOnce(ctx->proactor, iree_make_timeout_ms(100));
     }
   }
 
