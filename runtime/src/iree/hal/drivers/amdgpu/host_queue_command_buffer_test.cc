@@ -569,7 +569,7 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
   uint32_t output_values[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(
       output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
-  const uint32_t expected_values[4] = {13, 16, 19, 22};
+  const uint32_t expected_values[4] = {49, 58, 67, 76};
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(output_buffer, /*offset=*/0,
@@ -1258,7 +1258,7 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
   uint32_t output_values[4] = {0, 0, 0, 0};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(
       output_buffer, /*offset=*/0, output_values, sizeof(output_values)));
-  const uint32_t expected_values[4] = {13, 16, 19, 22};
+  const uint32_t expected_values[4] = {49, 58, 67, 76};
   EXPECT_EQ(0, memcmp(output_values, expected_values, sizeof(expected_values)));
 
   iree_hal_executable_release(executable);
@@ -1979,6 +1979,7 @@ TEST_F(HostQueueCommandBufferTest,
         dealloca_wait_list, dealloca_signal_list, transient_buffer,
         IREE_HAL_DEALLOCA_FLAG_NONE);
   }
+  transient_buffer.reset();
   iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
 
   if (iree_status_is_ok(status)) {
