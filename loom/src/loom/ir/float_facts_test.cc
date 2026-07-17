@@ -1,0 +1,362 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/ir/float_facts.h"
+
+#include <cmath>
+#include <cstdint>
+#include <limits>
+
+#include "iree/testing/gtest.h"
+
+namespace loom {
+namespace {
+
+static float AddF32(float lhs, float rhs) { return lhs + rhs; }
+static double AddF64(double lhs, double rhs) { return lhs + rhs; }
+static float SubF32(float lhs, float rhs) { return lhs - rhs; }
+static double SubF64(double lhs, double rhs) { return lhs - rhs; }
+static float MulF32(float lhs, float rhs) { return lhs * rhs; }
+static double MulF64(double lhs, double rhs) { return lhs * rhs; }
+
+static double ExactFloatValue(loom_scalar_type_t scalar_type,
+                              loom_value_facts_t facts) {
+  double value = 0.0;
+  EXPECT_TRUE(loom_value_facts_as_exact_float(scalar_type, facts, &value));
+  return value;
+}
+
+static uint64_t BitMask(int32_t bit_count) {
+  return bit_count == 64 ? UINT64_MAX
+                         : (UINT64_C(1) << bit_count) - UINT64_C(1);
+}
+
+static double NextSourceValue(loom_scalar_type_t source_type, double value,
+                              double direction) {
+  if (source_type == LOOM_SCALAR_TYPE_F32) {
+    return static_cast<double>(std::nextafter(static_cast<float>(value),
+                                              static_cast<float>(direction)));
+  }
+  return std::nextafter(value, direction);
+}
+
+static void ExpectFloatToInteger(loom_scalar_type_t source_type,
+                                 loom_scalar_type_t result_type,
+                                 loom_float_integer_conversion_kind_t kind,
+                                 double source_value, uint64_t expected_bits) {
+  const loom_value_facts_t source =
+      loom_value_facts_exact_float(source_type, source_value);
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_eval_float_to_integer(source_type, result_type, kind,
+                                         &source, &result);
+
+  const int32_t result_bit_count = loom_scalar_type_bitwidth(result_type);
+  uint64_t actual_bits = 0;
+  ASSERT_TRUE(loom_value_facts_as_exact_raw_bits(result, result_bit_count,
+                                                 &actual_bits));
+  EXPECT_EQ(expected_bits & BitMask(result_bit_count), actual_bits);
+}
+
+static void ExpectInvalidFloatToInteger(
+    loom_scalar_type_t source_type, loom_scalar_type_t result_type,
+    loom_float_integer_conversion_kind_t kind, double source_value) {
+  const loom_value_facts_t source =
+      loom_value_facts_exact_float(source_type, source_value);
+  loom_value_facts_t result = loom_value_facts_exact_i64(0);
+  loom_value_facts_eval_float_to_integer(source_type, result_type, kind,
+                                         &source, &result);
+  EXPECT_TRUE(loom_value_facts_is_unknown(result));
+}
+
+TEST(FloatFacts, RoundsEveryF32Instruction) {
+  loom_value_facts_t large =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 16777216.0);
+  loom_value_facts_t one =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0);
+  loom_value_facts_t sum = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F32, &large, &one, AddF32,
+                                     AddF64, &sum);
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F32, &sum, &large, SubF32,
+                                     SubF64, &result);
+
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, result)), 0.0f);
+}
+
+TEST(FloatFacts, PreservesF64InstructionPrecision) {
+  loom_value_facts_t large =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 16777216.0);
+  loom_value_facts_t one =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 1.0);
+  loom_value_facts_t sum = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F64, &large, &one, AddF32,
+                                     AddF64, &sum);
+  loom_value_facts_t result = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F64, &sum, &large, SubF32,
+                                     SubF64, &result);
+
+  EXPECT_DOUBLE_EQ(ExactFloatValue(LOOM_SCALAR_TYPE_F64, result), 1.0);
+}
+
+TEST(FloatFacts, FloatToIntegerUsesEveryDeclaredWidth) {
+  constexpr loom_scalar_type_t kSourceTypes[] = {
+      LOOM_SCALAR_TYPE_F32,
+      LOOM_SCALAR_TYPE_F64,
+  };
+  constexpr loom_scalar_type_t kResultTypes[] = {
+      LOOM_SCALAR_TYPE_I8,
+      LOOM_SCALAR_TYPE_I16,
+      LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64,
+  };
+  for (const loom_scalar_type_t source_type : kSourceTypes) {
+    for (const loom_scalar_type_t result_type : kResultTypes) {
+      SCOPED_TRACE(loom_scalar_type_name(source_type));
+      SCOPED_TRACE(loom_scalar_type_name(result_type));
+      ExpectFloatToInteger(source_type, result_type,
+                           LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, -42.75,
+                           static_cast<uint64_t>(-INT64_C(42)));
+      ExpectFloatToInteger(source_type, result_type,
+                           LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, 200.75,
+                           UINT64_C(200));
+    }
+  }
+}
+
+TEST(FloatFacts, FloatToIntegerChecksTheTruncatedValue) {
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I8,
+                       LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, -128.75,
+                       UINT64_C(0x80));
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_I16,
+                       LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, -32768.75,
+                       UINT64_C(0x8000));
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_I32,
+                       LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, -2147483648.75,
+                       UINT64_C(0x80000000));
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I8,
+                       LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, -0.75,
+                       UINT64_C(0));
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_I64,
+                       LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, -0.75,
+                       UINT64_C(0));
+}
+
+TEST(FloatFacts, FloatToUnsignedIntegerCanonicalizesBooleanBits) {
+  ExpectFloatToInteger(LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I1,
+                       LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, 1.75,
+                       UINT64_C(1));
+}
+
+TEST(FloatFacts, FloatToIntegerCoversDestinationBoundaries) {
+  constexpr loom_scalar_type_t kSourceTypes[] = {
+      LOOM_SCALAR_TYPE_F32,
+      LOOM_SCALAR_TYPE_F64,
+  };
+  constexpr loom_scalar_type_t kResultTypes[] = {
+      LOOM_SCALAR_TYPE_I8,
+      LOOM_SCALAR_TYPE_I16,
+      LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64,
+  };
+  for (const loom_scalar_type_t source_type : kSourceTypes) {
+    for (const loom_scalar_type_t result_type : kResultTypes) {
+      SCOPED_TRACE(loom_scalar_type_name(source_type));
+      SCOPED_TRACE(loom_scalar_type_name(result_type));
+      const int32_t result_bit_count = loom_scalar_type_bitwidth(result_type);
+      const double signed_extent = std::ldexp(1.0, result_bit_count - 1);
+      const double unsigned_extent = std::ldexp(1.0, result_bit_count);
+      const double highest_signed_source =
+          NextSourceValue(source_type, signed_extent, 0.0);
+      const double highest_unsigned_source =
+          NextSourceValue(source_type, unsigned_extent, 0.0);
+
+      ExpectFloatToInteger(source_type, result_type,
+                           LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, -signed_extent,
+                           UINT64_C(1) << (result_bit_count - 1));
+      ExpectFloatToInteger(
+          source_type, result_type, LOOM_FLOAT_INTEGER_CONVERSION_SIGNED,
+          highest_signed_source, static_cast<uint64_t>(highest_signed_source));
+      ExpectInvalidFloatToInteger(
+          source_type, result_type, LOOM_FLOAT_INTEGER_CONVERSION_SIGNED,
+          NextSourceValue(source_type, -signed_extent - 1.0, -INFINITY));
+      ExpectInvalidFloatToInteger(source_type, result_type,
+                                  LOOM_FLOAT_INTEGER_CONVERSION_SIGNED,
+                                  signed_extent);
+
+      ExpectFloatToInteger(source_type, result_type,
+                           LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED,
+                           highest_unsigned_source,
+                           static_cast<uint64_t>(highest_unsigned_source));
+      ExpectInvalidFloatToInteger(source_type, result_type,
+                                  LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, -1.0);
+      ExpectInvalidFloatToInteger(source_type, result_type,
+                                  LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED,
+                                  unsigned_extent);
+    }
+  }
+}
+
+TEST(FloatFacts, FloatToUnsignedIntegerPreservesTheUpperI64Bit) {
+  constexpr loom_scalar_type_t kSourceTypes[] = {
+      LOOM_SCALAR_TYPE_F32,
+      LOOM_SCALAR_TYPE_F64,
+  };
+  for (const loom_scalar_type_t source_type : kSourceTypes) {
+    SCOPED_TRACE(loom_scalar_type_name(source_type));
+    ExpectFloatToInteger(source_type, LOOM_SCALAR_TYPE_I64,
+                         LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, 0x1p63,
+                         UINT64_C(0x8000000000000000));
+  }
+}
+
+TEST(FloatFacts, FloatToIntegerRejectsNonFiniteValues) {
+  constexpr double kInvalidValues[] = {
+      NAN,
+      INFINITY,
+      -INFINITY,
+  };
+  for (const double value : kInvalidValues) {
+    ExpectInvalidFloatToInteger(LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I32,
+                                LOOM_FLOAT_INTEGER_CONVERSION_SIGNED, value);
+    ExpectInvalidFloatToInteger(LOOM_SCALAR_TYPE_F64, LOOM_SCALAR_TYPE_I64,
+                                LOOM_FLOAT_INTEGER_CONVERSION_UNSIGNED, value);
+  }
+}
+TEST(FloatFacts, DistinguishesFusedAndStagedF32Arithmetic) {
+  loom_value_facts_t a =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4097.0);
+  loom_value_facts_t b =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4097.0);
+  loom_value_facts_t c =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, -16785408.0);
+
+  loom_value_facts_t fused = loom_value_facts_unknown();
+  loom_value_facts_eval_float_ternary(LOOM_SCALAR_TYPE_F32, &a, &b, &c, fmaf,
+                                      fma, &fused);
+
+  loom_value_facts_t product = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F32, &a, &b, MulF32,
+                                     MulF64, &product);
+  loom_value_facts_t staged = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(LOOM_SCALAR_TYPE_F32, &product, &c, AddF32,
+                                     AddF64, &staged);
+
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, fused)), 1.0f);
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, staged)), 0.0f);
+}
+
+TEST(FloatFacts, MinimumAndMaximumSelectSignedZero) {
+  loom_value_facts_t positive_zero =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 0.0);
+  loom_value_facts_t negative_zero =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, -0.0);
+  loom_value_facts_t minimum = loom_value_facts_unknown();
+  loom_value_facts_t maximum = loom_value_facts_unknown();
+  loom_value_facts_eval_float_minmax(LOOM_SCALAR_TYPE_F32,
+                                     LOOM_FLOAT_MINMAX_MINIMUM, &positive_zero,
+                                     &negative_zero, &minimum);
+  loom_value_facts_eval_float_minmax(LOOM_SCALAR_TYPE_F32,
+                                     LOOM_FLOAT_MINMAX_MAXIMUM, &positive_zero,
+                                     &negative_zero, &maximum);
+
+  EXPECT_TRUE(std::signbit(ExactFloatValue(LOOM_SCALAR_TYPE_F32, minimum)));
+  EXPECT_FALSE(std::signbit(ExactFloatValue(LOOM_SCALAR_TYPE_F32, maximum)));
+}
+
+TEST(FloatFacts, RawNanBitcastRemainsNonMaterializable) {
+  loom_value_facts_t signaling_nan_bits =
+      loom_value_facts_exact_i64(UINT32_C(0x7F800001));
+  loom_value_facts_t signaling_nan = loom_value_facts_unknown();
+  loom_value_facts_eval_scalar_bitcast(LOOM_SCALAR_TYPE_I32,
+                                       LOOM_SCALAR_TYPE_F32,
+                                       &signaling_nan_bits, &signaling_nan);
+
+  EXPECT_TRUE(loom_value_facts_is_nan(signaling_nan));
+  EXPECT_FALSE(loom_value_facts_is_exact(signaling_nan));
+
+  loom_value_facts_t negated = loom_value_facts_unknown();
+  loom_value_facts_eval_float_negate(LOOM_SCALAR_TYPE_F32, &signaling_nan,
+                                     &negated);
+  EXPECT_TRUE(loom_value_facts_is_nan(negated));
+  EXPECT_FALSE(loom_value_facts_is_exact(negated));
+
+  loom_value_facts_t roundtrip_bits = loom_value_facts_unknown();
+  loom_value_facts_eval_scalar_bitcast(
+      LOOM_SCALAR_TYPE_F32, LOOM_SCALAR_TYPE_I32, &negated, &roundtrip_bits);
+  EXPECT_TRUE(loom_value_facts_is_unknown(roundtrip_bits));
+}
+
+TEST(FloatFacts, MinnumSkipsOneNanAndCanonicalizesTwo) {
+  loom_value_facts_t nan = loom_value_facts_known_nan();
+  loom_value_facts_t number =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 3.0);
+  loom_value_facts_t one_nan = loom_value_facts_unknown();
+  loom_value_facts_eval_float_minmax(
+      LOOM_SCALAR_TYPE_F32, LOOM_FLOAT_MINMAX_MINNUM, &nan, &number, &one_nan);
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, one_nan)), 3.0f);
+
+  loom_value_facts_t two_nans = loom_value_facts_unknown();
+  loom_value_facts_eval_float_minmax(
+      LOOM_SCALAR_TYPE_F32, LOOM_FLOAT_MINMAX_MINNUM, &nan, &nan, &two_nans);
+  EXPECT_TRUE(loom_value_facts_is_nan(two_nans));
+  EXPECT_TRUE(loom_value_facts_is_exact(two_nans));
+}
+
+TEST(FloatFacts, ClampModesHaveDistinctNanSemantics) {
+  loom_value_facts_t value =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 2.0);
+  loom_value_facts_t lower = loom_value_facts_known_nan();
+  loom_value_facts_t upper =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0);
+  loom_value_facts_t ordered = loom_value_facts_unknown();
+  loom_value_facts_t number = loom_value_facts_unknown();
+  loom_value_facts_t ieee = loom_value_facts_unknown();
+  loom_value_facts_eval_float_clamp(LOOM_SCALAR_TYPE_F32,
+                                    LOOM_FLOAT_CLAMP_ORDERED, &value, &lower,
+                                    &upper, &ordered);
+  loom_value_facts_eval_float_clamp(LOOM_SCALAR_TYPE_F32,
+                                    LOOM_FLOAT_CLAMP_NUMBER, &value, &lower,
+                                    &upper, &number);
+  loom_value_facts_eval_float_clamp(LOOM_SCALAR_TYPE_F32, LOOM_FLOAT_CLAMP_IEEE,
+                                    &value, &lower, &upper, &ieee);
+
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, ordered)), 1.0f);
+  EXPECT_FLOAT_EQ(
+      static_cast<float>(ExactFloatValue(LOOM_SCALAR_TYPE_F32, number)), 1.0f);
+  EXPECT_TRUE(loom_value_facts_is_nan(ieee));
+}
+
+TEST(FloatFacts, MeetPreservesSharedFloatClassFacts) {
+  loom_value_facts_t one =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0);
+  loom_value_facts_t two =
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 2.0);
+  loom_value_facts_t finite = loom_value_facts_unknown();
+  loom_value_facts_meet(&one, &two, &finite);
+
+  EXPECT_TRUE(loom_value_facts_is_float(finite));
+  EXPECT_FALSE(loom_value_facts_is_exact(finite));
+  EXPECT_TRUE(loom_value_facts_is_finite(finite));
+  EXPECT_TRUE(loom_value_facts_is_uniform(finite));
+
+  loom_value_facts_t raw_nan = loom_value_facts_known_nan();
+  loom_value_facts_t exact_nan = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F32, std::numeric_limits<float>::quiet_NaN());
+  loom_value_facts_t nan = loom_value_facts_unknown();
+  loom_value_facts_meet(&raw_nan, &exact_nan, &nan);
+
+  EXPECT_TRUE(loom_value_facts_is_float(nan));
+  EXPECT_TRUE(loom_value_facts_is_nan(nan));
+  EXPECT_FALSE(loom_value_facts_is_exact(nan));
+}
+
+}  // namespace
+}  // namespace loom

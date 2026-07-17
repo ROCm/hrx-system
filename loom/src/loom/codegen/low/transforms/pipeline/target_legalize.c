@@ -684,7 +684,7 @@ static iree_string_view_t loom_low_target_legalize_float_class_name(
   return IREE_SV("<unknown>");
 }
 
-static iree_status_t loom_low_target_legalize_emit_assume_exact_f64_error(
+static iree_status_t loom_low_target_legalize_emit_assume_float_class_error(
     loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     const loom_predicate_t* predicate, loom_value_id_t value_id,
     loom_value_fact_predicate_conflict_t conflict) {
@@ -721,8 +721,8 @@ static iree_status_t loom_low_target_legalize_emit_assume_conflict_error(
     case LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64:
       return loom_low_target_legalize_emit_assume_exact_i64_error(
           state, op, predicate, value_id, conflict);
-    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64:
-      return loom_low_target_legalize_emit_assume_exact_f64_error(
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS:
+      return loom_low_target_legalize_emit_assume_float_class_error(
           state, op, predicate, value_id, conflict);
     case LOOM_VALUE_FACT_PREDICATE_CONFLICT_NONE:
       return iree_ok_status();

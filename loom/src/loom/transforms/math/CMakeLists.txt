@@ -25,6 +25,7 @@ loom_cc_library(
     loom::analysis::symbol_facts
     loom::error::error_defs
     loom::ir
+    loom::ir::facts
     loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::ops::scalar

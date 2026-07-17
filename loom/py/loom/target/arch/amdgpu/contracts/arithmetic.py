@@ -1417,7 +1417,7 @@ def _divf_arcp_one_rule(
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.instance_flags_has_all("fastmath", "arcp"),
-            Guard.value_f64_equals("lhs", 1.0),
+            Guard.value_float_equals("lhs", 1.0),
             Guard.descriptor_available(reciprocal),
         ),
         emit=(
@@ -1450,7 +1450,7 @@ def _divf_arcp_literal_lhs_rule(
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.instance_flags_has_all("fastmath", "arcp"),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "lhs",
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -1474,7 +1474,7 @@ def _divf_arcp_literal_lhs_rule(
                 operands={"rhs": ValueRef.temporary("reciprocal")},
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits("lhs"),
+                    "imm32": ValueProject.float_as_f32_bits("lhs"),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2062,7 +2062,7 @@ def _f32_literal_binary_rule(
         descriptor=descriptor,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 literal_source,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2079,7 +2079,7 @@ def _f32_literal_binary_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2104,7 +2104,7 @@ def _f32_inline_binary_rule(
         descriptor=descriptor,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
-            Guard.value_f64_equals(
+            Guard.value_float_equals(
                 literal_source,
                 literal_value,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
@@ -2122,7 +2122,7 @@ def _f32_inline_binary_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2705,7 +2705,7 @@ def _f32_fmaak_literal_rule(
         guards=(
             *_typed_guards(("a", "b", "c", "result"), type_pattern),
             _register_class("a", a_register_class),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "c",
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2725,7 +2725,7 @@ def _f32_fmaak_literal_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits("c"),
+                    "imm32": ValueProject.float_as_f32_bits("c"),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2748,7 +2748,7 @@ def _f32_fmamk_literal_rule(
         guards=(
             *_typed_guards(("a", "b", "c", "result"), type_pattern),
             _register_class(multiply_source, multiply_register_class),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 literal_source,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2768,7 +2768,7 @@ def _f32_fmamk_literal_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),

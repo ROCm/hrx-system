@@ -72,7 +72,7 @@ CmpFPredicate = EnumDef(
         EnumCase("une", 12, doc="Unordered or not equal."),
         EnumCase("uno", 13, doc="Unordered (either is NaN)."),
     ],
-    doc="Floating-point comparison predicates (IEEE 754 total order).",
+    doc="IEEE 754 ordered and unordered floating-point predicates.",
 )
 
 # ============================================================================

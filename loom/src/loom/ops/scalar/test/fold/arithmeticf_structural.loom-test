@@ -53,7 +53,7 @@ func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%x: f32) -> (f32, f32) {
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%x: f32) -> (f32, f32) {
   %scale = scalar.constant 127.0 : f32
   %strict = scalar.divf %x, %scale : f32
-  %6 = scalar.constant 0.007874015748031496 : f32
+  %6 = scalar.constant 0.007874015718698502 : f32
   %fast = scalar.mulf<nnan|ninf|nsz|arcp> %x, %6 : f32
   func.return %strict, %fast : f32, f32
 }
@@ -70,7 +70,7 @@ func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
 
 // ----
 func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
-  %7 = scalar.constant -1.4426950408889634 : f32
+  %7 = scalar.constant -1.4426950216293335 : f32
   %scaled = scalar.mulf<nnan|ninf|nsz> %x, %7 : f32
   func.return %scaled : f32
 }

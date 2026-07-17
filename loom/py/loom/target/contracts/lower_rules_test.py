@@ -940,7 +940,7 @@ def test_compile_lower_rule_set_projects_source_instance_flags() -> None:
     assert compiled.attr_copies[0].kind == LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS
 
 
-def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
+def test_compile_lower_rule_set_compiles_float_equals_guard() -> None:
     table = ContractFragment(
         name="test.f64-equals",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -949,7 +949,7 @@ def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
                 source_op=scalar_arithmetic.scalar_mulf,
                 descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
                 guards=(
-                    Guard.value_f64_equals("lhs", 1.0),
+                    Guard.value_float_equals("lhs", 1.0),
                     Guard.value_type("lhs", Scalar("f32")),
                     Guard.value_type("rhs", Scalar("f32")),
                     Guard.value_type("result", Scalar("f32")),
@@ -971,7 +971,7 @@ def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
     compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
     assert compiled.rules[0].guard_count == 4
-    assert compiled.guards[0].kind == GuardKind.VALUE_F64_EQUALS
+    assert compiled.guards[0].kind == GuardKind.VALUE_FLOAT_EQUALS
     assert compiled.guards[0].value_ref_index == 0
     assert compiled.guards[0].u64 == 0x3FF0000000000000
 

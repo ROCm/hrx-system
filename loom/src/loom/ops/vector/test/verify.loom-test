@@ -1221,6 +1221,18 @@ func.def @transform_output_extent_mismatch(%v: vector<128xf32>) {
 
 // ====
 
+// JL dense matrices must use the source element type because the transform
+// multiplies matrix and source lanes directly.
+func.def @transform_matrix_element_type_mismatch(%v: vector<128xf32>) {
+  %matrix = vector.constant 0.0 : vector<64x128xf16>
+  // ERROR@+1: ENCODING/009 "matrix" "rank-2 source-element-type matrix matching output x input extents"
+  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x128xf16>} : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<64xf32>
+  func.return
+}
+
+// ====
+
 // Dynamic transform extents must use the same SSA value as the corresponding
 // dynamic vector dimension.
 func.def @transform_dynamic_extent_mismatch(%n: index, %m: index, %v: vector<[%n]xf32>) {

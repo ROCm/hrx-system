@@ -65,15 +65,17 @@ enum loom_value_fact_flag_bits_e {
   LOOM_VALUE_FACT_POWER_OF_TWO = 1u << 3,
   // The range is a single point (range_lo == range_hi). The value is
   // a known compile-time constant. For integer types, range_lo is the
-  // constant value. For float types, range_lo contains the IEEE 754
-  // bit pattern of the double (see FLOAT flag).
+  // constant value. For float types, range_lo contains a host double carrying
+  // the value rounded to its declared scalar type (see FLOAT flag).
   LOOM_VALUE_FACT_EXACT = 1u << 4,
   // The range is [0, 1]. Typical for i1 comparison results.
   LOOM_VALUE_FACT_BOOLEAN = 1u << 5,
   // The value has a floating-point type. When EXACT is also set,
-  // range_lo/range_hi contain the IEEE 754 double bit pattern (via
-  // memcpy), not an integer range. Non-exact float facts do not carry range
-  // bounds, but may carry semantic predicate facts such as NOT_NAN or FINITE.
+  // range_lo/range_hi contain a host double carrying the value rounded to its
+  // declared scalar type (via memcpy), not an integer range. The declared type
+  // is external to this compact summary and must accompany payload access.
+  // Non-exact float facts do not carry range bounds, but may carry semantic
+  // predicate facts such as NOT_NAN or FINITE.
   LOOM_VALUE_FACT_FLOAT = 1u << 6,
   // The value cannot be NaN. This may come from an exact float value or a
   // checked predicate; it is meaningful only for floating-point typed values.
@@ -108,6 +110,13 @@ enum loom_value_fact_flag_bits_e {
   LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y = 1u << 19,
   // The value is the full z-dimension workgroup id domain for a kernel launch.
   LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z = 1u << 20,
+  // The floating-point value is known to be NaN. This does not imply EXACT:
+  // facts derived from a raw signaling-NaN bit pattern intentionally preserve
+  // the producing operation because the compact fact payload does not retain
+  // NaN payload bits.
+  LOOM_VALUE_FACT_NAN = 1u << 21,
+  // The floating-point value is known to be positive or negative infinity.
+  LOOM_VALUE_FACT_INF = 1u << 22,
 };
 typedef uint32_t loom_value_fact_flags_t;
 
@@ -153,9 +162,9 @@ typedef enum loom_value_fact_memory_space_e {
 // Per-value analysis facts. 32 bytes, cache-friendly for dense arrays.
 typedef struct loom_value_facts_t {
   // Signed integer range [lo, hi], inclusive. Default (unknown):
-  // [INT64_MIN, INT64_MAX]. For float types with EXACT flag set,
-  // range_lo contains the IEEE 754 bit pattern of the double value
-  // (via memcpy); range_hi == range_lo.
+  // [INT64_MIN, INT64_MAX]. For float types with EXACT set, range_lo contains
+  // a host double carrying the value rounded to its declared scalar type (via
+  // memcpy); range_hi == range_lo. The declared type is stored in the IR.
   int64_t range_lo;
   int64_t range_hi;
 
@@ -194,18 +203,6 @@ static inline loom_value_facts_t loom_value_facts_unknown(void) {
 
 // Exact integer value. Computes all flags from the value.
 loom_value_facts_t loom_value_facts_exact_i64(int64_t value);
-
-// Exact float value. Stores the IEEE 754 bit pattern in range_lo. Loom does not
-// perform float range analysis, but non-exact float values may still carry
-// predicate facts such as NOT_NAN or FINITE.
-loom_value_facts_t loom_value_facts_exact_f64(double value);
-
-// Extracts the double from an exact float fact.
-static inline double loom_value_facts_as_f64(loom_value_facts_t facts) {
-  double value;
-  memcpy(&value, &facts.range_lo, sizeof(double));
-  return value;
-}
 
 // General constructor: range with divisor. Computes flags from the
 // range and divisor values.
@@ -301,6 +298,14 @@ static inline bool loom_value_facts_is_boolean(loom_value_facts_t facts) {
 
 static inline bool loom_value_facts_is_float(loom_value_facts_t facts) {
   return (facts.flags & LOOM_VALUE_FACT_FLOAT) != 0;
+}
+
+static inline bool loom_value_facts_is_nan(loom_value_facts_t facts) {
+  return (facts.flags & LOOM_VALUE_FACT_NAN) != 0;
+}
+
+static inline bool loom_value_facts_is_inf(loom_value_facts_t facts) {
+  return (facts.flags & LOOM_VALUE_FACT_INF) != 0;
 }
 
 static inline bool loom_value_facts_is_not_nan(loom_value_facts_t facts) {
@@ -474,6 +479,31 @@ static inline void loom_value_facts_meet(
     const loom_value_facts_t* IREE_RESTRICT a,
     const loom_value_facts_t* IREE_RESTRICT b,
     loom_value_facts_t* IREE_RESTRICT out) {
+  if (loom_value_facts_is_float(*a) || loom_value_facts_is_float(*b)) {
+    *out = loom_value_facts_unknown();
+    if (loom_value_facts_is_float(*a) && loom_value_facts_is_float(*b)) {
+      out->flags = LOOM_VALUE_FACT_FLOAT |
+                   (a->flags & b->flags &
+                    (LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_INF |
+                     LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
+                     LOOM_VALUE_FACT_FINITE));
+      if (loom_value_facts_is_exact(*a) && loom_value_facts_is_exact(*b) &&
+          a->range_lo == b->range_lo) {
+        out->range_lo = a->range_lo;
+        out->range_hi = a->range_hi;
+        out->flags |= LOOM_VALUE_FACT_EXACT;
+      }
+    }
+    if (loom_value_facts_is_exact(*out) ||
+        (loom_value_facts_is_uniform(*a) && loom_value_facts_is_uniform(*b))) {
+      loom_value_facts_mark_uniform(out);
+    } else if (loom_value_facts_is_lane_varying(*a) ||
+               loom_value_facts_is_lane_varying(*b)) {
+      loom_value_facts_mark_lane_varying(out);
+    }
+    return;
+  }
+
   const bool preserves_subgroup_lane_mask =
       (loom_value_facts_is_subgroup_lane_mask(*a) &&
        loom_value_facts_is_subgroup_lane_mask(*b)) ||
@@ -508,7 +538,7 @@ typedef enum loom_value_fact_predicate_conflict_kind_e {
   LOOM_VALUE_FACT_PREDICATE_CONFLICT_NONE = 0,
   LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE = 1,
   LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64 = 2,
-  LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64 = 3,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS = 3,
 } loom_value_fact_predicate_conflict_kind_t;
 
 typedef enum loom_value_fact_predicate_conflict_float_class_e {

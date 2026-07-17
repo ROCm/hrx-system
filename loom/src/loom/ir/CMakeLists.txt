@@ -14,11 +14,14 @@ loom_cc_library(
     facts
   HDRS
     "facts.h"
+    "float_facts.h"
   SRCS
     "facts.c"
+    "float_facts.c"
   DEPS
     ::ir
     iree::base
+    iree::base::internal
     loom::util::math
   PUBLIC
 )
@@ -28,6 +31,7 @@ loom_cc_test(
     facts_test
   SRCS
     "facts_test.cc"
+    "float_facts_test.cc"
   DEPS
     ::facts
     iree::testing::gtest

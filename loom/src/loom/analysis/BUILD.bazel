@@ -701,6 +701,7 @@ loom_cc_test(
     deps = [
         ":type_refinement",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
         "//loom/src/loom/ir:type_refinement",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",

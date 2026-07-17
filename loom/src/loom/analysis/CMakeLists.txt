@@ -816,6 +816,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ir::facts
     loom::ir::type_refinement
     loom::util::fact_table
 )

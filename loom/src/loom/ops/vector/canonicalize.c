@@ -6,6 +6,7 @@
 
 #include "loom/ir/attribute.h"
 #include "loom/ir/facts.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/combining.h"
 #include "loom/ops/index/ops.h"
@@ -73,26 +74,25 @@ static bool loom_vector_value_is_all_exact_i64(const loom_rewriter_t* rewriter,
          element.range_lo == expected_value;
 }
 
-static bool loom_vector_query_all_exact_f64(const loom_rewriter_t* rewriter,
-                                            loom_value_id_t value_id,
-                                            double* out_value) {
+static bool loom_vector_query_all_exact_float(const loom_rewriter_t* rewriter,
+                                              loom_value_id_t value_id,
+                                              double* out_value) {
   loom_value_facts_t facts = loom_rewriter_value_facts(rewriter, value_id);
   loom_value_facts_t element = {0};
   if (!loom_vector_query_all_equal_element(&rewriter->fact_table->context,
-                                           facts, &element) ||
-      !loom_value_facts_is_exact(element) ||
-      !loom_value_facts_is_float(element)) {
+                                           facts, &element)) {
     return false;
   }
-  *out_value = loom_value_facts_as_f64(element);
-  return true;
+  const loom_type_t type = loom_module_value_type(rewriter->module, value_id);
+  return loom_value_facts_as_exact_float(loom_type_element_type(type), element,
+                                         out_value);
 }
 
-static bool loom_vector_value_is_all_exact_f64(const loom_rewriter_t* rewriter,
-                                               loom_value_id_t value_id,
-                                               double expected_value) {
+static bool loom_vector_value_is_all_exact_float(
+    const loom_rewriter_t* rewriter, loom_value_id_t value_id,
+    double expected_value) {
   double actual_value = 0.0;
-  return loom_vector_query_all_exact_f64(rewriter, value_id, &actual_value) &&
+  return loom_vector_query_all_exact_float(rewriter, value_id, &actual_value) &&
          actual_value == expected_value;
 }
 
@@ -154,8 +154,11 @@ static bool loom_vector_facts_to_constant_attr(loom_value_facts_t facts,
   if (!loom_value_facts_is_exact(facts)) return false;
 
   if (loom_scalar_type_is_float(element_type)) {
-    if (!loom_value_facts_is_float(facts)) return false;
-    *out_attr = loom_attr_f64(loom_value_facts_as_f64(facts));
+    double value = 0.0;
+    if (!loom_value_facts_as_exact_float(element_type, facts, &value)) {
+      return false;
+    }
+    *out_attr = loom_attr_f64(value);
     return true;
   }
 
@@ -1392,6 +1395,11 @@ static bool loom_vector_fastmath_has_all(const loom_op_t* op, uint8_t flags) {
   return (op->instance_flags & flags) == flags;
 }
 
+static float loom_vector_divide_f32(float lhs, float rhs) { return lhs / rhs; }
+static double loom_vector_divide_f64(double lhs, double rhs) {
+  return lhs / rhs;
+}
+
 static iree_status_t loom_vector_canonicalize_subf(loom_op_t* op,
                                                    loom_rewriter_t* rewriter,
                                                    bool* out_changed) {
@@ -1400,7 +1408,7 @@ static iree_status_t loom_vector_canonicalize_subf(loom_op_t* op,
   loom_value_id_t lhs = loom_vector_subf_lhs(op);
   loom_value_id_t rhs = loom_vector_subf_rhs(op);
   if (loom_vector_fastmath_has_all(op, LOOM_VECTOR_FASTMATHFLAGS_NSZ) &&
-      loom_vector_value_is_all_exact_f64(rewriter, rhs, 0.0)) {
+      loom_vector_value_is_all_exact_float(rewriter, rhs, 0.0)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_replace_single_result_with_value(op, rewriter, lhs));
     *out_changed = true;
@@ -1410,7 +1418,7 @@ static iree_status_t loom_vector_canonicalize_subf(loom_op_t* op,
   const uint8_t neg_flags =
       LOOM_VECTOR_FASTMATHFLAGS_NNAN | LOOM_VECTOR_FASTMATHFLAGS_NSZ;
   if (!loom_vector_fastmath_has_all(op, neg_flags) ||
-      !loom_vector_value_is_all_exact_f64(rewriter, lhs, 0.0)) {
+      !loom_vector_value_is_all_exact_float(rewriter, lhs, 0.0)) {
     return iree_ok_status();
   }
 
@@ -1465,9 +1473,22 @@ static iree_status_t loom_vector_replace_divf_with_reciprocal_mulf(
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
+  const loom_scalar_type_t scalar_type = loom_type_element_type(result_type);
+  loom_value_facts_t one_facts = loom_value_facts_exact_float(scalar_type, 1.0);
+  loom_value_facts_t divisor_facts =
+      loom_value_facts_exact_float(scalar_type, divisor_value);
+  loom_value_facts_t reciprocal_facts = loom_value_facts_unknown();
+  loom_value_facts_eval_float_binary(scalar_type, &one_facts, &divisor_facts,
+                                     loom_vector_divide_f32,
+                                     loom_vector_divide_f64, &reciprocal_facts);
+  double reciprocal_value = 0.0;
+  const bool has_reciprocal = loom_value_facts_as_exact_float(
+      scalar_type, reciprocal_facts, &reciprocal_value);
+  IREE_ASSERT(has_reciprocal);
+
   loom_op_t* constant_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &rewriter->builder, loom_attr_f64(1.0 / divisor_value), result_type,
+      &rewriter->builder, loom_attr_f64(reciprocal_value), result_type,
       op->location, &constant_op));
   loom_value_id_t reciprocal = loom_vector_constant_result(constant_op);
 
@@ -1493,13 +1514,13 @@ static iree_status_t loom_vector_canonicalize_mulf(loom_op_t* op,
   }
   loom_value_id_t lhs = loom_vector_mulf_lhs(op);
   loom_value_id_t rhs = loom_vector_mulf_rhs(op);
-  if (loom_vector_value_is_all_exact_f64(rewriter, lhs, 1.0)) {
+  if (loom_vector_value_is_all_exact_float(rewriter, lhs, 1.0)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_replace_single_result_with_value(op, rewriter, rhs));
     *out_changed = true;
     return iree_ok_status();
   }
-  if (loom_vector_value_is_all_exact_f64(rewriter, rhs, 1.0)) {
+  if (loom_vector_value_is_all_exact_float(rewriter, rhs, 1.0)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_replace_single_result_with_value(op, rewriter, lhs));
     *out_changed = true;
@@ -1509,14 +1530,14 @@ static iree_status_t loom_vector_canonicalize_mulf(loom_op_t* op,
   loom_value_id_t negated_input = LOOM_VALUE_ID_INVALID;
   double constant_value = 0.0;
   if (loom_vector_match_negf(rewriter, lhs, &negated_input) &&
-      loom_vector_query_all_exact_f64(rewriter, rhs, &constant_value)) {
+      loom_vector_query_all_exact_float(rewriter, rhs, &constant_value)) {
     IREE_RETURN_IF_ERROR(loom_vector_replace_mulf_with_negated_constant(
         op, rewriter, negated_input, constant_value, result_type));
     *out_changed = true;
     return iree_ok_status();
   }
   if (loom_vector_match_negf(rewriter, rhs, &negated_input) &&
-      loom_vector_query_all_exact_f64(rewriter, lhs, &constant_value)) {
+      loom_vector_query_all_exact_float(rewriter, lhs, &constant_value)) {
     IREE_RETURN_IF_ERROR(loom_vector_replace_mulf_with_negated_constant(
         op, rewriter, negated_input, constant_value, result_type));
     *out_changed = true;
@@ -1527,8 +1548,8 @@ static iree_status_t loom_vector_canonicalize_mulf(loom_op_t* op,
                              LOOM_VECTOR_FASTMATHFLAGS_NINF |
                              LOOM_VECTOR_FASTMATHFLAGS_NSZ;
   if (loom_vector_fastmath_has_all(op, zero_flags) &&
-      (loom_vector_value_is_all_exact_f64(rewriter, lhs, 0.0) ||
-       loom_vector_value_is_all_exact_f64(rewriter, rhs, 0.0))) {
+      (loom_vector_value_is_all_exact_float(rewriter, lhs, 0.0) ||
+       loom_vector_value_is_all_exact_float(rewriter, rhs, 0.0))) {
     IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_constant_attr(
         op, rewriter, result_type, loom_attr_f64(0.0)));
     *out_changed = true;
@@ -1549,7 +1570,7 @@ static iree_status_t loom_vector_canonicalize_divf(loom_op_t* op,
   }
   loom_value_id_t lhs = loom_vector_divf_lhs(op);
   loom_value_id_t rhs = loom_vector_divf_rhs(op);
-  if (loom_vector_value_is_all_exact_f64(rewriter, rhs, 1.0)) {
+  if (loom_vector_value_is_all_exact_float(rewriter, rhs, 1.0)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_replace_single_result_with_value(op, rewriter, lhs));
     *out_changed = true;
@@ -1560,7 +1581,7 @@ static iree_status_t loom_vector_canonicalize_divf(loom_op_t* op,
   }
 
   double divisor_value = 0.0;
-  if (loom_vector_query_all_exact_f64(rewriter, rhs, &divisor_value)) {
+  if (loom_vector_query_all_exact_float(rewriter, rhs, &divisor_value)) {
     IREE_RETURN_IF_ERROR(loom_vector_replace_divf_with_reciprocal_mulf(
         op, rewriter, lhs, divisor_value, result_type));
     *out_changed = true;

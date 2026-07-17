@@ -7,6 +7,7 @@
 #include <math.h>
 
 #include "loom/ir/attribute.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
@@ -425,7 +426,7 @@ static iree_status_t loom_math_legalize_build_log_log2(
       builder, source, source->lane_builders->mulf, log2_input, ln2, out_value);
 }
 
-static bool loom_math_legalize_value_is_f64_close(
+static bool loom_math_legalize_value_matches_float_constant(
     const loom_math_legalize_source_t* source, loom_value_id_t value,
     double expected) {
   loom_value_facts_t facts = loom_rewriter_value_facts(source->rewriter, value);
@@ -436,11 +437,18 @@ static bool loom_math_legalize_value_is_f64_close(
       facts = uniform_element.element;
     }
   }
-  if (!loom_value_facts_is_exact(facts) || !loom_value_facts_is_float(facts)) {
+  const loom_scalar_type_t scalar_type = loom_type_element_type(
+      loom_module_value_type(source->rewriter->module, value));
+  double actual = 0.0;
+  if (!loom_value_facts_as_exact_float(scalar_type, facts, &actual)) {
     return false;
   }
-  const double actual = loom_value_facts_as_f64(facts);
-  return fabs(actual - expected) <= 1.0e-9;
+  loom_value_facts_t expected_facts =
+      loom_value_facts_exact_float(scalar_type, expected);
+  double rounded_expected = 0.0;
+  return loom_value_facts_as_exact_float(scalar_type, expected_facts,
+                                         &rounded_expected) &&
+         actual == rounded_expected;
 }
 
 static bool loom_math_legalize_try_project_turns_input(
@@ -471,11 +479,11 @@ static bool loom_math_legalize_try_project_turns_input(
   }
 
   const double two_pi = 6.28318530717958647692;
-  if (loom_math_legalize_value_is_f64_close(source, rhs, two_pi)) {
+  if (loom_math_legalize_value_matches_float_constant(source, rhs, two_pi)) {
     *out_input = lhs;
     return true;
   }
-  if (loom_math_legalize_value_is_f64_close(source, lhs, two_pi)) {
+  if (loom_math_legalize_value_matches_float_constant(source, lhs, two_pi)) {
     *out_input = rhs;
     return true;
   }

@@ -6,8 +6,6 @@
 
 #include "loom/ir/facts.h"
 
-#include <math.h>
-
 // Computes flags from integer range facts. Does not set floating-point, float
 // predicate, or execution distribution flags; those are preserved by the caller
 // when appropriate.
@@ -92,22 +90,6 @@ loom_value_facts_t loom_value_facts_exact_i64(int64_t value) {
   return facts;
 }
 
-loom_value_facts_t loom_value_facts_exact_f64(double value) {
-  loom_value_facts_t facts = {0};
-  memcpy(&facts.range_lo, &value, sizeof(double));
-  facts.range_hi = facts.range_lo;
-  facts.known_divisor = 1;
-  facts.flags = LOOM_VALUE_FACT_EXACT | LOOM_VALUE_FACT_FLOAT;
-  if (!isnan(value)) facts.flags |= LOOM_VALUE_FACT_NOT_NAN;
-  if (!isinf(value)) facts.flags |= LOOM_VALUE_FACT_NOT_INF;
-  if (isfinite(value)) {
-    facts.flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
-                   LOOM_VALUE_FACT_FINITE;
-  }
-  loom_value_facts_mark_uniform(&facts);
-  return facts;
-}
-
 loom_value_facts_t loom_value_facts_make(int64_t lo, int64_t hi,
                                          int64_t known_divisor) {
   if (known_divisor < 1) known_divisor = 1;
@@ -188,11 +170,12 @@ bool loom_value_facts_make_unsigned_raw_bits(uint64_t raw_bits,
 static int64_t loom_value_facts_sign_extend_raw_bits(uint64_t raw_bits,
                                                      int32_t bit_count) {
   if (bit_count <= 0) return 0;
-  if (bit_count >= 64) return (int64_t)raw_bits;
-  uint64_t sign_bit = UINT64_C(1) << (bit_count - 1);
-  uint64_t mask = (UINT64_C(1) << bit_count) - 1;
-  uint64_t masked = raw_bits & mask;
-  return (int64_t)((masked ^ sign_bit) - sign_bit);
+  const uint64_t masked = loom_mask_to_bitwidth_u64(raw_bits, bit_count);
+  const uint64_t sign_bit = UINT64_C(1) << (bit_count - 1);
+  if ((masked & sign_bit) == 0) return (int64_t)masked;
+  const int64_t signed_sign_bit =
+      bit_count == 64 ? INT64_MIN : -(int64_t)sign_bit;
+  return signed_sign_bit + (int64_t)(masked & (sign_bit - 1));
 }
 
 loom_value_facts_t loom_value_facts_make_signed_raw_bits(uint64_t raw_bits,
@@ -282,10 +265,10 @@ void loom_value_facts_recompute_flags(loom_value_facts_t* facts) {
   uint32_t preserved =
       facts->flags &
       (LOOM_VALUE_FACT_POWER_OF_TWO | LOOM_VALUE_FACT_FLOAT |
-       LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
-       LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_UNIFORM |
-       LOOM_VALUE_FACT_LANE_VARYING | LOOM_VALUE_FACT_LANE_PREDICATE |
-       LOOM_VALUE_FACT_SUBGROUP_LANE_MASK |
+       LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_INF | LOOM_VALUE_FACT_NOT_NAN |
+       LOOM_VALUE_FACT_NOT_INF | LOOM_VALUE_FACT_FINITE |
+       LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+       LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK |
        LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK);
   facts->flags =
       loom_value_facts_compute_flags(facts->range_lo, facts->range_hi) |
@@ -443,32 +426,30 @@ static bool loom_value_facts_predicate_exact_i64_conflict(
   return true;
 }
 
-static bool loom_value_facts_predicate_exact_f64_conflict(
+static bool loom_value_facts_predicate_float_conflict(
     loom_value_facts_t facts, const loom_predicate_t* predicate,
     loom_value_fact_predicate_conflict_t* out_conflict) {
-  if (!loom_value_facts_is_exact(facts) ||
-      !loom_value_facts_predicate_value_first_arg(predicate)) {
+  if (!loom_value_facts_predicate_value_first_arg(predicate)) {
     return false;
   }
 
-  const double known_value = loom_value_facts_as_f64(facts);
   loom_value_fact_predicate_conflict_float_class_t float_class =
       LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NONE;
   switch ((loom_predicate_kind_t)predicate->kind) {
     case LOOM_PREDICATE_NOT_NAN:
-      if (isnan(known_value)) {
+      if (loom_value_facts_is_nan(facts)) {
         float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN;
       }
       break;
     case LOOM_PREDICATE_NOT_INF:
-      if (isinf(known_value)) {
+      if (loom_value_facts_is_inf(facts)) {
         float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY;
       }
       break;
     case LOOM_PREDICATE_FINITE:
-      if (isnan(known_value)) {
+      if (loom_value_facts_is_nan(facts)) {
         float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN;
-      } else if (isinf(known_value)) {
+      } else if (loom_value_facts_is_inf(facts)) {
         float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY;
       }
       break;
@@ -481,7 +462,7 @@ static bool loom_value_facts_predicate_exact_f64_conflict(
 
   if (out_conflict != NULL) {
     *out_conflict = (loom_value_fact_predicate_conflict_t){
-        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64,
+        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS,
         .known_float_class = float_class,
     };
   }
@@ -500,8 +481,8 @@ bool loom_value_facts_predicate_conflict(
     return false;
   }
   if (loom_value_facts_is_float(facts)) {
-    return loom_value_facts_predicate_exact_f64_conflict(facts, predicate,
-                                                         out_conflict);
+    return loom_value_facts_predicate_float_conflict(facts, predicate,
+                                                     out_conflict);
   }
   return loom_value_facts_predicate_range_conflict(facts, predicate,
                                                    out_conflict) ||
@@ -537,7 +518,7 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
 
   // The constant argument is in args[1] for most predicates. For RANGE, lo is
   // in args[1] and hi is in args[2].
-  int64_t constant = predicate->args[1];
+  int64_t constant = predicate->arg_count > 1 ? predicate->args[1] : INT64_C(0);
   uint32_t preserved_predicate_flags = facts->flags & LOOM_VALUE_FACT_NON_ZERO;
 
   switch ((loom_predicate_kind_t)predicate->kind) {

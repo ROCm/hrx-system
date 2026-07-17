@@ -11,6 +11,7 @@
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -2772,10 +2773,11 @@ bool loom_amdgpu_value_as_exact_i32(const loom_module_t* module,
 bool loom_amdgpu_value_facts_as_f32_bit_pattern(loom_value_facts_t facts,
                                                 uint32_t* out_bit_pattern) {
   *out_bit_pattern = 0;
-  if (!loom_value_facts_is_exact(facts) || !loom_value_facts_is_float(facts)) {
+  double value = 0.0;
+  if (!loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F32, facts, &value)) {
     return false;
   }
-  const float f32_value = (float)loom_value_facts_as_f64(facts);
+  const float f32_value = (float)value;
   memcpy(out_bit_pattern, &f32_value, sizeof(*out_bit_pattern));
   return true;
 }

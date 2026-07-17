@@ -388,9 +388,9 @@ def test_validate_c_table_shape_rejects_invalid_report_key() -> None:
     )
 
 
-def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
+def test_generate_lower_rule_set_emits_value_ref_for_float_equals_guard() -> None:
     table = ContractFragment(
-        name="test.low.f64_equals",
+        name="test.low.float_equals",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
         public_header=_TEST_PUBLIC_HEADER,
         cases=[
@@ -399,7 +399,7 @@ def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
                 descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
                 guards=(
                     Guard.value_type("lhs", Scalar("f32")),
-                    Guard.value_f64_equals("rhs", 0.0),
+                    Guard.value_float_equals("rhs", 0.0),
                     Guard.value_type("rhs", Scalar("f32")),
                     Guard.value_type("result", Scalar("f32")),
                 ),
@@ -419,7 +419,7 @@ def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
 
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
-    guard_start = generated.source.index("LOOM_LOW_LOWER_GUARD_VALUE_F64_EQUALS")
+    guard_start = generated.source.index("LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EQUALS")
     guard_end = generated.source.index("},", guard_start)
     guard_text = generated.source[guard_start:guard_end]
     assert ".value_ref_index = 1," in guard_text
