@@ -50,6 +50,34 @@
       ]
     },
     {
+      "name": "allocates overlapping gfx1250 tied accumulators independently",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_tied_accumulators.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/gfx1250_tied_accumulators.hal",
+              "--emit-target-artifact={tmp}/gfx1250_tied_accumulators.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1250_tied_accumulators.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/gfx1250_tied_accumulators.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {

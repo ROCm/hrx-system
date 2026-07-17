@@ -80,8 +80,8 @@ static bool loom_low_allocation_coalescing_unit_ranges_overlap(
   return true;
 }
 
-// Returns true when any unit in |unit_offset, unit_count| remains semantically
-// live across |program_point| in the scheduled allocation order.
+// Returns true when any unit in |unit_offset, unit_count| retains concrete
+// storage across |program_point| in the scheduled allocation order.
 static bool loom_low_allocation_coalescing_value_units_live_at_point(
     const loom_low_allocation_coalescing_context_t* context,
     loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
@@ -96,12 +96,16 @@ static bool loom_low_allocation_coalescing_value_units_live_at_point(
   IREE_ASSERT_LE(unit_count, interval->unit_count - unit_offset);
 
   bool value_live_at_point = false;
+  const loom_low_allocation_unit_liveness_t* unit_liveness =
+      context->search_context->unit_liveness;
   const loom_liveness_segment_range_t segments =
-      loom_liveness_segment_range_for_value_ordinal(context->liveness,
-                                                    value_ordinal);
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          unit_liveness, context->liveness, value_ordinal);
   if (segments.count == 0) {
-    value_live_at_point = interval->start_point <= program_point &&
-                          program_point < interval->end_point;
+    // Empty storage segments require the conservative linear check below. The
+    // per-unit end points include storage continuation through tied results
+    // and decomposed edge payloads that semantic SSA segments do not encode.
+    value_live_at_point = interval->start_point <= program_point;
   } else {
     IREE_ASSERT_LE((uint64_t)segments.start + segments.count,
                    context->liveness->segment_count);
@@ -118,21 +122,56 @@ static bool loom_low_allocation_coalescing_value_units_live_at_point(
       }
     }
   }
-  if (!value_live_at_point) {
-    return false;
+  if (value_live_at_point) {
+    const uint32_t end_point_start =
+        loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+            unit_liveness, context->liveness, value_ordinal);
+    IREE_ASSERT_NE(end_point_start, UINT32_MAX);
+    IREE_ASSERT_LE((uint64_t)end_point_start + unit_offset + unit_count,
+                   unit_liveness->end_point_count);
+    for (uint32_t i = 0; i < unit_count; ++i) {
+      if (unit_liveness->end_points[end_point_start + unit_offset + i] >
+          program_point) {
+        return true;
+      }
+    }
   }
 
-  const loom_low_allocation_unit_liveness_t* unit_liveness =
-      context->search_context->unit_liveness;
-  const uint32_t end_point_start =
-      loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
-          unit_liveness, context->liveness, value_ordinal);
-  IREE_ASSERT_NE(end_point_start, UINT32_MAX);
-  IREE_ASSERT_LE((uint64_t)end_point_start + unit_offset + unit_count,
-                 unit_liveness->end_point_count);
-  for (uint32_t i = 0; i < unit_count; ++i) {
-    if (unit_liveness->end_points[end_point_start + unit_offset + i] >
-        program_point) {
+  // A tied result continues to own its operand's concrete units after the
+  // operand SSA value is consumed. Follow those unit mappings so copy and
+  // structural coalescing cannot classify continued storage as a dead alias.
+  // Tied-result relations point from an operand definition to its newer SSA
+  // result definition, making this recursive traversal acyclic.
+  const loom_low_placement_relation_range_t tied_range =
+      loom_low_placement_relation_range_for_source_value_ordinal(
+          context->placement, value_ordinal);
+  for (uint32_t i = 0; i < tied_range.count; ++i) {
+    const uint32_t relation_index =
+        context->placement
+            ->relation_indices_by_source_ordinal[tied_range.start + i];
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[relation_index];
+    if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
+      continue;
+    }
+    uint32_t overlap_offset = 0;
+    if (!loom_low_allocation_coalescing_unit_ranges_overlap(
+            unit_offset, unit_count, relation->source_unit_offset,
+            relation->unit_count, &overlap_offset)) {
+      continue;
+    }
+    const uint64_t query_end = (uint64_t)unit_offset + unit_count;
+    const uint64_t relation_end =
+        (uint64_t)relation->source_unit_offset + relation->unit_count;
+    const uint32_t overlap_count =
+        (uint32_t)((query_end < relation_end ? query_end : relation_end) -
+                   overlap_offset);
+    const uint32_t result_unit_offset =
+        relation->result_unit_offset +
+        (overlap_offset - relation->source_unit_offset);
+    if (loom_low_allocation_coalescing_value_units_live_at_point(
+            context, relation->result_ordinal, result_unit_offset,
+            overlap_count, program_point)) {
       return true;
     }
   }

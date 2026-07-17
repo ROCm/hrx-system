@@ -102,6 +102,7 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=::loom-compile"
   DATA
+    "gfx1250_tied_accumulators.loom"
     "gfx12_wmma_bf16_f32.loom"
     "report_carried_loop_memory_economics_amdgpu.loom"
     "report_complex_loop_memory_economics_amdgpu.loom"
