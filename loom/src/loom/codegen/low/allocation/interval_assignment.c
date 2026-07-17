@@ -131,8 +131,9 @@ loom_low_allocation_interval_assignment_failure_candidate(
     const loom_low_allocation_class_capacity_t* capacity,
     uint32_t location_base) {
   const loom_liveness_segment_range_t segment_range =
-      loom_liveness_segment_range_for_value_ordinal(state->context->liveness,
-                                                    value_ordinal);
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          state->context->unit_liveness, state->context->liveness,
+          value_ordinal);
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
       .value_class = interval->value_class,
@@ -468,8 +469,9 @@ static iree_status_t loom_low_allocation_interval_assignment_append_assignment(
   const uint32_t assignment_index = (uint32_t)state->result.assignment_count;
   loom_low_allocation_assignment_t stored_assignment = *assignment;
   const loom_liveness_segment_range_t segment_range =
-      loom_liveness_segment_range_for_value_ordinal(state->context->liveness,
-                                                    value_ordinal);
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          state->context->unit_liveness, state->context->liveness,
+          value_ordinal);
   stored_assignment.liveness_segments = segment_range;
   stored_assignment.unit_end_point_start =
       loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(

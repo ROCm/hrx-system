@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation/unit_liveness.h"
 
+#include <string.h>
+
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
@@ -123,6 +125,8 @@ loom_low_allocation_unit_liveness_note_contiguous_part_uses_at_point(
         (uint32_t)(intersection_begin - relation_begin);
     const uint32_t source_unit_count =
         (uint32_t)(intersection_end - intersection_begin);
+    iree_bitmap_set(unit_liveness->values_with_edge_handoff_units,
+                    relation->source_ordinal);
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_unit_liveness_note_unit_use_at_point(
             unit_liveness, value_domain, liveness,
@@ -751,6 +755,18 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     for (iree_host_size_t i = 0; i < liveness->value_count; ++i) {
       out_unit_liveness->end_point_starts_by_value_ordinal[i] = UINT32_MAX;
     }
+    const iree_host_size_t edge_handoff_word_count =
+        iree_bitmap_calculate_words(liveness->value_count);
+    uint64_t* edge_handoff_words = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, edge_handoff_word_count, sizeof(*edge_handoff_words),
+        (void**)&edge_handoff_words));
+    memset(edge_handoff_words, 0,
+           edge_handoff_word_count * sizeof(*edge_handoff_words));
+    out_unit_liveness->values_with_edge_handoff_units = (iree_bitmap_t){
+        .bit_count = liveness->value_count,
+        .words = edge_handoff_words,
+    };
   }
 
   iree_host_size_t unit_end_point_count = 0;
@@ -828,6 +844,21 @@ uint32_t loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
     return UINT32_MAX;
   }
   return unit_liveness->end_point_starts_by_value_ordinal[value_ordinal];
+}
+
+loom_liveness_segment_range_t
+loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_analysis_t* liveness,
+    loom_value_ordinal_t value_ordinal) {
+  IREE_ASSERT_ARGUMENT(unit_liveness);
+  IREE_ASSERT_ARGUMENT(liveness);
+  IREE_ASSERT_LT(value_ordinal, liveness->value_count);
+  if (iree_bitmap_test(unit_liveness->values_with_edge_handoff_units,
+                       value_ordinal)) {
+    return (loom_liveness_segment_range_t){0};
+  }
+  return loom_liveness_segment_range_for_value_ordinal(liveness, value_ordinal);
 }
 
 iree_status_t loom_low_allocation_unit_liveness_extend_for_tied_results(

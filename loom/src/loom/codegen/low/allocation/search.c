@@ -56,9 +56,10 @@ loom_low_allocation_search_candidate_assignment(
       loom_low_allocation_assignment_map_value_ordinal_for_value(
           context->assignment_map, interval->value_id, &value_ordinal);
   const loom_liveness_segment_range_t segment_range =
-      has_value_ordinal ? loom_liveness_segment_range_for_value_ordinal(
-                              context->liveness, value_ordinal)
-                        : (loom_liveness_segment_range_t){0};
+      has_value_ordinal
+          ? loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+                context->unit_liveness, context->liveness, value_ordinal)
+          : (loom_liveness_segment_range_t){0};
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
       .value_class = interval->value_class,

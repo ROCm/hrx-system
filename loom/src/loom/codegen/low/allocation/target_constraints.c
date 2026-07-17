@@ -1127,8 +1127,8 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
       continue;
     }
     const loom_liveness_segment_range_t segment_range =
-        loom_liveness_segment_range_for_value_ordinal(
-            liveness, fixed_value->value_ordinal);
+        loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+            unit_liveness, liveness, fixed_value->value_ordinal);
     loom_low_allocation_assignment_t fixed_assignment = {
         .value_id = fixed_value->value_id,
         .value_class = fixed_value->interval->value_class,
