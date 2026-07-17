@@ -284,10 +284,10 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // IREE-owned allocations by bracketing those HSA setup calls.
 
   // Bind a code object reader to the memory sourced from our rodata.
-  hsa_code_object_reader_t code_object_reader;
   IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_hsa_code_object_reader_create_from_memory(
-      IREE_LIBHSA(libhsa), file_toc->data, file_toc->size, &code_object_reader);
+      IREE_LIBHSA(libhsa), file_toc->data, file_toc->size,
+      &out_library->code_object_reader);
   IREE_LEAK_CHECK_DISABLE_POP();
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
@@ -316,7 +316,7 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
       IREE_LEAK_CHECK_DISABLE_PUSH();
       status = iree_hsa_executable_load_agent_code_object(
           IREE_LIBHSA(libhsa), out_library->executable, topology->gpu_agents[i],
-          code_object_reader, options, NULL);
+          out_library->code_object_reader, options, NULL);
       IREE_LEAK_CHECK_DISABLE_POP();
       if (!iree_status_is_ok(status)) break;
     }
@@ -330,11 +330,6 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
                                         out_library->executable, options);
     IREE_LEAK_CHECK_DISABLE_POP();
   }
-
-  // Release the reader now that the executable has been fully loaded.
-  status =
-      iree_status_join(status, iree_hsa_code_object_reader_destroy(
-                                   IREE_LIBHSA(libhsa), code_object_reader));
 
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_device_library_deinitialize(out_library);
@@ -351,6 +346,11 @@ void iree_hal_amdgpu_device_library_deinitialize(
   if (library->executable.handle) {
     iree_hal_amdgpu_hsa_cleanup_assert_success(
         iree_hsa_executable_destroy_raw(library->libhsa, library->executable));
+  }
+  if (library->code_object_reader.handle) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_code_object_reader_destroy_raw(library->libhsa,
+                                                library->code_object_reader));
   }
 
   memset(library, 0, sizeof(*library));

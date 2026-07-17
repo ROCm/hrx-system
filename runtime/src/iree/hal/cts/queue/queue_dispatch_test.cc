@@ -593,6 +593,35 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
                                               kParameterByteLength, out_buffer);
   }
 
+  void ReloadExecutableFromCallScopedStorage() {
+    const iree_const_byte_span_t source_data = executable_data(
+        IREE_SV("command_buffer_dispatch_multi_workgroup_test.bin"));
+    ASSERT_FALSE(iree_const_byte_span_is_empty(source_data));
+    std::vector<uint8_t> storage(source_data.data,
+                                 source_data.data + source_data.data_length);
+
+    iree_hal_executable_target_selection_result_t target_result;
+    IREE_ASSERT_OK(SelectExecutableTarget(&target_result));
+    ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+              target_result.outcome);
+
+    iree_hal_executable_t* replacement_executable = nullptr;
+    IREE_ASSERT_OK(LoadExecutable(
+        target_result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
+        iree_make_const_byte_span(storage.data(), storage.size()),
+        &replacement_executable));
+    ASSERT_NE(replacement_executable, nullptr);
+
+    // Loading before releasing the prior instance covers implementations that
+    // share loader state or code mappings between identical executables.
+    iree_hal_executable_release(executable_);
+    executable_ = replacement_executable;
+
+    // Load inputs are call-scoped. Destroy their contents before the
+    // executable is first used so retained borrowed pointers fail loudly.
+    std::fill(storage.begin(), storage.end(), UINT8_C(0xA5));
+  }
+
   void RunIndirectQueueDispatch(
       iree_hal_dispatch_flags_t flags,
       iree_device_size_t parameter_ref_length = kParameterByteLength) {
@@ -696,6 +725,16 @@ TEST_P(QueueDispatchIndirectParametersTest, StaticParameters) {
 
 TEST_P(QueueDispatchIndirectParametersTest, DynamicParameters) {
   RunIndirectQueueDispatch(IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS);
+}
+
+TEST_P(QueueDispatchIndirectParametersTest,
+       DynamicParametersWithCallScopedExecutableData) {
+  for (int i = 0; i < 2; ++i) {
+    ReloadExecutableFromCallScopedStorage();
+    ASSERT_NE(executable_, nullptr);
+    RunIndirectQueueDispatch(
+        IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS);
+  }
 }
 
 TEST_P(QueueDispatchIndirectParametersTest, StaticParametersWhileProfiling) {
